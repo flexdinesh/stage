@@ -2,10 +2,11 @@ package db
 
 import (
 	"errors"
-	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -17,7 +18,7 @@ func movedT3(t *testing.T) (*Store, *sqlite.DB, int64) {
 	t.Helper()
 	s, ctx, pool := connectionStore(t)
 	mustExec(t, pool, `INSERT INTO machines(id,label) VALUES(2,'worker')`)
-	old := s.LegacyT3ID()
+	old := s.ActiveID(LocalMachine, "t3")
 	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -28,17 +29,17 @@ func movedT3(t *testing.T) (*Store, *sqlite.DB, int64) {
 	if err := s.RetireConnection(ctx, old, sw.New); err != nil {
 		t.Fatal(err)
 	}
-	if s.LegacyT3ID() != 0 {
-		t.Fatalf("local T3 still active: %d", s.LegacyT3ID())
+	if s.ActiveID(LocalMachine, "t3") != 0 {
+		t.Fatalf("local T3 still active: %d", s.ActiveID(LocalMachine, "t3"))
 	}
 	return s, pool, sw.New
 }
 
-// A T3 thread with a parent on a worker's T3 is mirrored on its own
+// A T3 thread with a parent on a worker's T3 is observed on its own
 // connection with its latest parent, after the local machine's T3 was retired.
 func TestMovedT3ObservationKeepsParentOnItsConnection(t *testing.T) {
 	s, pool, moved := movedT3(t)
-	project := projectWithBinding(t, s, moved, "/w/a")
+	projectWithBinding(t, s, moved, "/w/a")
 	now := time.Now().UTC()
 	o := execution.Observation{Session: SessionRef{ConnectionID: moved, ExternalSessionID: "child"}, Project: "p/w/a", Title: "Child", State: "running", Active: true, CreatedAt: now, UpdatedAt: now,
 		Parent: &SessionRef{ConnectionID: moved, ExternalSessionID: "parent"}}
@@ -50,15 +51,9 @@ func TestMovedT3ObservationKeepsParentOnItsConnection(t *testing.T) {
 	if err := s.PutObservation(t.Context(), o); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	var conn int64
-	var parent string
-	var projectID *int64
-	err := pool.QueryRow(`SELECT si.connection_id,th.parent_thread_id,th.stage_project_id FROM threads th JOIN session_identities si ON si.id=th.session_id WHERE th.t3_thread_id='child'`).Scan(&conn, &parent, &projectID)
-	if err != nil || conn != moved || parent != "parent-2" {
-		t.Fatalf("parent on %d %q, want %d parent-2: %v", conn, parent, moved, err)
-	}
-	if projectID == nil || *projectID != project {
-		t.Fatalf("thread project %v, want %d", projectID, project)
+	got, err := s.Observation(t.Context(), SessionRef{ConnectionID: moved, ExternalSessionID: "child"})
+	if err != nil || got.Parent == nil || got.Parent.ConnectionID != moved || got.Parent.ExternalSessionID != "parent-2" {
+		t.Fatalf("parent %+v, want %d parent-2: %v", got.Parent, moved, err)
 	}
 	var nulls int
 	if err := pool.QueryRow(`SELECT count(*) FROM session_identities WHERE connection_id IS NULL`).Scan(&nulls); err != nil || nulls != 0 {

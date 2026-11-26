@@ -307,7 +307,7 @@ func TestAutoPairFailures(t *testing.T) {
 // instance retires it instead of restamping it.
 func (e *env) bind(workspace string) {
 	e.t.Helper()
-	_, err := e.store.InsertProject(context.Background(), db.Project{Title: workspace, Bindings: []db.ProjectBinding{{ConnectionID: e.store.LegacyT3ID(), ExternalProjectID: "p-" + workspace, Workspace: workspace}}})
+	_, err := e.store.InsertProject(context.Background(), db.Project{Title: workspace, Bindings: []db.ProjectBinding{{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalProjectID: "p-" + workspace, Workspace: workspace}}})
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -320,16 +320,16 @@ func TestPairRecordsEnvironment(t *testing.T) {
 	if _, err := e.svc.Pair(ctx, " "); !errors.As(err, &te) || !strings.Contains(err.Error(), "pairing failed: empty pairing code") {
 		t.Fatalf("bad code: %v", err)
 	}
-	first := e.store.LegacyT3ID()
+	first := e.store.ActiveID(db.LocalMachine, "t3")
 	paired, err := e.svc.Pair(ctx, "CODE-1")
 	if err != nil || paired.Replaced != nil {
 		t.Fatalf("pair: %v %+v", err, paired)
 	}
-	if e.bound() != "env-a" || e.kicks.Load() != 1 || e.store.LegacyT3ID() != first || len(e.switches) != 0 {
-		t.Fatalf("bound %q kicks %d id %d switches %v", e.bound(), e.kicks.Load(), e.store.LegacyT3ID(), e.switches)
+	if e.bound() != "env-a" || e.kicks.Load() != 1 || e.store.ActiveID(db.LocalMachine, "t3") != first || len(e.switches) != 0 {
+		t.Fatalf("bound %q kicks %d id %d switches %v", e.bound(), e.kicks.Load(), e.store.ActiveID(db.LocalMachine, "t3"), e.switches)
 	}
 	// Same T3 again: same connection.
-	if paired, err := e.svc.Pair(ctx, "CODE-2"); err != nil || paired.Replaced != nil || e.bound() != "env-a" || e.store.LegacyT3ID() != first {
+	if paired, err := e.svc.Pair(ctx, "CODE-2"); err != nil || paired.Replaced != nil || e.bound() != "env-a" || e.store.ActiveID(db.LocalMachine, "t3") != first {
 		t.Fatalf("re-pair: %v %+v %q", err, paired, e.bound())
 	}
 }
@@ -340,21 +340,21 @@ func TestPairingAnotherEnvironmentReplacesTheConnection(t *testing.T) {
 	if _, err := e.svc.Pair(ctx, "CODE-1"); err != nil {
 		t.Fatal(err)
 	}
-	first := e.store.LegacyT3ID()
+	first := e.store.ActiveID(db.LocalMachine, "t3")
 	e.bind("/w/a")
 	if err := e.svc.Unpair(ctx); err != nil {
 		t.Fatal(err)
 	}
 	// Disconnect keeps the environment: the connection is unchanged.
-	if e.bound() != "env-a" || e.store.LegacyT3ID() != first {
-		t.Fatalf("unpair changed the connection: %q %d", e.bound(), e.store.LegacyT3ID())
+	if e.bound() != "env-a" || e.store.ActiveID(db.LocalMachine, "t3") != first {
+		t.Fatalf("unpair changed the connection: %q %d", e.bound(), e.store.ActiveID(db.LocalMachine, "t3"))
 	}
 	e.client.SetProbe(reachable("env-b"))
 	paired, err := e.svc.Pair(ctx, "CODE-2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := e.store.LegacyT3ID()
+	second := e.store.ActiveID(db.LocalMachine, "t3")
 	if second == first || e.bound() != "env-b" {
 		t.Fatalf("not replaced: %d -> %d bound %q", first, second, e.bound())
 	}
@@ -378,8 +378,8 @@ func TestPairingAnotherEnvironmentReplacesTheConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.store.LegacyT3ID() != first || len(e.switches) != 2 || !e.switches[1].Revived {
-		t.Fatalf("not revived: %d %+v", e.store.LegacyT3ID(), e.switches)
+	if e.store.ActiveID(db.LocalMachine, "t3") != first || len(e.switches) != 2 || !e.switches[1].Revived {
+		t.Fatalf("not revived: %d %+v", e.store.ActiveID(db.LocalMachine, "t3"), e.switches)
 	}
 	// env-b held nothing: deleted rather than kept as a replaced connection.
 	if paired.Replaced != nil {
@@ -396,14 +396,14 @@ func TestPairingAnotherEnvironmentRestampsAnEmptyConnection(t *testing.T) {
 	if _, err := e.svc.Pair(ctx, "CODE-1"); err != nil {
 		t.Fatal(err)
 	}
-	first := e.store.LegacyT3ID()
+	first := e.store.ActiveID(db.LocalMachine, "t3")
 	if err := e.svc.Unpair(ctx); err != nil {
 		t.Fatal(err)
 	}
 	e.client.SetProbe(reachable("env-b"))
 	paired, err := e.svc.Pair(ctx, "CODE-2")
-	if err != nil || paired.Replaced != nil || e.bound() != "env-b" || e.store.LegacyT3ID() != first || len(e.switches) != 0 {
-		t.Fatalf("restamp: %v %+v %q %d %v", err, paired, e.bound(), e.store.LegacyT3ID(), e.switches)
+	if err != nil || paired.Replaced != nil || e.bound() != "env-b" || e.store.ActiveID(db.LocalMachine, "t3") != first || len(e.switches) != 0 {
+		t.Fatalf("restamp: %v %+v %q %d %v", err, paired, e.bound(), e.store.ActiveID(db.LocalMachine, "t3"), e.switches)
 	}
 	if err := e.svc.Unpair(ctx); err != nil {
 		t.Fatal(err)

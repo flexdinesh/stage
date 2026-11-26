@@ -104,8 +104,10 @@ capabilities, never a harness name. The code drifted:
     `machine.Ops` on the machine where the files live, never in adapters.
     Stage never asks a harness to create a project (`registerWorkspace` is
     removed).
-12. **No default harness.** No connection is seeded; `connectionId` and
-    `executionConfig` are required where a harness is chosen. Legacy T3
+12. **No default harness.** No connection is seeded; `connectionId` is
+    required unless a project binding or the default connection picks one.
+    An omitted `executionConfig` means the harness defaults; an update
+    that changes the connection must send one. Legacy T3
     model inputs, `/api/catalog`, `/api/connections/t3/projects` and the
     `threads` mirror are removed (breaking).
 13. **Wrapping harnesses.** A harness that runs other harnesses' sessions

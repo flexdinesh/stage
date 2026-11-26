@@ -1,7 +1,9 @@
 // Package refs parses references to stage tasks, trees and sessions: the links
 // the web UI copies (and their markdown form), the desktop's deep links
-// (stage://tasks/12, one scheme per installation identity), T3 web and app
-// links, "#12" and bare ids. Agents pass whatever the user pasted; the host of a stage link
+// (stage://tasks/12, one scheme per installation identity), "#12" and bare
+// ids. A harness's own session links are not parsed here: the connection's
+// adapter resolves them (execution.LinkResolver). Agents pass whatever the
+// user pasted; the host of a stage link
 // is ignored because the same stage is reached at many addresses (loopback,
 // tailnet, phone).
 package refs
@@ -24,7 +26,8 @@ const (
 )
 
 // Ref is a parsed reference: TaskID for a task, TreeID for a tree, ThreadID
-// (T3 thread id) for a session.
+// (the external session id; ConnectionID 0 when the reference names none)
+// for a session.
 type Ref struct {
 	ConnectionID int64
 	Kind         Kind
@@ -34,7 +37,7 @@ type Ref struct {
 }
 
 // ErrInvalid: the input names no task, tree or session.
-var ErrInvalid = errors.New("not a stage task, tree or session reference: want a stage link (/tasks/<id>, /trees/<id>, /sessions/<id>, stage://tasks/<id>), a T3 thread link, #<task id> or a thread id")
+var ErrInvalid = errors.New("not a stage task, tree or session reference: want a stage link (/tasks/<id>, /trees/<id>, /sessions/<id>, stage://tasks/<id>), a harness session link, #<task id> or a session id")
 
 // mdLink matches a whole markdown link, as "Copy link" produces.
 var mdLink = regexp.MustCompile(`^\[.*\]\((\S+)\)$`)
@@ -45,9 +48,8 @@ var taskNum = regexp.MustCompile(`^#?([1-9][0-9]{0,17})$`)
 // developer identities' "stage-<suffix>" (docs/desktop.md).
 var deepLink = regexp.MustCompile(`(?i)^stage(-[a-z0-9-]+)?://`)
 
-// Parse reads one reference. t3PublicURL is the T3 web base that T3 thread
-// links start with ("" disables matching them).
-func Parse(s, t3PublicURL string) (Ref, error) {
+// Parse reads one reference.
+func Parse(s string) (Ref, error) {
 	s = strings.TrimSpace(s)
 	if m := mdLink.FindStringSubmatch(s); m != nil {
 		s = m[1]
@@ -61,12 +63,10 @@ func Parse(s, t3PublicURL string) (Ref, error) {
 	}
 	lower := strings.ToLower(s)
 	switch {
-	case strings.HasPrefix(lower, "t3code://"):
-		return parseAppLink(s)
 	case deepLink.MatchString(s):
 		return parseDeepLink(s)
 	case strings.HasPrefix(lower, "http://"), strings.HasPrefix(lower, "https://"):
-		return parseWebLink(s, t3PublicURL)
+		return parseWebLink(s)
 	case strings.HasPrefix(s, "/"):
 		u, err := url.Parse(s)
 		if err != nil {
@@ -189,22 +189,8 @@ func parseDeepLink(s string) (Ref, error) {
 	return Ref{}, ErrInvalid
 }
 
-// parseAppLink reads t3code://threads/<environmentId>/<threadId>.
-func parseAppLink(s string) (Ref, error) {
-	u, err := url.Parse(s)
-	if err != nil || u.Host != "threads" {
-		return Ref{}, ErrInvalid
-	}
-	segs, ok := segments(u)
-	if !ok || len(segs) != 2 {
-		return Ref{}, ErrInvalid
-	}
-	return Ref{Kind: KindSession, ThreadID: segs[1]}, nil
-}
-
-// parseWebLink reads a stage page link (any host, checked first) or a T3
-// web thread link (<t3PublicURL>/<environmentId>/<threadId>).
-func parseWebLink(s, t3PublicURL string) (Ref, error) {
+// parseWebLink reads a stage page link (any host).
+func parseWebLink(s string) (Ref, error) {
 	u, err := url.Parse(s)
 	if err != nil {
 		return Ref{}, ErrInvalid
@@ -212,32 +198,5 @@ func parseWebLink(s, t3PublicURL string) (Ref, error) {
 	if r, ok := stagePath(u); ok {
 		return r, nil
 	}
-	if r, ok := t3Path(u, t3PublicURL); ok {
-		return r, nil
-	}
 	return Ref{}, ErrInvalid
-}
-
-func t3Path(u *url.URL, t3PublicURL string) (Ref, bool) {
-	if t3PublicURL == "" {
-		return Ref{}, false
-	}
-	base, err := url.Parse(t3PublicURL)
-	if err != nil || !strings.EqualFold(base.Scheme, u.Scheme) || !strings.EqualFold(base.Host, u.Host) {
-		return Ref{}, false
-	}
-	baseSegs, ok := segments(base)
-	if !ok {
-		return Ref{}, false
-	}
-	segs, ok := segments(u)
-	if !ok || len(segs) != len(baseSegs)+2 {
-		return Ref{}, false
-	}
-	for i, b := range baseSegs {
-		if segs[i] != b {
-			return Ref{}, false
-		}
-	}
-	return Ref{Kind: KindSession, ThreadID: segs[len(segs)-1]}, true
 }

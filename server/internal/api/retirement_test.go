@@ -7,6 +7,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -21,8 +22,10 @@ func TestRetiredEndpointsAreNotAvailable(t *testing.T) {
 	task := e.task(p.ID, "Retained task", map[string]any{"start": true})
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", task.ID), map[string]any{"message": "retired"}, 404, nil)
 	e.must("GET", fmt.Sprintf("/api/tasks/%d/opening-prompt", task.ID), nil, 400, nil)
+	// API v8: the T3 thread read is gone; the session context remains.
+	e.must("GET", "/api/connections/1/sessions/"+*task.T3ThreadID, nil, 404, nil)
 	var metadata map[string]any
-	e.must("GET", "/api/connections/1/sessions/"+*task.T3ThreadID, nil, 200, &metadata)
+	e.must("GET", "/api/connections/1/sessions/"+*task.T3ThreadID+"/context", nil, 200, &metadata)
 	for _, field := range []string{"children", "createdTasks"} {
 		if _, exists := metadata[field]; exists {
 			t.Fatalf("retired field %s", field)
@@ -41,13 +44,26 @@ func TestRetiredEndpointsAreNotAvailable(t *testing.T) {
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/stop", task.ID), nil, 200, nil)
 }
 
+// observeState records session id's observed state (a later observation).
+func observeState(t *testing.T, e *env, id string, st db.TaskState) {
+	t.Helper()
+	ref := db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}
+	o, err := e.store.Observation(t.Context(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.State, o.Active = string(st), st == db.StateNeedsInput || st == db.StateRunning
+	o.UpdatedAt = o.UpdatedAt.Add(time.Millisecond)
+	if err := e.store.PutObservation(t.Context(), o); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSilentWaitingSessionsDoNotCreateNotifications(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/silent")
 	id := runningSession(t, e, p.T3ProjectID, "Waiting before startup")
-	if err := e.store.SetObservedState(t.Context(), db.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: id}, db.StateNeedsInput); err != nil {
-		t.Fatal(err)
-	}
+	observeState(t, e, id, db.StateNeedsInput)
 	var inbox struct {
 		Waiting []struct {
 			ID    string `json:"externalSessionId"`
@@ -62,17 +78,13 @@ func TestSilentWaitingSessionsDoNotCreateNotifications(t *testing.T) {
 	if len(inbox.Waiting) != 1 || inbox.Waiting[0].ID != id || inbox.Waiting[0].Links.Native != t3.AppThreadURL(t3.FakeEnvironmentID, id) || inbox.Waiting[0].Links.Web == "" || inbox.Unread != 0 || inbox.Latest != 0 || len(inbox.Groups) != 0 {
 		t.Fatalf("silent inbox %+v", inbox)
 	}
-	if err := e.store.SetObservedState(t.Context(), db.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: id}, db.StateRunning); err != nil {
-		t.Fatal(err)
-	}
+	observeState(t, e, id, db.StateRunning)
 	read()
 	if len(inbox.Waiting) != 0 {
 		t.Fatalf("resolved session still waiting %+v", inbox)
 	}
-	if err := e.store.SetObservedState(t.Context(), db.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: id}, db.StateNeedsInput); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.store.InsertNotification(t.Context(), db.NewNotification{Event: db.StateNeedsInput, T3ThreadID: &id, Title: "Waiting", URL: "/?inbox"}); err != nil {
+	observeState(t, e, id, db.StateNeedsInput)
+	if _, err := e.store.InsertNotification(t.Context(), db.NewNotification{Event: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}, Title: "Waiting", URL: "/?inbox"}); err != nil {
 		t.Fatal(err)
 	}
 	read()

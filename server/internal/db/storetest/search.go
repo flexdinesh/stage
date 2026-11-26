@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 )
 
 // Search contract (docs/storage.md "Search"): TaskFilter.Q and
@@ -225,9 +226,9 @@ func caseSearchJournalPaging(t *testing.T, open Factory) {
 
 func searchTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64, title, prompt string) db.Task {
 	t.Helper()
-	task, err := s.CreateTask(ctx, db.NewTask{
-		ProjectID: projectID, Title: title, Prompt: prompt, RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"},
+	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection,
+		ProjectID: projectID, Title: title, Prompt: prompt,
+		Workspace: db.Workspace{Type: "root"},
 	})
 	if err != nil {
 		t.Fatal(err)

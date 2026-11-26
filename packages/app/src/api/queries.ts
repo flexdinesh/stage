@@ -21,11 +21,9 @@ export const keys = {
   machines: ["machines"],
   pairing: ["pairing"],
   harnesses: ["harnesses"],
-  catalog: ["catalog"],
   projects: ["projects"],
   tasks: ["tasks"],
   task: ["task"],
-  thread: ["thread"],
   snippets: ["snippets"],
   preferences: ["preferences"],
   me: ["me"],
@@ -345,20 +343,13 @@ function useSlotStatuses<S, C extends MachineConnection>(slot: StatusSlot<S>, co
   });
 }
 
-/** The first full sync filled projects, threads and the catalog: refetch everything that read them empty. */
+/** The first full sync filled projects and sessions: refetch everything that read them empty. */
 function refreshAfterFirstSync(qc: QueryClient): Promise<void> {
   return Promise.all([
     invalidateWork(qc),
     qc.invalidateQueries({ queryKey: keys.projects }),
-    qc.invalidateQueries({ queryKey: keys.catalog }),
   ]).then(() => undefined);
 }
-
-// Catalog is cached server-side for 10 min; no need to poll it.
-export const useCatalog = () => {
-  const api = useApi();
-  return useQuery({ queryKey: keys.catalog, queryFn: api.catalog, refetchInterval: false, staleTime: 60_000, retry: false });
-};
 
 /** `enabled: false` reads only what is cached (a picker that needs the list once it opens). */
 export const useProjects = (archived: ArchivedFilter = "false", { enabled = true }: { enabled?: boolean } = {}) => {
@@ -477,18 +468,6 @@ export const useSchedulePreview = (body: SchedulePreviewRequest | null) => {
   });
 };
 
-/** A session on the active T3 connection. */
-export const useThread = (id: string) => {
-  const api = useApi();
-  const t3 = useHarnesses().activeId("t3");
-  return useQuery({
-    queryKey: [...keys.thread, t3, id],
-    queryFn: () => (t3 === null ? Promise.reject(new Error("T3 is not connected")) : api.thread(t3, id)),
-    enabled: id !== "" && t3 !== null,
-    refetchInterval: POLL.live,
-  });
-};
-
 /** Tasks + external threads needing input (app badge, nav count). */
 export const useBadge = () => {
   const api = useApi();
@@ -549,7 +528,6 @@ export function invalidateWork(qc: QueryClient): Promise<void> {
     [
       keys.tasks,
       keys.task,
-      keys.thread,
       keys.preferences,
       keys.badge,
       keys.schedules,
@@ -577,7 +555,6 @@ export function invalidateConnectionChange(
     qc.invalidateQueries({ queryKey: keys.connections }),
     qc.invalidateQueries({ queryKey: keys.machines }),
     qc.invalidateQueries({ queryKey: keys.projects }),
-    qc.invalidateQueries({ queryKey: keys.catalog }),
     qc.invalidateQueries({ queryKey: scopedKey(keys.harnesses) }),
     invalidateWork(qc),
   ]);

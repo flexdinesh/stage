@@ -21,16 +21,6 @@ const (
 
 var TaskStates = store.TaskStates
 
-const (
-	SourceApp = store.SourceApp
-	SourceT3  = store.SourceT3
-)
-
-var (
-	RuntimeModes     = []string{"approval-required", "auto-accept-edits", "auto", "full-access"}
-	InteractionModes = []string{"default", "plan"}
-)
-
 type (
 	Project       = store.Project
 	ImportSummary = store.ImportSummary
@@ -46,9 +36,4 @@ type (
 	Workspace = store.Workspace
 	Task      = store.Task
 	TaskEvent = store.TaskEvent
-)
-
-type (
-	Thread   = store.Thread
-	LastWord = store.LastWord
 )

@@ -8,4 +8,4 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/store"
 )
 
-func postgresEngine(testing.TB) (store.Engine, bool) { return nil, false }
+func postgresEngine(testing.TB, bool) (store.Engine, bool) { return nil, false }

@@ -2,9 +2,10 @@ package db
 
 import (
 	"context"
-	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"slices"
 	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
@@ -55,7 +56,7 @@ func bindingOn(t *testing.T, s *Store, ctx context.Context, project, connection 
 
 func TestImportJoinsSameRepoAtAnotherPathOnAnotherMachine(t *testing.T) {
 	s, ctx, pool := twoMachineStore(t)
-	local := s.LegacyT3ID()
+	local := s.ActiveID(LocalMachine, "t3")
 	refreshImport(t, s, ctx, local, ws("stage", "/home/a/stage", remote("github.com/o/stage", ".")))
 	p, ok := byTitle(t, s, ctx, "stage")
 	if !ok {
@@ -93,7 +94,7 @@ func TestImportJoinsSameRepoAtAnotherPathOnAnotherMachine(t *testing.T) {
 // is a different checkout unless its remote and subproject match.
 func TestImportSamePathOnAnotherMachineNeverMerges(t *testing.T) {
 	s, ctx, pool := twoMachineStore(t)
-	local := s.LegacyT3ID()
+	local := s.ActiveID(LocalMachine, "t3")
 	refreshImport(t, s, ctx, local,
 		ws("plain", "/w/plain"),
 		ws("app", "/w/app", remote("github.com/o/app", ".")),
@@ -109,7 +110,7 @@ func TestImportSamePathOnAnotherMachineNeverMerges(t *testing.T) {
 
 func TestImportForkIsAnotherProject(t *testing.T) {
 	s, ctx, pool := twoMachineStore(t)
-	refreshImport(t, s, ctx, s.LegacyT3ID(), ws("upstream", "/w/stage", remote("github.com/o/stage", ".")))
+	refreshImport(t, s, ctx, s.ActiveID(LocalMachine, "t3"), ws("upstream", "/w/stage", remote("github.com/o/stage", ".")))
 	r := refreshImport(t, s, ctx, laptopT3, ws("fork", "/code/stage", remote("github.com/me/stage", ".")))
 	if r.Created != 1 || r.Bound != 0 || projectCount(t, pool) != 2 {
 		t.Fatalf("result %+v, %d projects", r, projectCount(t, pool))
@@ -119,7 +120,7 @@ func TestImportForkIsAnotherProject(t *testing.T) {
 func TestImportMatchesMonorepoSubprojects(t *testing.T) {
 	s, ctx, pool := twoMachineStore(t)
 	const mono = "github.com/o/mono"
-	refreshImport(t, s, ctx, s.LegacyT3ID(),
+	refreshImport(t, s, ctx, s.ActiveID(LocalMachine, "t3"),
 		ws("a", "/w/mono/packages/a", remote(mono, "packages/a")),
 		ws("b", "/w/mono/packages/b", remote(mono, "packages/b")),
 		ws("root", "/w/mono", remote(mono, ".")),
@@ -148,7 +149,7 @@ func TestImportMatchesMonorepoSubprojects(t *testing.T) {
 
 func TestImportWithoutRemoteOrSubprojectNeverMergesAcrossMachines(t *testing.T) {
 	s, ctx, pool := twoMachineStore(t)
-	refreshImport(t, s, ctx, s.LegacyT3ID(), ws("app", "/w/app", remote("github.com/o/app", ".")))
+	refreshImport(t, s, ctx, s.ActiveID(LocalMachine, "t3"), ws("app", "/w/app", remote("github.com/o/app", ".")))
 	r := refreshImport(t, s, ctx, laptopT3,
 		ws("no-remote", "/l/app"),
 		// A remote with an unknown subproject (e.g. before the first
@@ -166,7 +167,7 @@ func TestImportWithoutRemoteOrSubprojectNeverMergesAcrossMachines(t *testing.T) 
 func TestImportLeavesAmbiguousRemoteMatchForManualBinding(t *testing.T) {
 	s, ctx, pool := twoMachineStore(t)
 	const key = "github.com/o/stage"
-	r := refreshImport(t, s, ctx, s.LegacyT3ID(), ws("one", "/a/stage", remote(key, ".")), ws("two", "/b/stage", remote(key, ".")))
+	r := refreshImport(t, s, ctx, s.ActiveID(LocalMachine, "t3"), ws("one", "/a/stage", remote(key, ".")), ws("two", "/b/stage", remote(key, ".")))
 	if r.Created != 2 {
 		t.Fatalf("local checkouts %+v", r)
 	}
@@ -189,7 +190,7 @@ func TestImportLeavesRemoteOwnerPlacedOnThisMachine(t *testing.T) {
 	s, ctx, pool := twoMachineStore(t)
 	const key = "github.com/o/stage"
 	refreshImport(t, s, ctx, laptopT3, ws("l", "/l/stage", remote(key, ".")))
-	if r := refreshImport(t, s, ctx, s.LegacyT3ID(), ws("a", "/a/stage", remote(key, "."))); r.Bound != 1 {
+	if r := refreshImport(t, s, ctx, s.ActiveID(LocalMachine, "t3"), ws("a", "/a/stage", remote(key, "."))); r.Bound != 1 {
 		t.Fatalf("local join %+v", r)
 	}
 	if r := refreshImport(t, s, ctx, localOC, ws("c", "/c/stage", remote(key, "."))); r != (ImportResult{}) || projectCount(t, pool) != 1 {
@@ -200,7 +201,7 @@ func TestImportLeavesRemoteOwnerPlacedOnThisMachine(t *testing.T) {
 func TestImportRemoteMatchHonorsDeclines(t *testing.T) {
 	s, ctx, _ := twoMachineStore(t)
 	const key = "github.com/o/stage"
-	refreshImport(t, s, ctx, s.LegacyT3ID(), ws("stage", "/a/stage", remote(key, ".")))
+	refreshImport(t, s, ctx, s.ActiveID(LocalMachine, "t3"), ws("stage", "/a/stage", remote(key, ".")))
 	p, _ := byTitle(t, s, ctx, "stage")
 	laptop := ws("l", "/l/stage", remote(key, "."))
 	if r := refreshImport(t, s, ctx, laptopT3, laptop); r.Bound != 1 {

@@ -16,26 +16,6 @@ func (o *Ops) harnesses(ctx context.Context) (harnesses, error) {
 	return harnesses(cs), err
 }
 
-// t3 is the active T3 connection (0 when none).
-func (h harnesses) t3() int64 {
-	for _, c := range h {
-		if c.Harness == db.HarnessT3 && c.Active {
-			return c.ID
-		}
-	}
-	return 0
-}
-
-// isT3 reports whether a connection, active or replaced, is a T3 instance.
-func (h harnesses) isT3(id int64) bool {
-	for _, c := range h {
-		if c.ID == id {
-			return c.Harness == db.HarnessT3
-		}
-	}
-	return false
-}
-
 // get is the connection with id (nil when unknown).
 func (h harnesses) get(id int64) *db.HarnessConnection {
 	for i := range h {

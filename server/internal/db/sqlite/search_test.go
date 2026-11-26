@@ -21,6 +21,9 @@ func migratedStore(t *testing.T) (*DB, *db.Store) {
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := pool.Exec(`INSERT INTO harness_connections (id, harness) VALUES (1, 't3')`); err != nil {
+		t.Fatal(err)
+	}
 	return pool, db.NewStore(pool)
 }
 
@@ -53,7 +56,7 @@ func TestSearchIndexFollowsWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	newTask := func(title string) db.Task {
-		task, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: title, Prompt: "prompt " + title, RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}})
+		task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: 1, ProjectID: p.ID, Title: title, Prompt: "prompt " + title, Workspace: db.Workspace{Type: "root"}})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -94,24 +94,6 @@ func printCapabilities(w io.Writer, c execution.Capabilities) {
 	fmt.Fprintln(w, "Use --json for model options, permissions and operation availability.")
 }
 
-func printCatalog(w io.Writer, c client.Catalog) {
-	for _, p := range c.Providers {
-		fmt.Fprintf(w, "%s (%s)\n", p.ProviderInstanceID, p.DisplayName)
-		for _, m := range p.Models {
-			var opts []string
-			for _, o := range m.Options {
-				vals := make([]string, len(o.Values))
-				for i, v := range o.Values {
-					b, _ := v.MarshalJSON()
-					vals[i] = strings.Trim(string(b), `"`)
-				}
-				opts = append(opts, o.ID+"="+strings.Join(vals, "|"))
-			}
-			fmt.Fprintf(w, "  %s  %s  %s\n", m.ID, m.Label, strings.Join(opts, " "))
-		}
-	}
-}
-
 func printTaskRows(w io.Writer, res agenttools.TasksOut) {
 	table(w, "ID\tSTATE\tPROJECT\tTITLE\tWAITS ON", func(tw io.Writer) {
 		for _, t := range res.Tasks {
@@ -205,9 +187,7 @@ func printTaskDetail(w io.Writer, d client.TaskDetail) {
 	printHandoff(w, d)
 	printLaunchBase(w, d.CurrentLaunchBase)
 	fmt.Fprintf(w, "\n%s\n", strings.TrimRight(d.Prompt, "\n"))
-	if d.Thread != nil {
-		printLastWord(w, d.Thread.LastWord)
-	} else if d.FinalReply != nil {
+	if d.FinalReply != nil {
 		fmt.Fprintf(w, "\nFinal reply\n%s\n", d.FinalReply.Text)
 	}
 	if len(d.Events) > 0 {
@@ -395,16 +375,15 @@ func printScheduleDetail(w io.Writer, d client.ScheduleDetail) {
 	}
 }
 
-func printSessionDetail(w io.Writer, d client.ThreadDetail) {
-	t := d.Thread
-	fmt.Fprintf(w, "session %s  %s  [%s]  %s\n", t.T3ThreadID, t.Title, t.State, orDash(t.ProjectTitle))
+func printSessionDetail(w io.Writer, d client.SessionContext) {
+	project := "-"
+	if d.Project != nil {
+		project = d.Project.Title
+	}
+	fmt.Fprintf(w, "session %s (connection %d)  %s  %s\n", d.Session.ExternalSessionID, d.Session.ConnectionID, d.Title, project)
 	if d.Task != nil {
-		if open := orFirst(d.Task.Links.Web, d.Task.Links.Native); open != "" {
-			fmt.Fprintf(w, "  open  %s\n", open)
-		}
 		fmt.Fprintf(w, "  task  %d %s\n", d.Task.ID, d.Task.Title)
 	}
-
 }
 
 // printRef prints what a reference names: a task (with its session id), a
@@ -417,9 +396,6 @@ func printRef(w io.Writer, r agenttools.RefOut) {
 		printSessionDetail(w, *r.Session)
 	case r.Task != nil:
 		printTaskDetail(w, *r.Task)
-		if r.Session != nil {
-			fmt.Fprintf(w, "\nsession %s\n", r.Session.Thread.T3ThreadID)
-		}
 	}
 	if r.SessionRef != nil && r.Session == nil {
 		fmt.Fprintf(w, "session %s (connection %d)  %s\n", r.SessionRef.ExternalSessionID, r.SessionRef.ConnectionID, r.SessionTitle)
@@ -476,17 +452,6 @@ func compactCount(n int64) string {
 		return strings.TrimSuffix(fmt.Sprintf("%.1f", float64(n)/1e3), ".0") + "k"
 	default:
 		return strings.TrimSuffix(fmt.Sprintf("%.1f", float64(n)/1e6), ".0") + "M"
-	}
-}
-
-// printLastWord prints the thread's latest assistant reply excerpt.
-func printLastWord(w io.Writer, lw *db.LastWord) {
-	if lw == nil {
-		return
-	}
-	fmt.Fprintf(w, "\nlast word (%s)\n%s\n", ts(lw.At), strings.TrimRight(lw.Text, "\n"))
-	if lw.Truncated {
-		fmt.Fprintln(w, "[excerpt; full reply in T3]")
 	}
 }
 

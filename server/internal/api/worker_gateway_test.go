@@ -11,6 +11,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -187,7 +188,7 @@ func TestResolveConnectionUsesCallerMachine(t *testing.T) {
 		Harness   string `json:"harness"`
 	}
 	e.must("GET", "/api/connections/resolve?harness=t3", nil, 200, &local)
-	if local.ID != e.store.LegacyT3ID() || local.MachineID != 1 || local.Harness != "t3" {
+	if local.ID != e.store.ActiveID(db.LocalMachine, "t3") || local.MachineID != 1 || local.Harness != "t3" {
 		t.Fatalf("local resolve %+v", local)
 	}
 	var out errOut

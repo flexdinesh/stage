@@ -43,7 +43,6 @@ type Tx interface {
 	Connections() Connections
 	Machines() Machines
 	Projects() Projects
-	Threads() Threads
 	Tasks() Tasks
 	Attempts() Attempts
 	Observations() Observations

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -32,7 +33,7 @@ func caseAdoptThread(t *testing.T, open Factory) {
 	}
 	thread("planner-1", func(d *t3.ThreadDetail) { d.Title = "Planner" })
 
-	task, created, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "planner-1"})
+	task, created, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("planner-1")})
 	if err != nil || !created {
 		t.Fatalf("adopt: %+v %v %v", task, created, err)
 	}
@@ -46,18 +47,18 @@ func caseAdoptThread(t *testing.T, open Factory) {
 	if err != nil || len(events) != 1 || events[0].Detail != "adopted session" || events[0].ToState != db.StateRunning {
 		t.Fatalf("events %+v %v", events, err)
 	}
-	if th, err := s.GetThread(ctx, "planner-1"); err != nil || th.TaskID == nil || *th.TaskID != task.ID || th.Source != db.SourceApp {
-		t.Fatalf("session now owned: %+v %v", th, err)
+	if owner, err := s.TaskBySession(ctx, session("planner-1")); err != nil || owner.ID != task.ID {
+		t.Fatalf("session now owned: %+v %v", owner, err)
 	}
 	// Adopting again returns the owner.
-	again, created, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "planner-1", Title: ptr("ignored")})
+	again, created, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("planner-1"), Title: ptr("ignored")})
 	if err != nil || created || again.ID != task.ID || again.Title != "Planner" {
 		t.Fatalf("adopt again: %+v %v %v", again, created, err)
 	}
 
 	// Title and notes override; a settled session reads settled with timestamps.
 	thread("done-1", func(d *t3.ThreadDetail) { d.Settled, d.Status = true, t3.StatusIdle })
-	settled, _, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "done-1", Title: ptr(" Review "), InitialNote: ptr("n")})
+	settled, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("done-1"), Title: ptr(" Review "), InitialNote: ptr("n")})
 	if err != nil || settled.Title != "Review" || settled.State != db.StateDone ||
 		settled.SettledAt != nil || settled.FinishedAt == nil {
 		t.Fatalf("settled adopt %+v %v", settled, err)
@@ -69,28 +70,28 @@ func caseAdoptThread(t *testing.T, open Factory) {
 	// A blank title falls back to "Session <id8>"; a joined tree is kept.
 	thread("abcdefghij", func(d *t3.ThreadDetail) { d.Title = "  " })
 	tree := mustTree(t, s, ctx, "T", "", db.TreeMember{TaskID: settled.ID})
-	untitled, _, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "abcdefghij", TreeID: &tree.ID})
+	untitled, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("abcdefghij"), TreeID: &tree.ID})
 	if err != nil || untitled.Title != "Session abcdefgh" || untitled.TreeID == nil || *untitled.TreeID != tree.ID {
 		t.Fatalf("untitled adopt %+v %v", untitled, err)
 	}
 
 	var conflict *db.ConflictError
-	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "nope"}); !errors.Is(err, db.ErrNotFound) {
+	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("nope")}); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("unknown session: %v", err)
 	}
 	thread("sub-1", func(d *t3.ThreadDetail) { d.ParentThreadID, d.RelationshipToParent = "planner-1", "subagent" })
-	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "sub-1"}); !errors.As(err, &conflict) {
+	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("sub-1")}); !errors.As(err, &conflict) {
 		t.Fatalf("subagent: %v", err)
 	}
 	thread("arch-1", func(d *t3.ThreadDetail) { d.Archived = true })
-	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "arch-1"}); !errors.As(err, &conflict) {
+	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("arch-1")}); !errors.As(err, &conflict) {
 		t.Fatalf("archived: %v", err)
 	}
 	thread("foreign-1", func(d *t3.ThreadDetail) { d.ProjectID = "not-in-stage" })
-	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "foreign-1"}); !errors.As(err, &conflict) {
+	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("foreign-1")}); !errors.As(err, &conflict) {
 		t.Fatalf("no stage project: %v", err)
 	}
-	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{ThreadID: "sub-1", TreeID: ptr[int64](9999)}); !errors.As(err, &conflict) {
+	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("sub-1"), TreeID: ptr[int64](9999)}); !errors.As(err, &conflict) {
 		t.Fatalf("refusal comes before the tree check: %v", err)
 	}
 
@@ -113,28 +114,28 @@ func caseCreateTaskNeedsSession(t *testing.T, open Factory) {
 		t.Fatal(err)
 	}
 	other := mustTask(t, s, ctx, p.ID, "other", nil)
-	b, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "follow-up", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
-		Workspace: db.Workspace{Type: "root"}, NeedsThreadID: ptr("caller"), Needs: []int64{other.ID}})
+	b, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "follow-up", Prompt: "p",
+		Workspace: db.Workspace{Type: "root"}, NeedsSession: ptr(session("caller")), Needs: []int64{other.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner, err := s.GetThread(ctx, "caller")
-	if err != nil || owner.TaskID == nil {
+	owner, err := s.TaskBySession(ctx, session("caller"))
+	if err != nil || !owner.Adopted {
 		t.Fatalf("caller not adopted: %+v %v", owner, err)
 	}
-	if !slices.Equal(b.Needs, []int64{other.ID, *owner.TaskID}) || b.TreeTitle == nil || *b.TreeTitle != "Caller" || readiness(b) != "blocked" {
+	if !slices.Equal(b.Needs, []int64{other.ID, owner.ID}) || b.TreeTitle == nil || *b.TreeTitle != "Caller" || readiness(b) != "blocked" {
 		t.Fatalf("needs caller %+v", b)
 	}
 	// A second task needing the same session reuses its task.
-	c, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "second", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
-		Workspace: db.Workspace{Type: "root"}, NeedsThreadID: ptr("caller")})
-	if err != nil || !slices.Equal(c.Needs, []int64{*owner.TaskID}) || *c.TreeID != *b.TreeID {
+	c, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "second", Prompt: "p",
+		Workspace: db.Workspace{Type: "root"}, NeedsSession: ptr(session("caller"))})
+	if err != nil || !slices.Equal(c.Needs, []int64{owner.ID}) || *c.TreeID != *b.TreeID {
 		t.Fatalf("second %+v %v", c, err)
 	}
 	var invalid *db.InvalidError
 	at := now.Add(time.Hour)
-	if _, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "x", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
-		Workspace: db.Workspace{Type: "root"}, NeedsThreadID: ptr("caller"), StartAt: &at, StartTz: ptr("UTC")}); !errors.As(err, &invalid) {
+	if _, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "x", Prompt: "p",
+		Workspace: db.Workspace{Type: "root"}, NeedsSession: ptr(session("caller")), StartAt: &at, StartTz: ptr("UTC")}); !errors.As(err, &invalid) {
 		t.Fatalf("start time with a session need: %v", err)
 	}
 }

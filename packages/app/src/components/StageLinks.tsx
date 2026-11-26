@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } fro
 import { createPortal } from "react-dom";
 import { useApi } from "../platform/context.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
-import { keys, useHarnesses } from "../api/queries.ts";
+import { keys } from "../api/queries.ts";
 import type { TaskState } from "../api/types.ts";
 import {
   parseStageRef,
@@ -91,9 +91,8 @@ function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } 
     refetchInterval: 30_000,
     retry: false,
   });
-  // A session ref without a connection names the active T3 connection's session.
-  const t3 = useHarnesses().activeId("t3");
-  const sessionConnection = ref.kind === "session" ? (ref.connectionId ?? t3) : null;
+  // A session ref without a connection names no session to resolve: it stays plain text.
+  const sessionConnection = ref.kind === "session" ? (ref.connectionId ?? null) : null;
   const sessionPath = ref.kind === "session" && sessionConnection !== null ? `/connections/${sessionConnection}/sessions/${encodeURIComponent(ref.id)}` : "";
   const thread = useQuery({
     queryKey: ["session-reference",sessionPath],

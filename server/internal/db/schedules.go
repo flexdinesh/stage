@@ -41,26 +41,21 @@ func (s *Store) ListSchedules(ctx context.Context, f ScheduleFilter) ([]Schedule
 	return read(ctx, s, func(tx store.Tx) ([]Schedule, error) { return tx.Schedules().List(ctx, f) })
 }
 
-// NewSchedule is a validated create input (cron and tz already parse); the
-// legacy T3 model inputs translate as NewTask's do.
+// NewSchedule is a validated create input (cron and tz already parse).
+// ConnectionID is required; a nil ExecutionConfig is the harness defaults.
 type NewSchedule struct {
-	ConnectionID       int64
-	ExecutionConfig    *execution.Config
-	OriginSession      *SessionRef
-	ProjectID          int64
-	Title              string
-	Prompt             string
-	ProviderInstanceID *string
-	Model              *string
-	ModelOptions       []execution.ModelOption
-	RuntimeMode        string
-	InteractionMode    string
-	Workspace          Workspace
-	Notes              string
-	AttachmentIDs      []int64
-	Cron               string
-	Tz                 string
-	Paused             bool
+	ConnectionID    int64
+	ExecutionConfig *execution.Config
+	OriginSession   *SessionRef
+	ProjectID       int64
+	Title           string
+	Prompt          string
+	Workspace       Workspace
+	Notes           string
+	AttachmentIDs   []int64
+	Cron            string
+	Tz              string
+	Paused          bool
 }
 
 // nextRun is the first fire after now, or nil while paused.
@@ -91,10 +86,16 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 		if err := requireProject(ctx, tx, in.ProjectID); err != nil {
 			return 0, err
 		}
-		connection := s.defaultConnection(in.ConnectionID)
-		config, err := legacyT3Config(ctx, tx, connection, in.ExecutionConfig, in.ProviderInstanceID, in.Model, in.ModelOptions, in.RuntimeMode, in.InteractionMode)
-		if err != nil {
+		connection := in.ConnectionID
+		if connection == 0 {
+			return 0, errConnectionRequired
+		}
+		if err := requireConnection(ctx, tx, connection); err != nil {
 			return 0, err
+		}
+		config := in.ExecutionConfig
+		if config == nil {
+			config = &execution.Config{Options: []execution.ModelOption{}}
 		}
 		var originID *int64
 		if in.OriginSession != nil {
@@ -127,24 +128,19 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 // SchedulePatch is a partial schedule update (JSON body of PATCH
 // /api/schedules/:id).
 type SchedulePatch struct {
-	ValidatedConnection int64                             `json:"-"`
-	ValidatedProject    int64                             `json:"-"`
-	ConnectionID        Optional[int64]                   `json:"connectionId"`
-	ExecutionConfig     Optional[execution.Config]        `json:"executionConfig"`
-	ProjectID           Optional[int64]                   `json:"projectId"`
-	Title               Optional[string]                  `json:"title"`
-	Prompt              Optional[string]                  `json:"prompt"`
-	ProviderInstanceID  Optional[string]                  `json:"providerInstanceId"`
-	Model               Optional[string]                  `json:"model"`
-	ModelOptions        Optional[[]execution.ModelOption] `json:"modelOptions"`
-	RuntimeMode         Optional[string]                  `json:"runtimeMode"`
-	InteractionMode     Optional[string]                  `json:"interactionMode"`
-	Workspace           Optional[Workspace]               `json:"workspace"`
-	Notes               Optional[string]                  `json:"notes"`
-	AttachmentIDs       Optional[[]int64]                 `json:"attachmentIds"` // the exact image set; null = none
-	Cron                Optional[string]                  `json:"cron"`
-	Tz                  Optional[string]                  `json:"tz"`
-	Paused              Optional[bool]                    `json:"paused"`
+	ValidatedConnection int64                      `json:"-"`
+	ValidatedProject    int64                      `json:"-"`
+	ConnectionID        Optional[int64]            `json:"connectionId"`
+	ExecutionConfig     Optional[execution.Config] `json:"executionConfig"`
+	ProjectID           Optional[int64]            `json:"projectId"`
+	Title               Optional[string]           `json:"title"`
+	Prompt              Optional[string]           `json:"prompt"`
+	Workspace           Optional[Workspace]        `json:"workspace"`
+	Notes               Optional[string]           `json:"notes"`
+	AttachmentIDs       Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
+	Cron                Optional[string]           `json:"cron"`
+	Tz                  Optional[string]           `json:"tz"`
+	Paused              Optional[bool]             `json:"paused"`
 }
 
 // UpdateSchedule applies a validated patch. Changing cron, tz or paused
@@ -164,10 +160,6 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject) {
 			return Conflict("The destination changed during editing. Refresh and choose the task settings again.")
 		}
-		legacy, err := mergeLegacyT3(e.ExecutionConfig, p.ProviderInstanceID, p.Model, p.ModelOptions, p.RuntimeMode, p.InteractionMode)
-		if err != nil {
-			return err
-		}
 		if p.AttachmentIDs.Set {
 			if err := setOwned(ctx, tx, store.OwnerSchedule, id, p.AttachmentIDs.V); err != nil {
 				return err
@@ -175,9 +167,6 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 		}
 		u := store.ScheduleUpdate{ConnectionID: p.ConnectionID, ExecutionConfig: p.ExecutionConfig, ProjectID: p.ProjectID,
 			Title: p.Title, Prompt: p.Prompt, Workspace: p.Workspace, Notes: p.Notes}
-		if legacy != nil {
-			u.ExecutionConfig = Optional[execution.Config]{Set: true, V: *legacy}
-		}
 		if p.ConnectionID.Set {
 			if err := checkDestinationChange(ctx, tx, e.ConnectionID, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
 				return err

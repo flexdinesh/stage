@@ -55,7 +55,7 @@ func (s *server) respondRequest(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, s.task(s.envID(r.Context()), t))
+	writeJSON(w, http.StatusOK, s.task(t))
 	return nil
 }
 
@@ -76,6 +76,6 @@ func (s *server) sendMessage(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, s.task(s.envID(r.Context()), t))
+	writeJSON(w, http.StatusOK, s.task(t))
 	return nil
 }

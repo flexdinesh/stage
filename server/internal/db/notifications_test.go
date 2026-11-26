@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -37,8 +38,8 @@ func TestNotificationsInbox(t *testing.T) {
 		return id
 	}
 	id1 := insert(db.NewNotification{Event: db.StateNeedsInput, TaskID: &task.ID, Title: "Say OK", ProjectTitle: &proj, URL: "/tasks/1"})
-	id2 := insert(db.NewNotification{Event: db.StateNeedsInput, T3ThreadID: &thread, Title: "Ext", ProjectTitle: &proj, URL: "/history?q=Ext"})
-	id3 := insert(db.NewNotification{Event: db.StateFailed, T3ThreadID: &thread, Title: "Ext", URL: "/history?q=Ext"})
+	id2 := insert(db.NewNotification{Event: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Ext", ProjectTitle: &proj, URL: "/history?q=Ext"})
+	id3 := insert(db.NewNotification{Event: db.StateFailed, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Ext", URL: "/history?q=Ext"})
 
 	all, err := s.ListNotifications(ctx, 10, nil)
 	if err != nil {
@@ -57,11 +58,8 @@ func TestNotificationsInbox(t *testing.T) {
 		t.Fatalf("current states %q %q", state(all[2]), state(all[1]))
 	}
 
-	// Current state follows normalized execution; historical settlement cannot hide activity.
+	// Current state follows the task and the observed session.
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.ExecContext(ctx, `UPDATE threads SET settled = 1 WHERE t3_thread_id = 'ext-1'`); err != nil {
 		t.Fatal(err)
 	}
 	all, err = s.ListNotifications(ctx, 10, nil)
@@ -138,13 +136,13 @@ func TestNotificationGroups(t *testing.T) {
 	waitingID := insert(db.NewNotification{Event: db.StateNeedsInput, TaskID: &waiting.ID,
 		Title: waiting.Title, URL: fmt.Sprintf("/tasks/%d", waiting.ID)})
 	thread1, thread2 := "ext-1", "ext-2"
-	insert(db.NewNotification{Event: db.StateDone, T3ThreadID: &thread1, Title: "Same title", URL: "/history?q=Same"})
-	insert(db.NewNotification{Event: db.StateFailed, T3ThreadID: &thread2, Title: "Same title", URL: "/history?q=Same"})
+	insert(db.NewNotification{Event: db.StateDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread1}, Title: "Same title", URL: "/history?q=Same"})
+	insert(db.NewNotification{Event: db.StateFailed, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread2}, Title: "Same title", URL: "/history?q=Same"})
 	var activeIDs []int64
 	for i := range 55 {
 		thread := fmt.Sprintf("attempt-%d", i)
 		activeIDs = append(activeIDs, insert(db.NewNotification{Event: db.StateFailed, TaskID: &active.ID,
-			T3ThreadID: &thread, Title: fmt.Sprintf("Renamed %d", i), URL: fmt.Sprintf("/tasks/%d", active.ID)}))
+			Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: fmt.Sprintf("Renamed %d", i), URL: fmt.Sprintf("/tasks/%d", active.ID)}))
 	}
 	latest, unread, err := s.NotificationReadState(ctx)
 	if err != nil || latest != activeIDs[len(activeIDs)-1] || unread != 58 {
@@ -221,10 +219,10 @@ func TestNotificationGroupReadAndTags(t *testing.T) {
 		}
 	}
 	taskURL := fmt.Sprintf("/tasks/%d", task.ID)
-	insert(db.NewNotification{Event: db.StateNeedsInput, TaskID: &task.ID, T3ThreadID: &other, Title: "Say OK", URL: taskURL})
+	insert(db.NewNotification{Event: db.StateNeedsInput, TaskID: &task.ID, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: other}, Title: "Say OK", URL: taskURL})
 	insert(db.NewNotification{Event: db.StateDone, TaskID: &task.ID, Title: "Say OK", URL: taskURL})
 	insert(db.NewNotification{Event: db.StateDone, Title: "Deleted task", URL: "/tasks/99"})
-	insert(db.NewNotification{Event: db.StateNeedsInput, T3ThreadID: &ext, Title: "Ext", URL: "/sessions/ext-1"})
+	insert(db.NewNotification{Event: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: ext}, Title: "Ext", URL: "/sessions/ext-1"})
 	insert(db.NewNotification{Event: db.StateFailed, Title: "No identity", URL: "/"})
 
 	tags := func() []string {
@@ -268,11 +266,11 @@ func TestNotificationKeyParity(t *testing.T) {
 	deleted := mustTask(t, s, ctx, p.ID, "Gone", nil)
 	thread, other := "ext-1", "ext-2"
 	for _, n := range []db.NewNotification{
-		{Event: db.StateNeedsInput, TaskID: &task.ID, T3ThreadID: &other, Title: "Say OK", URL: fmt.Sprintf("/tasks/%d", task.ID)},
+		{Event: db.StateNeedsInput, TaskID: &task.ID, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: other}, Title: "Say OK", URL: fmt.Sprintf("/tasks/%d", task.ID)},
 		{Event: db.StateDone, TaskID: &deleted.ID, Title: "Gone", URL: fmt.Sprintf("/tasks/%d", deleted.ID)},
 		{Event: db.StateDone, Title: "Old", URL: "/tasks/007"},
 		{Event: db.StateDone, Title: "Not a task", URL: "/tasks/7x"},
-		{Event: db.StateNeedsInput, T3ThreadID: &thread, Title: "Ext", URL: "/sessions/ext-1"},
+		{Event: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Ext", URL: "/sessions/ext-1"},
 		{Event: db.StateFailed, Title: "No identity", URL: "/"},
 	} {
 		if _, err := s.InsertNotification(ctx, n); err != nil {
@@ -317,13 +315,13 @@ func TestNotificationsAfter(t *testing.T) {
 	p := mustProject(t, s, ctx, "proj-1")
 	task := mustTask(t, s, ctx, p.ID, "Say OK", nil)
 	thread := "session-2"
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: thread}}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: s.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: thread}}); err != nil {
 		t.Fatal(err)
 	}
 	stale := "session-1"
 	var ids []int64
 	for i := range 5 {
-		id, err := s.InsertNotification(ctx, db.NewNotification{Event: db.StateDone, TaskID: &task.ID, T3ThreadID: &stale,
+		id, err := s.InsertNotification(ctx, db.NewNotification{Event: db.StateDone, TaskID: &task.ID, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: stale},
 			Title: fmt.Sprintf("n%d", i), URL: fmt.Sprintf("/tasks/%d", task.ID)})
 		if err != nil {
 			t.Fatal(err)

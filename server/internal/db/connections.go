@@ -8,16 +8,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
-// LocalMachine is the machine this server runs on (migration 0015). Every
-// connection belongs to it until workers exist; legacy T3 thread ids belong
-// to its active T3 connection.
+// LocalMachine is the machine this server runs on (migration 0015).
 const LocalMachine int64 = 1
-
-// Harness names.
-const (
-	HarnessT3       = "t3"
-	HarnessOpenCode = "opencode"
-)
 
 type connectionSnapshot struct{ rows []store.ConnectionRow }
 
@@ -46,10 +38,6 @@ func (s *Store) ActiveID(machine int64, harness string) int64 {
 	}
 	return 0
 }
-
-// LegacyT3ID is the local machine's active T3 connection: the default for
-// legacy thread ids and requests that name no connection.
-func (s *Store) LegacyT3ID() int64 { return s.ActiveID(LocalMachine, HarnessT3) }
 
 // ActiveConnection is one active harness connection.
 type ActiveConnection struct {
@@ -88,9 +76,6 @@ func (s *Store) Harness(id int64) string {
 	}
 	return ""
 }
-
-// IsT3 reports whether a connection (active or retired) is a T3 instance.
-func (s *Store) IsT3(id int64) bool { return s.Harness(id) == HarnessT3 }
 
 // ConnectionActive reports whether a connection is its harness's active one.
 func (s *Store) ConnectionActive(id int64) bool {
@@ -344,18 +329,6 @@ func forgetTx(ctx context.Context, tx store.Tx, id int64) error {
 		return c.Delete(ctx, id)
 	}
 	return c.Forget(ctx, id)
-}
-
-// legacyT3ConnectionID owns rows written before connections existed.
-const legacyT3ConnectionID int64 = 1
-
-// legacyT3Tx is the legacy T3 connection (LegacyT3ID) inside a unit of work.
-func legacyT3Tx(ctx context.Context, tx store.Tx) (int64, error) {
-	id, err := tx.Connections().LegacyT3(ctx)
-	if err == nil && id == 0 {
-		err = Invalid("no T3 connection; pair T3 in Settings")
-	}
-	return id, err
 }
 
 // connectionUsable refuses new work on an unknown or replaced connection.

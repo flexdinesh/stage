@@ -30,9 +30,8 @@ Coding agents with a shell use the CLI by default: it costs no context until use
 | Flag | Meaning |
 |---|---|
 | `--project P` | project id or title |
-| `--connection ID` | the execution harness connection |
+| `--connection ID` | the execution harness connection (required unless the project's bindings or the default connection choose one) |
 | `--execution-config JSON` | harness options advertised by `stage models ls` |
-| `--provider ID`, `--model ID`, `--effort E`, `--option K=V...`, `--runtime MODE`, `--mode default\|plan` | T3 provider and model settings |
 | `--workspace worktree` | the harness-managed worktree instead of the root |
 | `--base-ref REF`, `--branch NAME` | worktree base ref and branch |
 | `--base predecessor [--base-task ID]` | start the worktree from a need's branch ([MCP tools](/docs/reference/mcp)) |
@@ -89,10 +88,10 @@ Categories are optional: `finding`, `decision`, `blocker`, `outcome`. The CLI ge
 | Command | Does |
 |---|---|
 | `stage sessions adopt [--target-connection ID --target-session ID] [--title T] [--initial-note TEXT] [--tree ID] [--project ID \| --new-project TITLE]` | track a session as a task (default: your own session) |
-| `stage show REF` | what a Stage link, T3 thread link, `#ID` or thread id names; `--target-connection ID --target-session ID` names a scoped session |
+| `stage show REF` | what a Stage link, a harness session link, `#ID` or a scoped session path names; `--target-connection ID --target-session ID` names a session by id |
 | `stage context` | your session, cwd, resolved project, owning task and tree |
 | `stage projects ls` | projects with their bindings and connections |
-| `stage models ls [--connection ID] [--project ID]` | a connection's models, agents and options |
+| `stage models ls --connection ID [--project ID]` | a connection's models, agents and options |
 | `stage guide` | the agent workflow guide |
 
 ## Tools
@@ -218,7 +217,7 @@ Commands that create tasks, write notes, adopt sessions or show context know the
 ## Examples
 
 ```sh
-stage task add --title "Fix flaky test" --prompt "..." --effort high          # backlog
+stage task add --title "Fix flaky test" --prompt "..." --connection 2 --execution-config '{"model":"m","options":[{"id":"effort","value":"high"}]}'  # backlog
 stage task add --title "Deploy" --prompt-file deploy.md --after-me             # eligible after user completion of this session's task
 echo "..." | stage task add --title "Refactor" --prompt - --base-ref origin/main --start
 stage task ls --state backlog --json

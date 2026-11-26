@@ -2,9 +2,13 @@ package db
 
 import (
 	"context"
-	"github.com/flexdinesh/stage/server/internal/db/sqlite"
-	"github.com/flexdinesh/stage/server/internal/t3"
 	"testing"
+	"time"
+
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite/sqlitetest"
+	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // Migration 0008: identities; projects bind to the T3 connection, sessions
@@ -65,6 +69,7 @@ func TestIdentityUpgradePreservesHistory(t *testing.T) {
 func TestSessionsAreConnectionScoped(t *testing.T) {
 	pool := openUnmigrated(t)
 	migrateTo(t, pool, sqlite.MaxVersion())
+	sqlitetest.SeedT3Connection(t, pool)
 	s := NewStore(pool)
 	ctx := context.Background()
 	mustExec(t, pool, `INSERT INTO harness_connections(id,harness) VALUES(2,'opencode')`)
@@ -92,6 +97,7 @@ func TestSessionsAreConnectionScoped(t *testing.T) {
 func TestBindingOwnershipAndPinnedDestination(t *testing.T) {
 	pool := openUnmigrated(t)
 	migrateTo(t, pool, sqlite.MaxVersion())
+	sqlitetest.SeedT3Connection(t, pool)
 	s := NewStore(pool)
 	ctx := context.Background()
 	p, err := s.InsertProject(ctx, Project{Title: "Stage", Bindings: []ProjectBinding{{ConnectionID: 1, ExternalProjectID: "p", Workspace: "/old"}}})
@@ -109,7 +115,7 @@ func TestBindingOwnershipAndPinnedDestination(t *testing.T) {
 	if err != nil || dest.Workspace != "/old" {
 		t.Fatal("claim redirected", dest, err)
 	}
-	if _, err = s.UpsertT3Projects(ctx, []t3.Project{{ID: "new", Title: "External title", WorkspaceRoot: "/moved"}}); err != nil {
+	if _, err = s.RefreshWorkspaces(ctx, 1, []t3.Project{{ID: "new", Title: "External title", WorkspaceRoot: "/moved"}}); err != nil {
 		t.Fatal(err)
 	}
 	p, err = s.GetProject(ctx, p.ID)
@@ -123,7 +129,7 @@ func TestBindingOwnershipAndPinnedDestination(t *testing.T) {
 	if _, err = s.BindProject(ctx, ProjectBinding{ProjectID: q.ID, ConnectionID: 1, ExternalProjectID: "new", Workspace: "/new"}); err == nil {
 		t.Fatal("ambiguous binding accepted")
 	}
-	if _, err = s.UpsertT3Projects(ctx, nil); err != nil {
+	if _, err = s.RefreshWorkspaces(ctx, 1, nil); err != nil {
 		t.Fatal(err)
 	}
 	p, err = s.GetProject(ctx, p.ID)
@@ -135,6 +141,7 @@ func TestBindingOwnershipAndPinnedDestination(t *testing.T) {
 func TestScopedHistoryNeverReadsAnotherConnection(t *testing.T) {
 	pool := openUnmigrated(t)
 	migrateTo(t, pool, sqlite.MaxVersion())
+	sqlitetest.SeedT3Connection(t, pool)
 	s := NewStore(pool)
 	ctx := context.Background()
 	mustExec(t, pool, `INSERT INTO harness_connections(id,harness) VALUES(2,'opencode')`)
@@ -149,7 +156,11 @@ func TestScopedHistoryNeverReadsAnotherConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,connection_id,session_id) VALUES(1,?,'OC','p',2,?)`, p.ID, bid)
-	mustExec(t, pool, `INSERT INTO threads(t3_thread_id,t3_project_id,title,status,last_word_text,created_at,updated_at) VALUES('same','unbound','T3','idle','T3 private reply',stage_now(),stage_now())`)
+	now := time.Now().UTC()
+	if err := s.PutObservation(ctx, execution.Observation{Session: a, Project: "unbound", Title: "T3", State: "done", CreatedAt: now, UpdatedAt: now,
+		Reply: &execution.Reply{Text: "T3 private reply", UpdatedAt: now}}); err != nil {
+		t.Fatal(err)
+	}
 	preview, err := s.CompletionPreview(ctx, 1)
 	if err != nil || preview.Evidence.Reply != nil || preview.Evidence.Session == nil || *preview.Evidence.Session != b {
 		t.Fatalf("cross-connection evidence %+v %v", preview, err)

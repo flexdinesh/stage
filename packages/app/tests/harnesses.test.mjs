@@ -285,11 +285,11 @@ test("session and workspace endpoints take the connection id", async () => {
   const paths = [];
   const { api } = fakeApi(async (path) => {
     paths.push(path);
-    return Response.json({ projects: [], thread: null, task: null });
+    return Response.json({ projects: [], task: null });
   });
-  await api.thread(5, "a/b");
+  await api.sessionContext({ connectionId: 5, externalSessionId: "a/b" });
   await api.externalProjects(5);
-  assert.deepEqual(paths, ["/connections/5/sessions/a%2Fb", "/connections/5/projects"]);
+  assert.deepEqual(paths, ["/connections/5/sessions/a%2Fb/context", "/connections/5/projects"]);
 });
 
 test("a session row opens the host destination, else copies the resume command, else offers nothing", () => {

@@ -77,14 +77,14 @@ func TestImportCreatesProjectsForImportableWorkspacesOnly(t *testing.T) {
 		t.Fatalf("repeat %+v", r)
 	}
 	sums, err := s.ImportSummaries(ctx)
-	if err != nil || len(sums) != 1 || sums[0].ConnectionID != oc || sums[0].Harness != HarnessOpenCode || sums[0].Count != 1 {
+	if err != nil || len(sums) != 1 || sums[0].ConnectionID != oc || sums[0].Harness != "opencode" || sums[0].Count != 1 {
 		t.Fatalf("summaries %+v %v", sums, err)
 	}
 }
 
 func TestImportBindsAcrossHarnessesBySamePath(t *testing.T) {
 	s, ctx := importStore(t)
-	t3 := s.LegacyT3ID()
+	t3 := s.ActiveID(LocalMachine, "t3")
 	existing := projectWithBinding(t, s, t3, "/w/stage")
 	r := refreshImport(t, s, ctx, oc, ws("oc-stage", "/w/stage"))
 	if r.Created != 0 || r.Bound != 1 {
@@ -106,14 +106,14 @@ func TestImportLeavesAmbiguousAndOccupiedPathsAlone(t *testing.T) {
 	mustExec(t, pool, `INSERT INTO harness_connections(id,harness) VALUES(2,'opencode')`)
 	// Two projects claim /w/dup: one through T3, one through a replaced
 	// OpenCode connection.
-	projectWithBinding(t, s, s.LegacyT3ID(), "/w/dup")
+	projectWithBinding(t, s, s.ActiveID(LocalMachine, "t3"), "/w/dup")
 	other, err := s.InsertProject(ctx, Project{Title: "other"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	mustExec(t, pool, `INSERT INTO project_bindings(project_id,connection_id,external_project_id,workspace) VALUES(?,3,'x','/w/dup')`, other.ID)
 	// The project at /w/busy already has a different OpenCode workspace.
-	busy := projectWithBinding(t, s, s.LegacyT3ID(), "/w/busy")
+	busy := projectWithBinding(t, s, s.ActiveID(LocalMachine, "t3"), "/w/busy")
 	if _, err = s.BindProject(ctx, ProjectBinding{ProjectID: busy, ConnectionID: oc, ExternalProjectID: "elsewhere", Workspace: "/w/elsewhere"}); err != nil {
 		t.Fatal(err)
 	}

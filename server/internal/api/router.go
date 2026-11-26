@@ -21,7 +21,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/remote"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
-	"github.com/flexdinesh/stage/server/internal/t3setup"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
@@ -41,9 +40,6 @@ type Deps struct {
 	// membership) so the release runner reconciles now; nil = no-op. Must
 	// not block.
 	OnTreeChange func()
-	// Setup is the T3 endpoint, read only for the legacy T3 link fields of
-	// task and thread responses and T3 thread refs (nil: none).
-	Setup *t3setup.Service
 	// Connectors is the connection setup per machine and connected harness
 	// kind (fixed; used when LiveConnectors is nil).
 	Connectors harness.Connectors
@@ -119,7 +115,6 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/me", s.me)
 
 	h("POST /api/sync", s.runSync)
-	h("GET /api/catalog", s.catalog)
 
 	h("GET /api/projects", s.listProjects)
 	h("GET /api/shared-paths", s.sharedPaths)
@@ -175,7 +170,6 @@ func NewRouter(deps Deps) http.Handler {
 	h("DELETE /api/connections/{connectionId}", s.forgetConnection)
 	h("POST /api/tasks/{id}/launch-link/preview", s.previewLaunchLink)
 	h("POST /api/tasks/{id}/launch-link", s.attachLaunchLink)
-	h("GET /api/connections/t3/projects", s.externalProjects)
 	h("GET /api/connections/{connectionId}/projects", s.externalProjects)
 
 	h("GET /api/tasks", s.listTasks)
@@ -225,7 +219,6 @@ func NewRouter(deps Deps) http.Handler {
 	h("DELETE /api/attachments/{id}", s.deleteAttachment)
 
 	h("GET /api/connections/{connectionId}/sessions/{id}/context", s.sessionContext)
-	h("GET /api/connections/{connectionId}/sessions/{id}", s.getThread)
 	h("POST /api/connections/{connectionId}/sessions/{id}/adopt", s.adoptThread)
 
 	h("GET /api/snippets", s.listSnippets)

@@ -74,9 +74,9 @@ type setupT3 struct {
 func (s *setupT3) opt(cfg config.Config) func(*api.Deps) {
 	return func(d *api.Deps) {
 		d.Config = cfg
-		a, _ := d.Sync.Adapter(d.Store.LegacyT3ID())
+		a, _ := d.Sync.Adapter(d.Store.ActiveID(db.LocalMachine, "t3"))
 		client := a.(*t3.Adapter).Client
-		d.Setup = t3setup.New(t3setup.Options{
+		withT3Setup(d, t3setup.New(t3setup.Options{
 			Config: cfg, Settings: d.Store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 			AdminTokens: d.Store.OnMachine(db.LocalMachine),
 			OnPaired:    func() { s.paired.Add(1) },
@@ -99,7 +99,7 @@ func (s *setupT3) opt(cfg config.Config) func(*api.Deps) {
 				}
 				return t3.Probe{Reachable: true, CheckedAt: time.Now(), Identity: &t3.Identity{EnvironmentID: env, Label: env}}
 			},
-		})
+		}))
 	}
 }
 
@@ -241,8 +241,6 @@ func TestT3URLEndpoint(t *testing.T) {
 	if st.T3URL != "http://localhost:4000" || st.PublicURL != "http://localhost:4000" || st.T3URLSource != "settings" || e.fake.BaseURL != "http://localhost:4000" {
 		t.Fatalf("set %+v (client %q)", st, e.fake.BaseURL)
 	}
-	// Links follow the new public URL.
-	e.must("GET", "/api/refs/resolve?ref=http://localhost:4000/fake-env/thread-x", nil, 404, nil)
 
 	// The fake is paired with an identity: while paired, a different
 	// environment is refused until Disconnect.

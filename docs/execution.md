@@ -310,9 +310,9 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   branch: T3) and `predecessor` (a worktree may start from a need's branch:
   T3, Claude Code). Without `baseRef`, a worktree carries no ref or branch
   and the harness picks them. Tasks and schedules store only an
-  execution config: legacy T3 model inputs are translated on write
-  (`store.LegacyT3Config`, equal to `t3.LegacyConfig`) and migration 0027
-  backfilled T3 rows saved before configs.
+  execution config (migration 0027 backfilled T3 rows saved before
+  configs); API v8 removed the legacy T3 model inputs (400 naming
+  `executionConfig` with `connectionId`).
 - `Observation` is a validated snapshot: session/project, normalized state,
   activity, top-level/archive eligibility, workspace, links, bounded reply and
   available artifact links. States are running, needs_input, done, failed,
@@ -442,9 +442,10 @@ gone. A revision check that no longer matches reports a conflict, never a silent
 no-op.
 
 Session identities are always scoped by the observed session's own connection:
-a mirrored thread's parent and a task event's journal row take the session of
-that thread or task, never the local machine's T3 (which may be retired once T3
-moved to a worker).
+an observation's parent and a task event's journal row take the session of
+that observation or task, never the local machine's T3 (which may be retired
+once T3 moved to a worker). A bare session id names no connection, so it
+records no session.
 A per-task lock serializes reconciliation and manual attachment; database
 revision checks reject stale checkpoints and attachments. The server data-dir
 lock prevents concurrent owners of the same database.
@@ -462,15 +463,24 @@ the configured base is an explicit edit. Historical fallback records remain.
 
 ## Compatibility and verification
 
-Existing T3 request fields and routes remain. `executionConfig` is the
-task/schedule field; legacy model/permission fields are translated into it on
-write. Do not combine the two in a create or update request. Existing responses and historical settlement/run/PR records
-remain readable. Newly observed execution uses Stage states; T3 settlement
-never hides active work and accepts a task only through inferred completion.
-The T3 thread mirror's `settled` follows the observation. T3 reports a thread's
-newest run; a cancelled or rolled-back run that never started (a queued
-follow-up) did no work, so the newest other run decides the observed state and
-end time.
+There is no default harness (ADR 0007 decision 12, API v8): no connection is
+seeded, nothing outside a harness's adapter and setup branches on its kind, and
+a request names its connection (`connectionId`) unless the project's bindings
+or the default connection choose one. `executionConfig` is the only
+task/schedule model field; the legacy T3 model inputs, `/api/catalog`,
+`/api/connections/t3/projects`, the T3 thread read and the `threads` mirror are
+removed. Historical settlement/run/PR records remain readable. Newly observed
+execution uses Stage states for every harness, from `execution_observations`
+(run span, last word, origin title, tree activity). The T3 adapter decides
+T3's states: idle after a run (a latest run id) or settled reads `done`, idle
+that never ran stays `idle` (an adopted never-ran T3 session is `backlog`);
+T3 settlement never hides active work and accepts a task only through
+inferred completion. T3 reports a thread's newest run; a cancelled or
+rolled-back run that never started (a queued follow-up) did no work, so the
+newest other run decides the observed state and end time. Full-sync progress
+and the one-sync-at-a-time guard cover every connection; T3's
+`lastFullSyncAt` is recorded by `t3setup.RecordFullSync` (the sync service's
+`OnConnectionSynced` hook).
 
 Contract tests use a second fake harness with document IDs, a non-T3 model,
 two-step creation, optional capabilities, lost replies, restart, offline reads,

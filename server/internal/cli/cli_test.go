@@ -60,7 +60,7 @@ func newHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
 	h.store = store
 	h.fake = t3.NewFake()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h.sync = t3sync.New(store, t3.NewAdapter(h.fake), log)
+	h.sync = t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(h.fake)}, log)
 	local, _ := h.sync.Machines().Local(db.LocalMachine)
 	ocPorts := machine.NewStorePorts(store.OnMachine(db.LocalMachine), stageharness.MustRegistry(opencode.Descriptor))
 	openCode, err := opencodesetup.New(t.Context(), opencodesetup.Ports{Settings: ocPorts, Identity: ocPorts, Install: local.Install}, log)
@@ -78,7 +78,7 @@ func newHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
 	}
 	deps := api.Deps{
 		Config: config.Config{},
-		Store:  store, Setup: setup, Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:  store, Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
 		Harnesses: reg, Connectors: connectors,
 	}
 	for _, opt := range opts {
@@ -160,7 +160,7 @@ func TestTaskCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.LegacyT3ID(), ExternalSessionID: out.ThreadID}); err != nil {
+	if err := h.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: out.ThreadID}); err != nil {
 		t.Fatal(err)
 	}
 	h.caller = agentctx.Caller{Session: t3Session(out.ThreadID), Cwd: "/elsewhere"}
@@ -226,7 +226,7 @@ func TestTreeCommandsAndSessionBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.LegacyT3ID(), ExternalSessionID: out.ThreadID}); err != nil {
+	if err := h.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: out.ThreadID}); err != nil {
 		t.Fatal(err)
 	}
 	h.caller = agentctx.Caller{Session: t3Session(out.ThreadID)}
@@ -340,7 +340,7 @@ func TestSessionsAdoptCommand(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := h.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.LegacyT3ID(), ExternalSessionID: out.ThreadID}); err != nil {
+		if err := h.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: out.ThreadID}); err != nil {
 			t.Fatal(err)
 		}
 		return out.ThreadID

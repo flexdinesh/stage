@@ -74,7 +74,7 @@ func TestServiceNoManager(t *testing.T) {
 func TestVersionJSON(t *testing.T) {
 	code, out, _ := runService(t, &noManager{}, "version", "--json")
 	var bi service.BuildInfo
-	if code != 0 || json.Unmarshal([]byte(out), &bi) != nil || bi.Identity != "stage" || bi.APIVersion != 7 || bi.ServiceUnit != "stage.service" || bi.ServiceLabel != "io.github.flexdinesh.stage" || bi.Schema != sqlite.MaxVersion() || !slices.Equal(bi.Engines, config.Engines()) || bi.Engines[0] != "sqlite" {
+	if code != 0 || json.Unmarshal([]byte(out), &bi) != nil || bi.Identity != "stage" || bi.APIVersion != 8 || bi.ServiceUnit != "stage.service" || bi.ServiceLabel != "io.github.flexdinesh.stage" || bi.Schema != sqlite.MaxVersion() || !slices.Equal(bi.Engines, config.Engines()) || bi.Engines[0] != "sqlite" {
 		t.Fatalf("version: %d %s", code, out)
 	}
 	code, out, _ = runService(t, &noManager{}, "version")

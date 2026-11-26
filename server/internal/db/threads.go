@@ -31,34 +31,8 @@ func RunSpan(source execution.Source) (*time.Time, *time.Time) {
 	return o.StartedAt, o.EndedAt
 }
 
-// ThreadObservation is the watcher's stored view of a thread.
-type ThreadObservation = store.ThreadObservation
-
-func (s *Store) GetThread(ctx context.Context, id string) (Thread, error) {
-	return read(ctx, s, func(tx store.Tx) (Thread, error) { return tx.Threads().Get(ctx, id) })
-}
-
-// NeedsInputCount: tasks in needs_input + external threads needing input.
+// NeedsInputCount: tasks in needs_input plus top-level sessions no task owns
+// observed needing input.
 func (s *Store) NeedsInputCount(ctx context.Context) (int, error) {
-	return read(ctx, s, func(tx store.Tx) (int, error) { return tx.Threads().NeedsInputCount(ctx) })
-}
-
-// WatchedThreadIDs: external non-subagent threads the watcher last saw running,
-// needing input or done (re-read until they leave those states; done until
-// observed again, including when work resumes). Scoped to the connection: a
-// replaced T3's threads are never watched against the T3 that replaced it.
-func (s *Store) WatchedThreadIDs(ctx context.Context, connection int64) ([]string, error) {
-	return read(ctx, s, func(tx store.Tx) ([]string, error) { return tx.Threads().WatchedIDs(ctx, connection) })
-}
-
-// ThreadObservations returns an entry for every id.
-func (s *Store) ThreadObservations(ctx context.Context, ids []string) (map[string]ThreadObservation, error) {
-	return read(ctx, s, func(tx store.Tx) (map[string]ThreadObservation, error) { return tx.Threads().Observations(ctx, ids) })
-}
-
-// SetObservedState records the watcher's mapped state for a mirrored thread
-// of ref's connection (scoped like WatchedThreadIDs: another T3 connection's
-// thread is never touched).
-func (s *Store) SetObservedState(ctx context.Context, ref SessionRef, st TaskState) error {
-	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Threads().SetObservedState(ctx, ref, st) })
+	return read(ctx, s, func(tx store.Tx) (int, error) { return tx.Observations().NeedsInputCount(ctx) })
 }

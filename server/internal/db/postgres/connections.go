@@ -29,18 +29,6 @@ func (r connections) IsActive(ctx context.Context, id int64) (bool, error) {
 	return active, notFound(err)
 }
 
-func (r connections) HarnessIs(ctx context.Context, id int64, harness string) (bool, error) {
-	var ok bool
-	err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_connections WHERE id=$1 AND harness=$2)`, id, harness).Scan(&ok)
-	return ok, err
-}
-
-func (r connections) LegacyT3(ctx context.Context) (int64, error) {
-	var id int64
-	err := r.QueryRow(ctx, `SELECT COALESCE(`+legacyT3SQL+`,0)`).Scan(&id)
-	return id, err
-}
-
 func (r connections) MachineOf(ctx context.Context, id int64) (int64, error) {
 	var machine int64
 	err := r.QueryRow(ctx, `SELECT machine_id FROM harness_connections WHERE id=$1`, id).Scan(&machine)

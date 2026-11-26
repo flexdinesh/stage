@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
@@ -38,6 +37,37 @@ func rawBody(r *http.Request) ([]byte, error) {
 		return nil, db.Invalid("body exceeds %d bytes", maxBody)
 	}
 	return body, nil
+}
+
+// removedModelFields are the T3 model inputs removed in API v8.
+var removedModelFields = []string{"providerInstanceId", "model", "modelOptions", "runtimeMode", "interactionMode"}
+
+// decodeConfig reads a task or schedule body into v (rejecting unknown
+// fields when strict). A removed model input is a 400 naming its
+// replacement.
+func decodeConfig(r *http.Request, v any, strict bool) error {
+	body, err := rawBody(r)
+	if err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(body, &fields) == nil {
+		for _, f := range removedModelFields {
+			if _, ok := fields[f]; ok {
+				return db.Invalid("%s was removed in API v8; send executionConfig with connectionId", f)
+			}
+		}
+	}
+	if strict {
+		return db.DecodeStrict(body, v)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		body = []byte("{}")
+	}
+	if err := json.Unmarshal(body, v); err != nil {
+		return db.Invalid("invalid JSON body: %v", err)
+	}
+	return nil
 }
 
 // decode reads a JSON body into v (400 on bad JSON).
@@ -248,30 +278,6 @@ func harnessWorktree(w db.Workspace, name string, policy harness.Worktree) (db.W
 	return w, db.Invalid("invalid workspace.type %q (want root|worktree)", w.Type)
 }
 
-func validateOptions(opts []execution.ModelOption) ([]execution.ModelOption, error) {
-	if opts == nil {
-		return []execution.ModelOption{}, nil
-	}
-	for _, o := range opts {
-		if strings.TrimSpace(o.ID) == "" {
-			return nil, db.Invalid("modelOptions[].id is required")
-		}
-	}
-	return opts, nil
-}
-
-// trimmedPtr trims; "" becomes nil.
-func trimmedPtr(s *string) *string {
-	if s == nil {
-		return nil
-	}
-	v := strings.TrimSpace(*s)
-	if v == "" {
-		return nil
-	}
-	return &v
-}
-
 // requiredText validates a PATCH text field that must not be null/empty.
 func requiredText(name string, o *db.Optional[string]) error {
 	if !o.Set {
@@ -282,34 +288,6 @@ func requiredText(name string, o *db.Optional[string]) error {
 		return db.Invalid("%s must be a non-empty string", name)
 	}
 	return nil
-}
-
-// nullableText normalizes a PATCH nullable text field ("" = null).
-func nullableText(o *db.Optional[string]) {
-	if o.Set && !o.Null {
-		o.V = strings.TrimSpace(o.V)
-		if o.V == "" {
-			o.Null = true
-		}
-	}
-}
-
-func enumField(name string, o *db.Optional[string], allowed []string) error {
-	if !o.Set {
-		return nil
-	}
-	if o.Null {
-		return db.Invalid("%s must not be null", name)
-	}
-	return validEnum(name, o.V, allowed)
-}
-
-// envID returns the T3 environment id for web links ("" if unknown).
-func (s *server) envID(ctx context.Context) string {
-	if s.Setup != nil {
-		return s.Setup.Status(ctx, false).Conn.EnvironmentID
-	}
-	return ""
 }
 
 func (s *server) connected(ctx context.Context, id int64) bool {

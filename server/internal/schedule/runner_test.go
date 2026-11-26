@@ -45,8 +45,8 @@ func TestReconcileLaunchesDueStarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sc, err := store.CreateSchedule(ctx, db.NewSchedule{
-		ProjectID: p.ID, Title: "every5", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
+	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: dbtest.T3Connection,
+		ProjectID: p.ID, Title: "every5", Prompt: "p",
 		Workspace: db.Workspace{Type: "root"}, Cron: "*/5 * * * *", Tz: "UTC",
 	})
 	if err != nil {
@@ -55,8 +55,8 @@ func TestReconcileLaunchesDueStarts(t *testing.T) {
 	now := sc.NextRunAt.Add(10 * time.Second)
 	tz := "UTC"
 	oneShot := func(title string, at time.Time) db.Task {
-		task, err := store.CreateTask(ctx, db.NewTask{
-			ProjectID: p.ID, Title: title, Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
+		task, err := store.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection,
+			ProjectID: p.ID, Title: title, Prompt: "p",
 			Workspace: db.Workspace{Type: "root"}, StartAt: &at, StartTz: &tz,
 		})
 		if err != nil {
@@ -115,7 +115,7 @@ func TestUnboundScheduleHoldsOneOccurrenceUntilManualStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ProjectID: p.ID, Title: "Review", Prompt: "Review", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, Cron: "*/5 * * * *", Tz: "UTC"})
+	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "Review", Prompt: "Review", Workspace: db.Workspace{Type: "root"}, Cron: "*/5 * * * *", Tz: "UTC"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,8 +166,8 @@ func TestRunnersPerConnectionFireOnlyTheirMachinesSchedules(t *testing.T) {
 	if err := pool.QueryRowContext(ctx, `INSERT INTO harness_connections(machine_id,harness) VALUES(2,'t3') RETURNING id`).Scan(&laptop); err != nil {
 		t.Fatal(err)
 	}
-	local := store.LegacyT3ID()
-	if store.ActiveID(2, db.HarnessT3) != laptop || store.ActiveID(db.LocalMachine, db.HarnessT3) != local {
+	local := store.ActiveID(db.LocalMachine, "t3")
+	if store.ActiveID(2, "t3") != laptop || store.ActiveID(db.LocalMachine, "t3") != local {
 		t.Fatal("one active T3 per machine")
 	}
 	p, err := store.InsertProject(ctx, db.Project{Title: "p", Bindings: []db.ProjectBinding{
@@ -180,7 +180,7 @@ func TestRunnersPerConnectionFireOnlyTheirMachinesSchedules(t *testing.T) {
 	schedules := map[int64]db.Schedule{}
 	for _, id := range []int64{local, laptop} {
 		sc, err := store.CreateSchedule(ctx, db.NewSchedule{
-			ProjectID: p.ID, ConnectionID: id, Title: "nightly", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
+			ProjectID: p.ID, ConnectionID: id, Title: "nightly", Prompt: "p",
 			Workspace: db.Workspace{Type: "root"}, Cron: "*/5 * * * *", Tz: "UTC",
 		})
 		if err != nil {

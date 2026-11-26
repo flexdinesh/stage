@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 )
 
 func init() {
@@ -21,10 +22,10 @@ func init() {
 
 func mustSchedule(t *testing.T, s *db.Store, ctx context.Context, projectID int64, cron string) db.Schedule {
 	t.Helper()
-	sc, err := s.CreateSchedule(ctx, db.NewSchedule{
-		ProjectID: projectID, Title: "nightly", Prompt: "p", RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"},
-		Cron: cron, Tz: "UTC",
+	sc, err := s.CreateSchedule(ctx, db.NewSchedule{ConnectionID: dbtest.T3Connection,
+		ProjectID: projectID, Title: "nightly", Prompt: "p",
+		Workspace: db.Workspace{Type: "root"},
+		Cron:      cron, Tz: "UTC",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +40,7 @@ func caseScheduleNotesValidatedBeforeSaving(t *testing.T, open Factory) {
 	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "notes")
 	for _, notes := range []string{strings.Repeat("界", 5462), string([]byte{0xff})} {
-		_, err := s.CreateSchedule(ctx, db.NewSchedule{ProjectID: p.ID, Title: "invalid", Prompt: "p", Cron: "*/5 * * * *", Tz: "UTC", Notes: notes})
+		_, err := s.CreateSchedule(ctx, db.NewSchedule{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "invalid", Prompt: "p", Cron: "*/5 * * * *", Tz: "UTC", Notes: notes})
 		var invalid *db.InvalidError
 		if !errors.As(err, &invalid) {
 			t.Fatalf("create invalid template: %v", err)
@@ -236,8 +237,8 @@ func caseTaskStartAt(t *testing.T, open Factory) {
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	at := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
 	tz := "Asia/Kolkata"
-	b, err := s.CreateTask(ctx, db.NewTask{
-		ProjectID: p.ID, Title: "b", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
+	b, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection,
+		ProjectID: p.ID, Title: "b", Prompt: "p",
 		Workspace: db.Workspace{Type: "root"}, StartAt: &at, StartTz: &tz,
 	})
 	if err != nil || b.StartAt == nil || !b.StartAt.Equal(at) || *b.StartTz != tz {

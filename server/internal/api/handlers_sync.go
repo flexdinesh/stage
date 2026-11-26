@@ -32,15 +32,6 @@ func (s *server) runSync(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (s *server) catalog(w http.ResponseWriter, r *http.Request) error {
-	snap, err := s.Sync.Catalog(r.Context())
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, catalogShape(snap))
-	return nil
-}
-
 // ---- projects ----
 
 func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {

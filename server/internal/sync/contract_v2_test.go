@@ -114,7 +114,7 @@ type hostedHarness struct {
 func (f *hostedHarness) Features(context.Context) (execution.Capabilities, error) {
 	return execution.Capabilities{
 		Operations: map[execution.Op]execution.Availability{
-			execution.OpLaunch:            {Available: true},
+			execution.OpLaunch:  {Available: true},
 			execution.OpRespond: {Available: f.respondOff == "", Reason: f.respondOff},
 			execution.OpSend:    {Available: true},
 		},
@@ -196,7 +196,7 @@ func v2Setup(t *testing.T, p placement, kind string, a execution.Adapter) (*db.S
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 3, Title: "Work", Prompt: "Do it", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "m"}})
+	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 3, Title: "Work", Prompt: "Do it", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "m"}})
 	if err != nil {
 		t.Fatal(err)
 	}

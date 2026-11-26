@@ -352,9 +352,25 @@ func TestLeaveRemovesMachine(t *testing.T) {
 func TestAgentThroughGateway(t *testing.T) {
 	short := isolate(t)
 	t.Setenv("STAGE_URL", "")
-	t.Setenv(agentctx.CallerEnv, "1:agent-cli")
 	m := newMain(t, short)
 	ctx := context.Background()
+	// A fresh install has no T3 connection: the refreshed T3 status stamps
+	// the fake's environment, creating the one the caller sessions run on.
+	mainJSON(t, m, "GET", "/api/harnesses/t3/status", "", 200, nil)
+	h, err := m.client().Health(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conn int64
+	for _, x := range h.Harnesses {
+		if x.Kind == "t3" {
+			conn = x.ConnectionID
+		}
+	}
+	if conn == 0 {
+		t.Fatalf("no T3 connection: %+v", h.Harnesses)
+	}
+	t.Setenv(agentctx.CallerEnv, fmt.Sprintf("%d:agent-cli", conn))
 	p, err := m.client().PairMachine(ctx, "laptop")
 	if err != nil {
 		t.Fatal(err)
@@ -446,7 +462,7 @@ func TestAgentThroughGateway(t *testing.T) {
 	_ = stage("task", "notes", fmt.Sprint(taskID), "add", "--text", "cli note", "--request-id", "cli-1")
 
 	// HTTP MCP on the opt-in TCP listener, caller by header.
-	tr := &mcp.StreamableClientTransport{Endpoint: "http://" + tcp + "/mcp", HTTPClient: &http.Client{Transport: callerHeader{"1:agent-mcp"}}}
+	tr := &mcp.StreamableClientTransport{Endpoint: "http://" + tcp + "/mcp", HTTPClient: &http.Client{Transport: callerHeader{fmt.Sprintf("%d:agent-mcp", conn)}}}
 	cs, err := mcp.NewClient(&mcp.Implementation{Name: "agent", Version: "1"}, nil).Connect(ctx, tr, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -475,7 +491,7 @@ func TestAgentThroughGateway(t *testing.T) {
 			continue
 		}
 		delete(want, e.Text)
-		if e.SourceMachineID == nil || *e.SourceMachineID != c.MachineID || e.SourceSession == nil || e.SourceSession.ConnectionID != 1 || e.SourceSession.ExternalSessionID != session {
+		if e.SourceMachineID == nil || *e.SourceMachineID != c.MachineID || e.SourceSession == nil || e.SourceSession.ConnectionID != conn || e.SourceSession.ExternalSessionID != session {
 			t.Errorf("%q: machine %v session %+v", e.Text, e.SourceMachineID, e.SourceSession)
 		}
 	}

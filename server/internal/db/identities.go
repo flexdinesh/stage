@@ -225,10 +225,3 @@ func (s *Store) HoldScheduled(ctx context.Context, id int64, reason string) erro
 	})
 }
 
-// defaultConnection: no connection named means the legacy T3 connection.
-func (s *Store) defaultConnection(id int64) int64 {
-	if id == 0 {
-		return s.LegacyT3ID()
-	}
-	return id
-}

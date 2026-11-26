@@ -14,7 +14,7 @@ type journal struct{ *runner }
 
 func (t *tx) Journal() store.Journal { return journal{t.r} }
 
-const journalColumns = `id, kind, task_id, tree_id, source_task_id, (SELECT external_id FROM session_identities WHERE id=source_session_id AND connection_id IN ` + t3ConnectionsSQL + `), attempt, category, text, event_type, from_tree_id, to_tree_id, created_at, (SELECT jsonb_build_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=source_session_id), created_by_user_id, source_machine_id`
+const journalColumns = `id, kind, task_id, tree_id, source_task_id, (SELECT external_id FROM session_identities WHERE id=source_session_id), attempt, category, text, event_type, from_tree_id, to_tree_id, created_at, (SELECT jsonb_build_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=source_session_id), created_by_user_id, source_machine_id`
 
 func scanJournal(r rowScanner) (store.JournalEntry, error) {
 	var e store.JournalEntry

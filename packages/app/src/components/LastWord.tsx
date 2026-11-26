@@ -11,26 +11,19 @@ const ReplyMarkdown = lazy(() => import("./ReplyMarkdown.tsx"));
 const PREVIEW_STATES: readonly TaskState[] = ["needs_input", "done"];
 
 /**
- * The thread's latest assistant reply (read-only glance; T3 stays the place to talk). Hidden until sync has read one.
+ * The session's latest assistant reply (read-only glance; the harness stays the place to talk). Hidden until sync has read one.
  */
 export function LastWordPanel({ task }: { task: TaskDetail }) {
-  const thread = task.thread;
   const reply = task.finalReply;
-  const word = reply ? { ...reply, at: reply.updatedAt } : thread?.lastWord;
+  const word = reply ? { ...reply, at: reply.updatedAt } : undefined;
   const name = useHarnesses().kindName(task.harness);
   const destination = useSessionDestination();
   if (!word) return null;
-  const earlier = word.runId !== null && thread?.latestRunId != null && word.runId !== thread.latestRunId;
   const href = destination(task);
   return (
     <Panel
       title="Last word"
-      meta={
-        <>
-          <RelTime at={word.at} className="tabular" />
-          {earlier ? " · earlier run" : null}
-        </>
-      }
+      meta={<RelTime at={word.at} className="tabular" />}
       actions={<CopyButton text={word.text} label="Copy" />}
     >
       <Suspense fallback={<div className="prose-reply whitespace-pre-wrap">{word.text}</div>}>

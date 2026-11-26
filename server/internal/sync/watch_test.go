@@ -2,6 +2,7 @@ package sync_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"slices"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -95,7 +97,7 @@ func TestWatchThreads(t *testing.T) {
 	old(oldIdle)
 	setStatus(oldIdle, t3.StatusCompleted)
 
-	svc := t3sync.New(store, t3.NewAdapter(client), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	svc.Harnesses = t3Harnesses
 	var got []change
 	svc.OnThreadChange = func(_ context.Context, c t3sync.ThreadChange) {
@@ -118,21 +120,27 @@ func TestWatchThreads(t *testing.T) {
 			t.Fatalf("changes %+v, want %+v", got, want)
 		}
 	}
+	// observed is the watched state of a session no task owns ("" when
+	// task-owned or never observed).
 	observed := func(id string) string {
 		t.Helper()
-		obs, err := store.ThreadObservations(ctx, []string{id})
+		ref := db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}
+		if _, err := store.TaskBySession(ctx, ref); err == nil {
+			return ""
+		}
+		o, err := store.Observation(ctx, ref)
+		if errors.Is(err, db.ErrNotFound) || err == nil && o.Child {
+			return ""
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		if obs[id].ObservedState == nil {
-			return ""
-		}
-		return string(*obs[id].ObservedState)
+		return o.State
 	}
 
 	// Task-owned thread and a subagent thread (both never watched).
-	task, err := store.CreateTask(ctx, db.NewTask{ProjectID: 1, Title: "task", Prompt: "p",
-		RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}})
+	task, err := store.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: 1, Title: "task", Prompt: "p",
+		Workspace: db.Workspace{Type: "root"}})
 	if err != nil {
 		t.Fatal(err)
 	}

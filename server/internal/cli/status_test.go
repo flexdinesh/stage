@@ -12,7 +12,7 @@ import (
 func TestStatusReady(t *testing.T) {
 	h := newHarness(t)
 	code, out, errOut := h.run("", "status")
-	if code != 0 || !strings.Contains(out, "✓ stage dev ready at "+h.url+" (STAGE_URL)") || !strings.Contains(out, "  t3          connected") || !strings.Contains(out, "  api         v7") || !strings.Contains(out, "  database    ok (sqlite)") {
+	if code != 0 || !strings.Contains(out, "✓ stage dev ready at "+h.url+" (STAGE_URL)") || !strings.Contains(out, "  t3          connected") || !strings.Contains(out, "  api         v8") || !strings.Contains(out, "  database    ok (sqlite)") {
 		t.Fatalf("status: %d %q %q", code, out, errOut)
 	}
 	code, out, _ = h.run("", "status", "--json")
@@ -27,7 +27,7 @@ func TestStatusReady(t *testing.T) {
 		} `json:"health"`
 		ClientAPIVersion int `json:"clientApiVersion"`
 	}
-	if code != 0 || json.Unmarshal([]byte(out), &s) != nil || !s.Ready || s.Source != "STAGE_URL" || s.Health.Service != "stage" || s.Health.APIVersion != 7 || s.Health.Engine != "sqlite" || s.ClientAPIVersion != 7 {
+	if code != 0 || json.Unmarshal([]byte(out), &s) != nil || !s.Ready || s.Source != "STAGE_URL" || s.Health.Service != "stage" || s.Health.APIVersion != 8 || s.Health.Engine != "sqlite" || s.ClientAPIVersion != 8 {
 		t.Fatalf("status --json: %d %s", code, out)
 	}
 }
@@ -83,7 +83,7 @@ func TestStatusAPIMismatch(t *testing.T) {
 	defer srv.Close()
 	h.url = "http://" + l.Addr().String()
 	code, out, errOut := h.run("", "status", "--wait", "5s")
-	if code != 1 || !strings.Contains(errOut, "API v1, this client v7") || !strings.Contains(out, "! Server version 9.9.9 differs") {
+	if code != 1 || !strings.Contains(errOut, "API v1, this client v8") || !strings.Contains(out, "! Server version 9.9.9 differs") {
 		t.Fatalf("mismatch: %d %q %q", code, out, errOut)
 	}
 	// Other commands refuse too.

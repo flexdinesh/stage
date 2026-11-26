@@ -68,9 +68,6 @@ type Connections interface {
 	Exists(ctx context.Context, id int64) (bool, error)
 	// IsActive reads a connection's active flag (ErrNotFound when unknown).
 	IsActive(ctx context.Context, id int64) (bool, error)
-	HarnessIs(ctx context.Context, id int64, harness string) (bool, error)
-	// LegacyT3 is the local machine's active T3 connection (0 when none).
-	LegacyT3(ctx context.Context) (int64, error)
 	// MachineOf is a connection's machine (ErrNotFound when unknown).
 	MachineOf(ctx context.Context, id int64) (int64, error)
 	// Rows lists every connection's identity row, by id.

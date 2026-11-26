@@ -53,21 +53,6 @@ type AcceptanceResult struct {
 	AcceptanceID *int64 `json:"acceptanceId"`
 }
 
-// ThreadEvidence is a task's T3 mirror row as completion evidence.
-type ThreadEvidence struct {
-	Branch         *string
-	WorktreePath   *string
-	RunID          *string
-	ReplyRunID     *string
-	Reply          *string
-	ReplyTruncated bool
-	ReplyAt        *time.Time
-	ObservedAt     *time.Time
-	Status         string
-	Pending        int
-	ActiveRunID    *string
-}
-
 // ClaimState is what a launch claim checks.
 type ClaimState struct {
 	Adopted   bool
@@ -82,9 +67,6 @@ type Acceptances interface {
 	List(ctx context.Context, taskID int64) ([]Acceptance, error)
 	// LaunchInputs are the acceptances the attempt read, by source task.
 	LaunchInputs(ctx context.Context, taskID int64, attempt int) ([]Acceptance, error)
-	// ThreadEvidence reads the mirror row of a session identity (false:
-	// none).
-	ThreadEvidence(ctx context.Context, sessionID *int64) (ThreadEvidence, bool, error)
 	// JournalThrough is the newest journal entry id of the task or tree.
 	JournalThrough(ctx context.Context, taskID int64, treeID *int64) (int64, error)
 	// Dependents are the tasks needing taskID, by id.

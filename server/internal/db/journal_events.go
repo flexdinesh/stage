@@ -6,7 +6,6 @@ import (
 	"slices"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
-	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // Derived writes (docs/storage.md "Journal events"). Every change that
@@ -270,21 +269,10 @@ func insertAcceptance(ctx context.Context, tx store.Tx, taskID int64, provenance
 }
 
 // recordHandoff stores the handoff with its source session: the evidence's
-// session, else its legacy thread id under the local machine's active T3,
-// else none.
+// session, else none.
 func recordHandoff(ctx context.Context, tx store.Tx, taskID int64, h Handoff) error {
 	var sourceID *int64
-	ref := h.Session
-	if ref == nil && h.SourceThreadID != "" {
-		t3, err := tx.Connections().LegacyT3(ctx)
-		if err != nil {
-			return err
-		}
-		if t3 != 0 {
-			ref = &SessionRef{ConnectionID: t3, ExternalSessionID: h.SourceThreadID}
-		}
-	}
-	if ref != nil {
+	if ref := h.Session; ref != nil {
 		id, err := ensureSession(ctx, tx, *ref)
 		if err != nil {
 			return err
@@ -294,22 +282,3 @@ func recordHandoff(ctx context.Context, tx store.Tx, taskID int64, h Handoff) er
 	return tx.Attempts().RecordHandoff(ctx, taskID, h, sourceID)
 }
 
-// mirrorThread upserts o's T3 mirror row. A new row takes its task's
-// project, else the only active binding of its harness project on its
-// connection.
-func mirrorThread(ctx context.Context, tx store.Tx, o execution.Observation, m store.ThreadMirror) error {
-	inserted, err := tx.Threads().Mirror(ctx, o, m)
-	if err != nil || !inserted {
-		return err
-	}
-	project, err := tx.Tasks().ProjectBySession(ctx, m.SessionID)
-	if err != nil {
-		return err
-	}
-	if project == nil {
-		if project, err = tx.Projects().SoleBinding(ctx, o.Session.ConnectionID, o.Project); err != nil {
-			return err
-		}
-	}
-	return tx.Threads().SetProject(ctx, o.Session.ExternalSessionID, project)
-}

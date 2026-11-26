@@ -130,7 +130,7 @@ func TestLiveMixedManualTree(t *testing.T) {
 		if harness == 2 {
 			model = "fixture/test"
 		}
-		task, err := store.CreateTask(ctx, db.NewTask{ConnectionID: harness, ProjectID: p.ID, Title: "Mixed handoff", Prompt: "Report fixture result", ExecutionConfig: &execution.Config{Model: model}, RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}})
+		task, err := store.CreateTask(ctx, db.NewTask{ConnectionID: harness, ProjectID: p.ID, Title: "Mixed handoff", Prompt: "Report fixture result", ExecutionConfig: &execution.Config{Model: model}, Workspace: db.Workspace{Type: "root"}})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -27,6 +27,14 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	29: {{name: "search indexes", seed: seedV0029Search, check: checkV0029Search}},
 	30: {{name: "claude settings table", seed: seedV0030ClaudeSettings, check: checkV0030ClaudeSettings}},
 	31: {{name: "codex settings", seed: seedV0031CodexSettings, check: checkV0031CodexSettings}},
+	32: {
+		{name: "unused seeded connection removed", seed: seedV0032(`INSERT INTO threads (t3_thread_id, t3_project_id, status, created_at, updated_at) VALUES ('th', 'p', 'idle', now(), now())`), check: checkV0032Connection(false)},
+		{name: "paired connection kept", seed: seedV0032(`UPDATE t3_connection SET token = 'tok' WHERE machine_id = 1`), check: checkV0032Connection(true)},
+		{name: "stamped connection kept", seed: seedV0032(`UPDATE harness_connections SET identity = 'env-1' WHERE id = 1`), check: checkV0032Connection(true)},
+		{name: "default connection kept", seed: seedV0032(`UPDATE preferences SET default_connection_id = 1`), check: checkV0032Connection(true)},
+		{name: "referenced connection kept", seed: seedV0032(`INSERT INTO projects (id, title) VALUES (1, 'P')`, `INSERT INTO tasks (id, project_id, title, prompt, connection_id) VALUES (1, 1, 'T', 'p', 1)`), check: checkV0032Connection(true)},
+		{name: "bound connection kept", seed: seedV0032(`INSERT INTO projects (id, title) VALUES (1, 'P')`, `INSERT INTO project_bindings (project_id, connection_id, external_project_id, workspace) VALUES (1, 1, 'x', '/w')`), check: checkV0032Connection(true)},
+	},
 }
 
 func seedV0029Search(t *testing.T, pool *sql.DB) {
@@ -225,6 +233,47 @@ func checkV0031CodexSettings(t *testing.T, pool *sql.DB) {
 	} {
 		if _, err := pool.ExecContext(ctx, q); err == nil {
 			t.Fatalf("%s: accepted", q)
+		}
+	}
+}
+
+// seedV0032 configures, references or mirrors with qs.
+func seedV0032(qs ...string) func(*testing.T, *sql.DB) {
+	return func(t *testing.T, pool *sql.DB) {
+		t.Helper()
+		for _, q := range qs {
+			if _, err := pool.ExecContext(context.Background(), q); err != nil {
+				t.Fatalf("%s: %v", q, err)
+			}
+		}
+	}
+}
+
+// checkV0032Connection: connection 1 survives only when configured or
+// referenced, and the threads mirror is dropped either way.
+func checkV0032Connection(kept bool) func(*testing.T, *sql.DB) {
+	return func(t *testing.T, pool *sql.DB) {
+		t.Helper()
+		ctx := context.Background()
+		var conns, threads int
+		if err := pool.QueryRowContext(ctx, `SELECT
+ (SELECT count(*) FROM harness_connections WHERE id = 1),
+ (SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'threads')`).Scan(&conns, &threads); err != nil {
+			t.Fatal(err)
+		}
+		want := 0
+		if kept {
+			want = 1
+		}
+		if conns != want || threads != 0 {
+			t.Fatalf("connection 1 rows %d (want %d), threads tables %d", conns, want, threads)
+		}
+		if !kept {
+			// A new connection takes a new id; 1 is never reissued.
+			var id int64
+			if err := pool.QueryRowContext(ctx, `INSERT INTO harness_connections (machine_id, harness) VALUES (1, 'opencode') RETURNING id`).Scan(&id); err != nil || id != 2 {
+				t.Fatalf("new connection id %d %v, want 2", id, err)
+			}
 		}
 	}
 }

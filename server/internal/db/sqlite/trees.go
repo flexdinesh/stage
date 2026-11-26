@@ -17,8 +17,8 @@ type trees struct{ *runner }
 func (t *tx) Trees() store.Trees { return trees{t.r} }
 
 // treeActivitySQL is TreeTimes.LastActivityAt for tree tr in SQL.
-const treeActivitySQL = `max(tr.created_at, tr.updated_at, COALESCE((SELECT max(j.created_at) FROM journal_entries j WHERE j.tree_id = tr.id OR (j.kind = 'note' AND j.task_id IN (SELECT id FROM tasks WHERE tree_id = tr.id))), ''), COALESCE((SELECT max(max(m.updated_at, COALESCE(th.updated_at, '')))
- FROM tasks m LEFT JOIN threads th ON th.session_id = m.session_id WHERE m.tree_id = tr.id), ''))`
+const treeActivitySQL = `max(tr.created_at, tr.updated_at, COALESCE((SELECT max(j.created_at) FROM journal_entries j WHERE j.tree_id = tr.id OR (j.kind = 'note' AND j.task_id IN (SELECT id FROM tasks WHERE tree_id = tr.id))), ''), COALESCE((SELECT max(max(m.updated_at, COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ', json_extract(o.observation,'$.updatedAt')), '')))
+ FROM tasks m LEFT JOIN execution_observations o ON o.session_id = m.session_id WHERE m.tree_id = tr.id), ''))`
 
 const treeColumns = `tr.id, tr.title, tr.start_mode, tr.status, tr.closed_at, tr.created_at, tr.created_by_user_id, tr.source_machine_id, tr.updated_at,
   (tr.recorded_work = 0 AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.tree_id = tr.id AND NOT ` + unstartedSQL + `)), ` + treeActivitySQL

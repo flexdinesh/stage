@@ -25,11 +25,6 @@ type Result struct {
 	Threads     int       `json:"threads"`
 	FinishedAt  time.Time `json:"finishedAt"`
 }
-type CatalogSnapshot struct {
-	Catalog   execution.Capabilities
-	FetchedAt time.Time
-}
-
 var ErrSyncRunning error = &db.ConflictError{Msg: "sync already running"}
 
 type Service struct {
@@ -40,22 +35,20 @@ type Service struct {
 	OnThreadChange                                                               func(context.Context, ThreadChange)
 	OnAccepted                                                                   func()                         // a completion was inferred (tree release may follow)
 	OnFullSync                                                                   func()                         // a full sync (Sync now) finished
+	// OnConnectionSynced runs after a connection's full sync succeeded
+	// (the composition records it where a harness's setup shows it).
+	OnConnectionSynced func(ctx context.Context, connection int64, at time.Time) error
 	Harnesses                                                                    *harness.Registry              // descriptors by kind; completion is inferred only from a declared closure
 	PublicURL                                                                    string                         // STAGE_PUBLIC_URL, named in launch journal instructions when set
 	CLI                                                                          string                         // installed CLI name (install.CLIName), named in launch journal instructions
 	Gateways                                                                     func(machineID int64) []string // a remote machine's agent gateway URLs (workerchan.Hub.Gateways), named in its launch journal instructions; nil: none known
-	FullSyncEvery, PollEvery, CatalogEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
-	syncs                                                                        gosync.Map // connection ID to *syncState (T3 full syncs)
+	FullSyncEvery, PollEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
+	syncs                                                                        gosync.Map // connection ID to *syncState (full syncs)
 	lastStalePoll                                                                gosync.Map // connection ID to *atomic.Int64
-	catalog                                                                      atomic.Pointer[CatalogSnapshot]
-	kickSync, kickCatalog                                                        chan struct{}
+	kickSync                                                                     chan struct{}
 	locks                                                                        gosync.Map
 	started                                                                      time.Time
 	watchSeeded                                                                  gosync.Map // connection IDs with a successful first observation pass
-}
-
-func New(store *db.Store, adapter execution.Adapter, log *slog.Logger) *Service {
-	return NewWithAdapters(store, map[int64]execution.Adapter{store.LegacyT3ID(): adapter}, log)
 }
 
 // hostsAll is the profile of a machine handed its adapters directly: it
@@ -96,7 +89,7 @@ func NewForMachines(store *db.Store, machines *machine.Set, log *slog.Logger) *S
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{store: store, machines: machines, log: log, FullSyncEvery: 5 * time.Minute, PollEvery: 5 * time.Second, CatalogEvery: 10 * time.Minute, StalePollEvery: time.Minute, LaunchAttemptTimeout: 40 * time.Second, kickSync: make(chan struct{}, 1), kickCatalog: make(chan struct{}, 1), started: time.Now()}
+	return &Service{store: store, machines: machines, log: log, FullSyncEvery: 5 * time.Minute, PollEvery: 5 * time.Second, StalePollEvery: time.Minute, LaunchAttemptTimeout: 40 * time.Second, kickSync: make(chan struct{}, 1), started: time.Now()}
 }
 
 // Machines are the machines this coordinator drives.
@@ -155,11 +148,9 @@ func (s *Service) lock(id int64) func() {
 	return mu.Unlock
 }
 func (s *Service) Kick() {
-	for _, ch := range []chan struct{}{s.kickSync, s.kickCatalog} {
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
+	select {
+	case s.kickSync <- struct{}{}:
+	default:
 	}
 }
 
@@ -181,7 +172,8 @@ func (s *Service) syncState(id int64) *syncState {
 	return st
 }
 
-// Progress is connection id's full sync progress (T3 connections report it).
+// Progress is connection id's full sync progress (a harness's setup may
+// show it).
 func (s *Service) Progress(id int64) Progress {
 	if p := s.syncState(id).progress.Load(); p != nil {
 		return *p
@@ -226,8 +218,6 @@ func (s *Service) Run(ctx context.Context) {
 		}
 	}
 	ensure()
-	wg.Add(1)
-	go loop(s.CatalogEvery, s.kickCatalog, func(ctx context.Context) error { _, e := s.RefreshCatalog(ctx); return e })
 	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
@@ -308,13 +298,11 @@ func (s *Service) FullSync(ctx context.Context, skip ...int64) (Result, error) {
 func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) {
 	now := time.Now().UTC()
 	st := s.syncState(id)
-	if s.store.IsT3(id) {
-		if !st.running.CompareAndSwap(false, true) {
-			return Result{}, ErrSyncRunning
-		}
-		st.progress.Store(&Progress{Running: true, StartedAt: &now})
-		defer func() { st.progress.Store(&Progress{}); st.running.Store(false) }()
+	if !st.running.CompareAndSwap(false, true) {
+		return Result{}, ErrSyncRunning
 	}
+	st.progress.Store(&Progress{Running: true, StartedAt: &now})
+	defer func() { st.progress.Store(&Progress{}); st.running.Store(false) }()
 	a, err := s.Adapter(id)
 	if err != nil {
 		return Result{}, err
@@ -328,9 +316,7 @@ func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) 
 		return Result{}, err
 	}
 	r := Result{Projects: n}
-	if s.store.IsT3(id) {
-		st.progress.Store(&Progress{Running: true, StartedAt: &now, Projects: n})
-	}
+	st.progress.Store(&Progress{Running: true, StartedAt: &now, Projects: n})
 	var errs []error
 	// Import only after a complete, successful inventory refresh. A failed
 	// import never blocks session polling.
@@ -354,8 +340,8 @@ func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) 
 		}
 	}
 	r.FinishedAt = time.Now().UTC()
-	if s.store.IsT3(id) && len(errs) == 0 {
-		errs = append(errs, s.store.SetLastFullSync(ctx, s.store.ConnectionMachine(id), r.FinishedAt))
+	if s.OnConnectionSynced != nil && len(errs) == 0 {
+		errs = append(errs, s.OnConnectionSynced(ctx, id, r.FinishedAt))
 	}
 	return r, errors.Join(errs...)
 }
@@ -567,27 +553,6 @@ func (s *Service) attribution(kind string) harness.Attribution {
 	return d.Attribution
 }
 
-func (s *Service) RefreshCatalog(ctx context.Context) (*CatalogSnapshot, error) {
-	// The legacy catalog is the local machine's active T3 connection's (GET
-	// /api/catalog), wherever T3 moved after a replaced instance.
-	a, e := s.Adapter(s.store.LegacyT3ID())
-	if e != nil {
-		return nil, e
-	}
-	c, e := a.Features(ctx)
-	if e != nil {
-		return nil, harnessErr(e)
-	}
-	snap := &CatalogSnapshot{Catalog: c, FetchedAt: time.Now().UTC()}
-	s.catalog.Store(snap)
-	return snap, nil
-}
-func (s *Service) Catalog(ctx context.Context) (*CatalogSnapshot, error) {
-	if snap := s.catalog.Load(); snap != nil {
-		return snap, nil
-	}
-	return s.RefreshCatalog(ctx)
-}
 func (s *Service) StartTask(ctx context.Context, id int64) (db.Task, error) {
 	return s.launch(ctx, id, "launch requested", false)
 }

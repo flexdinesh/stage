@@ -17,12 +17,12 @@ that disagrees with this file updates it in the same PR.
 | [Single owner](#single-owner) | as described on both engines (#403, in `serve` #405) | |
 | [Encodings](#encodings) and [errors](#errors) | as described on both engines (#403) | |
 | [Search](#search) | as described on both engines (#404): SQLite FTS5 trigram (0029), Postgres `pg_trgm` GIN (0029) | |
-| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 31; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 31 (0030 `claude_settings`, #372; 0031 `codex_settings`, #384); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
+| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 32; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 32 (0030 `claude_settings`, #372; 0031 `codex_settings`, #384; 0032 `no_default_harness`, #420); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
 | [Backups](#backups) | as described on both engines (#403) | |
 | [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) and `serve` on Postgres (#405) | |
 | [Data copy and cutover](#data-copy-and-cutover) | as described (#406): `stage db copy` (`internal/db/datacopy` over the copy ports), cutover and rollback runbook | |
 | [Docker image and compose example](#docker-image-and-compose-example) | as described (#407) | |
-| [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); every other Drop row dropped from SQLite (#417: 0027 backfill, 0028 contract); the Postgres baseline omits them (#403) | |
+| [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); every other Drop row dropped from SQLite (#417: 0027 backfill, 0028 contract); the Postgres baseline omits them (#403); the `threads` mirror dropped on both engines (0032, #420) | |
 | [Design only](#design-only-queue-events-leases) | Queue decided: [ADR 0004](adr/0004-queue-port.md) (#408), not built | Events, Leases: #409 |
 
 ## Engines and selection
@@ -125,8 +125,7 @@ execution observations), `Trees` (trees, membership, needs), `Journal`,
 `Acceptances`, `Schedules` (and runs), `Projects` (bindings, external
 projects, imports), `Connections` (harness connections, T3, OpenCode and
 Claude Code and Codex settings, shared paths), `Machines` (pairing codes, machine tokens),
-`Notifications`, `Sessions` (session identities), `Threads` (the T3 mirror,
-watcher state, last words), `Stats` (read-only counts), `Attachments`,
+`Notifications`, `Sessions` (session identities), `Attachments`,
 `Users`, `Preferences`, `Push` (VAPID keys, subscriptions) and `Snippets`.
 Repository methods are named queries: they hold no rules, return engine
 errors unchanged and `store.ErrNotFound` for a missing row; `internal/db`
@@ -175,15 +174,14 @@ migration 0026 (#399).
 | Membership (`setMembership`, `detachMembers`) | `task_moved` (task title, from and to tree) in the old and the new tree; both trees' membership revision + 1, `updated_at` now, recorded work carried over; an emptied old tree is archived (closed now), with its status event |
 | Needs (`addNeed`, `keepNeeds`, `inheritNeeds`, `dropNeeds`, `detachMembers`) | `needs_changed` (`Added` or `Removed need #N`) in the dependent's tree, by task then need; none for a standalone task |
 | Acceptance (`insertAcceptance`) | `task_acceptances.source_session_id` = the task's session |
-| Handoff (`recordHandoff`) | source session: the evidence's session, else the legacy thread id under the local machine's active T3, else none (the trigger aborted the write) |
-| New T3 mirror row (`mirrorThread`) | `threads.stage_project_id`: the session's task's project, else the project of the only active binding of its harness project on its connection |
+| Handoff (`recordHandoff`) | source session: the evidence's session, else none (a bare legacy thread id names no connection, #420) |
 
 - **Attribution:** derived events keep the triggers' attribution, the
   column defaults: the default user and no source machine
   ([architecture.md](architecture.md#users)).
 - **Changes from the triggers:** task events no longer copy the legacy
   `tasks.t3_thread_id` into `source_thread_id` (the API's `sourceThreadId`
-  reads the T3 session's id); deleting an unstarted tree writes no
+  reads the source session's external id, for every harness); deleting an unstarted tree writes no
   `needs_changed` rows into the tree it deletes; no direct `INSERT` of a task
   into a tree exists, so `journal_member_created` has no replacement. Events
   from one bulk change are written in the orders above.
@@ -390,7 +388,21 @@ and paging. (Thread search was removed with API v3.)
   so neither engine seeds it. 0031 `codex_settings` (#384): each machine's
   Codex setup (`binary_path`, the Codex CLI, `''` for `codex` on PATH;
   `connected`, set by connect and cleared by disconnect; `updated_at`),
-  unseeded the same way.
+  unseeded the same way. 0032 `no_default_harness` (#420, contract, ADR 0007
+  decision 12): drops the T3-only `threads` mirror (every harness's observed
+  state is in `execution_observations`; run span, origin title, last-word
+  preview and tree activity derive from it) and deletes the seeded T3
+  connection 1 when it was never configured (no identity, no T3 token,
+  default settings, not the default connection) and no row references it
+  (tasks, schedules, session identities, shared paths, bindings, external
+  projects, imports, launch destinations). A fresh install therefore has no
+  connection: the first pairing or connect creates one. A paired or used
+  connection 1 stays. Its `t3_connection` row (keyed by machine) stays for
+  the next pairing. Tests: the step-wise scenarios on both engines (unused
+  connection removed; paired, stamped, default, referenced and bound kept)
+  and `TestFreshInstallHasNoConnection` (`dbtest.FreshEngine`, both
+  engines); `dbtest.Reset`/`Engine` seed connection 1 for the suites that
+  need a T3 connection.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -575,7 +587,7 @@ from the Docker image; any other binary exits 78 before touching anything.
   [backup](#backups)), stop it, then copy; above it, use a newer image. The
   target must be either fresh (no tables: the copy migrates it to the head) or
   at the head holding only the baseline's seeded rows (user 1, machine 1,
-  harness connection 1, its `t3_connection` and `opencode_settings`, the
+  harness connection 1 (deleted by 0032 when unused), its `t3_connection` and `opencode_settings`, the
   preferences row; `claude_settings` and `codex_settings` have no seeded row; for example after a server started on it once). Anything
   else is refused: another version, other rows, or tables without a Stage
   schema. Refusals write no rows; only a schema mismatch (below) is found

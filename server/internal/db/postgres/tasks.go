@@ -42,12 +42,12 @@ SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM ta
   COALESCE((SELECT jsonb_agg(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'::jsonb),
   COALESCE((SELECT jsonb_agg(n.task_id ORDER BY n.task_id) FROM task_needs n WHERE n.need_id = t.id), '[]'::jsonb),
   t.adopted, t.ready_at, t.launch_attempt, t.last_error,
-  t.launched_at, t.finished_at, t.settled_at, th.run_started_at, th.run_ended_at, COALESCE(th.last_word_preview, substr(obs.observation #>> '{reply,text}',1,200)), COALESCE(th.last_word_at,(obs.observation #>> '{reply,updatedAt}')::timestamptz),
+  t.launched_at, t.finished_at, t.settled_at, (obs.observation->>'startedAt')::timestamptz, (obs.observation->>'endedAt')::timestamptz, substr(obs.observation #>> '{reply,text}',1,1000), (obs.observation #>> '{reply,updatedAt}')::timestamptz,
   t.created_at, t.updated_at,
-  t.start_at, t.start_tz, t.schedule_id, sc.title, oth.title, t.handoff,
+  t.start_at, t.start_tz, t.schedule_id, sc.title, (SELECT observation->>'title' FROM execution_observations WHERE session_id=t.origin_session_id), t.handoff,
   COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.task_id = t.id), '[]'::jsonb),
-  (SELECT max(e.at) FROM task_events e WHERE e.task_id = t.id AND e.to_state = t.state), th.updated_at,
+  (SELECT max(e.at) FROM task_events e WHERE e.task_id = t.id AND e.to_state = t.state), (obs.observation->>'updatedAt')::timestamptz,
   t.archived_at, tr.status, ` + unstartedSQL + `,
   t.connection_id,t.session_id,t.origin_session_id,
  (SELECT jsonb_build_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.session_id),
@@ -58,9 +58,7 @@ JOIN projects p ON p.id = t.project_id
 JOIN harness_connections hc ON hc.id = t.connection_id
 LEFT JOIN task_trees tr ON tr.id = t.tree_id
 LEFT JOIN execution_observations obs ON obs.session_id=t.session_id
-LEFT JOIN threads th ON th.session_id = t.session_id
-LEFT JOIN schedules sc ON sc.id = t.schedule_id
-LEFT JOIN threads oth ON oth.session_id = t.origin_session_id`
+LEFT JOIN schedules sc ON sc.id = t.schedule_id`
 
 func scanTask(row rowScanner) (store.Task, error) {
 	var t store.Task
@@ -79,6 +77,7 @@ func scanTask(row rowScanner) (store.Task, error) {
 	if t.Session != nil {
 		t.T3ThreadID = &t.Session.ExternalSessionID
 	}
+	t.LastWordPreview = store.Preview(t.LastWordPreview)
 	t.Needs = nonNilIDs(t.Needs)
 	t.Dependents = nonNilIDs(t.Dependents)
 	if t.Workspace.Type == "" {

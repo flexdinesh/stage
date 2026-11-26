@@ -43,7 +43,7 @@ func twoMachineSetup(t *testing.T) (*db.Store, *coordinator.Service, map[int64]*
 	fakes := map[int64]*documentHarness{2: {}, 3: {}}
 	tasks := map[int64]db.Task{}
 	for id := range fakes {
-		task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: p.ID, ConnectionID: id, Title: "Write", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "brain-7", Permission: "reviewed"}})
+		task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: p.ID, ConnectionID: id, Title: "Write", Prompt: "p", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "brain-7", Permission: "reviewed"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +92,7 @@ func TestTwoMachinesLaunchPollAndScheduleIndependently(t *testing.T) {
 
 	// A schedule targets a machine and harness through its connection: its
 	// task launches on that machine only.
-	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: 3, ProjectID: tasks[3].ProjectID, Title: "Nightly", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: tasks[3].ExecutionConfig, Cron: "0 3 * * *", Tz: "UTC"})
+	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: 3, ProjectID: tasks[3].ProjectID, Title: "Nightly", Prompt: "p", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: tasks[3].ExecutionConfig, Cron: "0 3 * * *", Tz: "UTC"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestTwoMachinesT3FullSyncsRunTogether(t *testing.T) {
 	if _, err := pool.ExecContext(ctx, `INSERT INTO machines(id,label) VALUES(2,'Laptop')`); err != nil {
 		t.Fatal(err)
 	}
-	local := store.LegacyT3ID()
+	local := store.ActiveID(db.LocalMachine, "t3")
 	sw, err := store.SwitchInstance(ctx, laptop, t3.Descriptor, "env-laptop", "laptop", 0)
 	if err != nil || sw.New == 0 || sw.New == local {
 		t.Fatalf("laptop T3 %+v %v", sw, err)
@@ -145,15 +145,22 @@ func TestTwoMachinesT3FullSyncsRunTogether(t *testing.T) {
 		local:  barrierAdapter{t3.NewConnectionAdapter(t3.NewFake(), local), &arrived},
 		sw.New: barrierAdapter{t3.NewConnectionAdapter(t3.NewFake(), sw.New), &arrived},
 	}, nil)
+	// Each connection's successful full sync reaches the hook (serve
+	// records T3's last full sync per machine from it).
+	var mu gosync.Mutex
+	synced := map[int64]bool{}
+	svc.OnConnectionSynced = func(_ context.Context, connection int64, at time.Time) error {
+		mu.Lock()
+		defer mu.Unlock()
+		synced[connection] = !at.IsZero()
+		return nil
+	}
 	r, err := svc.FullSync(ctx)
 	if err != nil || len(r.Unavailable) != 0 {
 		t.Fatalf("full sync %+v %v", r, err)
 	}
-	for _, machine := range []int64{db.LocalMachine, laptop} {
-		c, err := store.GetConnection(ctx, machine)
-		if err != nil || c.LastFullSyncAt == nil {
-			t.Fatalf("machine %d last full sync %+v %v", machine, c, err)
-		}
+	if !synced[local] || !synced[sw.New] {
+		t.Fatalf("synced connections %v", synced)
 	}
 	if svc.Progress(local).Running || svc.Progress(sw.New).Running {
 		t.Fatal("progress after sync")

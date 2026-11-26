@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 )
 
 func init() {
@@ -51,7 +52,7 @@ func caseJournalNotesQueriesAndRetry(t *testing.T, open Factory) {
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	owner := db.JournalOwner{TaskID: &a.ID}
-	input := db.AppendNoteInput{Text: strings.Repeat("界", 700) + " needle%_", Category: "finding", RequestID: "request-1", SourceTaskID: &a.ID, SourceSession: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: "session"}}
+	input := db.AppendNoteInput{Text: strings.Repeat("界", 700) + " needle%_", Category: "finding", RequestID: "request-1", SourceTaskID: &a.ID, SourceSession: &db.SessionRef{ConnectionID: s.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: "session"}}
 	first, err := s.AppendNote(ctx, owner, input)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +62,7 @@ func caseJournalNotesQueriesAndRetry(t *testing.T, open Factory) {
 		t.Fatalf("retry: %+v %v", again, err)
 	}
 	changed := input
-	changed.SourceSession = &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: "other"}
+	changed.SourceSession = &db.SessionRef{ConnectionID: s.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: "other"}
 	var conflict *db.ConflictError
 	if _, err := s.AppendNote(ctx, owner, changed); !errors.As(err, &conflict) {
 		t.Fatalf("changed provenance: %v", err)
@@ -176,7 +177,7 @@ func caseJournalMovesFreezeEventsAndInvalidateTreeCursors(t *testing.T, open Fac
 	old := mustTree(t, s, ctx, "old", "", db.TreeMember{TaskID: a.ID})
 	next := mustTree(t, s, ctx, "next", "", db.TreeMember{TaskID: b.ID})
 	own := note(t, s, ctx, db.JournalOwner{TaskID: &a.ID}, "task work", "task-note")
-	treeInput := db.AppendNoteInput{Text: "tree conclusion", RequestID: "tree-note", SourceTaskID: &a.ID, SourceSession: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: "thread"}}
+	treeInput := db.AppendNoteInput{Text: "tree conclusion", RequestID: "tree-note", SourceTaskID: &a.ID, SourceSession: &db.SessionRef{ConnectionID: s.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: "thread"}}
 	treeNote, err := s.AppendNote(ctx, db.JournalOwner{TreeID: &old.ID}, treeInput)
 	if err != nil {
 		t.Fatal(err)
@@ -300,7 +301,7 @@ func caseJournalClosedWritesAndPermanentProtection(t *testing.T, open Factory) {
 func caseJournalInitialNotesScheduleDuplicateAndRollback(t *testing.T, open Factory) {
 	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
-	in := db.NewTask{ProjectID: p.ID, Title: "a", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, InitialNote: "initial"}
+	in := db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "a", Prompt: "p", Workspace: db.Workspace{Type: "root"}, InitialNote: "initial"}
 	a, err := s.CreateTask(ctx, in)
 	if err != nil {
 		t.Fatal(err)
@@ -394,7 +395,7 @@ func caseJournalCreateIntoTreeInvalidatesCursor(t *testing.T, open Factory) {
 	if page.NextCursor == nil {
 		t.Fatal("missing cursor")
 	}
-	task, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "new member", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, TreeID: &tr.ID, InitialNote: "member note"})
+	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "new member", Prompt: "p", Workspace: db.Workspace{Type: "root"}, TreeID: &tr.ID, InitialNote: "member note"})
 	if err != nil {
 		t.Fatal(err)
 	}

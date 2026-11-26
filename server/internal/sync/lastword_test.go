@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -32,19 +33,19 @@ func TestLastWordReadOnlyWhenAtRestAndChanged(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	ctx := context.Background()
 	client := &replyClient{Fake: t3.NewFake()}
-	svc := t3sync.New(store, t3.NewAdapter(client), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	res, err := client.LaunchThread(ctx, t3.LaunchInput{ProjectID: "p", Title: "t"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	id := res.ThreadID
-	if err := svc.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: store.LegacyT3ID(), ExternalSessionID: id}); err != nil {
+	if err := svc.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.InsertProject(ctx, db.Project{Title: "p", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: "p", Workspace: "/w/p"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.AdoptThread(ctx, db.AdoptInput{ThreadID: id}); err != nil {
+	if _, _, err := store.AdoptThread(ctx, db.AdoptInput{Session: db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}}); err != nil {
 		t.Fatal(err)
 	}
 	mutate := func(fn func(*t3.ThreadDetail)) {
@@ -55,23 +56,27 @@ func TestLastWordReadOnlyWhenAtRestAndChanged(t *testing.T) {
 	}
 	refresh := func(wantCalls int) {
 		t.Helper()
-		if err := svc.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: store.LegacyT3ID(), ExternalSessionID: id}); err != nil {
+		if err := svc.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}); err != nil {
 			t.Fatal(err)
 		}
 		if client.calls != wantCalls {
 			t.Fatalf("LatestReply calls = %d, want %d", client.calls, wantCalls)
 		}
 	}
-	text := func() string {
+	reply := func() *execution.Reply {
 		t.Helper()
-		lw, err := store.GetThreadLastWord(ctx, id)
+		o, err := store.Observation(ctx, db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if lw == nil {
-			return ""
+		return o.Reply
+	}
+	text := func() string {
+		t.Helper()
+		if r := reply(); r != nil {
+			return r.Text
 		}
-		return lw.Text
+		return ""
 	}
 
 	// Running: never read, even with items and a reply.
@@ -138,9 +143,9 @@ func TestLastWordReadOnlyWhenAtRestAndChanged(t *testing.T) {
 	}
 	mutate(func(d *t3.ThreadDetail) { d.ItemCount = 9 })
 	refresh(8)
-	lw, err := store.GetThreadLastWord(ctx, id)
-	if err != nil || lw == nil {
-		t.Fatalf("capped last word: %v %v", lw, err)
+	lw := reply()
+	if lw == nil {
+		t.Fatal("capped last word missing")
 	}
 	if len(lw.Text) != 4000 || !lw.Truncated {
 		t.Fatalf("capped last word: len %d truncated %v", len(lw.Text), lw.Truncated)

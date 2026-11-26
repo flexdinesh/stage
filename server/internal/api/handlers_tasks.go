@@ -60,7 +60,7 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tasks": s.tasks(s.envID(r.Context()), ts)})
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": s.tasks(ts)})
 	return nil
 }
 
@@ -77,11 +77,6 @@ type taskConfigReq struct {
 	ProjectID          *int64                  `json:"projectId"`
 	Title              string                  `json:"title"`
 	Prompt             string                  `json:"prompt"`
-	ProviderInstanceID *string                 `json:"providerInstanceId"`
-	Model              *string                 `json:"model"`
-	ModelOptions       []execution.ModelOption `json:"modelOptions"`
-	RuntimeMode        *string                 `json:"runtimeMode"`
-	InteractionMode    *string                 `json:"interactionMode"`
 	Workspace          *db.Workspace           `json:"workspace"`
 	TreeID             *int64                  `json:"treeId"`
 	Needs              []int64                 `json:"needs"`
@@ -95,7 +90,8 @@ type taskConfigReq struct {
 
 // A request without a connection starts on the default connection when the
 // project is available there, else on the project's only binding, else (with
-// a default set) its first available binding (db.NewTaskDestination).
+// a default set) its first available binding (db.NewTaskDestination). With
+// none of those it is invalid: there is no default harness.
 func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 	if req.ConnectionID != nil {
 		return s.plannedConnection(r.Context(), *req.ConnectionID)
@@ -119,58 +115,48 @@ func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 		req.ConnectionID = &id
 		return s.plannedConnection(r.Context(), id)
 	case !active:
-		// Preserve legacy unbound T3 planning. New clients send an explicit destination.
-		return nil
+		return db.Invalid("connectionId is required: this project has no harness binding")
 	default:
 		return db.Invalid("This project has multiple harness bindings. Choose a connectionId.")
 	}
 }
 
-func (req createTaskReq) validate(isT3 func(int64) bool, rule worktreeRule) (db.NewTask, error) {
-	in, err := req.taskConfigReq.validate(isT3, rule)
+func (req createTaskReq) validate(rule worktreeRule) (db.NewTask, error) {
+	in, err := req.taskConfigReq.validate(rule)
 	in.InitialNote = req.InitialNote
 	return in, err
 }
 
-// isT3 reports whether a connection is a T3 instance (db.Store.IsT3); rule
-// is its worktree policy (server.worktreeRule).
-func (req taskConfigReq) validate(isT3 func(int64) bool, rule worktreeRule) (db.NewTask, error) {
-	if req.ExecutionConfig != nil && (req.ProviderInstanceID != nil || req.Model != nil || req.ModelOptions != nil || req.RuntimeMode != nil || req.InteractionMode != nil) {
-		return db.NewTask{}, db.Invalid("use executionConfig or legacy model/permission fields, not both")
-	}
+// rule is the destination's worktree policy (server.worktreeRule). An
+// omitted executionConfig runs on the harness defaults.
+func (req taskConfigReq) validate(rule worktreeRule) (db.NewTask, error) {
 	in := db.NewTask{
-		NeedsSession:       req.NeedsSession,
-		ExecutionConfig:    req.ExecutionConfig,
-		OriginSession:      req.OriginSession,
-		Title:              strings.TrimSpace(req.Title),
-		Prompt:             req.Prompt,
-		ProviderInstanceID: trimmedPtr(req.ProviderInstanceID),
-		Model:              trimmedPtr(req.Model),
-		RuntimeMode:        "full-access",
-		InteractionMode:    "default",
-		Workspace:          db.Workspace{Type: "root"},
-		TreeID:             req.TreeID,
-		Needs:              req.Needs,
-		StartMode:          req.StartMode,
-		AttachmentIDs:      req.AttachmentIDs,
-		Handoff:            req.Handoff,
+		NeedsSession:    req.NeedsSession,
+		ExecutionConfig: req.ExecutionConfig,
+		OriginSession:   req.OriginSession,
+		Title:           strings.TrimSpace(req.Title),
+		Prompt:          req.Prompt,
+		Workspace:       db.Workspace{Type: "root"},
+		TreeID:          req.TreeID,
+		Needs:           req.Needs,
+		StartMode:       req.StartMode,
+		AttachmentIDs:   req.AttachmentIDs,
+		Handoff:         req.Handoff,
 	}
-	if req.ConnectionID != nil {
-		if *req.ConnectionID <= 0 {
-			return db.NewTask{}, db.Invalid("choose a positive connectionId")
-		}
-		in.ConnectionID = *req.ConnectionID
+	if req.ConnectionID == nil {
+		return in, db.Invalid("connectionId is required: choose a harness connection")
 	}
-	if in.ConnectionID > 0 && !isT3(in.ConnectionID) && (req.Model != nil || req.ProviderInstanceID != nil || req.RuntimeMode != nil || req.InteractionMode != nil || req.ModelOptions != nil) {
-		return db.NewTask{}, db.Invalid("use executionConfig with this destination connection")
+	if *req.ConnectionID <= 0 {
+		return in, db.Invalid("choose a positive connectionId")
 	}
-	if in.ConnectionID > 0 && !isT3(in.ConnectionID) && in.ExecutionConfig == nil {
+	in.ConnectionID = *req.ConnectionID
+	if in.ExecutionConfig == nil {
 		in.ExecutionConfig = &execution.Config{}
 	}
 	if in.StartMode != nil && !in.StartMode.Valid() {
 		return in, db.Invalid("invalid startMode %q (want auto|manual)", *in.StartMode)
 	}
-	hasNeeds := len(in.Needs) > 0 || in.NeedsThreadID != nil || in.NeedsSession != nil
+	hasNeeds := len(in.Needs) > 0 || in.NeedsSession != nil
 	if req.Start && hasNeeds {
 		return in, db.Invalid("a task with needs cannot also start now (complete its needs in Stage before starting)")
 	}
@@ -187,25 +173,7 @@ func (req taskConfigReq) validate(isT3 func(int64) bool, rule worktreeRule) (db.
 	if strings.TrimSpace(in.Prompt) == "" {
 		return in, db.Invalid("prompt is required")
 	}
-	if (in.ProviderInstanceID == nil) != (in.Model == nil) {
-		return in, db.Invalid("providerInstanceId and model must be set together")
-	}
 	var err error
-	if in.ModelOptions, err = validateOptions(req.ModelOptions); err != nil {
-		return in, err
-	}
-	if req.RuntimeMode != nil {
-		if err := validEnum("runtimeMode", *req.RuntimeMode, db.RuntimeModes); err != nil {
-			return in, err
-		}
-		in.RuntimeMode = *req.RuntimeMode
-	}
-	if req.InteractionMode != nil {
-		if err := validEnum("interactionMode", *req.InteractionMode, db.InteractionModes); err != nil {
-			return in, err
-		}
-		in.InteractionMode = *req.InteractionMode
-	}
 	if req.Workspace != nil {
 		if in.Workspace, err = validateWorkspaceFor(*req.Workspace, in.ConnectionID, rule); err != nil {
 			return in, err
@@ -255,13 +223,13 @@ func startAt(local, tz *string, now time.Time) (*time.Time, error) {
 
 func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	var req createTaskReq
-	if err := decodeStrict(r, &req); err != nil {
+	if err := decodeConfig(r, &req, true); err != nil {
 		return err
 	}
 	if err := s.chooseConnection(r, &req.taskConfigReq); err != nil {
 		return err
 	}
-	in, err := req.validate(s.Store.IsT3, s.worktreeRule)
+	in, err := req.validate(s.worktreeRule)
 	if err != nil {
 		return err
 	}
@@ -296,7 +264,7 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	writeJSON(w, http.StatusCreated, s.task(s.envID(r.Context()), task))
+	writeJSON(w, http.StatusCreated, s.task(task))
 	return nil
 }
 
@@ -314,8 +282,7 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	env := s.envID(ctx)
-	out := taskDetailJSON{taskJSON: s.task(env, task), Events: events, CurrentHandoffs: []db.Handoff{}}
+	out := taskDetailJSON{taskJSON: s.task(task), Events: events, CurrentHandoffs: []db.Handoff{}}
 	if task.Session != nil {
 		obs, e := s.Store.Observation(ctx, *task.Session)
 		if e == nil {
@@ -341,7 +308,7 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return err
 		}
-		shaped := s.treeDetail(env, tree)
+		shaped := s.treeDetail(tree)
 		out.Tree = &shaped
 	}
 	if task.LaunchAttempt > 0 {
@@ -357,21 +324,8 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return err
 		}
-		shaped := s.createdTasks(env, batch)
+		shaped := s.createdTasks(batch)
 		out.Batch = &shaped
-	}
-	if s.Store.IsT3(task.ConnectionID) && s.Store.ConnectionActive(task.ConnectionID) && task.T3ThreadID != nil {
-		th, err := s.Store.GetThread(ctx, *task.T3ThreadID)
-		if err == nil {
-			th.LastWord, err = s.Store.GetThreadLastWord(ctx, th.T3ThreadID)
-		}
-		switch {
-		case err == nil:
-			tj := s.thread(env, th)
-			out.Thread = &tj
-		case !errors.Is(err, db.ErrNotFound):
-			return err
-		}
 	}
 	writeJSON(w, http.StatusOK, out)
 	return nil
@@ -383,7 +337,7 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	var p db.TaskPatch
-	if err := decodeStrict(r, &p); err != nil {
+	if err := decodeConfig(r, &p, true); err != nil {
 		return err
 	}
 	current, err := s.Store.GetTask(r.Context(), id)
@@ -398,9 +352,6 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	if !s.Store.IsT3(connection) && (p.ProviderInstanceID.Set || p.Model.Set || p.RuntimeMode.Set || p.ModelOptions.Set || p.InteractionMode.Set) {
-		return db.Invalid("Choose harness-specific configuration.")
-	}
 	projectID := current.ProjectID
 	if p.ProjectID.Set {
 		projectID = p.ProjectID.V
@@ -414,8 +365,7 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	if err := validateConfigPatch(configPatch{
-		ConnectionID: connection, ExecutionConfig: &p.ExecutionConfig, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
-		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
+		ConnectionID: connection, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt,
 		Workspace: &p.Workspace, AttachmentIDs: &p.AttachmentIDs,
 	}, s.worktreeRule); err != nil {
 		return err
@@ -446,33 +396,24 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 	if p.StartMode.Set {
 		s.treeChanged()
 	}
-	writeJSON(w, http.StatusOK, s.task(s.envID(r.Context()), task))
+	writeJSON(w, http.StatusOK, s.task(task))
 	return nil
 }
 
 // configPatch points at the task-config fields shared by task and schedule
 // patches.
 type configPatch struct {
-	ConnectionID       int64
-	ExecutionConfig    *db.Optional[execution.Config]
-	ProjectID          *db.Optional[int64]
-	Title              *db.Optional[string]
-	Prompt             *db.Optional[string]
-	ProviderInstanceID *db.Optional[string]
-	Model              *db.Optional[string]
-	ModelOptions       *db.Optional[[]execution.ModelOption]
-	RuntimeMode        *db.Optional[string]
-	InteractionMode    *db.Optional[string]
-	Workspace          *db.Optional[db.Workspace]
-	AttachmentIDs      *db.Optional[[]int64]
+	ConnectionID  int64
+	ProjectID     *db.Optional[int64]
+	Title         *db.Optional[string]
+	Prompt        *db.Optional[string]
+	Workspace     *db.Optional[db.Workspace]
+	AttachmentIDs *db.Optional[[]int64]
 }
 
 // validateConfigPatch validates and normalizes the shared config fields.
 func validateConfigPatch(c configPatch, rule worktreeRule) error {
 	var err error
-	if c.ExecutionConfig != nil && c.ExecutionConfig.Set && (c.ProviderInstanceID.Set || c.Model.Set || c.ModelOptions.Set || c.RuntimeMode.Set || c.InteractionMode.Set) {
-		return db.Invalid("executionConfig cannot be combined with legacy T3 configuration fields")
-	}
 	if c.ProjectID.Set && c.ProjectID.Null {
 		return db.Invalid("projectId must not be null")
 	}
@@ -481,20 +422,6 @@ func validateConfigPatch(c configPatch, rule worktreeRule) error {
 	}
 	if c.Prompt.Set && (c.Prompt.Null || strings.TrimSpace(c.Prompt.V) == "") {
 		return db.Invalid("prompt must be a non-empty string")
-	}
-	nullableText(c.ProviderInstanceID)
-	nullableText(c.Model)
-	if c.ModelOptions.Set {
-		if c.ModelOptions.V, err = validateOptions(c.ModelOptions.V); err != nil {
-			return err
-		}
-		c.ModelOptions.Null = false
-	}
-	if err := enumField("runtimeMode", c.RuntimeMode, db.RuntimeModes); err != nil {
-		return err
-	}
-	if err := enumField("interactionMode", c.InteractionMode, db.InteractionModes); err != nil {
-		return err
 	}
 	if c.Workspace.Set {
 		if c.Workspace.Null {
@@ -545,7 +472,7 @@ func (s *server) setArchived(w http.ResponseWriter, r *http.Request, archived bo
 		return err
 	}
 	s.treeChanged()
-	writeJSON(w, http.StatusOK, s.task(s.envID(r.Context()), task))
+	writeJSON(w, http.StatusOK, s.task(task))
 	return nil
 }
 
@@ -558,7 +485,7 @@ func (s *server) startTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, s.task(s.envID(r.Context()), task))
+	writeJSON(w, http.StatusOK, s.task(task))
 	return nil
 }
 
@@ -609,7 +536,7 @@ func (s *server) touchAndWrite(w http.ResponseWriter, r *http.Request, id int64)
 	} else if task, err = s.Store.GetTask(ctx, id); err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, s.task(s.envID(ctx), task))
+	writeJSON(w, http.StatusOK, s.task(task))
 	return nil
 }
 
@@ -622,7 +549,7 @@ func (s *server) duplicateTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusCreated, s.task(s.envID(r.Context()), task))
+	writeJSON(w, http.StatusCreated, s.task(task))
 	return nil
 }
 
@@ -651,6 +578,6 @@ func (s *server) setNeeds(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.treeChanged()
-	writeJSON(w, http.StatusOK, s.task(s.envID(r.Context()), task))
+	writeJSON(w, http.StatusOK, s.task(task))
 	return nil
 }

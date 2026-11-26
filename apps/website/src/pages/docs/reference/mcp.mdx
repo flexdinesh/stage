@@ -91,8 +91,8 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 ## Context and destination
 
 - `get_context` returns your session, cwd, resolved Stage project, owning task and current tree. The owner remains available offline. An unowned session resolves through its verified project binding. An external session can legitimately have no Stage task.
-- `list_projects` lists projects with bindings and configured connections. Set `connectionId` on `create_task` to choose the execution harness, independently of the creator's. A sole binding supplies the default; with both harnesses bound, choose one explicitly. Identifiable legacy T3 callers keep their T3 default.
-- `list_models` with `connectionId` (and `projectId` for workspace-specific choices) lists a harness's models, agents and options. Pass the advertised values in `executionConfig` on tasks and schedules. The T3 `provider`, `model` and `effort` parameters remain available.
+- `list_projects` lists projects with bindings and configured connections. Set `connectionId` on `create_task` to choose the execution harness, independently of the creator's. A sole binding supplies the default; with both harnesses bound, choose one explicitly. With no binding, the caller's connection or the sole configured connection; there is no default harness.
+- `list_models` with `connectionId` (required; and `projectId` for workspace-specific choices) lists a harness's models, agents and options. Pass the advertised values in `executionConfig` on tasks and schedules; the old T3 `provider`, `model` and `effort` parameters were removed.
 - `workspaceType: "worktree"` selects the harness default worktree. OpenCode selects its base and branch.
 - `startLocal` with `startTz` schedules a one-shot start.
 
@@ -160,7 +160,7 @@ When a task with needs starts, its launch prompt gets one block per accepted nee
 
 ## References
 
-`read_ref` (CLI `stage show REF`) reads what a pasted reference names: a Stage task or tree link (any host, markdown link ok), a historical T3 thread link, `#<task id>`, a thread id, or a scoped session path such as `/connections/2/sessions/EXTERNAL_ID`.
+`read_ref` (CLI `stage show REF`) reads what a pasted reference names: a Stage task or tree link (any host, markdown link ok), a harness's own session link (resolved by its connection), `#<task id>`, or a scoped session path such as `/connections/2/sessions/EXTERNAL_ID`. A bare session id names no connection: pass `session` with its connection.
 
 - A tree link returns the tree (as `get_tree`), ready for `add_to_tree`, `update_tree` and the other tree tools.
 - For an opaque ID, pass `session` (CLI `--target-connection ID --target-session ID`).

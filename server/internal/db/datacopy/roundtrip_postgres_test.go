@@ -33,6 +33,8 @@ var seedSQL = []string{
 	`INSERT INTO machines (id, label, created_by_user_id, last_seen_at, version) VALUES (2, 'worker', 2, '2026-11-02T10:00:00.000001Z', '1.2.3')`,
 	`INSERT INTO machine_tokens (machine_id, secret_hash) VALUES (2, X'00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF')`,
 	`INSERT INTO pairing_codes (secret_hash, label, created_by_user_id, expires_at, redeemed_at, machine_id) VALUES (X'FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00', 'pair', 1, '2026-11-03T00:00:00.000000Z', '2026-11-02T23:00:00.500000Z', 2)`,
+	// A paired T3 connection 1 (migration 0032 removes the unused seed).
+	`INSERT INTO harness_connections (id, machine_id, harness, identity, stable_identity) VALUES (1, 1, 't3', 'env-1', 1)`,
 	`INSERT INTO harness_connections (id, machine_id, harness, auto_complete, identity, stable_identity, label, active, new_task_config) VALUES (2, 1, 'opencode', 0, 'oc-1', 1, 'OpenCode', 1, '{"b": 1, "a": [1.0, 2e0, -0.5]}')`,
 	`INSERT INTO harness_connections (id, machine_id, harness, active, retired_at, forgotten_at) VALUES (3, 2, 't3', 0, '2026-11-04T01:02:03.456789Z', '2026-11-04T02:00:00.000000Z')`,
 	`INSERT INTO session_identities (id, connection_id, external_id) VALUES (1, 1, 'thread-1'), (2, 2, 'oc-session')`,
@@ -71,7 +73,6 @@ newline and 日本語', 1)`,
 	`INSERT INTO task_attachments (schedule_id, name, mime_type, size_bytes, data) VALUES (1, 'b.gif', 'image/gif', 3, X'00FF00')`,
 	`INSERT INTO schedule_runs (schedule_id, fire_at, outcome, task_id) VALUES (1, '2026-11-07T00:00:00.000000Z', 'started', 1)`,
 	`INSERT INTO notifications (event, task_id, title, project_title, url, session_id) VALUES ('done', 1, 'Done', 'Proj', '/tasks/1', 1)`,
-	`INSERT INTO threads (t3_thread_id, t3_project_id, title, status, settled, created_at, updated_at, session_id, stage_project_id) VALUES ('thread-1', 'p1', 'Thread', 'idle', 1, '2026-11-09T00:00:00.000000Z', '2026-11-09T00:00:00.000000Z', 1, 1)`,
 	`INSERT INTO push_subscriptions (endpoint, p256dh, auth) VALUES ('https://push', 'k', 'a')`,
 	`INSERT INTO push_vapid (id, public_key, private_key) VALUES (1, 'pub', 'priv')`,
 	`INSERT INTO snippets (id, name, body, project_id) VALUES (1, 's1', 'b', 1), (2, 's2', 'b', NULL), (3, 's3', 'gone', NULL)`,
@@ -402,11 +403,11 @@ func TestRefusals(t *testing.T) {
 // to its migrated, seeds-only state.
 func TestConversionErrorRollsBack(t *testing.T) {
 	ctx := context.Background()
-	src := openSource(t, sourceDB(t, sqlite.MaxVersion(), `UPDATE threads SET created_at = 'yesterday'`))
+	src := openSource(t, sourceDB(t, sqlite.MaxVersion(), `UPDATE tasks SET launched_at = 'yesterday' WHERE id = 1`))
 	dst := freshTarget(t)
 	_, err := datacopy.Run(ctx, src, dst)
-	if err == nil || !strings.Contains(err.Error(), "threads.created_at") {
-		t.Fatalf("got %v, want a threads.created_at conversion error", err)
+	if err == nil || !strings.Contains(err.Error(), "tasks.launched_at") {
+		t.Fatalf("got %v, want a tasks.launched_at conversion error", err)
 	}
 	st, err := dst.State(ctx)
 	if err != nil {

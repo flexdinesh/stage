@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -42,7 +44,7 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	ctx := context.Background()
 	a := &readsT3{Fake: t3.NewFake()}
-	first := store.LegacyT3ID()
+	first := store.ActiveID(db.LocalMachine, "t3")
 	if _, err := store.SwitchInstance(ctx, db.LocalMachine, t3.Descriptor, "env-a", "box a", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -51,9 +53,9 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := t3sync.New(store, t3.NewConnectionAdapter(a, first), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewConnectionAdapter(a, first)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	svc.Harnesses = t3Harnesses
-	task, err := store.CreateTask(ctx, db.NewTask{ProjectID: p.ID, ConnectionID: first, Title: "run", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}})
+	task, err := store.CreateTask(ctx, db.NewTask{ProjectID: p.ID, ConnectionID: first, Title: "run", Prompt: "p", Workspace: db.Workspace{Type: "root"}})
 	if err != nil {
 		t.Fatal(err)
 	}

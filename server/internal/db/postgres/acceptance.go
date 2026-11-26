@@ -4,9 +4,7 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
 )
@@ -41,15 +39,6 @@ func (r acceptances) LaunchInputs(ctx context.Context, id int64, attempt int) ([
 		return nil, err
 	}
 	return collectRows(rows, scanAcceptance)
-}
-
-func (r acceptances) ThreadEvidence(ctx context.Context, sessionID *int64) (store.ThreadEvidence, bool, error) {
-	var e store.ThreadEvidence
-	err := r.QueryRow(ctx, `SELECT branch,worktree_path,latest_run_id,last_word_run_id,last_word_text,last_word_truncated,last_word_at,updated_at,COALESCE(execution_state,'done'),pending_request_count,active_run_id FROM threads WHERE session_id=$1`, sessionID).Scan(&e.Branch, &e.WorktreePath, &e.RunID, &e.ReplyRunID, &e.Reply, &e.ReplyTruncated, &e.ReplyAt, &e.ObservedAt, &e.Status, &e.Pending, &e.ActiveRunID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return store.ThreadEvidence{}, false, nil
-	}
-	return e, err == nil, err
 }
 
 func (r acceptances) JournalThrough(ctx context.Context, id int64, treeID *int64) (int64, error) {

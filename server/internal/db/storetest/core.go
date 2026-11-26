@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -22,9 +23,14 @@ func init() {
 	register("ProjectLastActivity", caseProjectLastActivity)
 }
 
+// session is a session on the seeded T3 connection (dbtest.T3Connection).
+func session(external string) db.SessionRef {
+	return db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: external}
+}
+
 func mustProject(t *testing.T, s *db.Store, ctx context.Context, t3id string) db.Project {
 	t.Helper()
-	p, err := s.InsertProject(ctx, db.Project{Title: t3id, Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: t3id, Workspace: "/w/" + t3id}}})
+	p, err := s.InsertProject(ctx, db.Project{Title: t3id, Bindings: []db.ProjectBinding{{ConnectionID: dbtest.T3Connection, ExternalProjectID: t3id, Workspace: "/w/" + t3id}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,9 +39,9 @@ func mustProject(t *testing.T, s *db.Store, ctx context.Context, t3id string) db
 
 func mustTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64, title string, needs []int64) db.Task {
 	t.Helper()
-	task, err := s.CreateTask(ctx, db.NewTask{
-		ProjectID: projectID, Title: title, Prompt: "p", RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, Needs: needs,
+	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection,
+		ProjectID: projectID, Title: title, Prompt: "p",
+		Workspace: db.Workspace{Type: "root"}, Needs: needs,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +93,7 @@ func caseT3SettingsRoundTrip(t *testing.T, open Factory) {
 		t.Fatal(err)
 	}
 	c, _ = s.GetConnection(ctx, db.LocalMachine)
-	if c.T3URL == nil || *c.T3URL != "http://127.0.0.1:4000" || c.EnvironmentID == nil || *c.EnvironmentID != "env-1" || c.ConnectionID != s.LegacyT3ID() {
+	if c.T3URL == nil || *c.T3URL != "http://127.0.0.1:4000" || c.EnvironmentID == nil || *c.EnvironmentID != "env-1" || c.ConnectionID != s.ActiveID(db.LocalMachine, "t3") {
 		t.Fatalf("saved %+v", c)
 	}
 	// Saving a token leaves the settings alone.
@@ -121,7 +127,7 @@ func caseTransitionTask(t *testing.T, open Factory) {
 		t.Fatalf("begin attempt: %+v %v", res, err)
 	}
 	thread := "thread-1"
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: thread}}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: thread}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone}); err != nil {
@@ -193,11 +199,6 @@ func caseUpdateTaskRestrictions(t *testing.T, open Factory) {
 	if err := s.DeleteTask(ctx, task.ID); !errors.As(err, &conflict) {
 		t.Fatalf("delete running: %v", err)
 	}
-	var invalid *db.InvalidError
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateBacklog})
-	if _, err := s.UpdateTask(ctx, task.ID, db.TaskPatch{Model: db.Optional[string]{Set: true, V: "m"}}); !errors.As(err, &invalid) {
-		t.Fatalf("model without provider: %v", err)
-	}
 }
 
 func caseTransitionLaunchGuards(t *testing.T, open Factory) {
@@ -233,15 +234,15 @@ func caseUpsertThreadsKeepsDetailColumns(t *testing.T, open Factory) {
 	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{{ThreadID: "th-1", ProjectID: "proj-1", Title: "renamed", Status: t3.StatusCompleted, CreatedAt: now, UpdatedAt: now}})); err != nil {
 		t.Fatal(err)
 	}
-	th, err := s.GetThread(ctx, "th-1")
+	o, err := s.Observation(ctx, session("th-1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if th.Title != "renamed" || th.Status != "done" || th.Branch == nil || *th.Branch != "feat" || th.PendingRequestCount != 0 {
-		t.Fatalf("thread %+v", th)
+	if o.Title != "renamed" || o.State != "done" || o.Branch != "feat" || o.Directory != "/wt" {
+		t.Fatalf("observation %+v", o)
 	}
-	if th.Source != db.SourceT3 || th.ProjectID != nil {
-		t.Fatalf("unlinked thread source/project: %+v", th)
+	if _, err := s.TaskBySession(ctx, session("th-1")); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("an observed session is not a task: %v", err)
 	}
 }
 
@@ -295,12 +296,12 @@ func caseUpsertThreadDetailStoresRunSpan(t *testing.T, open Factory) {
 	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{d.Thread})); err != nil {
 		t.Fatal(err)
 	}
-	th, err := s.GetThread(ctx, "th-span")
+	o, err := s.Observation(ctx, session("th-span"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if th.RunStartedAt == nil || !th.RunStartedAt.Equal(started) || th.RunEndedAt == nil || !th.RunEndedAt.Equal(done) {
-		t.Fatalf("span %v..%v, want %v..%v", th.RunStartedAt, th.RunEndedAt, started, done)
+	if o.StartedAt == nil || !o.StartedAt.Equal(started) || o.EndedAt == nil || !o.EndedAt.Equal(done) {
+		t.Fatalf("span %v..%v, want %v..%v", o.StartedAt, o.EndedAt, started, done)
 	}
 }
 
@@ -310,18 +311,17 @@ func caseProjectLastActivity(t *testing.T, open Factory) {
 	if p.LastActivityAt != nil {
 		t.Fatalf("new project activity %v", p.LastActivityAt)
 	}
+	// Observed sessions are not project activity: only Stage's tasks and
+	// journal are.
 	created := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
-	settled := created.Add(3 * time.Hour)
 	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{
-		{ThreadID: "th-1", ProjectID: "proj-1", Status: t3.StatusCompleted, CreatedAt: created, UpdatedAt: created.Add(time.Hour), Settled: true, SettledAt: &settled},
-		{ThreadID: "th-2", ProjectID: "proj-1", Status: t3.StatusCompleted, CreatedAt: created, UpdatedAt: created.Add(2 * time.Hour)},
-		{ThreadID: "th-x", ProjectID: "proj-other", Status: t3.StatusCompleted, CreatedAt: created, UpdatedAt: settled.Add(time.Hour)},
+		{ThreadID: "th-1", ProjectID: "proj-1", Status: t3.StatusCompleted, CreatedAt: created, UpdatedAt: created.Add(time.Hour)},
 	})); err != nil {
 		t.Fatal(err)
 	}
 	p, err := s.GetProject(ctx, p.ID)
-	if err != nil || p.LastActivityAt == nil || !p.LastActivityAt.Equal(settled) {
-		t.Fatalf("thread activity: want settle %v, got %v %v", settled, p.LastActivityAt, err)
+	if err != nil || p.LastActivityAt != nil {
+		t.Fatalf("observed session activity: %v %v", p.LastActivityAt, err)
 	}
 	task := mustTask(t, s, ctx, p.ID, "a", nil)
 	latest := task.UpdatedAt

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 )
 
 func init() {
@@ -25,9 +26,9 @@ func idsOf(ts []db.Task) []int64 {
 
 func originTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64, title, origin string) db.Task {
 	t.Helper()
-	task, err := s.CreateTask(ctx, db.NewTask{
-		ProjectID: projectID, Title: title, Prompt: "p", RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, OriginSession: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: origin},
+	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection,
+		ProjectID: projectID, Title: title, Prompt: "p",
+		Workspace: db.Workspace{Type: "root"}, OriginSession: ptr(session(origin)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +80,7 @@ func caseCreatedBy(t *testing.T, open Factory) {
 	_ = originTask(t, s, ctx, p.ID, "other", "elsewhere")
 	needs(t, s, ctx, b.ID, a.ID)
 	needs(t, s, ctx, mine.ID, b.ID) // owner task in the tree: not in the batch
-	got, err := s.CreatedBy(ctx, "plan")
+	got, err := s.CreatedBySession(ctx, session("plan"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,7 @@ func caseCreatedBy(t *testing.T, open Factory) {
 	if deps := got.Trees[0].Tasks[1].Dependents; !slices.Equal(deps, []int64{mine.ID}) {
 		t.Fatalf("outside dependent must still show: %v", deps)
 	}
-	none, err := s.CreatedBy(ctx, "nobody")
+	none, err := s.CreatedBySession(ctx, session("nobody"))
 	if err != nil || len(none.Trees)+len(none.Independent) != 0 {
 		t.Fatalf("none %+v %v", none, err)
 	}

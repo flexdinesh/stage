@@ -46,7 +46,7 @@ func claudeSetupWith(t *testing.T, p placement, f *claudetest.Fake, a *claudecod
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: claudeConn, Title: "Work", Prompt: "Do it", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "haiku"}})
+	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: claudeConn, Title: "Work", Prompt: "Do it", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "haiku"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,11 +283,11 @@ func TestContractClaudePredecessorBase(t *testing.T) {
 		f.GitInit()
 		store, svc, first, _ := claudeSetup(t, p, f)
 		ctx := t.Context()
-		pred, err := store.CreateTask(ctx, db.NewTask{ProjectID: first.ProjectID, ConnectionID: claudeConn, Title: "Build", Prompt: "Build it", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "worktree"}, ExecutionConfig: &execution.Config{Model: "haiku"}})
+		pred, err := store.CreateTask(ctx, db.NewTask{ProjectID: first.ProjectID, ConnectionID: claudeConn, Title: "Build", Prompt: "Build it", Workspace: db.Workspace{Type: "worktree"}, ExecutionConfig: &execution.Config{Model: "haiku"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		dep, err := store.CreateTask(ctx, db.NewTask{ProjectID: first.ProjectID, ConnectionID: claudeConn, Title: "Use", Prompt: "Use it", RuntimeMode: "full-access", InteractionMode: "default", Needs: []int64{pred.ID}, Workspace: db.Workspace{Type: "worktree", Base: db.BasePredecessor}, ExecutionConfig: &execution.Config{Model: "haiku"}})
+		dep, err := store.CreateTask(ctx, db.NewTask{ProjectID: first.ProjectID, ConnectionID: claudeConn, Title: "Use", Prompt: "Use it", Needs: []int64{pred.ID}, Workspace: db.Workspace{Type: "worktree", Base: db.BasePredecessor}, ExecutionConfig: &execution.Config{Model: "haiku"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -335,11 +335,11 @@ func TestContractClaudeRemovedPredecessorBlocksLaunch(t *testing.T) {
 		f.GitInit()
 		store, svc, first, _ := claudeSetup(t, p, f)
 		ctx := t.Context()
-		pred, err := store.CreateTask(ctx, db.NewTask{ProjectID: first.ProjectID, ConnectionID: claudeConn, Title: "Build", Prompt: "Build it", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "worktree"}, ExecutionConfig: &execution.Config{Model: "haiku"}})
+		pred, err := store.CreateTask(ctx, db.NewTask{ProjectID: first.ProjectID, ConnectionID: claudeConn, Title: "Build", Prompt: "Build it", Workspace: db.Workspace{Type: "worktree"}, ExecutionConfig: &execution.Config{Model: "haiku"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		dep, err := store.CreateTask(ctx, db.NewTask{ProjectID: first.ProjectID, ConnectionID: claudeConn, Title: "Use", Prompt: "Use it", RuntimeMode: "full-access", InteractionMode: "default", Needs: []int64{pred.ID}, Workspace: db.Workspace{Type: "worktree", Base: db.BasePredecessor}, ExecutionConfig: &execution.Config{Model: "haiku"}})
+		dep, err := store.CreateTask(ctx, db.NewTask{ProjectID: first.ProjectID, ConnectionID: claudeConn, Title: "Use", Prompt: "Use it", Needs: []int64{pred.ID}, Workspace: db.Workspace{Type: "worktree", Base: db.BasePredecessor}, ExecutionConfig: &execution.Config{Model: "haiku"}})
 		if err != nil {
 			t.Fatal(err)
 		}
