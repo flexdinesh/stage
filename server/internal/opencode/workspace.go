@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
-	"github.com/flexdinesh/stage/server/internal/gitmeta"
 )
 
 func queryDirectory(dir string) string {
@@ -75,10 +74,8 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 			ArchivedAt: millis(p.Time.Archived), CreatedAt: *millis(p.Time.Created), UpdatedAt: *millis(p.Time.Updated),
 			ActiveAt:   millis(p.Time.Active),
 			Importable: p.Vcs != "" && p.Time.Archived <= 0 && p.ID != globalProject,
-		}
-		// Only a service on Stage's machine shares its filesystem.
-		if a.local && p.Vcs == "git" {
-			w.Repo, w.RepoPath = gitmeta.Checkout(p.Canonical, p.Canonical)
+			// Only a service on Stage's machine shares its filesystem.
+			Local: a.local,
 		}
 		out = append(out, w)
 	}

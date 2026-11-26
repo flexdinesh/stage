@@ -16,7 +16,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
-	"github.com/flexdinesh/stage/server/internal/gitmeta"
 )
 
 // Options build an Adapter.
@@ -250,8 +249,10 @@ func claudeJSON(configDir, home string) string {
 const worktreeMarker = "/.claude/worktrees/"
 
 // Workspaces are the folders Claude Code knows (the projects of its state
-// file); a Git checkout's top is importable. No file: none. An unreadable
-// or malformed file is an error, so discovery keeps its last inventory.
+// file), local to the machine; a Git checkout's top is importable, which
+// the machine's ops decide (ImportCheckoutTop). No file: none. An
+// unreadable or malformed file is an error, so discovery keeps its last
+// inventory.
 func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, error) {
 	home := a.cli.home()
 	configDir := a.identity
@@ -287,13 +288,7 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 			continue
 		}
 		dir = filepath.Clean(dir)
-		w := execution.WorkspaceInfo{ID: dir, Title: filepath.Base(dir), WorkspaceRoot: dir, CreatedAt: st.ModTime().UTC(), UpdatedAt: st.ModTime().UTC()}
-		if fi, err := os.Stat(filepath.Join(dir, ".git")); err == nil && (fi.IsDir() || fi.Mode().IsRegular()) {
-			w.Importable = true
-			w.Repo, w.RepoPath = gitmeta.Checkout(dir, dir)
-			w.OriginRemote = ""
-		}
-		out = append(out, w)
+		out = append(out, execution.WorkspaceInfo{ID: dir, Title: filepath.Base(dir), WorkspaceRoot: dir, CreatedAt: st.ModTime().UTC(), UpdatedAt: st.ModTime().UTC(), Local: true, ImportIf: execution.ImportCheckoutTop})
 	}
 	slices.SortFunc(out, func(x, y execution.WorkspaceInfo) int { return strings.Compare(x.ID, y.ID) })
 	a.inv, a.invAt, a.invKey = out, st.ModTime(), path

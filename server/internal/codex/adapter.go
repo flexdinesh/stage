@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
-	"github.com/flexdinesh/stage/server/internal/gitmeta"
 )
 
 // Adapter is one Codex connection: the daemon a Client reaches, for the
@@ -216,8 +215,9 @@ func (a *Adapter) catalog(ctx context.Context) ([]model, error) {
 	return all, nil
 }
 
-// Workspaces are the directories trusted in Codex (config projects). One
-// inside a Git checkout is importable; others stay manual-bind only.
+// Workspaces are the directories trusted in Codex (config projects), local
+// to the machine. One inside a Git checkout is importable, which the
+// machine's ops decide (ImportInCheckout); others stay manual-bind only.
 // Codex reports no archive or activity for them.
 func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, error) {
 	var res configResponse
@@ -250,31 +250,14 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 	return out, nil
 }
 
-// workspace describes a trusted directory: its Git checkout (read from
-// .git on this machine) decides import, its origin the match key.
+// workspace describes a trusted directory.
 func workspace(dir string) execution.WorkspaceInfo {
-	w := execution.WorkspaceInfo{ID: dir, Title: title(dir), WorkspaceRoot: dir}
+	w := execution.WorkspaceInfo{ID: dir, Title: title(dir), WorkspaceRoot: dir, Local: true, ImportIf: execution.ImportInCheckout}
 	if info, err := os.Stat(dir); err == nil {
 		t := info.ModTime().UTC()
 		w.CreatedAt, w.UpdatedAt = t, t
 	}
-	if gitTop(dir) != "" {
-		w.Importable = true
-		w.Repo, w.RepoPath = gitmeta.Checkout(dir, string(filepath.Separator))
-	}
 	return w
-}
-
-// gitTop is the nearest directory at or above dir holding .git ("" none).
-func gitTop(dir string) string {
-	for top := filepath.Clean(dir); ; top = filepath.Dir(top) {
-		if _, err := os.Stat(filepath.Join(top, ".git")); err == nil {
-			return top
-		}
-		if top == filepath.Dir(top) {
-			return ""
-		}
-	}
 }
 
 // title is the directory's name, or parent/name for main, master or trunk.

@@ -196,31 +196,19 @@ func (r projects) ImportCandidates(ctx context.Context, connectionID int64) ([]s
 	})
 }
 
-func (r projects) ids(ctx context.Context, query string, args ...any) ([]int64, error) {
-	rows, err := r.Query(ctx, query, args...)
+func (r projects) Claims(ctx context.Context) ([]store.Claim, error) {
+	rows, err := r.Query(ctx, `SELECT b.id,b.project_id,b.connection_id,c.machine_id,b.workspace,COALESCE(e.repo,''),COALESCE(e.repo_path,'') FROM project_bindings b
+ JOIN harness_connections c ON c.id=b.connection_id
+ LEFT JOIN external_projects e ON e.connection_id=b.connection_id AND e.external_id=b.external_project_id AND e.workspace=b.workspace
+ WHERE b.active=1 ORDER BY b.project_id,b.id`)
 	if err != nil {
 		return nil, err
 	}
-	return collectRows(rows, rowTo[int64])
-}
-
-func (r projects) PathOwners(ctx context.Context, workspace string, machine int64) ([]int64, error) {
-	return r.ids(ctx, `SELECT DISTINCT b.project_id FROM project_bindings b JOIN harness_connections c ON c.id=b.connection_id
- WHERE b.workspace=$1 AND b.active=1 AND c.machine_id=$2 ORDER BY b.project_id`, workspace, machine)
-}
-
-func (r projects) RemoteOwners(ctx context.Context, machine int64, repo, repoPath string) ([]int64, error) {
-	return r.ids(ctx, `SELECT DISTINCT b.project_id FROM project_bindings b
- JOIN harness_connections c ON c.id=b.connection_id
- JOIN external_projects e ON e.connection_id=b.connection_id AND e.external_id=b.external_project_id AND e.workspace=b.workspace
- WHERE b.active=1 AND c.machine_id<>$1 AND e.repo=$2 AND e.repo_path=$3 ORDER BY b.project_id`, machine, repo, repoPath)
-}
-
-func (r projects) PlacedOn(ctx context.Context, projectID, machine int64) (bool, error) {
-	var placed bool
-	err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_bindings b JOIN harness_connections c ON c.id=b.connection_id
- WHERE b.project_id=$1 AND b.active=1 AND c.machine_id=$2)`, projectID, machine).Scan(&placed)
-	return placed, err
+	return collectRows(rows, func(row rowScanner) (store.Claim, error) {
+		var c store.Claim
+		err := row.Scan(&c.BindingID, &c.ProjectID, &c.ConnectionID, &c.MachineID, &c.Workspace, &c.Repo, &c.RepoPath)
+		return c, err
+	})
 }
 
 func (r projects) FollowArchive(ctx context.Context) (archived, unarchived int, err error) {

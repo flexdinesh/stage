@@ -13,6 +13,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest"
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest/fakestate"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/machine"
 )
 
 const conn = 7
@@ -704,8 +705,17 @@ func TestHealthAndWorkspaces(t *testing.T) {
 	if err != nil || len(ws) != 2 {
 		t.Fatalf("%+v %v", ws, err)
 	}
+	// Harness facts only: the machine's ops read the Git evidence.
 	for _, w := range ws {
-		if w.ID != w.WorkspaceRoot || w.Importable != (w.ID == f.Workspace) {
+		if w.ID != w.WorkspaceRoot || !w.Local || w.ImportIf != execution.ImportCheckoutTop || w.Importable {
+			t.Fatalf("%+v", w)
+		}
+	}
+	if ws, err = (machine.LocalOps{}).Inventory(t.Context(), ws, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range ws {
+		if w.Importable != (w.ID == f.Workspace) {
 			t.Fatalf("%+v", w)
 		}
 	}

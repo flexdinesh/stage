@@ -63,9 +63,34 @@ type WorkspaceInfo struct {
 	// never proof within one machine (docs/architecture.md).
 	Repo string `json:"repo,omitempty"`
 	// RepoPath: slash-separated path from the checkout top to WorkspaceRoot
-	// ("." at the top), "" when unknown. Set only with Repo.
+	// ("." at the top), "" when unknown. Set only with Repo. Repo and
+	// RepoPath are harness facts only when the harness reports them (T3);
+	// otherwise machine.Ops reads them where the files live. Adapters never
+	// read Git (ADR 0007 decision 11).
 	RepoPath string `json:"repoPath,omitempty"`
+	// Local: WorkspaceRoot is a path on the filesystem of the machine that
+	// hosts the adapter (a hosted harness, or a service sharing that
+	// filesystem), so the machine's ops read it without a declared shared
+	// path.
+	Local bool `json:"local,omitempty"`
+	// ImportIf: the harness keeps no project list of its own and treats a
+	// workspace as a deliberate project when it is a Git checkout; the
+	// machine's ops read the files and set Importable. "": Importable is
+	// the harness's own judgment.
+	ImportIf ImportRule `json:"importIf,omitempty"`
 }
+
+// ImportRule is which Git checkouts a harness without a project list
+// imports (WorkspaceInfo.ImportIf).
+type ImportRule string
+
+const (
+	// ImportCheckoutTop: the top level of a Git checkout.
+	ImportCheckoutTop ImportRule = "checkoutTop"
+	// ImportInCheckout: any directory inside a Git checkout.
+	ImportInCheckout ImportRule = "inCheckout"
+)
+
 type ModelOption struct {
 	ID    string      `json:"id"`
 	Value OptionValue `json:"value"`

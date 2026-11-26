@@ -19,8 +19,8 @@ A project groups tasks, trees and schedules under one title. Stage owns the proj
 A binding ties a project to one workspace on one connection. A project has at most one binding per connection, and each workspace belongs to at most one project.
 
 - **Bind workspace**: pick an existing workspace the harness reports. To bind a directory the harness does not list yet, add it in the harness, then refresh workspaces. Stage never creates harness projects, and never creates, clones or provisions directories.
-- **Match**: Stage can bind for you when it can prove two harnesses see the same checkout, through the shared path mappings you declare. Two workspaces with the same Git remote only produce a suggestion you confirm.
-- **Import**: each sync binds deliberate harness projects (live T3 projects, and OpenCode Git or Mercurial checkouts it has not archived). A workspace at a path a project already uses on that machine joins that project; a new path creates a project. The Projects page notes recent imports for 7 days.
+- **Match**: Stage binds for you when the workspace is the project's only match: the same path on that machine, a checkout it can prove two harnesses share (through the shared path mappings you declare, or directly for Claude Code, Codex and a local OpenCode service), or the same Git remote and subproject on another machine. Other workspaces with the same Git remote only produce a suggestion you confirm.
+- **Import**: each sync binds deliberate harness projects (live T3 projects, OpenCode Git or Mercurial checkouts it has not archived, Git checkouts Codex trusts, and Claude Code folders at a checkout's top). A workspace at a path a project already uses on that machine joins that project; a new path creates a project. The Projects page notes recent imports for 7 days.
 - **Unbind**: unbinding declines that workspace for good. Discovery never binds it again until you bind it by hand.
 
 When a project is bound on more than one connection, you pick the destination on each new task. The harness picker lists the project's bound connections first.
@@ -32,7 +32,7 @@ When a project is bound on more than one connection, you pick the destination on
 
 ## Projects across machines
 
-With [workers](/docs/concepts/machines), the same repository can be checked out on several machines. A workspace on another machine joins the one project bound to the same Git origin remote and subproject. If more than one project could match, Stage waits for you to bind it by hand. A workspace with no remote never merges across machines.
+With [workers](/docs/concepts/machines), the same repository can be checked out on several machines. Each machine reads its own checkouts. A workspace on another machine joins the one project bound to the same Git origin remote and subproject. If more than one project could match, or the project already has another checkout on that machine, Stage waits for you to bind it by hand. A workspace with no remote never merges across machines.
 
 ## Archive
 

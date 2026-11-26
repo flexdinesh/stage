@@ -1,14 +1,17 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/gitmeta"
 	"github.com/flexdinesh/stage/server/internal/machine"
+	"github.com/flexdinesh/stage/server/internal/projectmatch"
 )
 
 // Only repository hosts and paths enter comparisons. Credentials and local
@@ -36,9 +39,13 @@ func (s *server) sharedPaths(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// The explicit match action binds by verified checkout evidence. Discovery
-// refresh here stays read-only for bindings; the sync pass alone imports
-// (db.Store.ImportWorkspaces).
+// The explicit match action walks the project identity ladder
+// (projectmatch.Resolve) for the connection's live inventory against the
+// other connections' available bindings, with Git checkout proof from the
+// matched connection's machine: a workspace the ladder places in this
+// project binds when it is the only one, and equal remotes suggest.
+// Discovery refresh here stays read-only for other bindings; the sync pass
+// alone imports (db.Store.ImportWorkspaces).
 func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	id, err := pathID(r)
@@ -75,20 +82,21 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	ops, hosted := s.Sync.Ops(machineID)
-	checkout := func(id int64, dir string) machine.CheckoutEvidence {
+	checkout := func(id int64, w execution.WorkspaceInfo) machine.CheckoutEvidence {
 		if !hosted {
 			return machine.CheckoutEvidence{}
 		}
-		var roots []machine.SharedRoot
+		var declared []machine.SharedRoot
 		for _, p := range paths {
 			if p.ConnectionID == id {
-				roots = append(roots, machine.SharedRoot{HarnessRoot: p.HarnessRoot, StageRoot: p.StageRoot})
+				declared = append(declared, machine.SharedRoot{HarnessRoot: p.HarnessRoot, StageRoot: p.StageRoot})
 			}
 		}
+		roots := machine.RootsFor(w, declared)
 		if len(roots) == 0 {
 			return machine.CheckoutEvidence{}
 		}
-		proof, err := ops.Checkout(ctx, roots, dir)
+		proof, err := ops.Checkout(ctx, roots, w.WorkspaceRoot)
 		if err != nil {
 			return machine.CheckoutEvidence{}
 		}
@@ -107,43 +115,39 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 		return out
 	}
 	inventories[connection] = index(inventory)
-	evidence := func(id int64, key location) (machine.CheckoutEvidence, bool) {
+	evidence := func(id int64, key location) (projectmatch.Evidence, bool) {
 		items, loaded := inventories[id]
 		if !loaded {
 			inventories[id] = nil
-			if a, e := s.Sync.Adapter(id); e == nil {
-				call, cancel := context.WithTimeout(ctx, 3*time.Second)
-				rows, e := a.Workspaces(call)
-				cancel()
-				if e == nil {
-					items = index(rows)
-					inventories[id] = items
-				}
+			call, cancel := context.WithTimeout(ctx, 3*time.Second)
+			rows, e := s.Sync.Inventory(call, id)
+			cancel()
+			if e == nil {
+				items = index(rows)
+				inventories[id] = items
 			}
 		}
 		w, ok := items[key]
 		if !ok {
-			return machine.CheckoutEvidence{}, false
+			return projectmatch.Evidence{}, false
 		}
+		m := s.Store.ConnectionMachine(id)
 		var proof machine.CheckoutEvidence
-		if s.Store.ConnectionMachine(id) == machineID {
-			proof = checkout(id, key.dir)
+		if m == machineID {
+			proof = checkout(id, w)
 		}
-		if proof.Remote == "" {
-			proof.Remote = remoteIdentity(w.OriginRemote)
+		e := projectmatch.Evidence{Connection: id, Machine: m, Path: w.WorkspaceRoot, Common: proof.Common, Subproject: proof.Subproject, Remote: proof.Remote, RepoPath: proof.RepoPath}
+		if e.Remote == "" {
+			e.Remote = cmp.Or(w.Repo, remoteIdentity(w.OriginRemote))
 		}
 		// A proven checkout carries its own subproject; otherwise the
-		// harness's, when it reported the same remote.
-		if proof.Common == "" && proof.Remote != "" && proof.Remote == w.Repo {
-			proof.RepoPath = w.RepoPath
+		// inventory's, when it names the same remote.
+		if proof.Common == "" && e.Remote != "" && e.Remote == w.Repo {
+			e.RepoPath = w.RepoPath
 		}
-		return proof, true
+		return e, true
 	}
-	type owner struct {
-		binding db.ProjectBinding
-		proof   machine.CheckoutEvidence
-	}
-	var owners []owner
+	var owners []projectmatch.Binding
 	already := false
 	for _, p := range projects {
 		for _, b := range p.Bindings {
@@ -154,8 +158,8 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 				continue
 			}
 			if b.Status == "available" {
-				if proof, ok := evidence(b.ConnectionID, location{b.ExternalProjectID, b.Workspace}); ok {
-					owners = append(owners, owner{b, proof})
+				if e, ok := evidence(b.ConnectionID, location{b.ExternalProjectID, b.Workspace}); ok {
+					owners = append(owners, projectmatch.Binding{ID: b.ID, Project: p.ID, Evidence: e})
 				}
 			}
 		}
@@ -165,44 +169,58 @@ func (s *server) matchWorkspace(w http.ResponseWriter, r *http.Request) error {
 	ambiguous := false
 	suggestions := map[string]string{}
 	for _, c := range candidates {
-		proof, ok := evidence(connection, location{c.ExternalID, c.Workspace})
+		e, ok := evidence(connection, location{c.ExternalID, c.Workspace})
 		if !ok {
 			continue
 		}
-		matches := 0
-		var selected db.ProjectBinding
-		for _, o := range owners {
-			if proof.SameCheckout(o.proof) {
-				matches++
-				if o.binding.ProjectID == id {
-					selected = o.binding
-					suggestions[c.ExternalID] = "Shared Git checkout and subproject"
-				}
-			} else if o.binding.ProjectID == id && proof.SameRemote(o.proof) {
-				suggestions[c.ExternalID] = "Same Git remote. Confirm the checkout."
-			}
-		}
-		if selected.ID != 0 && matches > 1 {
-			ambiguous = true
-		}
-		if matches == 1 && selected.ID != 0 {
-			source = selected.ID
+		// An explicit match is the user's decision, like a manual bind: an
+		// earlier decline does not stop it.
+		v := projectmatch.Resolve(projectmatch.Candidate{Evidence: e, Bound: ptrValue(c.ProjectID)}, owners)
+		switch {
+		case v.Rung == projectmatch.RungBinding:
+		case v.Project == id:
+			suggestions[c.ExternalID] = matchReason(v)
+			source = v.Via
 			chosen = append(chosen, db.ProjectBinding{ProjectID: id, ConnectionID: connection, ExternalProjectID: c.ExternalID, Workspace: c.Workspace})
+		case slices.Contains(v.Matches, id):
+			suggestions[c.ExternalID] = matchReason(v)
+			// The same machine names several projects: none binds.
+			ambiguous = ambiguous || v.Rung != projectmatch.RungRemote
+		case slices.Contains(v.Suggest, id):
+			suggestions[c.ExternalID] = sameRemote
 		}
 	}
 	var bound *db.Project
 	if !already && !ambiguous && len(chosen) == 1 {
-		for _, c := range candidates {
-			if c.ExternalID == chosen[0].ExternalProjectID && c.Workspace == chosen[0].Workspace && c.ProjectID == nil {
-				p, err := s.Store.AutoBind(ctx, source, chosen[0], paths)
-				if err != nil {
-					return err
-				}
-				bound = &p
-				break
-			}
+		p, err := s.Store.AutoBind(ctx, source, chosen[0], paths)
+		if err != nil {
+			return err
 		}
+		bound = &p
 	}
 	writeJSON(w, 200, map[string]any{"bound": bound, "suggestions": suggestions, "projects": candidates})
 	return nil
+}
+
+const sameRemote = "Same Git remote. Confirm the checkout."
+
+// matchReason says which rung named the project.
+func matchReason(v projectmatch.Verdict) string {
+	switch {
+	case v.Rung == projectmatch.RungPath:
+		return "Same path on this machine"
+	case v.Rung == projectmatch.RungCheckout:
+		return "Shared Git checkout and subproject"
+	case v.Leave:
+		return sameRemote
+	default:
+		return "Same Git remote and subproject on another machine"
+	}
+}
+
+func ptrValue(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }

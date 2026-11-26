@@ -17,27 +17,51 @@ type LocalOps struct{}
 
 var _ Ops = LocalOps{}
 
-// Inventory reads repository metadata without a git binary through the
-// first root a workspace sits under (gitmeta.Translate, gitmeta.Checkout):
-// the origin remote and the subproject path, never walking above the root.
-// A workspace that already has a Repo keeps it.
+// Inventory reads each workspace's Git evidence without a git binary
+// through the first root it sits under (RootsFor, gitmeta.Translate),
+// never walking above that root: the origin remote and the subproject path
+// (a workspace that already has a Repo, reported by its harness, keeps
+// it), and Importable for a harness that imports Git checkouts
+// (WorkspaceInfo.ImportIf). A workspace under no root keeps what the
+// harness said; one with ImportIf is then not importable.
 func (LocalOps) Inventory(_ context.Context, ws []execution.WorkspaceInfo, roots []SharedRoot) ([]execution.WorkspaceInfo, error) {
 	ws = slices.Clone(ws)
 	for i := range ws {
-		if ws[i].Repo != "" {
-			continue
-		}
-		for _, r := range roots {
-			if dir, ok := gitmeta.Translate(r.HarnessRoot, r.StageRoot, ws[i].WorkspaceRoot); ok {
-				// The walk to the checkout top stays inside the shared path.
+		w := &ws[i]
+		top, dir := "", ""
+		for _, r := range RootsFor(*w, roots) {
+			if d, ok := gitmeta.Translate(r.HarnessRoot, r.StageRoot, w.WorkspaceRoot); ok {
+				// The walk to the checkout top stays inside the root.
 				if root, err := filepath.EvalSymlinks(r.StageRoot); err == nil {
-					ws[i].Repo, ws[i].RepoPath = gitmeta.Checkout(dir, root)
+					top, dir = gitmeta.Top(d, root), d
 				}
 				break
 			}
 		}
+		switch w.ImportIf {
+		case execution.ImportCheckoutTop:
+			w.Importable = top != "" && top == dir
+		case execution.ImportInCheckout:
+			w.Importable = top != ""
+		}
+		if w.Repo == "" && top != "" {
+			w.Repo, w.RepoPath = gitmeta.Checkout(dir, top)
+		}
 	}
 	return ws, nil
+}
+
+// identityRoot maps a path local to the machine to itself.
+var identityRoot = SharedRoot{HarnessRoot: string(filepath.Separator), StageRoot: string(filepath.Separator)}
+
+// RootsFor are the roots a workspace's Git evidence is read through: its
+// connection's declared shared paths, then, for a path local to the
+// machine (WorkspaceInfo.Local), the path itself.
+func RootsFor(w execution.WorkspaceInfo, declared []SharedRoot) []SharedRoot {
+	if !w.Local {
+		return declared
+	}
+	return append(slices.Clip(declared), identityRoot)
 }
 
 // Checkout asks git where the directory's checkout is, through the first
