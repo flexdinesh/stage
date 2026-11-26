@@ -168,6 +168,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("PUT /api/connections/{connectionId}/auto-complete", s.setAutoComplete)
 	h("PUT /api/connections/{connectionId}/new-task-config", s.setNewTaskConfig)
 	h("DELETE /api/connections/{connectionId}", s.forgetConnection)
+	h("POST /api/connections/{connectionId}/observations", s.pushObservations)
 	h("POST /api/tasks/{id}/launch-link/preview", s.previewLaunchLink)
 	h("POST /api/tasks/{id}/launch-link", s.attachLaunchLink)
 	h("GET /api/connections/{connectionId}/projects", s.externalProjects)

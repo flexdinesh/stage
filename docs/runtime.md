@@ -478,7 +478,9 @@ so `stage`, `stage mcp` and HTTP MCP clients there work unchanged. Code:
   is skipped for it (a proxy on the same host forwards the public Host).
   Machine management routes and per-machine harness setup changes
   (`PUT`/`POST`/`DELETE /api/machines/{id}/harnesses/...`) are 403
-  `gateway_forbidden`; `/api/worker/*`
+  `gateway_forbidden`, and so is pushing observations
+  (`POST /api/connections/{id}/observations`) for another machine's
+  connection; `/api/worker/*`
   and other paths 404 ([api.md](api.md#apiworkergatewayapi-and-apiworkergatewaymcp)).
 - **Reported addresses.** The worker sends its listener URLs in the channel
   connect's `Stage-Worker-Gateway` header; the main server keeps them in

@@ -57,7 +57,7 @@ func (s *Service) previewExisting(ctx context.Context, id int64, link string) (L
 	if o.Session != ref {
 		return p, db.Conflict("Harness returned a different session.")
 	}
-	if err = s.checkObservation(t.Harness, o); err != nil {
+	if err = s.CheckObservation(t.Harness, o); err != nil {
 		return p, err
 	}
 	dest, err := s.store.LaunchDestination(ctx, id, t.LaunchAttempt)

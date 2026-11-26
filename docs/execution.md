@@ -420,7 +420,15 @@ interaction).
   policies, transition, inferred completion). Unowned sessions are left to
   discovery, launching tasks to their launch. Polling continues as
   reconciliation, so a lost event only delays; the stream is the shape a
-  worker's upstream channel will take.
+  worker's upstream channel will take. An external bridge or hook (no
+  in-process `EventSource`) may push observations of an existing connection
+  to `POST /api/connections/{id}/observations`
+  ([api.md](api.md#harness-connections-api-v6), ADR 0007 decision 8): the
+  same `sync.Service.Ingest`, after `CheckObservation` with the
+  connection's kind, so a malformed one is reported `invalid` and changes
+  nothing; each result says `ingested`, `ignored` or `invalid`. A push for
+  a connection on an offline worker (or one that needs an update) is 409
+  `connection_unavailable` and changes nothing. Polling still reconciles.
 - **Resume command.** `Links.command` is a copyable shell command that
   resumes the session in the harness's own client, for a harness without a web
   or app destination. The platform's `ExecutionLinks.command` carries it; hosts
