@@ -23,5 +23,8 @@ func (s *Service) RefreshScopedSession(ctx context.Context, ref execution.Sessio
 	if o.Session != ref {
 		return db.Conflict("Harness returned a different session. Check the configured connection.")
 	}
+	if e := s.refusal(s.store.Harness(ref.ConnectionID), o); e != nil {
+		return e
+	}
 	return s.store.PutObservation(ctx, o)
 }

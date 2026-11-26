@@ -17,7 +17,8 @@ import (
 type Transcript struct {
 	SessionID string
 	// Cwd, Entrypoint and FirstPrompt come from the first typed user
-	// prompt (entrypoint t3-code: a session T3 started).
+	// prompt. Entrypoint is the client that started the session
+	// (execution.Observation Origin).
 	Cwd, Entrypoint, FirstPrompt string
 	FirstAt, LastAt              time.Time
 	// Title: the user's title (custom-title), else Claude's (ai-title).
@@ -370,12 +371,6 @@ func transcriptPath(root, cwd, id string) (string, bool) {
 	return ms[0], true
 }
 
-// Origin reports the entrypoint of a T3-started session.
-const entrypointT3 = "t3-code"
-
 // sessionKindBackground is a transcript record's sessionKind in a `--bg`
 // session.
 const sessionKindBackground = "bg"
-
-// refusedT3 is the refusal for a session T3 started: T3 tracks it.
-var refusedT3 = "This Claude session was started by T3. Track it through T3."

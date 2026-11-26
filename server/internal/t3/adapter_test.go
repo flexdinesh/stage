@@ -159,6 +159,9 @@ func TestUnreportedRuntimeModesInheritHarnessPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := caps.DeclaresOperations(); err != nil {
+		t.Fatal(err)
+	}
 	m := caps.Models[0]
 	if m.Permissions != nil {
 		t.Fatalf("unreported runtime modes reported as %+v", m.Permissions)

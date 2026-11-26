@@ -560,9 +560,10 @@ func TestStop(t *testing.T) {
 	}
 }
 
-// Attention lists every session waiting for its user that Stage may track:
-// blocked background sessions (also retired ones, with no process) and
-// waiting terminal sessions, never T3's or ones that are not waiting.
+// Attention lists every session waiting for its user: blocked background
+// sessions (also retired ones, with no process) and waiting terminal
+// sessions, whatever client started them (the coordinator leaves out
+// wrapped ones), never ones that are not waiting.
 func TestAttentionListsWaitingSessions(t *testing.T) {
 	f := claudetest.New(t)
 	a := f.Adapter(conn)
@@ -614,7 +615,7 @@ func TestAttentionListsWaitingSessions(t *testing.T) {
 	f.SetState(term, "", "waiting", "permission prompt")
 	f.SetState(t3, "", "waiting", "input needed")
 	f.SetState(idle, "", "idle", "")
-	attention(blocked, term)
+	attention(blocked, term, t3)
 	f.Update(func(s *fakestate.State) { s.FailAgents = true })
 	if _, err := a.Attention(t.Context()); err == nil {
 		t.Fatal("an unreadable list must be an error")
@@ -643,27 +644,27 @@ func TestInteractiveLinks(t *testing.T) {
 	}
 }
 
-// A session T3 started is refused everywhere Stage could pick it up; a
-// terminal session can be adopted by UUID or short id.
-func TestT3SessionsAreRefusedAndLinksResolve(t *testing.T) {
+// A session reports the client that started it raw (its origin), for the
+// coordinator to refuse a wrapped one; a terminal session can be adopted
+// by UUID or short id.
+func TestSessionOriginAndLinksResolve(t *testing.T) {
 	f := claudetest.New(t)
 	a := f.Adapter(conn)
-	t3 := "33333333-3333-4333-8333-333333333333"
-	f.AddInteractive(t3, f.Workspace, "t3-code", "from T3")
-	ref := execution.SessionRef{ConnectionID: conn, ExternalSessionID: t3}
-	var refused *execution.Refused
-	if _, err := a.Observe(t.Context(), ref); !errors.As(err, &refused) || !strings.Contains(refused.Reason, "Track it through T3") {
-		t.Fatalf("observe: %v", err)
+	wrapped := "33333333-3333-4333-8333-333333333333"
+	f.AddInteractive(wrapped, f.Workspace, "wrapper-entrypoint", "from a wrapper")
+	ref := execution.SessionRef{ConnectionID: conn, ExternalSessionID: wrapped}
+	if o, err := a.Observe(t.Context(), ref); err != nil || o.Origin != "wrapper-entrypoint" {
+		t.Fatalf("observe: %+v %v", o, err)
 	}
-	if _, err := a.ResolveLink(t.Context(), t3); !errors.As(err, &refused) {
-		t.Fatalf("resolve: %v", err)
+	if r, err := a.ResolveLink(t.Context(), wrapped); err != nil || r != ref {
+		t.Fatalf("resolve: %+v %v", r, err)
 	}
 	term := "44444444-4444-4444-8444-444444444444"
 	f.AddInteractive(term, f.Workspace, "cli", "from a terminal")
 	if r, err := a.ResolveLink(t.Context(), "claude --resume "+term); err != nil || r.ExternalSessionID != term {
 		t.Fatalf("%+v %v", r, err)
 	}
-	if o, err := a.Observe(t.Context(), execution.SessionRef{ConnectionID: conn, ExternalSessionID: term}); err != nil || o.State != "running" {
+	if o, err := a.Observe(t.Context(), execution.SessionRef{ConnectionID: conn, ExternalSessionID: term}); err != nil || o.State != "running" || o.Origin != "cli" {
 		t.Fatalf("interactive %+v %v", o, err)
 	}
 	o, err := a.Launch(t.Context(), intent(f, "req-r"), execution.Checkpoint{}, nil)
@@ -727,15 +728,15 @@ func TestHealthAndWorkspaces(t *testing.T) {
 func TestFeatures(t *testing.T) {
 	f := claudetest.New(t)
 	c, err := f.Adapter(conn).Features(t.Context())
-	if err != nil || c.Valid() != nil {
-		t.Fatal(err, c.Valid())
+	if err != nil || c.Valid() != nil || c.DeclaresOperations() != nil {
+		t.Fatal(err, c.Valid(), c.DeclaresOperations())
 	}
-	for _, op := range []string{"worktreeBase", "respond", "registerWorkspace"} {
+	for _, op := range []execution.Op{execution.OpWorktreeBase, execution.OpRespond} {
 		if a := c.Operations[op]; a.Available || a.Reason == "" {
 			t.Fatalf("%s %+v", op, a)
 		}
 	}
-	for _, op := range []string{"images", "predecessorBase", "send"} {
+	for _, op := range []execution.Op{execution.OpImages, execution.OpPredecessorBase, execution.OpSend, execution.OpAttention} {
 		if a := c.Operations[op]; !a.Available {
 			t.Fatalf("%s %+v", op, a)
 		}

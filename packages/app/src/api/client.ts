@@ -270,7 +270,6 @@ export function createApi(transport: Transport) {
     externalProjects: (connectionId: number) => apiFetch<{projects: ExternalProject[]}>(`/connections/${connectionId}/projects`),
     bindProject: (id: number, project: ExternalProject) => apiFetch<Project>(`/projects/${id}/binding`, put({connectionId: project.connectionId, externalProjectId: project.externalId, workspace: project.workspace})),
     unbindProject: (id: number, connectionId: number) => apiFetch<Project>(`/projects/${id}/bindings/${connectionId}`, {method: "DELETE"}),
-    registerWorkspace: (body: {title: string; workspace: string}) => apiFetch<ExternalProject>("/connections/t3/projects", post(body)),
 
     tasks: (q: TaskListQuery = {}) =>
       apiFetch<TaskList>(

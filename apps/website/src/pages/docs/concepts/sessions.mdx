@@ -36,7 +36,7 @@ You can adopt a session started directly in a harness as a task, so it shows in 
 
 - Use **Track session** on the Dashboard, Tasks or Trees, or **Add session** in a tree.
 - Choose the harness and paste the session link or id. Preview its title, project and state, then confirm with an optional title and initial note. The field's hint says what the harness accepts: for Codex, a thread id or a `codex resume <id>` command; for Claude Code, a session UUID, the 8-character ID `claude agents` shows, or a pasted `claude attach` or `--resume` command.
-- A harness may refuse a session another client owns. A Codex thread or Claude Code session that T3 started is refused: track it through T3.
+- Stage refuses a session another harness runs and tracks. A Codex thread or Claude Code session that T3 started is refused: track it through T3.
 - Stage never starts the session. Its prompt is read from the harness, and Stop still works.
 - A session already tracked returns its existing task. Subagent and archived sessions cannot be tracked.
 - Tracking never completes the task, even for a finished session. You complete it, or the connection's auto-complete may on a later poll.

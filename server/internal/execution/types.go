@@ -124,11 +124,11 @@ type Capabilities struct {
 	Options []Option `json:"options,omitempty"`
 	// ModeLabel names the mode choice in the harness's own words ("Agent");
 	// empty reads "Interaction mode".
-	ModeLabel  string                  `json:"modeLabel,omitempty"`
-	Operations map[string]Availability `json:"operations"`
-	Models     []Model                 `json:"models"`
-	Modes      []Choice                `json:"modes"`
-	Workspaces []Choice                `json:"workspaces"`
+	ModeLabel  string              `json:"modeLabel,omitempty"`
+	Operations map[Op]Availability `json:"operations"`
+	Models     []Model             `json:"models"`
+	Modes      []Choice            `json:"modes"`
+	Workspaces []Choice            `json:"workspaces"`
 }
 type Config struct {
 	Model      string        `json:"model"`
@@ -231,6 +231,11 @@ type Observation struct {
 	Closed      *Closure     `json:"closed,omitempty"`
 	// StateReason qualifies State; "" when the state speaks for itself.
 	StateReason string `json:"stateReason,omitempty"`
+	// Origin is the client that started the session as the harness
+	// records it (Claude Code's entrypoint, Codex's originator), raw; ""
+	// when it records none. The coordinator refuses a session whose origin
+	// another registered harness wraps (harness.Wraps).
+	Origin string `json:"origin,omitempty"`
 }
 
 // ReasonOwnerExited: the process that owned the execution exited without
@@ -290,8 +295,8 @@ type Rejected struct{ Reason string }
 
 func (e *Rejected) Error() string { return e.Reason }
 
-// Refused: the harness will not let Stage track this session (another
-// client owns it, e.g. a Claude session T3 started). Reason says where to
+// Refused: Stage will not track this session (another harness wraps it,
+// e.g. a Claude session T3 started: harness.Wraps). Reason says where to
 // track it instead. It is a decision, not a failure: the API answers 409.
 type Refused struct{ Reason string }
 
@@ -323,7 +328,6 @@ type Adapter interface {
 	Health(context.Context) Health
 	Features(context.Context) (Capabilities, error)
 	Workspaces(context.Context) ([]WorkspaceInfo, error)
-	RegisterWorkspace(context.Context, string, string) (WorkspaceInfo, error)
 	Observe(context.Context, SessionRef) (Observation, error)
 	Launch(context.Context, Intent, Checkpoint, SaveCheckpoint) (Observation, error)
 	Stop(context.Context, SessionRef) error

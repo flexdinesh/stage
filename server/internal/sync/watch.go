@@ -31,7 +31,8 @@ func (s *Service) watchConnection(ctx context.Context, connection int64) error {
 	}
 	// A silent harness's unowned sessions are current state only (the
 	// waiting row and needs-input count): no inbox event, no push.
-	d, _ := s.descriptor(s.store.Harness(connection))
+	kind := s.store.Harness(connection)
+	d, _ := s.descriptor(kind)
 	silent := d.Attention == harness.AttentionSilent
 	refs, e := a.Attention(ctx)
 	if e != nil {
@@ -58,7 +59,8 @@ func (s *Service) watchConnection(ctx context.Context, connection int64) error {
 		}
 		seen[ref.ExternalSessionID] = true
 		o, e := a.Observe(ctx, ref)
-		if e != nil || o.Child || o.Session != ref {
+		// A session another harness wraps is that harness's to surface.
+		if e != nil || o.Child || o.Session != ref || s.refusal(kind, o) != nil {
 			continue
 		}
 		previous, e := s.store.Observation(ctx, ref)

@@ -115,12 +115,6 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 	return ws, err
 }
 
-func (a *Adapter) RegisterWorkspace(ctx context.Context, title, directory string) (execution.WorkspaceInfo, error) {
-	var w execution.WorkspaceInfo
-	err := a.call(ctx, KindRegisterWorkspace, RegisterRequest{Title: title, Directory: directory}, &w, CallTimeout, nil)
-	return w, err
-}
-
 func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execution.Observation, error) {
 	var o execution.Observation
 	err := a.call(ctx, KindObserve, SessionRequest{Session: ref}, &o, CallTimeout, nil)

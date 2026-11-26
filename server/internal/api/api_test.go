@@ -745,6 +745,13 @@ func TestBindingChangeDoesNotRedirectUncertainLaunch(t *testing.T) {
 	}
 }
 
+// Stage never asks a harness to create a project (ADR 0007 decision 11):
+// the registration route is gone.
+func TestRegisterWorkspaceRouteRemoved(t *testing.T) {
+	e := newEnv(t)
+	e.must("POST", "/api/connections/t3/projects", map[string]any{"title": "P", "workspace": "/w"}, 404, nil)
+}
+
 func TestSaveAndStartWithoutBindingRetainsActionableBacklog(t *testing.T) {
 	e := newEnv(t)
 	var p project

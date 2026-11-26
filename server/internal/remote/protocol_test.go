@@ -48,7 +48,6 @@ func TestRPCBodiesRoundTripJSON(t *testing.T) {
 			Observations: []execution.Observation{{Session: ref, Project: "p", State: "running", CreatedAt: at, UpdatedAt: at}}, Unknown: true},
 		"SessionRequest":   SessionRequest{Session: ref},
 		"WorkspaceRequest": WorkspaceRequest{Project: "p", Directory: "/w"},
-		"RegisterRequest":  RegisterRequest{Title: "t", Directory: "/w"},
 		"OpeningRequest":   OpeningRequest{Session: ref, Full: true},
 		"LaunchRequest":    LaunchRequest{Intent: intent, Checkpoint: execution.Checkpoint{Version: 3, Data: json.RawMessage(`{"a":1}`)}},
 		"ImageRequest":     ImageRequest{Index: 2},

@@ -18,7 +18,7 @@ A project groups tasks, trees and schedules under one title. Stage owns the proj
 
 A binding ties a project to one workspace on one connection. A project has at most one binding per connection, and each workspace belongs to at most one project.
 
-- **Bind workspace**: pick an existing workspace the harness reports. On T3 you can also register an existing directory on the T3 machine. Stage never creates, clones or provisions directories.
+- **Bind workspace**: pick an existing workspace the harness reports. To bind a directory the harness does not list yet, add it in the harness, then refresh workspaces. Stage never creates harness projects, and never creates, clones or provisions directories.
 - **Match**: Stage can bind for you when it can prove two harnesses see the same checkout, through the shared path mappings you declare. Two workspaces with the same Git remote only produce a suggestion you confirm.
 - **Import**: each sync binds deliberate harness projects (live T3 projects, and OpenCode Git or Mercurial checkouts it has not archived). A workspace at a path a project already uses on that machine joins that project; a new path creates a project. The Projects page notes recent imports for 7 days.
 - **Unbind**: unbinding declines that workspace for good. Discovery never binds it again until you bind it by hand.

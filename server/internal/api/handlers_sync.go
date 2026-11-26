@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"path"
 	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -61,14 +60,6 @@ func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": ps, "imports": imports})
 	return nil
-}
-
-func normalizeRoot(root string) string {
-	root = strings.TrimSpace(root)
-	if strings.HasPrefix(root, "/") {
-		return path.Clean(root)
-	}
-	return root
 }
 
 // createProject saves Stage metadata without contacting a harness.

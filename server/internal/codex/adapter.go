@@ -147,14 +147,13 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 		return execution.Capabilities{}, err
 	}
 	c := execution.Capabilities{
-		Operations: map[string]execution.Availability{
-			"launch": available, "stop": available, "adopt": available, "reply": available, "opening": available, "attention": available,
-			"images":            available,
-			"predecessorBase":   {Reason: "Codex runs in the project checkout; Stage can't start it on another task's branch."},
-			"worktreeBase":      {Reason: "Codex runs in the project checkout."},
-			"registerWorkspace": {Reason: "Trust the directory in Codex (run codex there once), then refresh discovery."},
-			execution.OpRespond: {Reason: answerInCodex},
-			execution.OpSend:    {Reason: answerInCodex},
+		Operations: map[execution.Op]execution.Availability{
+			execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
+			execution.OpImages:          available,
+			execution.OpPredecessorBase: {Reason: "Codex runs in the project checkout; Stage can't start it on another task's branch."},
+			execution.OpWorktreeBase:    {Reason: "Codex runs in the project checkout."},
+			execution.OpRespond:         {Reason: answerInCodex},
+			execution.OpSend:            {Reason: answerInCodex},
 		},
 		Workspaces: []execution.Choice{{ID: "root", Label: "Project checkout", Availability: available}},
 	}
@@ -293,10 +292,6 @@ func title(dir string) string {
 	return base
 }
 
-func (a *Adapter) RegisterWorkspace(context.Context, string, string) (execution.WorkspaceInfo, error) {
-	return execution.WorkspaceInfo{}, errors.New("trust the directory in Codex (run codex there once), then refresh Stage workspace discovery")
-}
-
 // Destinations: Codex has no web or app destination; the resume command
 // attaches the user's terminal to the thread (live, through the daemon).
 func (a *Adapter) Destinations(_ context.Context, ref execution.SessionRef) execution.Links {
@@ -326,8 +321,9 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// ResolveLink accepts a thread id, or a `codex resume <id>` command. A
-// thread T3 Code started is T3's to track; an ephemeral one has no history.
+// ResolveLink accepts a thread id, or a `codex resume <id>` command. An
+// ephemeral thread has no history. A thread another harness started is
+// refused by the coordinator (its observed origin).
 func (a *Adapter) ResolveLink(ctx context.Context, s string) (execution.SessionRef, error) {
 	fields := strings.Fields(s)
 	id := ""
@@ -348,8 +344,6 @@ func (a *Adapter) ResolveLink(ctx context.Context, s string) (execution.SessionR
 	switch {
 	case res.Thread.ID != id:
 		return execution.SessionRef{}, errors.New("codex returned a different thread")
-	case res.Thread.Originator == T3Originator:
-		return execution.SessionRef{}, errors.New("T3 Code started this Codex thread. Track it through T3.")
 	case res.Thread.Ephemeral:
 		return execution.SessionRef{}, errors.New("this Codex thread is ephemeral: it keeps no history Stage can follow")
 	case res.Thread.ParentThreadID != nil && *res.Thread.ParentThreadID != "":

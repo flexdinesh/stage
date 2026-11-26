@@ -41,7 +41,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		Reply:     &execution.Reply{ItemID: "i", RunID: "r", MessageID: "m", Text: "done", Truncated: true, Position: 2, UpdatedAt: at},
 		Usage:     &execution.Usage{Turns: 2, InputTokens: 3, CacheReadTokens: 4, CacheWriteTokens: 5, OutputTokens: 6, WorkingMs: 7, CostUSD: &cost},
 		Artifacts: []execution.Artifact{{Host: "github.com", Repository: "o/r", Number: 3, URL: "https://github.com/o/r/pull/3", Source: "reply", State: "open"}},
-		Base:      avail, Closed: &execution.Closure{Signal: execution.ClosedSettled}, StateReason: execution.ReasonOwnerExited,
+		Base:      avail, Closed: &execution.Closure{Signal: execution.ClosedSettled}, StateReason: execution.ReasonOwnerExited, Origin: "cli",
 	}
 	binding := db.ProjectBinding{ID: 1, ProjectID: 2, ConnectionID: 7, Harness: "kind", ExternalProjectID: "p", Workspace: "/w", Revision: 3, Status: "available", ObservedWorkspace: &str, ConnectionActive: true, ConnectionLabel: "box", Origin: db.BindingPath}
 	samples := map[string]any{
@@ -55,7 +55,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		},
 		"Capabilities": execution.Capabilities{
 			Permissions: []execution.Choice{choice}, Options: []execution.Option{option}, ModeLabel: "Agent",
-			Operations: map[string]execution.Availability{"launch": avail}, Models: []execution.Model{{Choice: choice, Group: "g", Options: []execution.Option{option}, Permissions: []execution.Choice{choice}}},
+			Operations: map[execution.Op]execution.Availability{execution.OpLaunch: avail}, Models: []execution.Model{{Choice: choice, Group: "g", Options: []execution.Option{option}, Permissions: []execution.Choice{choice}}},
 			Modes: []execution.Choice{choice}, Workspaces: []execution.Choice{choice},
 		},
 		"Intent": execution.Intent{

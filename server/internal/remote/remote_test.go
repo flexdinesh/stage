@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -29,26 +30,28 @@ func (p *probe) Health(context.Context) execution.Health {
 	return execution.Health{Availability: execution.Availability{Available: true}, Identity: "probe-1"}
 }
 func (p *probe) Features(context.Context) (execution.Capabilities, error) {
-	return execution.Capabilities{Operations: map[string]execution.Availability{"launch": {Available: true}}}, nil
+	ops := map[execution.Op]execution.Availability{}
+	for _, op := range execution.Ops {
+		ops[op] = execution.Availability{Reason: "probe lacks " + string(op)}
+	}
+	ops[execution.OpLaunch] = execution.Availability{Available: true}
+	return execution.Capabilities{Operations: ops}, nil
 }
 func (p *probe) Workspaces(context.Context) ([]execution.WorkspaceInfo, error) {
 	return []execution.WorkspaceInfo{{ID: "w", WorkspaceRoot: "/srv/repo/app"}}, nil
-}
-func (p *probe) RegisterWorkspace(context.Context, string, string) (execution.WorkspaceInfo, error) {
-	return execution.WorkspaceInfo{}, execution.ErrUnavailable
 }
 func (p *probe) Observe(_ context.Context, ref execution.SessionRef) (execution.Observation, error) {
 	if ref.ExternalSessionID != "s1" {
 		return execution.Observation{}, execution.ErrNotFound
 	}
-	return execution.Observation{Session: ref, Project: "w", State: "running", Active: true}, nil
+	return execution.Observation{Session: ref, Project: "w", State: "running", Active: true, Origin: "wrapper"}, nil
 }
 func (p *probe) Launch(ctx context.Context, in execution.Intent, cp execution.Checkpoint, save execution.SaveCheckpoint) (execution.Observation, error) {
 	return p.launchFn(ctx, in, cp, save)
 }
 func (p *probe) Stop(context.Context, execution.SessionRef) error { return nil }
 func (p *probe) Attention(context.Context) ([]execution.SessionRef, error) {
-	return nil, nil
+	return nil, execution.ErrUnavailable
 }
 func (p *probe) Opening(context.Context, execution.SessionRef, bool) (*execution.Reply, error) {
 	return nil, execution.ErrNoReply
@@ -203,8 +206,16 @@ func TestProxyTraitsDestinationsAndErrors(t *testing.T) {
 	if _, err := a.Opening(t.Context(), execution.SessionRef{ConnectionID: 5, ExternalSessionID: "s1"}, true); !errors.Is(err, execution.ErrNoReply) {
 		t.Fatal("no reply lost", err)
 	}
-	if _, err := a.RegisterWorkspace(t.Context(), "t", "/d"); !errors.Is(err, execution.ErrUnavailable) {
+	if _, err := a.Attention(t.Context()); !errors.Is(err, execution.ErrUnavailable) {
 		t.Fatal("unavailable lost", err)
+	}
+	// Every operation and its reason, and a session's origin, pass through.
+	want, _ := p.Features(t.Context())
+	if got, err := a.Features(t.Context()); err != nil || !reflect.DeepEqual(got.Operations, want.Operations) || got.DeclaresOperations() != nil {
+		t.Fatal("operations", got.Operations, err)
+	}
+	if o, err := a.Observe(t.Context(), execution.SessionRef{ConnectionID: 5, ExternalSessionID: "s1"}); err != nil || o.Origin != "wrapper" {
+		t.Fatal("origin", o, err)
 	}
 	if got := rig.Machine().Profile().Kind; got != "server" {
 		t.Fatal("profile", got)

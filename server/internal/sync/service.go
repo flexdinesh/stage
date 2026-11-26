@@ -469,6 +469,19 @@ func (s *Service) apply(ctx context.Context, task db.Task, o execution.Observati
 	return nil
 }
 
+// refusal refuses o, a session of kind that another registered harness
+// wraps (its origin among that harness's Wraps): the wrapper tracks it.
+// Nil: Stage may track it.
+func (s *Service) refusal(kind string, o execution.Observation) error {
+	if s.Harnesses == nil {
+		return nil
+	}
+	if r := s.Harnesses.Refusal(kind, o.Origin); r != nil {
+		return harnessErr(r)
+	}
+	return nil
+}
+
 // checkObservation validates o against kind's policies: only a harness that
 // owns its processes may report an execution lost with its owner.
 func (s *Service) checkObservation(kind string, o execution.Observation) error {
@@ -480,7 +493,7 @@ func (s *Service) checkObservation(kind string, o execution.Observation) error {
 			return errors.New("malformed observation: only a harness that owns its processes may report " + execution.ReasonOwnerExited)
 		}
 	}
-	return nil
+	return s.refusal(kind, o)
 }
 
 // descriptor is kind's registered descriptor.
@@ -614,7 +627,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	if e != nil {
 		return t, harnessErr(e)
 	}
-	if op := features.Operations["launch"]; !op.Available {
+	if op := features.Operations[execution.OpLaunch]; !op.Available {
 		return t, db.Conflict("Launch unavailable: %s", op.Reason)
 	}
 	d, _ := s.descriptor(t.Harness)
@@ -623,7 +636,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 		return t, db.Conflict("Launch unavailable: this harness cannot reconcile a launch it does not reserve.")
 	}
 	if t.Workspace.FromPredecessor() {
-		if op := features.Operations["predecessorBase"]; !op.Available {
+		if op := features.Operations[execution.OpPredecessorBase]; !op.Available {
 			return t, db.Conflict("Predecessor base unavailable: %s", op.Reason)
 		}
 	}

@@ -9,29 +9,28 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/agenttools"
+	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-// precedenceAPI serves GET /api/harnesses with a T3-like, an OpenCode-like
-// and a nested-harness kind ("cc-like": owns under a background session
-// kind, yields to T3's variable or a T3 entrypoint), and resolves each
-// kind's connection to a distinct id.
+// precedenceAPI serves GET /api/harnesses with the real T3 attribution and
+// wraps ("t3-like"), an OpenCode-like kind, the real Claude Code
+// attribution ("cc-like": owns under a background session kind, wrapped by
+// T3) and the real Codex descriptor, and resolves each kind's connection
+// to a distinct id.
 func precedenceAPI(t *testing.T) *client.Client {
 	t.Helper()
 	conns := map[string]int64{"t3-like": 1, "oc-like": 2, "cc-like": 3, codex.Kind: 4}
 	descs := []map[string]any{
-		{"kind": "t3-like", "attribution": map[string]any{"metaKeys": []string{}, "env": "T3CODE_THREAD_ID"}},
+		{"kind": "t3-like", "attribution": t3.Descriptor.Attribution, "wraps": t3.Descriptor.Wraps},
 		{"kind": "oc-like", "attribution": map[string]any{"metaKeys": []string{}, "env": "OPENCODE_SESSION_ID"}},
-		{"kind": "cc-like", "attribution": map[string]any{"metaKeys": []string{}, "env": "CLAUDE_CODE_SESSION_ID",
-			"precedence": harness.Precedence{
-				Owns:   []harness.EnvMatch{{Env: "CLAUDE_CODE_SESSION_KIND", Value: "bg"}},
-				Yields: []harness.EnvMatch{{Env: "T3CODE_THREAD_ID"}, {Env: "CLAUDE_CODE_ENTRYPOINT", Value: "t3-code"}},
-			}}},
+		{"kind": "cc-like", "attribution": claudecode.Descriptor.Attribution},
 		{"kind": "no-env", "attribution": map[string]any{"metaKeys": []string{}}},
-		// The real Codex descriptor: yields to T3.
+		// The real Codex descriptor: wrapped by T3.
 		{"kind": codex.Kind, "attribution": codex.Descriptor.Attribution},
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +78,7 @@ func TestHarnessEnvPrecedence(t *testing.T) {
 		{"T3, OpenCode and yielding nested", map[string]string{"T3CODE_THREAD_ID": "t3", "OPENCODE_SESSION_ID": "oc", "CLAUDE_CODE_SESSION_ID": "cc"}, 0, "", "", "several harness session variables are set (T3CODE_THREAD_ID, OPENCODE_SESSION_ID)"},
 		{"Codex inside T3", map[string]string{"T3CODE_THREAD_ID": "t3", "CODEX_THREAD_ID": "cx"}, 1, "t3", "T3CODE_THREAD_ID", ""},
 		{"Codex alone", map[string]string{"CODEX_THREAD_ID": "cx"}, 4, "cx", "CODEX_THREAD_ID", ""},
+		{"Codex and nested with a wrapper's entrypoint", map[string]string{"CODEX_THREAD_ID": "cx", "CLAUDE_CODE_SESSION_ID": "cc", "CLAUDE_CODE_ENTRYPOINT": "t3-code"}, 4, "cx", "CODEX_THREAD_ID", ""},
 		{"Codex and OpenCode", map[string]string{"OPENCODE_SESSION_ID": "oc", "CODEX_THREAD_ID": "cx"}, 0, "", "", "several harness session variables are set (OPENCODE_SESSION_ID, CODEX_THREAD_ID)"},
 		{"blank values ignored", map[string]string{"T3CODE_THREAD_ID": " ", "CLAUDE_CODE_SESSION_ID": "cc"}, 3, "cc", "CLAUDE_CODE_SESSION_ID", ""},
 	}

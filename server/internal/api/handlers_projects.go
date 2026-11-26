@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -283,33 +282,5 @@ func (s *server) unbindProject(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	writeJSON(w, http.StatusOK, p)
-	return nil
-}
-
-// Registration is a separate explicit side effect, never part of creating a
-// Stage project. A lost response requires discovery before another registration.
-func (s *server) registerWorkspace(w http.ResponseWriter, r *http.Request) error {
-	var in struct {
-		Title     string `json:"title"`
-		Workspace string `json:"workspace"`
-	}
-	if err := decodeStrict(r, &in); err != nil {
-		return err
-	}
-	in.Title = strings.TrimSpace(in.Title)
-	in.Workspace = normalizeRoot(in.Workspace)
-	if in.Title == "" || in.Workspace == "" {
-		return db.Invalid("title and an existing directory are required")
-	}
-	t3 := s.Store.LegacyT3ID()
-	adapter, err := s.Sync.Adapter(t3)
-	if err != nil {
-		return err
-	}
-	p, err := adapter.RegisterWorkspace(r.Context(), in.Title, in.Workspace)
-	if err != nil {
-		return &db.HarnessError{Err: err}
-	}
-	writeJSON(w, http.StatusCreated, db.ExternalProject{ConnectionID: t3, ExternalID: p.ID, Title: p.Title, Workspace: p.WorkspaceRoot})
 	return nil
 }

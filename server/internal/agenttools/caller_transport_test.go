@@ -38,7 +38,7 @@ func (h *callerHarness) Health(context.Context) execution.Health {
 }
 func (h *callerHarness) Features(context.Context) (execution.Capabilities, error) {
 	return execution.Capabilities{
-		Operations: map[string]execution.Availability{"adopt": {Available: true}},
+		Operations: map[execution.Op]execution.Availability{execution.OpAdopt: {Available: true}},
 		Models: []execution.Model{
 			{Choice: execution.Choice{ID: "blocked", Availability: execution.Availability{Reason: "read-only subscription"}}},
 			{Choice: execution.Choice{ID: "remote-model", Availability: execution.Availability{Available: true}},

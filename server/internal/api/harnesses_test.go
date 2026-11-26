@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -159,7 +160,8 @@ func TestHarnessConnectionRoutes(t *testing.T) {
 }
 
 // Claude Code's descriptor reaches clients with its attribution precedence
-// (the CLI ranks harness session variables by it) and a connect action.
+// and origin, and T3's with what it wraps (the CLI ranks harness session
+// variables by them), and a connect action.
 func TestHarnessListServesClaudeCode(t *testing.T) {
 	e := newEnv(t, func(d *api.Deps) {
 		d.Harnesses = harness.MustRegistry(t3.Descriptor, opencode.Descriptor, claudecode.Descriptor)
@@ -174,7 +176,9 @@ func TestHarnessListServesClaudeCode(t *testing.T) {
 			Attribution struct {
 				Env        string              `json:"env"`
 				Precedence *harness.Precedence `json:"precedence"`
+				Origin     *harness.Origin     `json:"origin"`
 			} `json:"attribution"`
+			Wraps *harness.Wraps `json:"wraps"`
 		} `json:"harnesses"`
 	}
 	e.must("GET", "/api/harnesses", nil, 200, &list)
@@ -185,8 +189,12 @@ func TestHarnessListServesClaudeCode(t *testing.T) {
 	}
 	p := cc.Attribution.Precedence
 	if cc.Kind != claudecode.Descriptor.Kind || cc.Hosting != "hosted" || cc.Launch != "correlated" || cc.Attribution.Env != "CLAUDE_CODE_SESSION_ID" || p == nil ||
-		len(p.Owns) != 1 || p.Owns[0] != (harness.EnvMatch{Env: "CLAUDE_CODE_SESSION_KIND", Value: "bg"}) || len(p.Yields) != 2 {
+		len(p.Owns) != 1 || p.Owns[0] != (harness.EnvMatch{Env: "CLAUDE_CODE_SESSION_KIND", Value: "bg"}) || len(p.Yields) != 0 ||
+		cc.Attribution.Origin == nil || cc.Attribution.Origin.Env != "CLAUDE_CODE_ENTRYPOINT" || cc.Wraps != nil {
 		t.Fatalf("%+v %+v", cc, p)
+	}
+	if w := list.Harnesses[0].Wraps; w == nil || !slices.Equal(w.Origins, []string{t3.OriginEntrypoint, t3.OriginOriginator}) || list.Harnesses[0].Attribution.Origin != nil {
+		t.Fatalf("T3 wraps %+v", w)
 	}
 	if _, ok := cc.Setup.Action(claudecode.ActionConnect); !ok || !cc.Setup.Disconnect || len(cc.Setup.Fields) != 1 {
 		t.Fatalf("setup %+v", cc.Setup)

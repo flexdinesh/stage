@@ -559,8 +559,8 @@ Title-only creation works offline. Project detail uses the existing ruled Worksp
 panel for binding status, rename/archive and explicit unbind confirmation.
 Bind workspace opens the shared Drawer, full screen on phone. Show external title,
 full wrapping mono path and any existing Stage owner. Selection requires explicit
-confirmation; never preselect by title or path. Register existing directory is a
-separate action. Missing/changed bindings show a concrete repair action.
+confirmation; never preselect by title or path. Stage never registers a directory
+in a harness. Missing/changed bindings show a concrete repair action.
 The task form offers Save to backlog when launch needs a binding.
 
 The Workspace panel has one section per active connection ("T3 workspace",

@@ -9,7 +9,15 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
+
+// OpenCode declares every operation, and why it lacks one.
+func TestOperationsDeclared(t *testing.T) {
+	if err := (execution.Capabilities{Operations: operations()}).DeclaresOperations(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestTitle(t *testing.T) {
 	for _, c := range []struct{ name, canonical, want string }{

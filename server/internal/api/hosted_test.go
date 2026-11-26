@@ -42,15 +42,12 @@ func (hostedAdapter) Health(context.Context) execution.Health {
 }
 func (hostedAdapter) Features(context.Context) (execution.Capabilities, error) {
 	return execution.Capabilities{
-		Operations: map[string]execution.Availability{"launch": {Available: true}},
+		Operations: map[execution.Op]execution.Availability{execution.OpLaunch: {Available: true}},
 		Models:     []execution.Model{{Choice: execution.Choice{ID: "m", Availability: execution.Availability{Available: true}}}},
 	}, nil
 }
 func (hostedAdapter) Workspaces(context.Context) ([]execution.WorkspaceInfo, error) {
 	return []execution.WorkspaceInfo{{ID: "repo", Title: "repo", WorkspaceRoot: hostedWorkspace}}, nil
-}
-func (hostedAdapter) RegisterWorkspace(context.Context, string, string) (execution.WorkspaceInfo, error) {
-	return execution.WorkspaceInfo{}, execution.ErrUnavailable
 }
 func (hostedAdapter) observation(ref execution.SessionRef) execution.Observation {
 	now := time.Now().UTC()
