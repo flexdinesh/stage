@@ -35,9 +35,6 @@ func (f fakeBase) Health(context.Context) execution.Health {
 func (f fakeBase) Workspaces(context.Context) ([]execution.WorkspaceInfo, error) {
 	return []execution.WorkspaceInfo{{ID: "proj", Title: "Project", WorkspaceRoot: f.workspace}}, nil
 }
-func (f fakeBase) RegisterWorkspace(context.Context, string, string) (execution.WorkspaceInfo, error) {
-	return execution.WorkspaceInfo{}, execution.ErrUnavailable
-}
 func (f fakeBase) Attention(context.Context) ([]execution.SessionRef, error) { return nil, nil }
 func (f fakeBase) Opening(context.Context, execution.SessionRef, bool) (*execution.Reply, error) {
 	return nil, execution.ErrUnavailable
@@ -56,7 +53,7 @@ type assignedHarness struct {
 }
 
 func (f *assignedHarness) Features(context.Context) (execution.Capabilities, error) {
-	return execution.Capabilities{Operations: map[string]execution.Availability{"launch": {Available: true}}, Models: []execution.Model{{Choice: execution.Choice{ID: "m", Availability: execution.Availability{Available: true}}}}}, nil
+	return execution.Capabilities{Operations: map[execution.Op]execution.Availability{execution.OpLaunch: {Available: true}}, Models: []execution.Model{{Choice: execution.Choice{ID: "m", Availability: execution.Availability{Available: true}}}}}, nil
 }
 func (f *assignedHarness) observation(conn int64, id string) execution.Observation {
 	now := time.Now().UTC()
@@ -116,8 +113,8 @@ type hostedHarness struct {
 
 func (f *hostedHarness) Features(context.Context) (execution.Capabilities, error) {
 	return execution.Capabilities{
-		Operations: map[string]execution.Availability{
-			"launch":            {Available: true},
+		Operations: map[execution.Op]execution.Availability{
+			execution.OpLaunch:            {Available: true},
 			execution.OpRespond: {Available: f.respondOff == "", Reason: f.respondOff},
 			execution.OpSend:    {Available: true},
 		},

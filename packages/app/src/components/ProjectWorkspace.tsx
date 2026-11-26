@@ -23,9 +23,6 @@ export function BindWorkspaceDrawer({
   const qc = useQueryClient();
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<ExternalProject | null>(null);
-  const [registering, setRegistering] = useState(false);
-  const [workspace, setWorkspace] = useState("");
-  const [registrationAttempted, setRegistrationAttempted] = useState(false);
   const harnesses = useHarnesses();
   const { machines } = useMachines();
   const name = withMachine(harnesses.name(connectionId), machineTag(machines, harnesses.connection(connectionId)?.machineId ?? 0));
@@ -38,14 +35,6 @@ export function BindWorkspaceDrawer({
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: keys.projects });
       onClose();
-    },
-  });
-  const register = useMutation({
-    mutationFn: () => api.registerWorkspace({ title: project.title, workspace: workspace.trim() }),
-    onSuccess: async (candidate) => {
-      setPicked(candidate);
-      setRegistering(false);
-      await external.refetch();
     },
   });
   const candidates = (external.data?.projects ?? []).filter((candidate) =>
@@ -147,45 +136,6 @@ export function BindWorkspaceDrawer({
             Connection settings
           </TextLink>
         </div>
-        {harness !== "t3" ? null : registering ? (
-          <div className="flex flex-col gap-3 border-t border-line pt-3">
-            <Field label="Existing directory on the T3 machine">
-              {(id) => (
-                <Input
-                  id={id}
-                  value={workspace}
-                  onChange={(event) => {
-                    setWorkspace(event.target.value);
-                    setRegistrationAttempted(false);
-                    register.reset();
-                  }}
-                  className="font-mono"
-                />
-              )}
-            </Field>
-            <Muted>Registers the directory in T3. Stage does not create or clone a directory.</Muted>
-            <Button
-              busy={register.isPending}
-              disabled={workspace.trim() === "" || registrationAttempted}
-              onClick={() => {
-                setRegistrationAttempted(true);
-                register.mutate();
-              }}
-            >
-              Register directory in T3
-            </Button>
-            <ErrorText error={register.error} />
-            {register.isError ? (
-              <Alert>
-                Registration may have reached T3. Refresh workspaces before trying again.
-              </Alert>
-            ) : null}
-          </div>
-        ) : (
-          <Button variant="ghost" onClick={() => setRegistering(true)}>
-            Register existing directory in T3
-          </Button>
-        )}
         <ErrorText error={bind.error} />
       </div>
     </Drawer>

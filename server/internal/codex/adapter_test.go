@@ -300,14 +300,19 @@ func TestResolveLinkAdoptsOnlyFollowableThreads(t *testing.T) {
 	r := newRig(t)
 	ctx := t.Context()
 	own := r.srv.AddThread(codextest.Thread{ID: "019a0000-0000-7000-8000-00000000aaaa", Cwd: "/w", Originator: "codex-tui"})
-	t3 := r.srv.AddThread(codextest.Thread{ID: "019a0000-0000-7000-8000-00000000bbbb", Cwd: "/w", Originator: codex.T3Originator})
+	wrapped := r.srv.AddThread(codextest.Thread{ID: "019a0000-0000-7000-8000-00000000bbbb", Cwd: "/w", Originator: "Wrapper"})
 	eph := r.srv.AddThread(codextest.Thread{ID: "019a0000-0000-7000-8000-00000000cccc", Cwd: "/w", Ephemeral: true})
 	sub := r.srv.AddThread(codextest.Thread{ID: "019a0000-0000-7000-8000-00000000dddd", Cwd: "/w", Parent: own.ID})
 	if ref, err := r.adapter.ResolveLink(ctx, "codex resume "+strings.ToUpper(own.ID)); err != nil || ref.ExternalSessionID != own.ID || ref.ConnectionID != conn {
 		t.Fatal(ref, err)
 	}
-	if _, err := r.adapter.ResolveLink(ctx, t3.ID); err == nil || !strings.Contains(err.Error(), "Track it through T3") {
-		t.Fatal("T3 thread adopted", err)
+	// A thread another client started resolves; it reports its origin raw
+	// for the coordinator to refuse a wrapped one.
+	if ref, err := r.adapter.ResolveLink(ctx, wrapped.ID); err != nil || ref.ExternalSessionID != wrapped.ID {
+		t.Fatal(ref, err)
+	}
+	if o, err := r.adapter.Observe(ctx, execution.SessionRef{ConnectionID: conn, ExternalSessionID: wrapped.ID}); err != nil || o.Origin != "Wrapper" {
+		t.Fatalf("%+v %v", o, err)
 	}
 	for _, id := range []string{eph.ID, sub.ID} {
 		if _, err := r.adapter.ResolveLink(ctx, id); err == nil {
@@ -366,10 +371,13 @@ func TestFeaturesFromModelCatalog(t *testing.T) {
 	if err := c.Valid(); err != nil {
 		t.Fatal(err)
 	}
+	if err := c.DeclaresOperations(); err != nil {
+		t.Fatal(err)
+	}
 	if len(c.Models) != 1 || c.Models[0].ID != "gpt-test" || len(c.Models[0].Options) != 1 || c.Models[0].Options[0].Default == nil || c.Models[0].Options[0].Default.Str != "low" {
 		t.Fatalf("models %+v", c.Models)
 	}
-	if !c.Operations["images"].Available || c.Operations[execution.OpRespond].Available || c.Operations["worktreeBase"].Available || len(c.Workspaces) != 1 || len(c.Permissions) != 3 {
+	if !c.Operations[execution.OpImages].Available || c.Operations[execution.OpRespond].Available || c.Operations[execution.OpWorktreeBase].Available || len(c.Workspaces) != 1 || len(c.Permissions) != 3 {
 		t.Fatalf("%+v", c)
 	}
 	if err := c.ValidateConfig(execution.Config{}); err != nil {

@@ -12,7 +12,7 @@ import (
 
 // interactive is the task's session and its adapter's Interactive when the
 // harness offers op; otherwise an operation_unavailable conflict naming why.
-func (s *Service) interactive(ctx context.Context, id int64, op string) (db.Task, execution.Interactive, error) {
+func (s *Service) interactive(ctx context.Context, id int64, op execution.Op) (db.Task, execution.Interactive, error) {
 	t, err := s.store.GetTask(ctx, id)
 	if err != nil {
 		return t, nil, err
@@ -38,11 +38,11 @@ func (s *Service) interactive(ctx context.Context, id int64, op string) (db.Task
 	return t, in, nil
 }
 
-func unavailable(op, reason string) error {
+func unavailable(op execution.Op, reason string) error {
 	if strings.TrimSpace(reason) == "" {
 		reason = "the harness reports it unavailable"
 	}
-	return &db.ConflictError{Code: "operation_unavailable", Msg: "Operation " + op + " unavailable: " + reason + "."}
+	return &db.ConflictError{Code: "operation_unavailable", Msg: "Operation " + string(op) + " unavailable: " + reason + "."}
 }
 
 // Requests lists what the task's session waits on (operation respond).

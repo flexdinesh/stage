@@ -30,12 +30,6 @@ type EventSource interface {
 	Events(ctx context.Context, sink Sink) error
 }
 
-// Interaction operations (Capabilities.Operations).
-const (
-	OpRespond = "respond" // list and answer pending requests
-	OpSend    = "send"    // send a message to the session
-)
-
 // Request kinds.
 const (
 	RequestApproval = "approval" // pick an option

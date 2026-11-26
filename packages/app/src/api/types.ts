@@ -327,7 +327,15 @@ export interface HarnessDescriptor {
       owns?: { env: string; value?: string }[];
       yields?: { env: string; value?: string }[];
     };
+    /** It records the client that started each session, so a wrapping harness may run them; env holds that origin in its agents. */
+    origin?: { env?: string };
   };
+  /** How a launch learns its session identity: reserved before any effect, or correlated by a marker after. */
+  launch: "reserved" | "correlated";
+  /** What a worktree workspace may take from Stage: a base ref and branch, or a need's branch. */
+  worktree: { baseRef: boolean; predecessor: boolean };
+  /** It runs other harnesses' sessions and leaves these origins in them; Stage refuses those sessions elsewhere. */
+  wraps?: { origins: string[] };
   available: boolean;
   /** Why it cannot run here (e.g. Stage runs in a container); "" when available. */
   reason?: string;
@@ -472,13 +480,26 @@ export interface HarnessModel extends HarnessChoice {
   options: HarnessOption[] | null;
   permissions: HarnessChoice[] | null;
 }
+/** An operation a harness declares in its capabilities (Go execution.Op). */
+export type OperationId =
+  | "launch"
+  | "stop"
+  | "adopt"
+  | "reply"
+  | "opening"
+  | "attention"
+  | "images"
+  | "predecessorBase"
+  | "worktreeBase"
+  | "respond"
+  | "send";
 export interface Capabilities {
   permissions?: HarnessChoice[];
   /** Harness-wide options, beside the selected model's own (ids never collide). */
   options?: HarnessOption[];
   /** The mode choice in the harness's own words ("Agent"); absent reads "Interaction mode". */
   modeLabel?: string;
-  operations: Record<string, {available: boolean; reason?: string}>;
+  operations: Partial<Record<OperationId, {available: boolean; reason?: string}>>;
   models: HarnessModel[] | null;
   modes: HarnessChoice[] | null;
   workspaces: HarnessChoice[] | null;

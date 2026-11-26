@@ -38,7 +38,9 @@ type HarnessDescriptor struct {
 		MetaKeys   []string            `json:"metaKeys"`
 		Env        string              `json:"env,omitempty"`
 		Precedence *harness.Precedence `json:"precedence,omitempty"`
+		Origin     *harness.Origin     `json:"origin,omitempty"`
 	} `json:"attribution"`
+	Wraps *harness.Wraps `json:"wraps,omitempty"`
 	Setup struct {
 		Fields     []SetupField  `json:"fields"`
 		Actions    []SetupAction `json:"actions"`

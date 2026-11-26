@@ -84,10 +84,6 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 	}
 	return out, nil
 }
-func (a *Adapter) RegisterWorkspace(context.Context, string, string) (execution.WorkspaceInfo, error) {
-	return execution.WorkspaceInfo{}, errors.New("open the directory in OpenCode, then refresh Stage workspace discovery")
-}
-
 func (a *Adapter) verifyLocation(ctx context.Context, project, dir string) error {
 	var loc struct {
 		Directory string
@@ -134,13 +130,20 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	if _, err := a.check(ctx); err != nil {
 		return execution.Capabilities{}, err
 	}
-	return execution.Capabilities{Operations: map[string]execution.Availability{
-		"launch": available, "stop": available, "adopt": available, "reply": available, "opening": available, "attention": available,
-		"predecessorBase":   {Reason: "OpenCode selects the worktree strategy and base. Choose its default base."},
-		"images":            {Reason: "Image attachment delivery has not been verified for this adapter."},
-		"registerWorkspace": {Reason: "Open the workspace in OpenCode and refresh discovery."},
-		"worktreeBase":      {Reason: "OpenCode chooses the worktree base and branch."},
-	}, ModeLabel: "Agent", Workspaces: []execution.Choice{choice("root", "Bound checkout"), choice("worktree", "OpenCode-managed worktree")}}, nil
+	return execution.Capabilities{Operations: operations(), ModeLabel: "Agent", Workspaces: []execution.Choice{choice("root", "Bound checkout"), choice("worktree", "OpenCode-managed worktree")}}, nil
+}
+
+// operations are OpenCode's, whatever the server.
+func operations() map[execution.Op]execution.Availability {
+	answer := execution.Availability{Reason: "Answer in OpenCode: open the session there."}
+	return map[execution.Op]execution.Availability{
+		execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
+		execution.OpPredecessorBase: {Reason: "OpenCode selects the worktree strategy and base. Choose its default base."},
+		execution.OpImages:          {Reason: "Image attachment delivery has not been verified for this adapter."},
+		execution.OpWorktreeBase:    {Reason: "OpenCode chooses the worktree base and branch."},
+		execution.OpRespond:         answer,
+		execution.OpSend:            answer,
+	}
 }
 
 type wireModel struct {
@@ -205,7 +208,7 @@ func selection(c execution.Capabilities, in execution.Intent) (*wireModel, error
 		return nil, reject("Choose the bound checkout or an OpenCode worktree with its default base and branch.")
 	}
 	if len(in.Images) > 0 {
-		return nil, reject(c.Operations["images"].Reason)
+		return nil, reject(c.Operations[execution.OpImages].Reason)
 	}
 	if in.Config.Permission != "" {
 		return nil, reject("Use the selected OpenCode agent's permission policy.")

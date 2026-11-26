@@ -163,7 +163,9 @@ suite cannot tell a remote machine from the local one.
   `no_reply`, `rejected`, `refused`). Offline, `not_hosted`, `unsupported` and an older worker
   (`unknown_kind`) are unavailable. A lost reply, a worker timeout or any
   other error stays uncertain; only the worker adapter's own rejection is
-  `Rejected`.
+  `Rejected`. The removed `adapter.registerWorkspace` (an older main
+  server's call) answers `unknown_kind`. A session's `origin` crosses the
+  channel raw; the main server's registry decides a wrapped refusal.
 - **An offline worker is an offline harness.** Health is unavailable, polls
   and streams idle, task states and acceptance do not change, a backlog
   launch is refused as `connection_unavailable`, and an attempt already
@@ -263,6 +265,23 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   `needs_input|done|failed` after startup. `silent` (Claude Code): the
   waiting row and the needs-input count only, never an event or push.
   Either way discovery never tracks a session: adoption does.
+- **Wrapping** ([ADR 0007](adr/0007-harness-boundary.md) decision 13). A
+  harness that runs other harnesses' sessions declares `wraps: {origins}`:
+  the session origins it leaves in them, as the wrapped harness records
+  them (T3: `t3-code`, Claude Code's entrypoint; `T3 Code`, Codex's
+  originator). An origin belongs to one harness (the registry rejects a
+  second). Adapters report a session's `origin` raw (`Observation.origin`)
+  and never name another harness (`harness` `boundary_test.go`
+  `TestAdaptersDoNotNameOtherHarnesses`). The coordinator refuses to track
+  a session whose origin another registered harness wraps (adoption, track
+  preview, link repair, polling: `session_refused`, "Track it through
+  <wrapper>"), and leaves it out of discovery's waiting rows. A harness
+  that records origins declares `attribution.origin` (`{env?}`: the
+  variable holding a session's origin in its agents; Claude Code
+  `CLAUDE_CODE_ENTRYPOINT`, Codex none); among several harness session
+  variables in one process, such a harness's yields when a wrapper's
+  variable is set or its origin variable holds a wrapped origin (unless
+  its precedence owns), so the wrapper's variable names the caller.
 
 ## Contracts for roadmap tasks 5 and 6
 
@@ -273,7 +292,12 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
 - `Config.model` is an opaque adapter key. Options are named string/boolean
   values; permission and interaction mode are opaque adapter selections.
   `Features` supplies models, options, permissions, modes, workspaces and
-  operation availability with reasons. Unsupported operations return actionable
+  operation availability with reasons. Operations are typed (`execution.Op`,
+  UI `OperationId`): `launch`, `stop`, `adopt`, `reply`, `opening`,
+  `attention`, `images`, `predecessorBase`, `worktreeBase`, `respond`,
+  `send`. Every adapter declares each one, with a reason when unavailable
+  (`Capabilities.DeclaresOperations`, its contract tests); the remote proxy
+  passes them through. Unsupported operations return actionable
   errors. Adapters must validate the requested semantics before dispatch.
   Product code reads policy from these, never a harness name: `images`,
   `predecessorBase` and `worktreeBase` (unavailable when the harness picks the
@@ -318,10 +342,13 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   for repair. Every other launch error keeps the attempt unconfirmed. A harness
   must never use rejection merely because it is offline, timed out or returned
   malformed data.
-- `Refused` (`execution.Refused{reason}`) is a harness declining to track a
-  session another client owns (Claude Code refuses a session T3 started).
-  It is a decision, not a failure: the coordinator answers 409
-  `session_refused` with the reason, and nothing about the session changes.
+- `Refused` (`execution.Refused{reason}`) is Stage declining to track a
+  session another registered harness wraps (its `origin` among that
+  harness's `wraps`: a Claude Code session or Codex thread T3 started). The
+  coordinator decides it from the descriptors, never an adapter by name. It
+  is a decision, not a failure: the coordinator answers 409
+  `session_refused` with the reason ("This Claude Code session was started
+  by T3. Track it through T3."), and nothing about the session changes.
 - Optional link resolution supports explicit repair. Preview verifies the pinned
   destination, current environment, top-level session and ownership. Attachment
   rechecks those facts and the attempt revision. It sends no launch and grants
@@ -621,15 +648,16 @@ to run on that machine.
   assistant text of the current turn, bounded to 4,000 characters, shown
   once the session is not running; best effort. `executionId` is the
   current turn's prompt.
-- **Refusal.** A session whose transcript starts with entrypoint `t3-code`
-  is T3's: Observe, Stop and link resolution refuse it ("Track it through
-  T3").
+- **Origin.** An observation's `origin` is the entrypoint of the
+  transcript's first typed prompt (`cli`, `sdk-cli`, `t3-code`, ...), raw.
+  The adapter refuses nothing by origin: the coordinator refuses a session
+  another harness wraps ([harness registry](#harness-registry)).
 - **Stop** is `claude stop <short>`, for background sessions only.
   **Attention** lists every session Claude lists as waiting for its user:
   a `blocked` background session (also one the daemon retired after an hour
   idle; attach wakes it) and a terminal, IDE or SDK session with status
-  `waiting`, leaving out sessions T3 started (T3 surfaces them). The
-  descriptor's attention policy is `silent`: they show as waiting rows in the
+  `waiting`; the coordinator leaves out a session another harness wraps
+  (its origin; T3 surfaces those). The descriptor's attention policy is `silent`: they show as waiting rows in the
   inbox and in the needs-input count, never as events or pushes, and Stage
   tracks one only when the user adopts it (the row's Track). A finished
   discovered background session stays watched until `claude rm`; the
@@ -678,8 +706,7 @@ to run on that machine.
   or `.claude.json` in a `CLAUDE_CONFIG_DIR`); a Git checkout's top is
   importable, worktrees under `.claude/worktrees` are left out. No file is
   an empty inventory; an unreadable or malformed one is an error, so
-  discovery keeps the last one. Registering a folder is unavailable: run
-  Claude there once.
+  discovery keeps the last one. Run Claude in a folder once to list it.
 - **Features.** Models: Claude's default, `opus`, `sonnet`, `haiku`,
   `fable` (aliases for the latest). Harness-wide option `effort` (`low` to
   `max`). Permissions: `manual`, `acceptEdits`, `auto`, `plan`, `dontAsk`,
@@ -734,8 +761,10 @@ to run on that machine.
   directory than the connection's.
 - **Attribution.** Agents read `CLAUDE_CODE_SESSION_ID`. Its precedence
   owns a background session (`CLAUDE_CODE_SESSION_KIND=bg`, which may carry
-  a stale `T3CODE_THREAD_ID` from the daemon) and yields to T3 inside a
-  Claude process T3 runs (`T3CODE_THREAD_ID`, or `CLAUDE_CODE_ENTRYPOINT=t3-code`).
+  a stale wrapper variable from the daemon). Its `origin` variable is
+  `CLAUDE_CODE_ENTRYPOINT`: inside a Claude process a wrapping harness runs
+  (its variable set, or the entrypoint one of its `wraps` origins) the
+  wrapper's variable names the caller.
 
 Tests: parser tests on the captured fixtures (`claudecode/testdata`,
 including `hooks/`), the hook receiver and requests with the fake sending
@@ -770,8 +799,8 @@ credentials and never writes Codex's config.
   the daemon down. Every failure is `execution.ErrUnavailable` with the
   problem; an unknown method names the method and asks for a Codex update.
 - **Inventory.** Workspaces are the projects Codex trusts
-  (`config/read`); a Git checkout is importable. `RegisterWorkspace` refuses:
-  trust the project in Codex. One workspace mode, the project checkout.
+  (`config/read`); a Git checkout is importable (trust a project in Codex to
+  list it). One workspace mode, the project checkout.
 - **Launch (`reserved`).** Validation rejects before any effect (non-root
   workspace, missing directory, non-image attachment, invalid option or
   permission). `thread/start`, checkpoint the thread id, best-effort
@@ -791,10 +820,12 @@ credentials and never writes Codex's config.
   Codex. Links carry `command` (`cd <dir> && codex resume <id>`), which the
   task list offers as Copy resume command.
 - **Adoption.** `ResolveLink` takes a thread id or a `codex resume` command
-  and refuses T3 Code's threads (T3 tracks them), ephemeral and subagent
-  threads.
-- **Attribution.** Agents read `CODEX_THREAD_ID`. Its precedence yields to
-  T3 inside a Codex process T3 runs (`T3CODE_THREAD_ID`).
+  and refuses ephemeral and subagent threads. An observation's `origin` is
+  the thread's originator, raw; the coordinator refuses a thread another
+  harness wraps (T3's `T3 Code`: track it through T3).
+- **Attribution.** Agents read `CODEX_THREAD_ID`. Codex declares an
+  `origin` (no variable): inside a Codex process a wrapping harness runs,
+  the wrapper's variable names the caller.
 
 The fake daemon (`codex/codextest`) speaks the same subset over a temp
 socket; `internal/sync` `contract_codex_test.go` runs the coordinator

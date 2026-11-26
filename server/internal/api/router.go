@@ -177,7 +177,6 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/tasks/{id}/launch-link", s.attachLaunchLink)
 	h("GET /api/connections/t3/projects", s.externalProjects)
 	h("GET /api/connections/{connectionId}/projects", s.externalProjects)
-	h("POST /api/connections/t3/projects", s.registerWorkspace)
 
 	h("GET /api/tasks", s.listTasks)
 	h("POST /api/tasks", s.createTask)

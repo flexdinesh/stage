@@ -14,8 +14,17 @@ const (
 	ActionAutoPair = "auto-pair" // {}: pair through the t3 CLI on the server's machine
 )
 
+// Wrapped session origins: T3 runs other harnesses' sessions and leaves
+// these in them (a Claude Code transcript's entrypoint, a Codex thread's
+// originator). T3 tracks those sessions, so Stage refuses them elsewhere.
+const (
+	OriginEntrypoint = "t3-code"
+	OriginOriginator = "T3 Code"
+)
+
 // Descriptor: T3 is a connected service whose environment id names one
-// instance for good; a settled thread may complete its task.
+// instance for good; a settled thread may complete its task. It wraps the
+// sessions it runs in other harnesses (Wraps).
 var Descriptor = harness.Descriptor{
 	Kind: Kind, Name: "T3", Hosting: harness.Connected, StableIdentity: true,
 	// T3 creates worktrees from the base ref and branch Stage passes.
@@ -39,6 +48,7 @@ var Descriptor = harness.Descriptor{
 		},
 		Disconnect: true,
 	},
+	Wraps: &harness.Wraps{Origins: []string{OriginEntrypoint, OriginOriginator}},
 	Attribution: harness.Attribution{
 		Env:  "T3CODE_THREAD_ID",
 		Hint: "T3 sets your session id in T3CODE_THREAD_ID; the {cli} CLI and its stdio MCP detect it ({cli} context shows it). Otherwise MCP: pass callerSession {connectionId: {connectionId}, externalSessionId: $T3CODE_THREAD_ID}; HTTP MCP: send the header Stage-Caller-Session: {connectionId}:$T3CODE_THREAD_ID.",

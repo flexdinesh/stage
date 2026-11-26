@@ -21,7 +21,7 @@ type workerT3 struct {
 }
 
 func (f *workerT3) Features(context.Context) (execution.Capabilities, error) {
-	return execution.Capabilities{Operations: map[string]execution.Availability{"launch": {Available: true}}, Models: []execution.Model{{Choice: execution.Choice{ID: "m", Availability: execution.Availability{Available: true}}}}}, nil
+	return execution.Capabilities{Operations: map[execution.Op]execution.Availability{execution.OpLaunch: {Available: true}}, Models: []execution.Model{{Choice: execution.Choice{ID: "m", Availability: execution.Availability{Available: true}}}}}, nil
 }
 func (f *workerT3) observation(conn int64) execution.Observation {
 	now := time.Now().UTC()

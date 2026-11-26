@@ -165,22 +165,27 @@ func TestEventsSettleOnTheList(t *testing.T) {
 	none(t, ch, 200*time.Millisecond)
 }
 
-// A hook naming a session Claude does not have, or one T3 started, pushes
-// nothing.
-func TestEventsIgnoreUnknownAndT3Sessions(t *testing.T) {
+// A hook naming a session Claude does not have pushes nothing; one naming
+// a session another client started pushes it with its origin (the
+// coordinator leaves an unowned session to discovery).
+func TestEventsIgnoreUnknownSessions(t *testing.T) {
 	f := claudetest.New(t)
 	h := f.Hooks()
 	a := f.HookedAdapter(conn, h)
 	id, ch, _, _ := subscribed(t, f, a)
-	t3 := "11111111-2222-4333-8444-555555555555"
-	f.AddInteractive(t3, f.Workspace, "t3-code", "from T3")
 	// Post as Claude would, with the launched session's hook settings.
-	for _, other := range []string{"99999999-2222-4333-8444-555555555555", t3} {
-		if code := f.HookAs(id, other, "Stop", nil); code != http.StatusNoContent {
-			t.Fatal(code)
-		}
+	if code := f.HookAs(id, "99999999-2222-4333-8444-555555555555", "Stop", nil); code != http.StatusNoContent {
+		t.Fatal(code)
 	}
 	none(t, ch, 300*time.Millisecond)
+	wrapped := "11111111-2222-4333-8444-555555555555"
+	f.AddInteractive(wrapped, f.Workspace, "wrapper-entrypoint", "from a wrapper")
+	if code := f.HookAs(id, wrapped, "Stop", nil); code != http.StatusNoContent {
+		t.Fatal(code)
+	}
+	if o := next(t, ch); o.Session.ExternalSessionID != wrapped || o.Origin != "wrapper-entrypoint" {
+		t.Fatalf("%+v", o)
+	}
 	f.Hook(id, "SessionEnd", map[string]any{"reason": "other"})
 	if o := next(t, ch); o.Session.ExternalSessionID != id {
 		t.Fatalf("%+v", o)

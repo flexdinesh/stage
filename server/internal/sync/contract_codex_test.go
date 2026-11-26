@@ -2,6 +2,7 @@ package sync_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	coordinator "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // The real Codex adapter against a fake daemon, driven by the coordinator
@@ -38,8 +40,35 @@ func codexSetup(t *testing.T, p placement) (*db.Store, *codextest.Server, *coord
 	client := codex.NewClient(&codextest.Daemon{Srv: srv, T: t}, "test")
 	t.Cleanup(client.Close)
 	svc := p.coordinator(t, store, map[int64]execution.Adapter{3: codex.New(client, 3, "")}, nil)
-	svc.Harnesses = harness.MustRegistry(codex.Descriptor)
+	svc.Harnesses = harness.MustRegistry(t3.Descriptor, codex.Descriptor)
 	return store, srv, svc, task
+}
+
+// A thread T3 started (its originator, which T3's descriptor wraps) is
+// refused with a conflict that says where to track it; Codex declares every
+// operation through the coordinator, in process and behind a worker.
+func TestContractCodexWrappedThreadRefusedAndOperationsDeclared(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		_, srv, svc, _ := codexSetup(t, p)
+		ctx := t.Context()
+		a, err := svc.Adapter(3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f, err := a.Features(ctx); err != nil || f.DeclaresOperations() != nil {
+			t.Fatal(f.Operations, err, f.DeclaresOperations())
+		}
+		wrapped := srv.AddThread(codextest.Thread{ID: "019a0000-0000-7000-8000-00000000bbbb", Cwd: codexDir, Originator: t3.OriginOriginator})
+		err = svc.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: 3, ExternalSessionID: wrapped.ID})
+		var conflict *db.ConflictError
+		if !errors.As(err, &conflict) || conflict.Code != "session_refused" || conflict.Msg != "This Codex session was started by T3. Track it through T3." {
+			t.Fatalf("%v", err)
+		}
+		own := srv.AddThread(codextest.Thread{ID: "019a0000-0000-7000-8000-00000000aaaa", Cwd: codexDir, Originator: "codex-tui"})
+		if err := svc.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: 3, ExternalSessionID: own.ID}); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func TestContractCodexLaunchToDoneWithReplyAndResumeCommand(t *testing.T) {

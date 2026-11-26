@@ -92,9 +92,11 @@ type harnessCaller struct {
 // harness's active connection on this machine (resolved by the server).
 // Several set: a candidate whose Attribution.Precedence.Owns matches wins
 // (several owning: ambiguous); otherwise candidates whose Yields match drop
-// out and the one left wins. A derived session is cached for the process;
-// several left or no connection leave the caller unknown with a warning;
-// none set or all yielded leave it unknown without one.
+// out, and so does a wrapped candidate (Attribution.Origin) when a
+// wrapper's variable is set or its origin variable names a wrapper
+// (harness.Wraps); the one left wins. A derived session is cached for the
+// process; several left or no connection leave the caller unknown with a
+// warning; none set or all yielded leave it unknown without one.
 func (o *Ops) fromHarnessEnv(ctx context.Context) (harnessCaller, error) {
 	if o.HarnessEnv == nil {
 		return harnessCaller{}, nil
@@ -109,15 +111,19 @@ func (o *Ops) fromHarnessEnv(ctx context.Context) (harnessCaller, error) {
 		return harnessCaller{}, err
 	}
 	var cands []envCandidate
+	var wrapped []string
 	for _, d := range hs.Harnesses {
+		if d.Wraps != nil {
+			wrapped = append(wrapped, d.Wraps.Origins...)
+		}
 		if d.Attribution.Env == "" {
 			continue
 		}
 		if id := strings.TrimSpace(o.HarnessEnv(d.Attribution.Env)); id != "" {
-			cands = append(cands, envCandidate{kind: d.Kind, env: d.Attribution.Env, id: id, precedence: d.Attribution.Precedence})
+			cands = append(cands, envCandidate{kind: d.Kind, env: d.Attribution.Env, id: id, precedence: d.Attribution.Precedence, origin: d.Attribution.Origin, wraps: d.Wraps != nil})
 		}
 	}
-	cands = rankCandidates(cands, o.HarnessEnv)
+	cands = rankCandidates(cands, wrapped, o.HarnessEnv)
 	switch len(cands) {
 	case 0:
 		return harnessCaller{}, nil
@@ -147,13 +153,27 @@ func (o *Ops) fromHarnessEnv(ctx context.Context) (harnessCaller, error) {
 type envCandidate struct {
 	kind, env, id string
 	precedence    *harness.Precedence
+	// origin: the harness may be wrapped (harness.Attribution.Origin).
+	origin *harness.Origin
+	// wraps: the harness runs others' sessions (harness.Wraps).
+	wraps bool
 }
 
-// rankCandidates applies harness.Precedence to several set variables: the
-// owning candidates if any, else those that do not yield.
-func rankCandidates(cands []envCandidate, getenv func(string) string) []envCandidate {
+// rankCandidates applies harness.Precedence and harness.Wraps to several
+// set variables: the owning candidates if any, else those that neither
+// yield nor are wrapped. A wrapped candidate drops out when a wrapper's
+// variable is set or its origin variable holds an origin a wrapper leaves
+// (wrapped).
+func rankCandidates(cands []envCandidate, wrapped []string, getenv func(string) string) []envCandidate {
 	if len(cands) < 2 {
 		return cands
+	}
+	wrapperSet := slices.ContainsFunc(cands, func(c envCandidate) bool { return c.wraps })
+	inWrapper := func(c envCandidate) bool {
+		if c.origin == nil {
+			return false
+		}
+		return wrapperSet || (c.origin.Env != "" && slices.Contains(wrapped, strings.TrimSpace(getenv(c.origin.Env))))
 	}
 	var owns, kept []envCandidate
 	for _, c := range cands {
@@ -161,6 +181,7 @@ func rankCandidates(cands []envCandidate, getenv func(string) string) []envCandi
 		case c.precedence != nil && harness.AnyMatches(c.precedence.Owns, getenv):
 			owns = append(owns, c)
 		case c.precedence != nil && harness.AnyMatches(c.precedence.Yields, getenv):
+		case inWrapper(c):
 		default:
 			kept = append(kept, c)
 		}
@@ -517,12 +538,12 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 				}
 			}
 			if a.Base == db.BasePredecessor {
-				if err := execution.RequireAvailable("predecessor base", f.Operations["predecessorBase"]); err != nil {
+				if err := execution.RequireAvailable("predecessor base", f.Operations[execution.OpPredecessorBase]); err != nil {
 					return rc, err
 				}
 			}
 			if len(a.ImagePaths) > 0 {
-				if err := execution.RequireAvailable("images", f.Operations["images"]); err != nil {
+				if err := execution.RequireAvailable("images", f.Operations[execution.OpImages]); err != nil {
 					return rc, err
 				}
 			}

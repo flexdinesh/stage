@@ -202,7 +202,6 @@ var available = execution.Availability{Available: true}
 const (
 	reasonAnswer = "Answer in Claude Code: copy the resume command and run it in a terminal."
 	reasonBase   = "Claude Code starts worktrees from origin's default branch, or from a predecessor's branch, and names the branch itself."
-	reasonFolder = "Open Claude Code in the folder once; Stage lists the folders Claude Code knows."
 	reasonImages = "Stage has no folder for Claude Code's images on this machine."
 )
 
@@ -213,13 +212,13 @@ func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 		effort.Values = append(effort.Values, execution.StringValue(e))
 	}
 	return execution.Capabilities{
-		Operations: map[string]execution.Availability{
-			"launch": available, "stop": available, "adopt": available, "reply": available, "opening": available, "images": a.images(),
-			"predecessorBase":   available,
-			"worktreeBase":      {Reason: reasonBase},
-			"registerWorkspace": {Reason: reasonFolder},
-			execution.OpRespond: a.hooksRunning(),
-			execution.OpSend:    available,
+		Operations: map[execution.Op]execution.Availability{
+			execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpImages: a.images(),
+			execution.OpAttention:       available,
+			execution.OpPredecessorBase: available,
+			execution.OpWorktreeBase:    {Reason: reasonBase},
+			execution.OpRespond:         a.hooksRunning(),
+			execution.OpSend:            available,
 		},
 		Models:      slices.Clone(models),
 		Options:     []execution.Option{effort},
@@ -310,11 +309,6 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 	return slices.Clone(out), nil
 }
 
-// RegisterWorkspace: Claude Code learns folders when it runs in them.
-func (a *Adapter) RegisterWorkspace(context.Context, string, string) (execution.WorkspaceInfo, error) {
-	return execution.WorkspaceInfo{}, fmt.Errorf("%w: %s", execution.ErrUnavailable, reasonFolder)
-}
-
 var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 var shortRe = regexp.MustCompile(`^[0-9a-f]{8}$`)
 
@@ -349,7 +343,7 @@ func (s session) cwd() string {
 }
 
 // read gathers a session from the session list (fresh: read the CLI again)
-// and its transcript. ErrNotFound: neither exists. A T3 session is refused.
+// and its transcript. ErrNotFound: neither exists.
 func (a *Adapter) read(ctx context.Context, id string, fresh bool) (session, error) {
 	if !validUUID(id) {
 		return session{}, execution.ErrNotFound
@@ -373,9 +367,6 @@ func (a *Adapter) readListed(ctx context.Context, id string, es []Entry) (sessio
 	}
 	if !s.listed && !s.hasLog {
 		return s, execution.ErrNotFound
-	}
-	if s.hasLog && s.transcript.Entrypoint == entrypointT3 {
-		return s, &execution.Refused{Reason: refusedT3}
 	}
 	return s, nil
 }
@@ -429,6 +420,7 @@ func (a *Adapter) observation(s session) (execution.Observation, error) {
 		Artifacts:   []execution.Artifact{},
 		Base:        baseAvailability(cwd, t.Branch),
 		Config:      execution.Config{Options: []execution.ModelOption{}},
+		Origin:      t.Entrypoint,
 	}
 	if o.Title == "" {
 		o.Title = s.entry.Name
@@ -530,28 +522,19 @@ func (a *Adapter) Stop(ctx context.Context, ref execution.SessionRef) error {
 // Attention is every listed session waiting for its user (ADR 0005
 // decision 9): a blocked background session, also one Claude's daemon
 // retired (attach wakes it), and a waiting terminal, IDE or SDK session.
-// Sessions T3 started are T3's to surface. Discovery surfaces, adoption
-// tracks: the descriptor's silent attention policy keeps these to a waiting
-// row. An unreadable list, or no transcript root to tell T3's sessions
-// apart, is an error.
+// Discovery surfaces, adoption tracks: the descriptor's silent attention
+// policy keeps these to a waiting row, and the coordinator leaves out a
+// session another harness wraps (its observed origin). An unreadable list
+// is an error.
 func (a *Adapter) Attention(ctx context.Context) ([]execution.SessionRef, error) {
 	es, err := a.roster.list(ctx, false)
 	if err != nil {
 		return nil, err
 	}
-	root := a.projects(ctx)
-	if root == "" {
-		return nil, errors.New("claude auth status reports no projects directory")
-	}
 	out := []execution.SessionRef{}
 	for _, e := range es {
 		if st, err := MapState(e); err != nil || st != "needs_input" || !validUUID(e.SessionID) {
 			continue
-		}
-		if p, ok := transcriptPath(root, e.Cwd, e.SessionID); ok {
-			if t, err := ReadHead(p); err == nil && t.Entrypoint == entrypointT3 {
-				continue
-			}
 		}
 		out = append(out, execution.SessionRef{ConnectionID: a.conn, ExternalSessionID: e.SessionID})
 	}

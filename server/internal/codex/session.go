@@ -105,6 +105,7 @@ func (a *Adapter) observation(t thread, last *turn, archived bool) (execution.Ob
 		CreatedAt: unix(t.CreatedAt), UpdatedAt: unix(max(t.UpdatedAt, t.CreatedAt)),
 		Archived: archived,
 		Base:     execution.Availability{Reason: "Codex runs in the project checkout."},
+		Origin:   t.Originator,
 	}
 	if t.GitInfo != nil && t.GitInfo.Branch != nil {
 		o.Branch = *t.GitInfo.Branch

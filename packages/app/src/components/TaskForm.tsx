@@ -5,6 +5,7 @@ import { useHarnesses, useMachines, usePreferences, useInvalidateWork, useProjec
 import { connectionOptions, machineTag, withMachine } from "../lib/machines.ts";
 import {
   type ExecutionConfig,
+  type OperationId,
   type Schedule,
   type StartMode as TreeStartMode,
   type Task,
@@ -627,7 +628,7 @@ function useHarnessConfig(
     retry: false,
   });
   // Until the harness answers, nothing is ruled out: the server checks the launch.
-  const operation = (id: string) => caps.data?.operations[id]?.available ?? true;
+  const operation = (id: OperationId) => caps.data?.operations[id]?.available ?? true;
   const [draftConfig, setDraftConfig] = useState<ExecutionConfig | null>(null);
   // A new task starts with the connection's pinned model; it follows the harness until the user edits the config.
   const prefilled = existing ? undefined : prefillConfig(harnesses.connection(connection));

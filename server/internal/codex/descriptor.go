@@ -22,10 +22,6 @@ const ActionConnect = "connect"
 // knows its threads by the ids it records.
 const ClientName = "stage"
 
-// T3Originator is the originator T3 Code's threads carry (T3 runs its own
-// app-server): Stage refuses to adopt them, T3 tracks them.
-const T3Originator = "T3 Code"
-
 // Descriptor: Codex runs on Stage's machine (hosted: the daemon is a local
 // process). Its identity is the Codex home the daemon serves, which names
 // one instance for good. Stage reserves a launch's identity by
@@ -51,9 +47,10 @@ var Descriptor = harness.Descriptor{
 	Attribution: harness.Attribution{
 		MetaKeys: []string{},
 		Env:      "CODEX_THREAD_ID",
-		// A Codex process T3 runs is T3's session (T3 runs its own
-		// app-server and tracks those threads).
-		Precedence: &harness.Precedence{Yields: []harness.EnvMatch{{Env: "T3CODE_THREAD_ID"}}},
-		Hint:       "Codex sets your session id in CODEX_THREAD_ID; the {cli} CLI and its stdio MCP detect it ({cli} context shows it). Otherwise MCP: pass callerSession {connectionId: {connectionId}, externalSessionId: $CODEX_THREAD_ID}; HTTP MCP: send the header Stage-Caller-Session: {connectionId}:$CODEX_THREAD_ID.",
+		// Codex records the client that started a thread (its originator),
+		// so a harness that wraps Codex threads tracks them and names their
+		// caller (harness.Wraps).
+		Origin: &harness.Origin{},
+		Hint:   "Codex sets your session id in CODEX_THREAD_ID; the {cli} CLI and its stdio MCP detect it ({cli} context shows it). Otherwise MCP: pass callerSession {connectionId: {connectionId}, externalSessionId: $CODEX_THREAD_ID}; HTTP MCP: send the header Stage-Caller-Session: {connectionId}:$CODEX_THREAD_ID.",
 	},
 }

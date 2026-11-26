@@ -106,7 +106,7 @@ func TestLiveMixedManualTree(t *testing.T) {
 	first := isolatedT3(t, f.dir, binary, fx, &disconnected)
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	project, err := first.RegisterWorkspace(ctx, "Stage fixture", f.dir)
+	project, err := first.Client.CreateProject(ctx, t3.CreateProjectInput{Title: "Stage fixture", WorkspaceRoot: f.dir})
 	if err != nil {
 		t.Fatal(err)
 	}

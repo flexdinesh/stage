@@ -2,6 +2,10 @@
 
 - **Status:** accepted (2026-11-25), Stage task #384 (tree 200). Builds on
   the hosted-kind plumbing of #371 (PR #205).
+- **Amended** 2026-11-26 by #420 ([ADR 0007](0007-harness-boundary.md)):
+  decisions 8 (T3's threads are refused through T3's declared `wraps`, not
+  by the adapter naming T3) and 11 (attribution yields to T3 through
+  `wraps`, not by name).
 - **Sources:** live gates against `codex` 0.171.0 (app-server 0.171.0) on
   Linux x86_64 with a ChatGPT login, 2026-11-25, in scratch directories.
   Probe threads were deleted afterwards. Sanitized protocol fixtures:
@@ -65,7 +69,9 @@ daemon, so a thread Stage starts is the user's thread too.
    Stage never writes Codex's config: trust a project in Codex. Adoption
    takes a thread id or a `codex resume <id>` command. It refuses T3 Code's
    threads ("Track it through T3": T3 runs its own app-server and tracks
-   them), ephemeral threads and subagent threads. Threads created through
+   them), ephemeral threads and subagent threads. Amended by #420: the
+   adapter reports the originator as the session's origin and the
+   coordinator refuses `T3 Code` because T3's descriptor wraps it. Threads created through
    the daemon carry originator "Codex Desktop", not Stage's client name
    (gate), so Stage knows its threads by the ids it records.
 9. **Closure.** Archive (`thread/archived`, or `thread/list` with
@@ -79,7 +85,8 @@ daemon, so a thread Stage starts is the user's thread too.
 11. **Attribution.** Codex sets `CODEX_THREAD_ID` in commands (gate). Its
     precedence ([ADR 0005](0005-claude-code-harness.md)'s generic
     owns/yields) yields to T3 (`T3CODE_THREAD_ID`): a Codex process T3 runs
-    is T3's session.
+    is T3's session. Amended by #420: Codex declares an origin; yielding
+    follows from T3's `wraps`, not a precedence naming T3.
 12. **Settings.** `codex_settings` (machine, CLI path, connected) stores the
     CLI path and whether the machine connected; boot reinstalls the adapter
     when connected (migration 0031).

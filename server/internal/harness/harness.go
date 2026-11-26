@@ -100,6 +100,21 @@ type Descriptor struct {
 	// Worktree is what a worktree workspace on this harness may take from
 	// Stage; task and schedule validation enforces it.
 	Worktree Worktree `json:"worktree"`
+	// Wraps: this harness runs other harnesses' sessions (T3 runs Claude
+	// Code and Codex). Nil: it runs only its own.
+	Wraps *Wraps `json:"wraps,omitempty"`
+}
+
+// Wraps is what a harness that runs other harnesses' sessions leaves in
+// them, without naming them. Stage refuses to track such a session on the
+// wrapped harness's connection (the wrapper tracks it), and the wrapper's
+// session variable (Attribution.Env) names the caller over a wrapped
+// harness's (one with Attribution.Origin) (docs/execution.md).
+type Wraps struct {
+	// Origins are the session origins it leaves, as the wrapped harness
+	// records them and its adapter reports them (execution.Observation
+	// Origin): Claude Code's entrypoint, Codex's originator.
+	Origins []string `json:"origins"`
 }
 
 // Worktree is the static policy for a worktree workspace's base. The live
@@ -139,15 +154,30 @@ type Attribution struct {
 	// one process (a harness running inside another, or inheriting its
 	// environment). Nil: none.
 	Precedence *Precedence `json:"precedence,omitempty"`
+	// Origin: the harness records the client that started each session, so
+	// a wrapping harness (Descriptor.Wraps) may run its sessions; nil: it
+	// records none and no harness wraps it.
+	Origin *Origin `json:"origin,omitempty"`
 	// Hint is the caller line of launch journal instructions; {connectionId}
 	// and {cli} are filled in. Empty: the generic hint.
 	Hint string `json:"-"`
 }
 
+// Origin is how a wrappable harness exposes a session's origin to its
+// agents.
+type Origin struct {
+	// Env is the variable holding the session's origin in its agent
+	// processes; "" when the harness sets none. Its value among another
+	// harness's Wraps.Origins means the process runs inside that harness.
+	Env string `json:"env,omitempty"`
+}
+
 // Precedence ranks a harness's session variable against the others set in
 // the same process. Resolution (agenttools): a candidate whose Owns matches
-// wins outright; otherwise candidates whose Yields match drop out; one left
-// wins, several name no caller.
+// wins outright; otherwise candidates whose Yields match drop out, and so
+// do wrapped candidates (Attribution.Origin) when a wrapper's variable is
+// set or their origin variable names a wrapper (Wraps); one left wins,
+// several name no caller.
 type Precedence struct {
 	// Owns: when any matches, this harness's variable names the caller
 	// whatever else is set.
@@ -199,6 +229,7 @@ type Registry struct{ list []Descriptor }
 // NewRegistry validates and orders ds (the server's composition order).
 func NewRegistry(ds ...Descriptor) (*Registry, error) {
 	seen := map[string]bool{}
+	origins := map[string]string{}
 	ds = slices.Clone(ds)
 	for i := range ds {
 		if ds[i].Launch == "" {
@@ -233,6 +264,20 @@ func NewRegistry(ds ...Descriptor) (*Registry, error) {
 		if err := d.Setup.validate(); err != nil {
 			return nil, fmt.Errorf("harness %s: %w", d.Kind, err)
 		}
+		if d.Wraps != nil {
+			if len(d.Wraps.Origins) == 0 {
+				return nil, fmt.Errorf("harness %s: wraps needs an origin", d.Kind)
+			}
+			for _, o := range d.Wraps.Origins {
+				if strings.TrimSpace(o) == "" {
+					return nil, fmt.Errorf("harness %s: blank wrapped origin", d.Kind)
+				}
+				if prev, dup := origins[o]; dup {
+					return nil, fmt.Errorf("harness %s: origin %q already wrapped by %s", d.Kind, o, prev)
+				}
+				origins[o] = d.Kind
+			}
+		}
 	}
 	return &Registry{list: ds}, nil
 }
@@ -265,6 +310,31 @@ func (r *Registry) Lookup(kind string) (Descriptor, bool) {
 		return Descriptor{}, false
 	}
 	return r.list[i], true
+}
+
+// Wrapper is the harness, other than kind, whose Wraps lists origin: a
+// session of kind started by it, which it tracks.
+func (r *Registry) Wrapper(kind, origin string) (Descriptor, bool) {
+	if origin == "" {
+		return Descriptor{}, false
+	}
+	i := slices.IndexFunc(r.list, func(d Descriptor) bool {
+		return d.Kind != kind && d.Wraps != nil && slices.Contains(d.Wraps.Origins, origin)
+	})
+	if i < 0 {
+		return Descriptor{}, false
+	}
+	return r.list[i], true
+}
+
+// Refusal is the refusal for a session of kind whose origin another
+// registered harness wraps; nil when none does.
+func (r *Registry) Refusal(kind, origin string) *execution.Refused {
+	w, ok := r.Wrapper(kind, origin)
+	if !ok {
+		return nil
+	}
+	return &execution.Refused{Reason: fmt.Sprintf("This %s session was started by %s. Track it through %s.", r.Name(kind), w.Name, w.Name)}
 }
 
 // Name is a kind's display name; an unknown kind reads as itself.

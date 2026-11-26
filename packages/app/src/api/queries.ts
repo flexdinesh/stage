@@ -10,7 +10,7 @@ import { claudeStatusView } from "../lib/claude.ts";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
 import { machineKey, machineScopeId } from "../lib/machines.ts";
 import { POLL, pollFirstPage } from "../lib/polling.ts";
-import type { CodexStatus, ExecutionConfig, Harness, RequestResponse, SessionRequest, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OpenCodeStatus, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
+import type { CodexStatus, ExecutionConfig, Harness, RequestResponse, SessionRequest, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OperationId, OpenCodeStatus, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   t3Status: ["t3Status"],
@@ -598,7 +598,7 @@ const REQUESTS_POLL = 3000;
  * Whether connection `connectionId` offers operation `op` (its capabilities, cached as NewTaskDefaults reads them).
  * Read only while `enabled`; `known` is false until the capabilities answer (or always, when disabled or retired).
  */
-export function useConnectionOperation(connectionId: number, op: string, enabled: boolean): { offered: boolean; known: boolean } {
+export function useConnectionOperation(connectionId: number, op: OperationId, enabled: boolean): { offered: boolean; known: boolean } {
   const api = useApi();
   const harnesses = useHarnesses();
   const live = enabled && !harnesses.retired(connectionId);

@@ -26,7 +26,6 @@ const (
 	KindFeatures             = "adapter.features"
 	KindFeaturesForWorkspace = "adapter.featuresForWorkspace"
 	KindWorkspaces           = "adapter.workspaces"
-	KindRegisterWorkspace    = "adapter.registerWorkspace"
 	KindObserve              = "adapter.observe"
 	KindLaunch               = "adapter.launch"
 	KindStop                 = "adapter.stop"
@@ -110,12 +109,6 @@ type SessionRequest struct {
 // project and directory.
 type WorkspaceRequest struct {
 	Project   string `json:"project"`
-	Directory string `json:"directory"`
-}
-
-// RegisterRequest is adapter.registerWorkspace.
-type RegisterRequest struct {
-	Title     string `json:"title"`
 	Directory string `json:"directory"`
 }
 

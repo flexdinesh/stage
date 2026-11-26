@@ -140,13 +140,6 @@ func (h *Host) Handlers() map[string]workerchan.WorkerHandler {
 			}
 			return ws, err
 		}),
-		KindRegisterWorkspace: h.with(func(ctx context.Context, a execution.Adapter, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
-			var r RegisterRequest
-			if err := decode(env, &r); err != nil {
-				return nil, err
-			}
-			return a.RegisterWorkspace(ctx, r.Title, r.Directory)
-		}),
 		KindObserve: h.with(func(ctx context.Context, a execution.Adapter, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
 			var r SessionRequest
 			if err := decode(env, &r); err != nil {

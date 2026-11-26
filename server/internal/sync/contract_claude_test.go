@@ -21,6 +21,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
 	coordinator "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // The real Claude Code adapter against a fake claude CLI, through the
@@ -50,7 +51,7 @@ func claudeSetupWith(t *testing.T, p placement, f *claudetest.Fake, a *claudecod
 		t.Fatal(err)
 	}
 	svc := p.coordinator(t, store, map[int64]execution.Adapter{claudeConn: a}, nil)
-	svc.Harnesses = harness.MustRegistry(claudecode.Descriptor)
+	svc.Harnesses = harness.MustRegistry(t3.Descriptor, claudecode.Descriptor)
 	return store, svc, task, a
 }
 
@@ -366,17 +367,25 @@ func TestContractClaudeRemovedPredecessorBlocksLaunch(t *testing.T) {
 	})
 }
 
-// A session T3 started is refused with a conflict that says where to track
-// it.
+// A session T3 started (its entrypoint, which T3's descriptor wraps) is
+// refused with a conflict that says where to track it; Claude Code declares
+// every operation through the coordinator, in process and behind a worker.
 func TestContractClaudeT3SessionRefused(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
 		f := claudetest.New(t)
 		_, svc, _, _ := claudeSetup(t, p, f)
+		a, err := svc.Adapter(claudeConn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c, err := a.Features(t.Context()); err != nil || c.DeclaresOperations() != nil {
+			t.Fatal(c.Operations, err, c.DeclaresOperations())
+		}
 		id := "55555555-5555-4555-8555-555555555555"
-		f.AddInteractive(id, f.Workspace, "t3-code", "from T3")
-		err := svc.RefreshScopedSession(t.Context(), execution.SessionRef{ConnectionID: claudeConn, ExternalSessionID: id})
+		f.AddInteractive(id, f.Workspace, t3.OriginEntrypoint, "from T3")
+		err = svc.RefreshScopedSession(t.Context(), execution.SessionRef{ConnectionID: claudeConn, ExternalSessionID: id})
 		var conflict *db.ConflictError
-		if !errors.As(err, &conflict) || conflict.Code != "session_refused" || !strings.Contains(conflict.Msg, "Track it through T3") {
+		if !errors.As(err, &conflict) || conflict.Code != "session_refused" || conflict.Msg != "This Claude Code session was started by T3. Track it through T3." {
 			t.Fatalf("%v", err)
 		}
 	})

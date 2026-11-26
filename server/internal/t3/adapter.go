@@ -43,9 +43,6 @@ func (a *Adapter) Health(ctx context.Context) execution.Health {
 func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, error) {
 	return a.Client.ListProjects(ctx)
 }
-func (a *Adapter) RegisterWorkspace(ctx context.Context, title, dir string) (execution.WorkspaceInfo, error) {
-	return a.Client.CreateProject(ctx, CreateProjectInput{Title: title, WorkspaceRoot: dir})
-}
 func ModelKey(provider, model string) string {
 	b, _ := json.Marshal([2]string{provider, model})
 	return string(b)
@@ -70,9 +67,12 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 		return execution.Capabilities{}, err
 	}
 	yes := execution.Availability{Available: true}
-	out := execution.Capabilities{Operations: map[string]execution.Availability{}, Models: []execution.Model{}}
-	for _, name := range []string{"launch", "stop", "adopt", "opening", "reply", "attention", "images", "registerWorkspace", "predecessorBase", "worktreeBase"} {
-		out.Operations[name] = yes
+	out := execution.Capabilities{Operations: map[execution.Op]execution.Availability{}, Models: []execution.Model{}}
+	for _, op := range []execution.Op{execution.OpLaunch, execution.OpStop, execution.OpAdopt, execution.OpOpening, execution.OpReply, execution.OpAttention, execution.OpImages, execution.OpPredecessorBase, execution.OpWorktreeBase} {
+		out.Operations[op] = yes
+	}
+	for _, op := range []execution.Op{execution.OpRespond, execution.OpSend} {
+		out.Operations[op] = execution.Availability{Reason: "Answer in T3: open the thread there."}
 	}
 	for _, mode := range []string{"approval-required", "auto-accept-edits", "auto", "full-access"} {
 		out.Permissions = append(out.Permissions, execution.Choice{ID: mode, Label: mode, Availability: yes})

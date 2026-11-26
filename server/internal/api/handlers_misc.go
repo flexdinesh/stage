@@ -138,7 +138,7 @@ func (s *server) prepareAdoption(r *http.Request, ref db.SessionRef) (*db.Projec
 	if err != nil {
 		return nil, &db.HarnessError{Err: err}
 	}
-	if op := f.Operations["adopt"]; !op.Available {
+	if op := f.Operations[execution.OpAdopt]; !op.Available {
 		return nil, db.Conflict("adoption unavailable on this connection: %s", op.Reason)
 	}
 	if err := s.Sync.RefreshScopedSession(ctx, ref); err != nil {

@@ -22,6 +22,10 @@ func TestRegistryValidatesDescriptors(t *testing.T) {
 		"unknown field kind": {{Kind: "a", Name: "A", Hosting: harness.Connected, Setup: harness.Setup{Fields: []harness.Field{{ID: "u", Label: "U", Kind: "date"}}}}},
 		"unlabeled action":   {{Kind: "a", Name: "A", Hosting: harness.Connected, Setup: harness.Setup{Actions: []harness.Action{{ID: "go"}}}}},
 		"duplicate input":    {{Kind: "a", Name: "A", Hosting: harness.Connected, Setup: harness.Setup{Actions: []harness.Action{{ID: "go", Label: "Go", Input: []harness.Field{{ID: "x", Label: "X", Kind: harness.FieldText}, {ID: "x", Label: "X", Kind: harness.FieldText}}}}}}},
+		"wraps nothing":      {{Kind: "a", Name: "A", Hosting: harness.Connected, Wraps: &harness.Wraps{}}},
+		"blank origin":       {{Kind: "a", Name: "A", Hosting: harness.Connected, Wraps: &harness.Wraps{Origins: []string{" "}}}},
+		"origin wrapped twice": {{Kind: "a", Name: "A", Hosting: harness.Connected, Wraps: &harness.Wraps{Origins: []string{"x"}}},
+			{Kind: "b", Name: "B", Hosting: harness.Connected, Wraps: &harness.Wraps{Origins: []string{"x"}}}},
 	} {
 		if _, err := harness.NewRegistry(ds...); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -47,6 +51,21 @@ func TestRegistryValidatesDescriptors(t *testing.T) {
 	}
 	if _, found := b.Closure(execution.ClosedSettled); found {
 		t.Fatal("undeclared closure")
+	}
+}
+
+// A session whose origin another registered harness wraps is refused,
+// naming the wrapper; its own origins, an unknown one or none are not.
+func TestRegistryRefusesWrappedSessions(t *testing.T) {
+	w := harness.Descriptor{Kind: "w", Name: "Wrapper", Hosting: harness.Connected, Wraps: &harness.Wraps{Origins: []string{"w-client"}}}
+	r := harness.MustRegistry(w, harness.Descriptor{Kind: "a", Name: "Agent", Hosting: harness.Hosted, Attribution: harness.Attribution{Origin: &harness.Origin{}}})
+	if got := r.Refusal("a", "w-client"); got == nil || got.Reason != "This Agent session was started by Wrapper. Track it through Wrapper." {
+		t.Fatalf("%+v", got)
+	}
+	for _, c := range []struct{ kind, origin string }{{"a", ""}, {"a", "cli"}, {"w", "w-client"}} {
+		if got := r.Refusal(c.kind, c.origin); got != nil {
+			t.Errorf("%+v refused: %v", c, got)
+		}
 	}
 }
 

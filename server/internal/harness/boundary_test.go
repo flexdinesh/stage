@@ -8,6 +8,12 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/claudecode"
+	"github.com/flexdinesh/stage/server/internal/codex"
+	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/opencode"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // harnessBranch matches code that names a specific harness: kind literals,
@@ -90,6 +96,80 @@ func TestProductCodeDoesNotBranchOnHarnessNames(t *testing.T) {
 	for f := range pending {
 		if !found[f] {
 			t.Errorf("%s no longer names a harness: remove it from pending", f)
+		}
+	}
+}
+
+// adapterKinds are the adapter packages (and their connection setup) with
+// the harness each owns.
+var adapterKinds = map[string]string{
+	"internal/t3/": "t3", "internal/t3setup/": "t3",
+	"internal/opencode/": "opencode", "internal/opencodesetup/": "opencode",
+	"internal/claudecode/": "claude", "internal/claudecodesetup/": "claude",
+	"internal/codex/": "codex", "internal/codexsetup/": "codex",
+}
+
+// namesKind matches code naming a harness kind: its kind literal, its kind
+// constant, an import of its adapter or setup package, or a session origin
+// it wraps (harness.Wraps, which only it declares).
+func namesKind() map[string]*regexp.Regexp {
+	out := map[string]*regexp.Regexp{}
+	for pkg, d := range map[string]harness.Descriptor{"t3": t3.Descriptor, "opencode": opencode.Descriptor, "claudecode": claudecode.Descriptor, "codex": codex.Descriptor} {
+		alts := []string{regexp.QuoteMeta(`"` + d.Kind + `"`), `\b` + pkg + `\.Kind\b`, `/internal/` + pkg + `(setup)?[/"]`}
+		if d.Wraps != nil {
+			for _, o := range d.Wraps.Origins {
+				alts = append(alts, regexp.QuoteMeta(`"`+o+`"`))
+			}
+		}
+		out[d.Kind] = regexp.MustCompile(strings.Join(alts, "|"))
+	}
+	return out
+}
+
+// modelsProviders may name another harness's kind as the harness's own
+// vocabulary: T3's fake catalog lists a "claude" provider instance (T3's
+// provider id, not Stage's harness kind).
+var modelsProviders = map[string]bool{"internal/t3/fake.go": true}
+
+// No adapter names another harness (ADR 0007 decision 13): a harness that
+// runs other harnesses' sessions declares harness.Wraps, and the
+// coordinator refuses and attributes from it.
+func TestAdaptersDoNotNameOtherHarnesses(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := namesKind()
+	for dir, own := range adapterKinds {
+		err := filepath.WalkDir(filepath.Join(root, filepath.FromSlash(dir)), func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			rel := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
+			if modelsProviders[rel] {
+				return nil
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for i, line := range strings.Split(string(b), "\n") {
+				if c := strings.Index(line, "//"); c >= 0 {
+					line = line[:c]
+				}
+				for kind, re := range names {
+					if kind != own && re.MatchString(line) {
+						t.Errorf("%s:%d names harness %s: declare harness.Wraps or a descriptor policy instead", rel, i+1, kind)
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 }

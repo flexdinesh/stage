@@ -21,7 +21,10 @@
   evidence [E10](#e10-predecessor-base).
 - **Amended** 2026-11-26 by #420 ([ADR 0007](0007-harness-boundary.md)):
   decision 15 (images under Stage's data dir, read through an allow rule,
-  no `--add-dir`), evidence [E8](#e8-images); decision 18's text-only note.
+  no `--add-dir`), evidence [E8](#e8-images); decision 18's text-only note;
+  decision 9 (T3's sessions are refused through T3's declared `wraps`, not
+  by the adapter naming T3) and E6's precedence note (the wrapper's
+  variable wins through `wraps` and Claude's declared origin variable).
 - **Sources:** probes of the local `claude` CLI on Linux x86_64 with a
   claude.ai (Max) login, 2026-11-25, in scratch directories with haiku
   prompts. The CLI auto-updated from 2.1.331 to 2.1.332 two minutes in;
@@ -122,11 +125,13 @@ them. 2, 3, 13 and 14 come from the evidence.
 9. **Scope.** Stage sees the sessions it launched plus ones the user adopts
    by UUID (or short id, resolved through the roster). Adoption is refused
    with "Track it through T3" when the transcript's first `user` record has
-   `entrypoint: "t3-code"`. Opening an adopted session returns its first
+   `entrypoint: "t3-code"`; amended by #420: the adapter reports the
+   entrypoint as the session's origin and the coordinator refuses it
+   because T3's descriptor wraps that origin. Opening an adopted session returns its first
    user prompt. Amended by #383: discovery surfaces, adoption tracks. The
    adapter's attention feed lists every session waiting for its user
-   (background `blocked`, retired ones included, and interactive `waiting`,
-   T3's left out), read from the same roster. Under the descriptor's
+   (background `blocked`, retired ones included, and interactive `waiting`;
+   the coordinator leaves T3's out by origin), read from the same roster. Under the descriptor's
    `silent` attention policy they appear only as inbox waiting rows and in
    the needs-input count, never as events or pushes, until the user adopts
    one (the row's Track). Global hooks (`stage setup --claude`) were
@@ -387,7 +392,9 @@ a message, even when it is dirty. The roster `cwd` is the worktree.
   would pass `T3CODE_THREAD_ID` on to every background session (inferred,
   not run). So attribution inside a session must check
   `CLAUDE_CODE_SESSION_KIND=bg` (a Claude background session) before
-  `T3CODE_THREAD_ID` (#372's precedence rule).
+  `T3CODE_THREAD_ID` (#372's precedence rule). Amended by #420: Claude
+  declares only the `bg` owns rule and its origin variable
+  (`CLAUDE_CODE_ENTRYPOINT`); yielding to T3 follows from T3's `wraps`.
 
 ### E7 Reap
 

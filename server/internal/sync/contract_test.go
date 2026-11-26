@@ -35,16 +35,13 @@ func (f *documentHarness) Health(context.Context) execution.Health {
 	return execution.Health{Availability: execution.Availability{Available: !f.offline, Reason: "Reconnect documents"}, Identity: "documents-local"}
 }
 func (f *documentHarness) Features(context.Context) (execution.Capabilities, error) {
-	return execution.Capabilities{Operations: map[string]execution.Availability{"launch": {Available: !f.disallow, Reason: "Read-only document service"}, "opening": {Reason: "Documents have no opening prompt"}}, Models: []execution.Model{{Choice: execution.Choice{ID: "brain-7", Label: "Brain seven", Availability: execution.Availability{Available: true}}, Permissions: []execution.Choice{{ID: "reviewed"}}}}}, nil
+	return execution.Capabilities{Operations: map[execution.Op]execution.Availability{execution.OpLaunch: {Available: !f.disallow, Reason: "Read-only document service"}, execution.OpOpening: {Reason: "Documents have no opening prompt"}}, Models: []execution.Model{{Choice: execution.Choice{ID: "brain-7", Label: "Brain seven", Availability: execution.Availability{Available: true}}, Permissions: []execution.Choice{{ID: "reviewed"}}}}}, nil
 }
 func (f *documentHarness) Workspaces(context.Context) ([]execution.WorkspaceInfo, error) {
 	if f.offline {
 		return nil, execution.ErrUnavailable
 	}
 	return []execution.WorkspaceInfo{{ID: "collection-z", Title: "Collection", WorkspaceRoot: "volume://checkout"}}, nil
-}
-func (f *documentHarness) RegisterWorkspace(context.Context, string, string) (execution.WorkspaceInfo, error) {
-	return execution.WorkspaceInfo{}, execution.ErrUnavailable
 }
 func (f *documentHarness) Observe(_ context.Context, ref execution.SessionRef) (execution.Observation, error) {
 	if f.offline {

@@ -90,7 +90,7 @@ func (a *Adapter) Events(ctx context.Context, sink execution.Sink) error {
 
 // settle reads n's session until it shows the change n's event announces,
 // at most len(settleDelays) times, and returns the last observation read.
-// A session that is gone, refused or unreadable throughout yields none.
+// A session that is gone or unreadable throughout yields none.
 func (a *Adapter) settle(ctx context.Context, n Nudge) (execution.Observation, bool) {
 	var last execution.Observation
 	have := false
@@ -109,8 +109,7 @@ func (a *Adapter) settle(ctx context.Context, n Nudge) (execution.Observation, b
 			continue
 		}
 		s, err := a.readListed(ctx, n.Session, es)
-		var refused *execution.Refused
-		if errors.Is(err, execution.ErrNotFound) || errors.As(err, &refused) {
+		if errors.Is(err, execution.ErrNotFound) {
 			return execution.Observation{}, false
 		}
 		if err != nil {

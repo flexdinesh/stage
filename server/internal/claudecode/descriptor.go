@@ -53,11 +53,14 @@ var Descriptor = harness.Descriptor{
 		MetaKeys: []string{},
 		Env:      SessionEnv,
 		// A background session owns its variable even when Claude's daemon
-		// leaked T3's into it; a Claude process T3 runs is T3's session.
+		// leaked another harness's into it. Claude records the client that
+		// started a session (its entrypoint, also in CLAUDE_CODE_ENTRYPOINT),
+		// so a harness that wraps Claude sessions tracks them and names
+		// their caller (harness.Wraps).
 		Precedence: &harness.Precedence{
-			Owns:   []harness.EnvMatch{{Env: "CLAUDE_CODE_SESSION_KIND", Value: "bg"}},
-			Yields: []harness.EnvMatch{{Env: "T3CODE_THREAD_ID"}, {Env: "CLAUDE_CODE_ENTRYPOINT", Value: "t3-code"}},
+			Owns: []harness.EnvMatch{{Env: "CLAUDE_CODE_SESSION_KIND", Value: "bg"}},
 		},
-		Hint: "Claude Code sets your session id in CLAUDE_CODE_SESSION_ID; the {cli} CLI and its stdio MCP detect it ({cli} context shows it). Otherwise MCP: pass callerSession {connectionId: {connectionId}, externalSessionId: $CLAUDE_CODE_SESSION_ID}; HTTP MCP: send the header Stage-Caller-Session: {connectionId}:$CLAUDE_CODE_SESSION_ID.",
+		Origin: &harness.Origin{Env: "CLAUDE_CODE_ENTRYPOINT"},
+		Hint:   "Claude Code sets your session id in CLAUDE_CODE_SESSION_ID; the {cli} CLI and its stdio MCP detect it ({cli} context shows it). Otherwise MCP: pass callerSession {connectionId: {connectionId}, externalSessionId: $CLAUDE_CODE_SESSION_ID}; HTTP MCP: send the header Stage-Caller-Session: {connectionId}:$CLAUDE_CODE_SESSION_ID.",
 	},
 }
