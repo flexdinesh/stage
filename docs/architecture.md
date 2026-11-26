@@ -14,6 +14,10 @@ Claude Code harness (background sessions, spike evidence):
 The Stage and harness boundary (what Stage owns, what a harness owns,
 declared capabilities, project identity):
 [ADR 0007](adr/0007-harness-boundary.md).
+The harness foundation target and its delivery layers:
+[ADR 0008](adr/0008-harness-foundation.md),
+[workspace discovery and project identity](discovery.md),
+[harness authoring](harnesses.md).
 
 ## Ownership
 
@@ -133,7 +137,7 @@ Not part of the contract: plain DOM and layout (`document` visibility,
 - The theme key `stage-theme` is read before first paint in
   `web/index.html` and `desktop/app/ui/public/theme.js`; keep both in step with `app/src/lib/theme.ts`.
 
-T3 synchronization refreshes external workspace discovery and tracked task sessions, with active external discovery for notifications. The `workevent` package owns shared task/session transition events; the T3 watcher produces them and `notify` delivers them. No historical transcript sweep, question enrichment or automatic PR tracking. Retired and legacy-only database columns were dropped, not preserved (#417, migrations 0027 and 0028). A historical row keeps its meaning through its session identity or `execution_config`. Journal text and accepted snapshot evidence are unchanged. The list is in [storage.md](storage.md#legacy-columns-and-compatibility-triggers).
+Stage refreshes workspace inventory and follows tracked sessions through each active connection's adapter. Adapters can discover live external sessions for the notification watcher. The `workevent` package owns shared task and session transition events, and `notify` delivers them. These flows operate on current observations and discovered activity. Retired and legacy-only database columns were dropped in #417 (migrations 0027 and 0028). A historical row keeps its meaning through its session identity or `execution_config`, with its original journal text and accepted snapshot evidence. The list is in [storage.md](storage.md#legacy-columns-and-compatibility-triggers).
 
 Stage owns task acceptance separately from observed execution. SQLite stores immutable accepted evidence and idempotent acceptance requests; a launch claim atomically checks current acceptance and pins its inputs. The release runner consumes these claims, and handoff reads only Stage snapshots. See [API v4 acceptance](api.md#user-acceptance-api-v4).
 
