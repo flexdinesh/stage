@@ -464,7 +464,7 @@ function TaskFormDrawer({
           }
         </Field>
         {connection ? <>
-          <HarnessFields config={effectiveConfig} caps={caps.data} onChange={setDraftConfig} disabled={!full}/>
+          <HarnessFields title={`Harness · ${connectionName(connection)}`} config={effectiveConfig} caps={caps.data} onChange={setDraftConfig} disabled={!full}/>
           <ErrorText error={caps.error}/>
           {unverifiedConfig ? <p className="text-small">Connect and bind this harness to verify saved choices, or clear each unavailable choice above.</p> : null}
           {!acceptsImages && images.items.length ? <Alert>{caps.data?.operations.images?.reason || "This harness cannot receive these images."} {images.items.map(i=><Button small key={i.key} onClick={()=>images.remove(i.key)}>Remove {i.name}</Button>)}</Alert> : null}

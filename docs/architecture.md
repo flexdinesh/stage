@@ -20,7 +20,7 @@ declared capabilities, project identity):
 | Path | Owns | Must not |
 | --- | --- | --- |
 | `server/` (Go module `github.com/flexdinesh/stage/server`) | REST API, `/mcp`, CLI, stdio MCP, storage (SQLite by default, Postgres in Docker builds: [storage.md](storage.md)), harness connections, scheduling, business rules; embeds the browser host build (`internal/webui`) | Be imported by another module's `internal` path (promote a small public package instead, per ADR 0001) |
-| `packages/app/` (`@stage/app`) | The whole UI: routes, pages, components, query/state logic, API client and types (`src/api/types.ts` mirrors [api.md](api.md)), design tokens (`src/index.css`), and the platform contract (`src/platform/index.ts`) | Use browser globals at a platform boundary, import a host or MyGo, or branch on the platform |
+| `packages/app/` (`@stage/app`) | The whole UI: routes, pages, components, query/state logic, API client and types (`src/api/types.ts` mirrors [api.md](api.md)), design tokens (`src/index.css`), the platform contract (`src/platform/index.ts`), and the per-harness slot registry (`src/harnesses/`: each kind's setup panel, connection row, live status and typed calls, with a generic fallback) | Use browser globals at a platform boundary, import a host or MyGo, branch on the platform, or name a harness kind outside `src/harnesses/` (ADR 0007 decision 4) |
 | `apps/web/` (`@stage/web`) | Browser host: `index.html`, `src/main.tsx` (mount, service worker registration), `src/sw.ts`, `public/` (manifest, icons, favicons), Vite config, browser adapters (`src/platform/`) | Hold product UI or business logic |
 | `desktop/app/` | Desktop host: Go module `github.com/flexdinesh/stage/desktop/app` (MyGo shell, bridge B, launcher, URL policy) and `desktop/app/ui` (`@stage/desktop`, workspace package: mount and desktop adapters) | Import `server/internal` or the fixture; open `stage.db`; hold business logic |
 | `apps/website/` (`@stage/website`) | Static marketing site and public user guides on vocs (`renderStrategy: 'full-static'`), illustrative demos (vendored stageshow in `src/vendor/`), its own `PRODUCT.md`, `DESIGN.md` and `.impeccable/`, and the Cloudflare Workers static-assets config (`wrangler.jsonc`, worker `stage-website`, deployed by Workers Builds from `main`: [website.md](website.md)). Tasks: `mise run website:dev` (:5175), `website:build`, `website:check` (also in `mise run check`), `website:preview` (wrangler dev, :8787) | Import `@stage/*` or product UI/runtime internals; be needed by a product build or release (they install with `--filter` and never build it); deploy with product releases |
@@ -74,7 +74,8 @@ only through `usePlatform()` and `useApi()` (`packages/app/src/platform/context.
 Optional parts are capabilities: product code checks for them, never for a
 platform.
 `packages/app/tests/boundaries.test.mjs` fails if product code uses the browser APIs
-below directly or imports MyGo.
+below directly or imports MyGo, and if code outside `src/harnesses/` names a harness kind,
+compares a harness display name, or imports a harness's files past `src/harnesses/index.ts`.
 
 | Contract | Boundary | Browser adapter (`apps/web/src/platform/`) | Desktop adapter (`desktop/app/ui/src/platform/`) |
 | --- | --- | --- | --- |

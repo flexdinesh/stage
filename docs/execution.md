@@ -263,7 +263,7 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   connect action creates one through the identity port (`machine.Connect`).
   The API exposes them generically under `/api/harnesses/{kind}/...`; health, sync skipping and
   connection lists read connector summaries. Hosts render the schema, or a
-  panel registered for the kind (UI `CONNECTION_PANELS`, CLI `slots_*.go`).
+  panel registered for the kind (UI `packages/app/src/harnesses/` slot registry, CLI `slots_*.go`).
 - **Closures.** Completion is inferred only from a closure the harness's
   descriptor declares; the descriptor supplies the stored provenance, the
   journal event, the auto-complete toggle label and the accepted-result copy.

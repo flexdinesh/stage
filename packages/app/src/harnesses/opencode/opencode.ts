@@ -1,9 +1,12 @@
 // OpenCode connection: what the Settings card reads from the status and the
-// pairing-link-or-address field. Rendering lives in components/OpenCodeSetup.tsx.
-import { ApiError } from "../api/client.ts";
-import type { OpenCodeSettings } from "../api/client.ts";
-import type { OpenCodeStatus } from "../api/types.ts";
-import { shortDate } from "./format.ts";
+// pairing-link-or-address field, and its replace and reconnect copy. Rendering lives in Setup.tsx.
+import { ApiError } from "../../api/client.ts";
+import type { HarnessConnection } from "../../api/types.ts";
+import { shortDate } from "../../lib/format.ts";
+import type { OpenCodeSettings } from "./api.ts";
+import type { OpenCodeStatus } from "./types.ts";
+
+const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 /** What the pairing-link-or-address field holds: a link from `opencode pair`, a plain service address, or neither. */
 export type OpenCodeTarget = { kind: "link"; service: string } | { kind: "address"; service: string } | null;
@@ -102,4 +105,24 @@ export function advancedChanges(s: OpenCodeStatus, draft: AdvancedDraft, credent
     body.password = credentials.password;
   }
   return body;
+}
+
+/** Saving OpenCode settings hit a different service (instance_changed) or a replaced one returning (instance_returned): the user confirms before it replaces the current one. */
+export const isInstanceChanged = (err: unknown) =>
+  err instanceof ApiError && err.status === 409 && (err.code === "instance_changed" || err.code === "instance_returned");
+
+/** The address serves a replaced OpenCode service: confirming revives its connection. */
+export const isInstanceReturned = (err: unknown) => err instanceof ApiError && err.status === 409 && err.code === "instance_returned";
+
+/** Confirm before reconnecting a replaced OpenCode service (save answered 409 instance_returned). */
+export function returnedServicePrompt(address: string, old: Pick<HarnessConnection, "label"> | undefined): string {
+  const who = old === undefined || old.label === "" ? "the current service" : old.label;
+  return `${address} is the OpenCode service Stage used before. Connect it again? Its tasks and project bindings come back, and ${who} becomes read-only.`;
+}
+
+/** Confirm before connecting a different OpenCode service (save answered 409 instance_changed). */
+export function newServicePrompt(address: string, old: Pick<HarnessConnection, "label" | "tasks"> | undefined): string {
+  const who = old === undefined || old.label === "" ? "The current service" : old.label;
+  const tasks = old === undefined ? "its tasks keep" : `its ${count(old.tasks, "task")} ${old.tasks === 1 ? "keeps its" : "keep their"}`;
+  return `${address} is a different OpenCode service. Connect it as a new service? ${who} becomes read-only: ${tasks} last state and its project bindings need rebinding.`;
 }

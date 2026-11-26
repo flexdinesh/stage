@@ -162,7 +162,7 @@ test("harness setup calls: local routes stay, forMachine drives a remote machine
   await desk.configureHarness("x", { a: 1 });
   await desk.runHarnessAction("x", "connect local");
   await desk.disconnectHarness("x");
-  await desk.connectLocalOpenCode();
+  await desk.runHarnessAction("opencode", "connect-local");
   assert.deepEqual(seen, [
     "GET /harnesses",
     "GET /harnesses/t3/status",

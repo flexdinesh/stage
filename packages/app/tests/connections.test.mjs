@@ -1,25 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  connectionGate,
-  connectionStatusItem,
-  harnessStatusView,
-  harnessSummary,
-  liveChip,
-  openCodeErrorText,
-  openCodeRowDetail,
-  openCodeStatusView,
-  openCodeSummary,
-  statusRead,
-  statusTargets,
-  t3ErrorText,
-  t3RowDetail,
-  t3StatusView,
-  t3Summary,
-  unreachableDetail,
-} from "../src/lib/connections.ts";
+import { connectionGate, connectionStatusItem, harnessStatusView, harnessSummary, liveChip, statusRead, statusTargets, unreachableDetail } from "../src/lib/connections.ts";
 import { statusRow } from "../src/lib/status.ts";
-import { serviceHostText } from "../src/lib/opencode.ts";
+import { serviceHostText } from "../src/harnesses/opencode/opencode.ts";
+import { openCodeErrorText, openCodeRowDetail, openCodeStatusView, openCodeSummary } from "../src/harnesses/opencode/status.ts";
+import { t3ErrorText, t3RowDetail, t3StatusView, t3Summary } from "../src/harnesses/t3/status.ts";
 
 const NOW = Date.parse("2026-11-20T10:00:00Z");
 

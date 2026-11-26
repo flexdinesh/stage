@@ -1,6 +1,6 @@
 import type {
   Machine, MachinePairing, PairingStatus,
-  OpenCodeStatus, OpenCodeStatusWire, Harness, HarnessConnection, HarnessesReply, HarnessStatus, Capabilities, ExecutionConfig, ExecutionLinks, TaskState,
+  Harness, HarnessConnection, HarnessesReply, HarnessStatus, Capabilities, ExecutionConfig, ExecutionLinks, TaskState,
   CompletionPreview,
   AcceptanceRequest,
   AcceptanceResult,
@@ -35,18 +35,13 @@ import type {
   NotificationEvent,
   NotificationGroupPage,
   NotificationPage,
-  PairRequest,
   Preferences,
   Project,
   ProjectList,
   PushConfig,
   PushEndpointBody,
   PushSubscriptionBody,
-  T3SettingsRequest,
   SyncResult,
-  T3State,
-  T3Status,
-  T3StatusWire,
   RequestResponse,
   SendMessageRequest,
   SessionRequest,
@@ -115,56 +110,12 @@ const patch = (body: unknown): RequestOptions => ({ method: "PATCH", body });
 const put = (body: unknown): RequestOptions => ({ method: "PUT", body });
 const del: RequestOptions = { method: "DELETE" };
 
-/** State an older server (no `state`) implies: `connected` is a valid token, else unpaired or expired. */
-function legacyState(w: T3StatusWire, now: number): T3State {
-  if (w.connected) return "connected";
-  if (w.tokenExpiresAt !== null && Date.parse(w.tokenExpiresAt) <= now) return "expired";
-  return "unpaired";
-}
-
-/** Fills the onboarding fields an older server does not send, so the UI never reads a missing object. */
-export function normalizeT3Status(w: T3StatusWire, now = Date.now()): T3Status {
-  return {
-    ...w,
-    state: w.state ?? legacyState(w, now),
-    t3UrlSource: w.t3UrlSource ?? "default",
-    reachable: w.reachable ?? true,
-    checkedAt: w.checkedAt ?? null,
-    probeError: w.probeError ?? null,
-    t3: w.t3 ?? null,
-    autoPair: w.autoPair ?? { available: false, reason: null },
-    sync: w.sync ?? { running: false, startedAt: null, projects: 0, threads: 0 },
-  };
-}
-
-/** Fills the pairing fields an older server does not send: Basic credentials when it has them, and no local service. */
-export function normalizeOpenCodeStatus(w: OpenCodeStatusWire): OpenCodeStatus {
-  return {
-    ...w,
-    auth: w.auth ?? (w.hasCredentials ? "basic" : "none"),
-    local: w.local ?? { available: false, url: "", version: "", reason: "" },
-  };
-}
-
 const harnessPath = (kind: Harness, rest: string) => `/harnesses/${encodeURIComponent(kind)}${rest}`;
 
-/** T3's panel state from its harness status (details plus the connection a pairing replaced). */
-export function t3Details(s: HarnessStatus<T3StatusWire>, now = Date.now()): T3Status {
-  if (s.details === undefined) throw new ApiError(502, "T3 status without details");
-  return normalizeT3Status({ ...s.details, replaced: s.replaced ?? null }, now);
-}
-
-/** OpenCode's panel state from its harness status. */
-export function openCodeDetails(s: HarnessStatus<OpenCodeStatusWire>): OpenCodeStatus {
-  if (s.details === undefined) throw new ApiError(502, "OpenCode status without details");
-  return normalizeOpenCodeStatus(s.details);
-}
-
 type Fetch = <T>(path: string, init?: RequestOptions) => Promise<T>;
-type Send = (path: string, init?: RequestOptions) => Promise<void>;
 
 /** A machine's harness connection setup calls: base "" is the local machine (/api/harnesses), else /machines/{id}. A remote machine's call answers 503 with code machine_offline, machine_needs_update or machine_setup_starting when its worker cannot answer. */
-function harnessCalls(apiFetch: Fetch, apiSend: Send, base: string) {
+function harnessCalls(apiFetch: Fetch, base: string) {
   const path = (kind: Harness, rest: string) => `${base}${harnessPath(kind, rest)}`;
   return {
     /** The harness kinds the server knows, their policies and copy, and what the machine can run and set up. */
@@ -178,23 +129,6 @@ function harnessCalls(apiFetch: Fetch, apiSend: Send, base: string) {
       apiFetch<HarnessStatus<D>>(path(kind, `/actions/${encodeURIComponent(action)}`), post(input)),
     /** Forgets the connection's credentials; tasks and history stay. */
     disconnectHarness: <D = unknown>(kind: Harness) => apiFetch<HarnessStatus<D>>(path(kind, "/connection"), del),
-    openCodeStatus: () => apiFetch<HarnessStatus<OpenCodeStatusWire>>(path("opencode", "/status")).then(openCodeDetails),
-    /** 409 `opencode_auth_required` when the service demands a password; 409 code instance_changed when the address is another OpenCode service (instance_returned: a replaced one); resend with newInstance to connect it. */
-    saveOpenCode: (body: OpenCodeSettings) => apiSend(path("opencode", "/settings"), put(body)),
-    /** Connects the OpenCode service on the machine with its own password (409 `opencode_local_unavailable`, or instance_changed / instance_returned as for saveOpenCode). */
-    connectLocalOpenCode: (newInstance = false) => apiSend(path("opencode", "/actions/connect-local"), post(newInstance ? { newInstance: true } : undefined)),
-    /** Redeems a link from `opencode pair` (400 when invalid, 409 `opencode_pairing_expired`, or instance_changed / instance_returned: resend the same link with newInstance). */
-    pairOpenCode: (link: string, newInstance = false) => apiSend(path("opencode", "/actions/pair"), post(newInstance ? { link, newInstance: true } : { link })),
-    /** Forgets the OpenCode connection; tasks and history stay. */
-    disconnectOpenCode: () => apiSend(path("opencode", "/connection"), del),
-    t3Status: () => apiFetch<HarnessStatus<T3StatusWire>>(path("t3", "/status")).then((s) => t3Details(s)),
-    pair: (body: PairRequest) => apiFetch<HarnessStatus<T3StatusWire>>(path("t3", "/actions/pair"), post(body)).then((s) => t3Details(s)),
-    /** Pairs through the t3 CLI on the machine (409 when unavailable, 502 when it fails). */
-    autoPair: () => apiFetch<HarnessStatus<T3StatusWire>>(path("t3", "/actions/auto-pair"), post()).then((s) => t3Details(s)),
-    /** Forgets the T3 token, URL, browser URL and admin token; the connection record stays, so pairing the same T3 resumes it. */
-    disconnectT3: () => apiFetch<HarnessStatus<T3StatusWire>>(path("t3", "/connection"), del).then((s) => t3Details(s)),
-    /** 400 when a URL is invalid; 409 when paired and the URL serves another T3 environment. */
-    saveT3Settings: (body: T3SettingsRequest) => apiFetch<HarnessStatus<T3StatusWire>>(path("t3", "/settings"), put(body)).then((s) => t3Details(s)),
     };
 }
 
@@ -235,9 +169,9 @@ export function createApi(transport: Transport) {
 
   return {
     health: () => apiFetch<Health>("/health"),
-    ...harnessCalls(apiFetch, apiSend, ""),
+    ...harnessCalls(apiFetch, ""),
     /** A remote machine's harness setup, driven through its worker. */
-    forMachine: (id: number): HarnessApi => harnessCalls(apiFetch, apiSend, `/machines/${id}`),
+    forMachine: (id: number): HarnessApi => harnessCalls(apiFetch, `/machines/${id}`),
     connections: () => apiFetch<{connections: HarnessConnection[]}>("/connections"),
     /** Machines not removed, local (id 1) first. */
     machines: () => apiFetch<{machines: Machine[]}>("/machines"),
@@ -374,11 +308,6 @@ export function createApi(transport: Transport) {
     attachmentUrl: (id: number) => transport.assetUrl(`/attachments/${id}`),
   };
 }
-
-export type OpenCodeSettings = Partial<Record<"endpoint" | "browserEndpoint" | "webClient" | "username" | "password", string>> & {
-  /** Connect a different OpenCode service as a new connection, retiring the current one. */
-  newInstance?: boolean;
-};
 
 export type ArchivedFilter = "true" | "false" | "all";
 

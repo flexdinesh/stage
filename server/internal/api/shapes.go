@@ -19,9 +19,12 @@ type taskJSON struct {
 }
 
 type taskDetailJSON struct {
-	FinalReply  *execution.Reply `json:"finalReply,omitempty"`
-	Usage       *execution.Usage `json:"usage,omitempty"` // the current session's, when its harness reports one
-	Acceptances []db.Acceptance  `json:"acceptances"`
+	FinalReply *execution.Reply `json:"finalReply,omitempty"`
+	Usage      *execution.Usage `json:"usage,omitempty"` // the current session's, when its harness reports one
+	// Reported: the branch and directory the current session's harness reports
+	// (its observation); omitted when it reports neither.
+	Reported    *reportedJSON   `json:"reported,omitempty"`
+	Acceptances []db.Acceptance `json:"acceptances"`
 	taskJSON
 	Events []db.TaskEvent `json:"events"`
 	// Tree: the task's tree (null outside one).
@@ -31,6 +34,12 @@ type taskDetailJSON struct {
 	// CurrentHandoffs: what the current launch attempt appended, one per
 	// need (empty when none).
 	CurrentHandoffs []db.Handoff `json:"currentHandoffs"`
+}
+
+// reportedJSON is where a session's harness says it works; "" when it does not say.
+type reportedJSON struct {
+	Branch    string `json:"branch,omitempty"`
+	Directory string `json:"directory,omitempty"`
 }
 
 // treeDetailJSON is db.TreeDetail with API task shapes.

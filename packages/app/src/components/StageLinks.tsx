@@ -175,7 +175,7 @@ export function useRefSlots(html: string, enabled: boolean): [RefObject<HTMLDivE
   return [root, portals];
 }
 
-/** A journal entry's source session; without a connection it names the active T3 connection's session. */
+/** A journal entry's source session; without a connection, the session the server resolves by id alone. */
 export function SourceSessionLink({ id, connectionId }: { id: string; connectionId?: number }) {
   const { data } = useResolved(connectionId === undefined ? { kind: "session", id } : { kind: "session", id, connectionId });
   if (data?.href == null) return <span title={id}>source session</span>;

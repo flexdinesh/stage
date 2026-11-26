@@ -18,6 +18,7 @@ export function HarnessFields({
   onChange,
   disabled,
   modelOnly = false,
+  title,
 }: {
   config: ExecutionConfig;
   caps: Capabilities | undefined;
@@ -25,6 +26,8 @@ export function HarnessFields({
   disabled: boolean;
   /** Model and its options only (a connection's new-task pin: mode and permission start at the harness default). */
   modelOnly?: boolean;
+  /** Wraps the fields in a ruled group under this label ("Harness · T3"); nothing at all when no field renders. */
+  title?: string;
 }) {
   const model = caps?.models?.find((m) => m.id === config.model);
   const options = optionsFor(caps, model);
@@ -37,7 +40,7 @@ export function HarnessFields({
     if (!list.length && !current) return null;
     const unavailable = list.find((c) => c.id === current && !c.available);
     return (
-      <Field label={label} {...(unavailable?.reason ? { hint: unavailable.reason } : {})}>
+      <Field key={`choice:${field}`} label={label} {...(unavailable?.reason ? { hint: unavailable.reason } : {})}>
         {(id) => (
           <Combobox
             id={id}
@@ -65,25 +68,31 @@ export function HarnessFields({
   };
   const setOption = (key: string, value: string | boolean | undefined) =>
     onChange({ ...config, options: withOption(config.options, options, key, value) });
+  // The harness's order: model, its launch options (each by kind, shown when its dependsOn holds), permission, mode.
+  const stray = config.options.filter((o) => !options.some((v) => v.id === o.id && optionApplies(v, config.options, options)));
+  const fields = [
+    choices("Model", "model", caps?.models ?? []),
+    ...shownOptions(options, config.options).map((o) => (
+      <OptionField key={`option:${o.id}`} option={o} config={config} disabled={disabled} onChange={(v) => setOption(o.id, v)} />
+    )),
+    ...stray.map((o) => (
+      <div key={`stray:${o.id}`} className="text-small">
+        {o.id} = {String(o.value)}{" "}
+        <Button small disabled={disabled} onClick={() => setOption(o.id, undefined)}>
+          Clear option
+        </Button>
+      </div>
+    )),
+    modelOnly ? null : choices("Permission", "permission", model?.permissions ?? caps?.permissions ?? []),
+    modelOnly ? null : choices(caps?.modeLabel || "Interaction mode", "mode", caps?.modes ?? []),
+  ].filter((f) => f !== null);
+  if (fields.length === 0 && title !== undefined) return null;
+  const grid = <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">{fields}</div>;
+  if (title === undefined) return grid;
   return (
-    <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
-      {choices("Model", "model", caps?.models ?? [])}
-      {modelOnly ? null : choices(caps?.modeLabel || "Interaction mode", "mode", caps?.modes ?? [])}
-      {modelOnly ? null : choices("Permission", "permission", model?.permissions ?? caps?.permissions ?? [])}
-      {shownOptions(options, config.options).map((o) => (
-          <OptionField key={o.id} option={o} config={config} disabled={disabled} onChange={(v) => setOption(o.id, v)} />
-        ))}
-      {config.options
-        .filter((o) => !options.some((v) => v.id === o.id && optionApplies(v, config.options, options)))
-        .map((o) => (
-          <div key={o.id} className="text-small">
-            {o.id} = {String(o.value)}{" "}
-            <Button small disabled={disabled} onClick={() => setOption(o.id, undefined)}>
-              Clear option
-            </Button>
-          </div>
-        ))}
-    </div>
+    <section className="border-t border-line pt-3">
+      <FieldGroup label={title}>{grid}</FieldGroup>
+    </section>
   );
 }
 

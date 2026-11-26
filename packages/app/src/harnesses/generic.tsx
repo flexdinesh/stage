@@ -1,33 +1,28 @@
-// Harness connection setup (Settings > Connections, in the Manage drawer).
-// A harness with its own panel registers it in CONNECTION_PANELS (its
-// harness-specific UI, behind this one boundary); every other harness gets
-// the generic card rendered from its setup schema (GET /api/harnesses).
+// The generic registry entry, for any harness kind without its own (index.ts): its setup card rendered from the
+// descriptor's setup schema (GET /api/harnesses) and the generic HarnessStatus, its Settings row and status reader.
 import { useMutation } from "@tanstack/react-query";
-import { useState, type ComponentType, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useHarnessApi } from "../api/harnessScope.tsx";
-import { useApplyHarnessStatus, useDisconnectHarness, useHarnessStatus } from "../api/queries.ts";
+import { keys, useApplyHarnessStatus, useDisconnectHarness, useHarnessStatus } from "../api/queries.ts";
 import type { HarnessDescriptor, HarnessStatus, SetupAction, SetupField } from "../api/types.ts";
 import { actionBody, initialValues, settingsBody, type SetupValues } from "../lib/connectionSetup.ts";
-import { ClaudeSetup } from "./ClaudeSetup.tsx";
-import { CodexSetup } from "./CodexSetup.tsx";
-import { AutoCompleteToggle } from "./Completion.tsx";
-import { NewTaskDefaults } from "./NewTaskDefaults.tsx";
-import { OpenCodeSetup } from "./OpenCodeSetup.tsx";
-import { T3ConnectionPanel } from "./T3Setup.tsx";
-import { Button, Checkbox, ChoiceRow, Chip, Detail, Details, ErrorText, Field, InlineError, Input, Muted, Panel, QueryState } from "./ui.tsx";
+import { AutoCompleteToggle } from "../components/Completion.tsx";
+import { ConnectionRow } from "../components/ConnectionRow.tsx";
+import { NewTaskDefaults } from "../components/NewTaskDefaults.tsx";
+import { Button, Checkbox, ChoiceRow, Chip, Detail, Details, ErrorText, Field, InlineError, Input, Muted, Panel, QueryState, type ChipTone } from "../components/ui.tsx";
+import { GENERIC_STATUS, statusSlots } from "./status.ts";
+import type { ConnectionRowProps, HarnessSlots } from "./types.ts";
 
-/** Harness-specific setup panels by kind (each places its NewTaskDefaults); the generic card covers the rest. */
-const CONNECTION_PANELS: Record<string, ComponentType> = {
-  t3: T3ConnectionPanel,
-  opencode: OpenCodeSetup,
-  codex: CodexSetup,
-  claude: ClaudeSetup,
+export const GENERIC_SLOTS: HarnessSlots = {
+  Setup: GenericSetup,
+  Row: GenericRow,
+  ...statusSlots(GENERIC_STATUS),
+  statusKey: (kind) => [...keys.harnessStatus, kind],
+  webAddress: false,
 };
 
-/** One harness's setup on the harness scope's machine: its own panels, or the generic card and its New tasks panel. */
-export function ConnectionSetup({ descriptor }: { descriptor: HarnessDescriptor }) {
-  const Own = CONNECTION_PANELS[descriptor.kind];
-  if (Own !== undefined) return <Own />;
+/** The generic card and its New tasks panel, on the harness scope's machine. */
+function GenericSetup({ descriptor }: { descriptor: HarnessDescriptor }) {
   return (
     <>
       <ConnectionCard descriptor={descriptor} />
@@ -36,8 +31,36 @@ export function ConnectionSetup({ descriptor }: { descriptor: HarnessDescriptor 
   );
 }
 
+function GenericRow({ descriptor, machine, onManage, isDefault }: ConnectionRowProps) {
+  const status = useHarnessStatus(descriptor.kind);
+  const disconnect = useDisconnectHarness(descriptor.kind);
+  const s = status.data;
+  const tone: ChipTone = s === undefined ? "idle" : s.connected ? "ok" : s.configured ? "bad" : "idle";
+  return (
+    <ConnectionRow
+      name={descriptor.name}
+      machine={machine}
+      detail={s === undefined ? (status.error?.message ?? "") : (s.reason ?? s.lastError ?? "")}
+      chip={{ tone, label: s?.state ?? "checking" }}
+      onManage={onManage}
+      isDefault={isDefault}
+      disconnect={
+        s === undefined || !descriptor.setup.disconnect || !s.configured
+          ? null
+          : {
+              prompt: `Disconnect ${descriptor.name}? Tasks and history stay. You can connect again any time. It stays listed as disconnected until you forget it.`,
+              busy: disconnect.isPending,
+              error: disconnect.error,
+              run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
+              reset: disconnect.reset,
+            }
+      }
+    />
+  );
+}
+
 /** The generic card: state, settings, actions and disconnect from the setup schema. */
-export function ConnectionCard({ descriptor }: { descriptor: HarnessDescriptor }) {
+function ConnectionCard({ descriptor }: { descriptor: HarnessDescriptor }) {
   const status = useHarnessStatus(descriptor.kind);
   return (
     <Panel

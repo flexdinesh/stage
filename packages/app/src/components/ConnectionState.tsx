@@ -2,27 +2,12 @@
 // tones, read on the connection's machine) and, while Settings can fix a problem there, a link to it.
 // Logic: lib/connections.ts (connectionGate, liveChip).
 import type { ReactNode } from "react";
-import { useCodexStatus, useHarnessStatus, useHarnesses, useMachines, useOpenCodeStatus, useT3Status } from "../api/queries.ts";
-import { CLAUDE, claudeStatusView } from "../lib/claude.ts";
+import { useHarnesses, useMachines } from "../api/queries.ts";
 import type { Harness } from "../api/types.ts";
-import {
-  codexErrorText,
-  codexRowDetail,
-  codexSummary,
-  connectionGate,
-  harnessSummary,
-  liveChip,
-  openCodeErrorText,
-  openCodeRowDetail,
-  openCodeSummary,
-  statusRead,
-  t3ErrorText,
-  t3RowDetail,
-  t3Summary,
-  type ConnectionChip,
-} from "../lib/connections.ts";
+import { harnessSlots } from "../harnesses/index.ts";
+import { connectionGate, type ConnectionChip } from "../lib/connections.ts";
 import { SETTINGS_PATH } from "../lib/settings.ts";
-import { MachineScope } from "./ConnectionRows.tsx";
+import { MachineScope } from "./ConnectionRow.tsx";
 import { Chip, TextLink } from "./ui.tsx";
 
 /** The Harness row's value: `children` (the name) with the connection's state chip, and "Fix in Settings" under it on a problem. */
@@ -49,46 +34,14 @@ export function HarnessConnectionState({ connectionId, children }: { connectionI
   );
 }
 
+/** The live chip from the harness's status reader (its registry entry), on the connection's machine. */
 function LiveState({ harness, name }: { harness: Harness; name: string }) {
-  switch (harness) {
-    case "t3":
-      return <T3State />;
-    case "opencode":
-      return <OpenCodeState />;
-    case "codex":
-      return <CodexState />;
-    case CLAUDE:
-      return <ClaudeState name={name} />;
-    default:
-      return <GenericState harness={harness} name={name} />;
-  }
-}
-
-function T3State() {
-  const read = statusRead(useT3Status());
-  return <State chip={liveChip(t3Summary(read), read.data === undefined ? "" : t3RowDetail(read.data), t3ErrorText(read))} />;
-}
-
-function OpenCodeState() {
-  const read = statusRead(useOpenCodeStatus());
-  return <State chip={liveChip(openCodeSummary(read), read.data === undefined ? "" : openCodeRowDetail(read.data), openCodeErrorText(read))} />;
-}
-
-function CodexState() {
-  const read = statusRead(useCodexStatus());
-  return <State chip={liveChip(codexSummary(read), read.data === undefined ? "" : codexRowDetail(read.data), codexErrorText(read))} />;
-}
-
-function ClaudeState({ name }: { name: string }) {
-  const read = statusRead(useHarnessStatus(CLAUDE));
-  const view = claudeStatusView(read, name);
-  return <State chip={liveChip(view.summary, view.detail.lines.join(" · "), view.detail.error)} />;
-}
-
-function GenericState({ harness, name }: { harness: Harness; name: string }) {
-  const read = statusRead(useHarnessStatus(harness));
-  const s = read.data;
-  return <State chip={liveChip(harnessSummary(read, harness, name), s?.reason ?? s?.lastError ?? "", read.error)} />;
+  const { LiveChip } = harnessSlots(harness);
+  return (
+    <LiveChip kind={harness} name={name}>
+      {(chip) => <State chip={chip} />}
+    </LiveChip>
+  );
 }
 
 function State({ chip }: { chip: ConnectionChip }) {

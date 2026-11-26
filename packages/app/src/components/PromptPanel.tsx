@@ -3,11 +3,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError } from "../api/client.ts";
+import { useConnectionOperation } from "../api/queries.ts";
 import { useApi } from "../platform/context.tsx";
 import { RefText } from "./StageLinks.tsx";
 import { Alert, Button, EmptyState, InlineError, Panel, RelTime, Skeleton, SkeletonBar, cx, errorText, CopyButton } from "./ui.tsx";
 
-/** A truncated T3 preview: the full text loads from the adopted task opening-prompt route. */
+/** A truncated preview: the full text loads from the adopted task opening-prompt route. */
 interface FullSource {
   taskId: number;
   itemId: string;
@@ -93,12 +94,18 @@ export function PromptPanel({
   );
 }
 
-/** The session's first own message, read from T3 (session detail without a task; an adopted task's detail). */
-export function OpeningPrompt({ taskId, live }: { taskId: number; live: boolean }) {
+/**
+ * The session's first own message, read through its harness (an adopted task's detail) when the connection offers
+ * operation `opening`; `harness` is its display name. A declared "unavailable" shows the harness's reason instead.
+ */
+export function OpeningPrompt({ taskId, connectionId, harness, live }: { taskId: number; connectionId: number; harness: string; live: boolean }) {
   const api = useApi();
+  const opening = useConnectionOperation(connectionId, "opening", true);
+  const unavailable = opening.known && !opening.offered;
   const query = useQuery({
     queryKey: ["opening-prompt", taskId],
     queryFn: () => api.openingPrompt(taskId),
+    enabled: !unavailable,
     // The first message never changes once sent; a launching session is re-read until it has one.
     staleTime: Infinity,
     retry: false,
@@ -106,12 +113,19 @@ export function OpeningPrompt({ taskId, live }: { taskId: number; live: boolean 
     refetchInterval: (q) => (live && q.state.data?.item === null ? 5000 : false),
   });
 
+  if (unavailable) {
+    return (
+      <Panel title="Prompt">
+        <EmptyState>{opening.reason ?? `${harness} does not share a session's first prompt.`}</EmptyState>
+      </Panel>
+    );
+  }
   if (query.data !== undefined) {
     const item = query.data.item;
     if (item === null) {
       return (
         <Panel title="Prompt">
-          <EmptyState>{live ? "No prompt yet. It shows once T3 records the first message." : "No prompt in this session."}</EmptyState>
+          <EmptyState>{live ? `No prompt yet. It shows once ${harness} records the first message.` : "No prompt in this session."}</EmptyState>
         </Panel>
       );
     }
@@ -129,7 +143,7 @@ export function OpeningPrompt({ taskId, live }: { taskId: number; live: boolean 
     return (
       <Panel title="Prompt">
         <Alert tone="bad" actions={<Button small onClick={() => void query.refetch()}>Retry</Button>}>
-          {offline ? "T3 not connected, so stage can't read the prompt. Reconnect in Settings." : `Prompt failed: ${errorText(query.error)}`}
+          {offline ? `${harness} not connected, so stage can't read the prompt. Reconnect in Settings.` : `Prompt failed: ${errorText(query.error)}`}
         </Alert>
       </Panel>
     );

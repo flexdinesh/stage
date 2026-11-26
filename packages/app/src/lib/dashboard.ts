@@ -1,4 +1,5 @@
 import type { HarnessConnection, Task } from "../api/types.ts";
+import type { StatusItem } from "./status.ts";
 
 /** Task groups, in Tasks view order; the Dashboard lists the first four (`ATTENTION_GROUPS`). */
 export type GroupKey = "needs" | "done" | "ready" | "failed" | "running" | "backlog" | "scheduled" | "settled";
@@ -42,14 +43,17 @@ export function inGroup(key: GroupKey, t: Grouped, since: string, lingering: Rea
 }
 
 /**
- * The harness notice above the Dashboard: `connect` when no connection of any harness is set up anywhere, `t3` (its
- * own alert) when T3 is set up on `machineId`, else none. None while connections load (null).
+ * The harness notice above the Dashboard: `connect` when no connection of any harness is set up anywhere, else none
+ * (a set-up connection's problems are the status button's: dashboardProblems). None while connections load (null).
  */
-export function harnessNotice(connections: readonly Pick<HarnessConnection, "harness" | "machineId" | "active" | "configured">[] | null, machineId: number): "connect" | "t3" | null {
+export function harnessNotice(connections: readonly Pick<HarnessConnection, "active" | "configured">[] | null): "connect" | null {
   if (connections === null) return null;
-  const set = connections.filter((c) => c.active && c.configured);
-  if (set.length === 0) return "connect";
-  return set.some((c) => c.harness === "t3" && c.machineId === machineId) ? "t3" : null;
+  return connections.some((c) => c.active && c.configured) ? null : "connect";
+}
+
+/** The status button's problems (yellow or red items, worst first) as the Dashboard's alerts. */
+export function dashboardProblems(items: readonly StatusItem[]): (StatusItem & { tone: "need" | "bad" })[] {
+  return items.flatMap((i) => (i.tone === "need" || i.tone === "bad" ? [{ ...i, tone: i.tone }] : []));
 }
 
 /** Tasks view tree filter (`?tree=`): every task, or only tasks outside any tree. */

@@ -6,6 +6,7 @@ import { useState, type ReactNode } from "react";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { invalidateWork, keys, useHarnesses, useMachines, useMe, usePreferences } from "../api/queries.ts";
 import { type NotificationEvent, type Preferences } from "../api/types.ts";
+import { harnessStatusKeys } from "../harnesses/index.ts";
 import { InfoPanel } from "../components/InfoPanel.tsx";
 import { AddMachineDrawer, MachinesPanel } from "../components/Machines.tsx";
 import { notificationEventTone } from "../components/StateBadge.tsx";
@@ -323,7 +324,9 @@ export function SettingsConnectionsPage() {
   const sync = useMutation({
     mutationFn: api.sync,
     onSuccess: async () => {
-      await Promise.all([invalidateWork(qc), qc.invalidateQueries({ queryKey: keys.projects }), qc.invalidateQueries({ queryKey: keys.t3Status })]);
+      // Every harness's status: a sync may change what it reports (a harness's first full sync).
+      const statuses = harnessStatusKeys(harnesses.descriptors.map((d) => d.kind)).map((queryKey) => qc.invalidateQueries({ queryKey }));
+      await Promise.all([invalidateWork(qc), qc.invalidateQueries({ queryKey: keys.projects }), ...statuses]);
     },
   });
   const connections = machines.reduce((n, m) => n + connectedRows(connectionRows(m, harnesses.connection)).length, 0);

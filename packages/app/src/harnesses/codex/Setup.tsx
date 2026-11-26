@@ -1,20 +1,21 @@
 // Codex connection panel (Settings > Connections, in the Manage drawer): the CLI's versions, account, CODEX_HOME and
 // app-server daemon; when not connected, why and the command that fixes it, then Connect; Check again and Disconnect
-// once connected; the CLI path setting. Logic: lib/codex.ts, lib/connections.ts (codexSummary).
+// once connected; the CLI path setting. Logic: codex.ts, status.ts (codexSummary).
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
-import { ApiError } from "../api/client.ts";
-import { useHarnessApi, useScopedKey } from "../api/harnessScope.tsx";
-import { invalidateConnectionChange, keys, useCodexStatus } from "../api/queries.ts";
-import type { CodexDetails, CodexStatus, HarnessStatus, SetupField } from "../api/types.ts";
-import { codexAccountText, codexDaemonText, codexVersionText, parseCodexStatus } from "../lib/codex.ts";
-import { initialValues, settingsBody, type SetupValues } from "../lib/connectionSetup.ts";
-import { codexSummary, statusRead } from "../lib/connections.ts";
-import { AutoCompleteToggle } from "./Completion.tsx";
-import { NewTaskDefaults } from "./NewTaskDefaults.tsx";
-import { Button, Chip, CommandBox, ConfirmInline, ErrorText, Field, InlineError, Input, MetaLine, Muted, Panel, QueryState, RelTime } from "./ui.tsx";
-
-const KIND = "codex";
+import { ApiError } from "../../api/client.ts";
+import { useHarnessApi, useScopedKey } from "../../api/harnessScope.tsx";
+import { invalidateConnectionChange } from "../../api/queries.ts";
+import type { HarnessStatus, SetupField } from "../../api/types.ts";
+import { initialValues, settingsBody, type SetupValues } from "../../lib/connectionSetup.ts";
+import { statusRead } from "../../lib/connections.ts";
+import { AutoCompleteToggle } from "../../components/Completion.tsx";
+import { NewTaskDefaults } from "../../components/NewTaskDefaults.tsx";
+import { Button, Chip, CommandBox, ConfirmInline, ErrorText, Field, InlineError, Input, MetaLine, Muted, Panel, QueryState, RelTime } from "../../components/ui.tsx";
+import { CODEX_KIND as KIND, codexAccountText, codexDaemonText, codexVersionText, parseCodexStatus } from "./codex.ts";
+import { CODEX_STATUS_KEY, useCodexStatus } from "./queries.ts";
+import { codexSummary } from "./status.ts";
+import type { CodexDetails, CodexStatus } from "./types.ts";
 
 /** The CLI path setting (the descriptor's `binary` field). */
 const BINARY: SetupField = { id: "binary", kind: "text", label: "Codex CLI", help: "Path to the codex binary. Empty uses codex on PATH." };
@@ -27,10 +28,10 @@ function useCodexCache() {
   const scoped = useScopedKey();
   return {
     apply: (s: HarnessStatus) => {
-      qc.setQueryData(scoped(keys.codexStatus), parseCodexStatus(s));
+      qc.setQueryData(scoped(CODEX_STATUS_KEY), parseCodexStatus(s));
       void invalidateConnectionChange(qc, scoped);
     },
-    recheck: () => void qc.invalidateQueries({ queryKey: scoped(keys.codexStatus) }),
+    recheck: () => void qc.invalidateQueries({ queryKey: scoped(CODEX_STATUS_KEY) }),
   };
 }
 

@@ -1,21 +1,14 @@
-import { keepPreviousData, queryOptions, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient, type UseQueryOptions } from "@tanstack/react-query";
+import { keepPreviousData, queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter, type HarnessApi } from "./client.ts";
 import { useHarnessApi, useHarnessScope, useScopedKey } from "./harnessScope.tsx";
-import { codexStatusView, harnessStatusView, openCodeStatusView, statusRead, t3StatusView, type StatusRead, type StatusView } from "../lib/connections.ts";
-import { parseCodexStatus } from "../lib/codex.ts";
-import { firstSyncLanded } from "../lib/onboarding.ts";
-import { claudeStatusView } from "../lib/claude.ts";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
-import { machineKey, machineScopeId } from "../lib/machines.ts";
 import { POLL, pollFirstPage } from "../lib/polling.ts";
-import type { CodexStatus, ExecutionConfig, Harness, RequestResponse, SessionRequest, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OperationId, OpenCodeStatus, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, T3Status, TaskListQuery, TreeListQuery } from "./types.ts";
+import type { ExecutionConfig, Harness, RequestResponse, SessionRequest, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OperationId, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
-  t3Status: ["t3Status"],
-  openCodeStatus: ["opencode-status"],
-  codexStatus: ["codex-status"],
+  /** A harness's generic status (`[...harnessStatus, kind]`); a harness with its own status reader keeps its own key (src/harnesses/). */
   harnessStatus: ["harness-status"],
   connections: ["connections"],
   machines: ["machines"],
@@ -181,16 +174,6 @@ export function useSetDefaultConnection() {
   });
 }
 
-/** OpenCode's setup status on the harness scope's machine. */
-export function useOpenCodeStatus() {
-  const api = useHarnessApi();
-  const key = useScopedKey();
-  return useQuery(openCodeStatusQuery(api, key(keys.openCodeStatus)));
-}
-
-/** OpenCode's status on a machine (`api`, `key`: that machine's calls and scoped key). */
-const openCodeStatusQuery = (api: HarnessApi, key: readonly unknown[]) => queryOptions({ queryKey: key, queryFn: api.openCodeStatus, refetchInterval: 15000 });
-
 /** A generic harness's status on a machine (`key`: that machine's scoped harnessStatus key for the kind). */
 export const harnessStatusQuery = (api: HarnessApi, key: readonly unknown[], kind: Harness) =>
   queryOptions({ queryKey: key, queryFn: () => api.harnessStatus(kind), refetchInterval: 15000 });
@@ -224,127 +207,8 @@ export function useApplyHarnessStatus(kind: string) {
   };
 }
 
-/** Codex's setup status on the harness scope's machine. */
-export function useCodexStatus() {
-  const api = useHarnessApi();
-  const key = useScopedKey();
-  return useQuery(codexStatusQuery(api, key(keys.codexStatus)));
-}
-
-/** Codex's status on a machine (`api`, `key`: that machine's calls and scoped key), its details parsed. */
-const codexStatusQuery = (api: HarnessApi, key: readonly unknown[]) =>
-  queryOptions({ queryKey: key, queryFn: () => api.harnessStatus("codex").then(parseCodexStatus), refetchInterval: 15000 });
-
-const T3_STATUS_POLL_MS = 5000;
-const T3_SYNC_POLL_MS = 1000;
-
-/** T3's setup status on the harness scope's machine; `enabled: false` (T3 not set up there) reads only what is cached. */
-export const useT3Status = ({ enabled = true }: { enabled?: boolean } = {}) => {
-  const api = useHarnessApi();
-  const key = useScopedKey()(keys.t3Status);
-  const qc = useQueryClient();
-  return useQuery({ ...t3StatusQuery(api, key, qc), enabled });
-};
-
-/** T3's status on a machine (`api`, `key`: that machine's calls and scoped key). */
-function t3StatusQuery(api: HarnessApi, key: readonly unknown[], qc: QueryClient) {
-  return queryOptions({
-    queryKey: key,
-    // Compared here (once per fetch, however many observers) so the first sync refreshes the views it fills.
-    queryFn: async () => {
-      const prev = qc.getQueryData<T3Status>(key);
-      const next = await api.t3Status();
-      if (firstSyncLanded(prev, next)) void refreshAfterFirstSync(qc);
-      return next;
-    },
-    refetchInterval: (q) => (q.state.data?.sync.running === true ? T3_SYNC_POLL_MS : T3_STATUS_POLL_MS),
-  });
-}
-
-/** A connection whose status is read on its machine. */
-export interface MachineConnection {
-  harness: Harness;
-  machine: Pick<Machine, "id" | "kind">;
-}
-
-/** A connection's live status view (lib/connections.ts), paired with the connection. */
-export interface ConnectionStatus<C> {
-  connection: C;
-  view: StatusView;
-}
-
-/** A machine's harness calls and its scoped query key. */
-type MachineCalls = { api: HarnessApi; key: (k: readonly unknown[]) => readonly unknown[] };
-
-/**
- * How one harness's status is read: its query on a machine (the one Settings' rows run there, so the cache is shared)
- * and its view. A kind without its own slot reads the generic status.
- */
-interface StatusSlot<S> {
-  query: (m: MachineCalls, kind: Harness, qc: QueryClient) => UseQueryOptions<S, Error, S, readonly unknown[]>;
-  view: (read: StatusRead<S>, kind: Harness, name: string) => StatusView;
-}
-
-const GENERIC_STATUS: StatusSlot<HarnessStatus> = {
-  query: (m, kind) => harnessStatusQuery(m.api, m.key([...keys.harnessStatus, kind]), kind),
-  view: harnessStatusView,
-};
-
-/** Harness-specific status reads by kind: the only place status reading names a harness. */
-const STATUS_SLOTS: { t3: StatusSlot<T3Status>; opencode: StatusSlot<OpenCodeStatus>; codex: StatusSlot<CodexStatus>; claude: StatusSlot<HarnessStatus> } = {
-  t3: { query: (m, _kind, qc) => t3StatusQuery(m.api, m.key(keys.t3Status), qc), view: (read) => t3StatusView(read) },
-  opencode: { query: (m) => openCodeStatusQuery(m.api, m.key(keys.openCodeStatus)), view: (read) => openCodeStatusView(read) },
-  codex: { query: (m) => codexStatusQuery(m.api, m.key(keys.codexStatus)), view: (read) => codexStatusView(read) },
-  // The generic status (same query and cache as its Settings row), read as Claude Code's.
-  claude: { query: GENERIC_STATUS.query, view: (read, _kind, name) => claudeStatusView(read, name) },
-};
-
-const hasStatusSlot = (kind: Harness): boolean => Object.hasOwn(STATUS_SLOTS, kind);
-
-/**
- * Each connection's live status view on its own machine, in input order: its kind's slot, else the generic status.
- * `name` is a kind's display name (generic summaries name it).
- */
-export function useConnectionStatuses<C extends MachineConnection>(
-  connections: readonly C[],
-  name: (kind: Harness) => string,
-  { poll = true }: { poll?: boolean } = {},
-): ConnectionStatus<C>[] {
-  // poll false: read what another observer (the status row) keeps fresh, without a second poll of the same status.
-  const every: { refetchInterval?: false } = poll ? {} : { refetchInterval: false };
-  const of = (kind: Harness) => connections.filter((c) => c.harness === kind);
-  const read = [
-    ...useSlotStatuses(STATUS_SLOTS.t3, of("t3"), every, name),
-    ...useSlotStatuses(STATUS_SLOTS.opencode, of("opencode"), every, name),
-    ...useSlotStatuses(STATUS_SLOTS.codex, of("codex"), every, name),
-    ...useSlotStatuses(STATUS_SLOTS.claude, of("claude"), every, name),
-    ...useSlotStatuses(
-      GENERIC_STATUS,
-      connections.filter((c) => !hasStatusSlot(c.harness)),
-      every,
-      name,
-    ),
-  ];
-  return connections.flatMap((c) => read.filter((r) => r.connection === c));
-}
-
-/** One slot's status queries, each connection on its machine, paired with its view. */
-function useSlotStatuses<S, C extends MachineConnection>(slot: StatusSlot<S>, connections: readonly C[], every: { refetchInterval?: false }, name: (kind: Harness) => string): ConnectionStatus<C>[] {
-  const api = useApi();
-  const qc = useQueryClient();
-  const on = (m: MachineConnection["machine"]): MachineCalls => {
-    const id = machineScopeId(m);
-    return { api: id === null ? api : api.forMachine(id), key: (k: readonly unknown[]) => machineKey(id, k) };
-  };
-  const queries = useQueries({ queries: connections.map((c) => ({ ...slot.query(on(c.machine), c.harness, qc), ...every })) });
-  return connections.flatMap((connection, i) => {
-    const query = queries[i];
-    return query === undefined ? [] : [{ connection, view: slot.view(statusRead(query), connection.harness, name(connection.harness)) }];
-  });
-}
-
 /** The first full sync filled projects and sessions: refetch everything that read them empty. */
-function refreshAfterFirstSync(qc: QueryClient): Promise<void> {
+export function refreshAfterFirstSync(qc: QueryClient): Promise<void> {
   return Promise.all([
     invalidateWork(qc),
     qc.invalidateQueries({ queryKey: keys.projects }),
@@ -572,13 +436,13 @@ const NO_REQUESTS: SessionRequest[] = [];
 const REQUESTS_POLL = 3000;
 
 /**
- * Whether connection `connectionId` offers operation `op` (its capabilities, cached as NewTaskDefaults reads them).
- * Read only while `enabled`; `known` is false until the capabilities answer (or always, when disabled or retired).
+ * Connection `connectionId`'s capabilities for any project (its harness-wide models, options and operations), cached
+ * as NewTaskDefaults reads them. Read only while `enabled` and the connection is not retired.
  */
-export function useConnectionOperation(connectionId: number, op: OperationId, enabled: boolean): { offered: boolean; known: boolean } {
+export function useConnectionCapabilities(connectionId: number, enabled: boolean) {
   const api = useApi();
   const harnesses = useHarnesses();
-  const live = enabled && !harnesses.retired(connectionId);
+  const live = enabled && connectionId > 0 && !harnesses.retired(connectionId);
   const caps = useQuery({
     queryKey: ["capabilities", connectionId, "", false],
     queryFn: () => api.capabilities(connectionId),
@@ -586,7 +450,18 @@ export function useConnectionOperation(connectionId: number, op: OperationId, en
     staleTime: 60_000,
     retry: false,
   });
-  return { offered: live && caps.data?.operations[op]?.available === true, known: live && (caps.isSuccess || caps.isError) };
+  return { ...caps, live };
+}
+
+/**
+ * Whether connection `connectionId` offers operation `op` (its capabilities, cached as NewTaskDefaults reads them), and
+ * the harness's reason when it does not. Read only while `enabled`; `known` is false until the capabilities answer (or
+ * always, when disabled or retired).
+ */
+export function useConnectionOperation(connectionId: number, op: OperationId, enabled: boolean): { offered: boolean; known: boolean; reason: string | null } {
+  const caps = useConnectionCapabilities(connectionId, enabled);
+  const o = caps.data?.operations[op];
+  return { offered: caps.live && o?.available === true, known: caps.live && (caps.isSuccess || caps.isError), reason: o?.available === false && o.reason !== undefined && o.reason !== "" ? o.reason : null };
 }
 
 /**

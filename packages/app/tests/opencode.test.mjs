@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ApiError, normalizeOpenCodeStatus } from "../src/api/client.ts";
+import { ApiError } from "../src/api/client.ts";
+import { normalizeOpenCodeStatus, openCodeApi } from "../src/harnesses/opencode/api.ts";
 import {
   advancedChanges,
   isAuthRequired,
@@ -11,7 +12,7 @@ import {
   serviceText,
   signInText,
   targetReadBack,
-} from "../src/lib/opencode.ts";
+} from "../src/harnesses/opencode/opencode.ts";
 import { fakeApi } from "./fake-transport.mjs";
 
 const NOW = Date.parse("2026-11-19T12:00:00Z");
@@ -55,13 +56,14 @@ test("client: pair, connect-local, connect address and disconnect hit the contra
   const seen = [];
   const { api } = fakeApi(async (path, init) => {
     seen.push({ path, method: init.method, body: init.body === undefined ? undefined : JSON.parse(init.body) });
-    return new Response(null, { status: 204 });
+    return Response.json({});
   });
-  await api.pairOpenCode("http://192.168.1.2:49374/auth/connect/abc");
-  await api.connectLocalOpenCode();
-  await api.saveOpenCode({ endpoint: "http://studio.lan:49374" });
-  await api.saveOpenCode({ endpoint: "http://studio.lan:49374", username: "opencode", password: "pw" });
-  await api.disconnectOpenCode();
+  const oc = openCodeApi(api);
+  await oc.pair("http://192.168.1.2:49374/auth/connect/abc");
+  await oc.connectLocal();
+  await oc.save({ endpoint: "http://studio.lan:49374" });
+  await oc.save({ endpoint: "http://studio.lan:49374", username: "opencode", password: "pw" });
+  await oc.disconnect();
   assert.deepEqual(seen, [
     { path: "/harnesses/opencode/actions/pair", method: "POST", body: { link: "http://192.168.1.2:49374/auth/connect/abc" } },
     { path: "/harnesses/opencode/actions/connect-local", method: "POST", body: undefined },
@@ -73,7 +75,7 @@ test("client: pair, connect-local, connect address and disconnect hit the contra
 
 test("auth required: only the 409 opencode_auth_required reveals the password", async () => {
   const { api } = fakeApi(async () => Response.json({ error: "OpenCode requires a password.", code: "opencode_auth_required" }, { status: 409 }));
-  const error = await api.saveOpenCode({ endpoint: "http://studio.lan:49374" }).catch((e) => e);
+  const error = await openCodeApi(api).save({ endpoint: "http://studio.lan:49374" }).catch((e) => e);
   assert.ok(error instanceof ApiError);
   assert.equal(isAuthRequired(error), true);
   assert.equal(isAuthRequired(new ApiError(409, "expired", "opencode_pairing_expired")), false);
@@ -83,7 +85,7 @@ test("auth required: only the 409 opencode_auth_required reveals the password", 
 
 test("pairing errors keep the server's message and code", async () => {
   const { api } = fakeApi(async () => Response.json({ error: "Pairing link expired.", code: "opencode_pairing_expired" }, { status: 409 }));
-  const error = await api.pairOpenCode("http://h:1/auth/connect/x").catch((e) => e);
+  const error = await openCodeApi(api).pair("http://h:1/auth/connect/x").catch((e) => e);
   assert.equal(error.message, "Pairing link expired.");
   assert.equal(error.code, "opencode_pairing_expired");
 });

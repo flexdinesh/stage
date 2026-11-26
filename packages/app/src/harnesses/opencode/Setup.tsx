@@ -1,24 +1,40 @@
 // OpenCode connection card (Settings): one-click Connect to the service on this
 // machine, a pairing link or address for another machine, sign-in recovery,
-// Disconnect, and the Advanced drawer. Logic lives in lib/opencode.ts.
+// Disconnect, and the Advanced drawer. Logic lives in opencode.ts.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
-import type { OpenCodeStatus } from "../api/types.ts";
-import { invalidateConnectionChange, keys, useHarnesses, useOpenCodeStatus } from "../api/queries.ts";
-import { activeOn, isInstanceChanged, isInstanceReturned, newServicePrompt, returnedServicePrompt } from "../lib/harnesses.ts";
-import { usePlatform } from "../platform/context.tsx";
-import { useHarnessApi, useScopeMachineId, useScopedKey, useSetupCopy } from "../api/harnessScope.tsx";
-import { dateTime } from "../lib/format.ts";
-import { advancedChanges, isAuthRequired, localNote, openCodeChip, parseTarget, serviceHost, serviceText, signInText, targetReadBack } from "../lib/opencode.ts";
-import { AutoCompleteToggle } from "./Completion.tsx";
-import { NewTaskDefaults } from "./NewTaskDefaults.tsx";
-import { Alert, Button, ConfirmInline, Chip, Drawer, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, CommandBox } from "./ui.tsx";
+import { invalidateConnectionChange, useHarnesses } from "../../api/queries.ts";
+import { activeOn } from "../../lib/harnesses.ts";
+import { usePlatform } from "../../platform/context.tsx";
+import { useHarnessApi, useScopeMachineId, useScopedKey, useSetupCopy } from "../../api/harnessScope.tsx";
+import { dateTime } from "../../lib/format.ts";
+import { AutoCompleteToggle } from "../../components/Completion.tsx";
+import { NewTaskDefaults } from "../../components/NewTaskDefaults.tsx";
+import { Alert, Button, ConfirmInline, Chip, Drawer, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, CommandBox } from "../../components/ui.tsx";
+import { OPENCODE_KIND, openCodeApi } from "./api.ts";
+import {
+  advancedChanges,
+  isAuthRequired,
+  isInstanceChanged,
+  isInstanceReturned,
+  localNote,
+  newServicePrompt,
+  openCodeChip,
+  parseTarget,
+  returnedServicePrompt,
+  serviceHost,
+  serviceText,
+  signInText,
+  targetReadBack,
+} from "./opencode.ts";
+import { OPENCODE_STATUS_KEY, useOpenCodeStatus } from "./queries.ts";
+import type { OpenCodeStatus } from "./types.ts";
 
 /** Connect, pair and disconnect change the status, connections and what tasks can start: waits for the status, the rest refreshes behind. */
 function useRefresh(): () => Promise<void> {
   const qc = useQueryClient();
   const key = useScopedKey();
-  return () => invalidateConnectionChange(qc, key, [keys.openCodeStatus]);
+  return () => invalidateConnectionChange(qc, key, [OPENCODE_STATUS_KEY]);
 }
 
 /**
@@ -43,7 +59,7 @@ function useConnect<T>(run: (arg: T, newInstance: boolean) => Promise<void>, onS
 
 /** The confirm for a different (or earlier) OpenCode service, or the request's error. */
 function ConnectOutcome({ address, connect, confirm }: { address: string; connect: { mutation: { error: unknown; isPending: boolean; reset: () => void }; returned: boolean; confirming: boolean }; confirm: () => void }) {
-  const current = activeOn(useHarnesses().list, "opencode", useScopeMachineId());
+  const current = activeOn(useHarnesses().list, OPENCODE_KIND, useScopeMachineId());
   const { mutation, returned, confirming } = connect;
   if (!confirming) return <ErrorText error={mutation.error} />;
   return (
@@ -77,21 +93,21 @@ export function OpenCodeSetup() {
           ) : (
             <Connection info={info} checking={status.isFetching} check={() => void status.refetch()} advanced={() => setEditing(true)} />
           )}
-          <AutoCompleteToggle harness="opencode" className="w-full border-t border-line pt-2" />
+          <AutoCompleteToggle harness={OPENCODE_KIND} className="w-full border-t border-line pt-2" />
         </div>
         {editing && info ? <ConnectionEditor info={info} close={() => setEditing(false)} /> : null}
       </Panel>
-      <NewTaskDefaults harness="opencode" />
+      <NewTaskDefaults harness={OPENCODE_KIND} />
     </>
   );
 }
 
 /** A1/A2: Connect to the local service when one answers, then a pairing link or address for another machine. */
 function NotConnected({ info }: { info: OpenCodeStatus }) {
-  const api = useHarnessApi();
+  const api = openCodeApi(useHarnessApi());
   const copy = useSetupCopy();
   const refresh = useRefresh();
-  const connect = useConnect((_: null, newInstance: boolean) => api.connectLocalOpenCode(newInstance), refresh);
+  const connect = useConnect((_: null, newInstance: boolean) => api.connectLocal(newInstance), refresh);
   const note = localNote(info);
   if (info.local.available) {
     return (
@@ -136,7 +152,7 @@ function NotConnected({ info }: { info: OpenCodeStatus }) {
  * OpenCode asks for a password, reveals one. `linkOnly` takes links alone (pair again).
  */
 function TargetForm({ primary, linkOnly = false, pairLabel = "Pair" }: { primary: boolean; linkOnly?: boolean; pairLabel?: string }) {
-  const api = useHarnessApi();
+  const api = openCodeApi(useHarnessApi());
   const refresh = useRefresh();
   const [text, setText] = useState("");
   const [password, setPassword] = useState("");
@@ -152,12 +168,12 @@ function TargetForm({ primary, linkOnly = false, pairLabel = "Pair" }: { primary
     await refresh();
   };
   // A link is resent as is after a confirm: Stage kept its redeemed token (links work once).
-  const pair = useConnect((link: string, newInstance: boolean) => api.pairOpenCode(link, newInstance), done);
-  const connect = useConnect((endpoint: string, newInstance: boolean) => api.saveOpenCode({ endpoint, ...(newInstance ? { newInstance: true } : {}) }), done, (e, endpoint) => {
+  const pair = useConnect((link: string, newInstance: boolean) => api.pair(link, newInstance), done);
+  const connect = useConnect((endpoint: string, newInstance: boolean) => api.save({ endpoint, ...(newInstance ? { newInstance: true } : {}) }), done, (e, endpoint) => {
     if (isAuthRequired(e)) setAskedFor(endpoint);
   });
   const signIn = useConnect(
-    (endpoint: string, newInstance: boolean) => api.saveOpenCode({ endpoint, username: "opencode", password, ...(newInstance ? { newInstance: true } : {}) }),
+    (endpoint: string, newInstance: boolean) => api.save({ endpoint, username: "opencode", password, ...(newInstance ? { newInstance: true } : {}) }),
     done,
   );
   const asking = askedFor !== null && askedFor === value && target?.kind === "address";
@@ -268,9 +284,9 @@ function Connection({ info, checking, check, advanced }: { info: OpenCodeStatus;
 
 /** A4: OpenCode answered but no longer accepts Stage's sign-in; the fix depends on how Stage signed in. */
 function SignInLost({ info, advanced }: { info: OpenCodeStatus; advanced: () => void }) {
-  const api = useHarnessApi();
+  const api = openCodeApi(useHarnessApi());
   const refresh = useRefresh();
-  const reconnect = useConnect((_: null, newInstance: boolean) => api.connectLocalOpenCode(newInstance), refresh);
+  const reconnect = useConnect((_: null, newInstance: boolean) => api.connectLocal(newInstance), refresh);
   const host = <span className="font-mono break-all">{serviceHost(info.endpoint)}</span>;
   switch (info.auth) {
     case "local":
@@ -356,10 +372,10 @@ export const OPENCODE_DISCONNECT_PROMPT = "Disconnect OpenCode? Tasks and histor
 
 /** Disconnects OpenCode on the harness scope's machine, then waits for the new status. */
 export function useDisconnectOpenCode(onDone?: () => void) {
-  const api = useHarnessApi();
+  const api = openCodeApi(useHarnessApi());
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: api.disconnectOpenCode,
+    mutationFn: api.disconnect,
     onSuccess: async () => {
       onDone?.();
       await refresh();
@@ -392,7 +408,7 @@ function BrowserSetupHint({ client, service }: { client: string; service: string
 
 /** D: the rarely needed fields. Saves only what changed, so an untouched service URL keeps the sign-in mode. */
 function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => void }) {
-  const api = useHarnessApi();
+  const api = openCodeApi(useHarnessApi());
   const refresh = useRefresh();
   const [urls, setUrls] = useState({
     endpoint: info.endpoint,
@@ -402,7 +418,7 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
   const [replace, setReplace] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const current = activeOn(useHarnesses().list, "opencode", useScopeMachineId());
+  const current = activeOn(useHarnesses().list, OPENCODE_KIND, useScopeMachineId());
   // Which confirm (a replaced service returning, or a different one): kept while its resend runs, so the copy does not flip.
   const [returned, setReturned] = useState(false);
   // Compared with the status as the editor opened, not the live poll: an untouched field never reverts a change made elsewhere.
@@ -410,7 +426,7 @@ function ConnectionEditor({ info, close }: { info: OpenCodeStatus; close: () => 
   const body = advancedChanges(opened, urls, replace ? { username, password } : null);
   // A different service answers 409 instance_changed (a replaced one instance_returned): the same body is resent with newInstance once confirmed.
   const save = useMutation({
-    mutationFn: (newInstance: boolean) => api.saveOpenCode(newInstance ? { ...body, newInstance: true } : body),
+    mutationFn: (newInstance: boolean) => api.save(newInstance ? { ...body, newInstance: true } : body),
     onSuccess: async () => {
       await refresh();
       close();

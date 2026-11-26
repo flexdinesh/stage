@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { approvalsText, claudeChip, claudeDetails, claudeFix, claudeIdentity, claudeRowDetail, claudeStatusView, claudeSummary, commandText, configText, updatesText, versionText } from "../src/lib/claude.ts";
+import { approvalsText, claudeChip, claudeDetails, claudeFix, claudeIdentity, claudeRowDetail, claudeStatusView, claudeSummary, commandText, configText, updatesText, versionText } from "../src/harnesses/claude/claude.ts";
 
 const details = { binary: "/home/dee/.local/bin/claude", version: "2.1.332 (Claude Code)", configDirectory: "/home/dee/.claude", loggedIn: true, scope: true };
 const status = (extra = {}) => ({

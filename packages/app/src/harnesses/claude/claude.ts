@@ -1,9 +1,9 @@
 // Claude Code's connection (kind `claude`): the state chip, the Settings row's detail line, the status panel view and
 // the fix a problem state asks for. Its status is the generic GET /harnesses/claude/status; its `details` are read
-// with claudeDetails (docs/api.md). Components: components/ClaudeSetup.tsx.
-import type { HarnessStatus } from "../api/types.ts";
-import type { HarnessSummary, HarnessTone, StatusRead, StatusView } from "./connections.ts";
-import { relativeTime } from "./format.ts";
+// with claudeDetails (docs/api.md). Components: Setup.tsx, index.tsx.
+import type { HarnessStatus } from "../../api/types.ts";
+import type { HarnessSummary, HarnessTone, StatusRead, StatusView } from "../../lib/connections.ts";
+import { relativeTime } from "../../lib/format.ts";
 
 export const CLAUDE = "claude";
 

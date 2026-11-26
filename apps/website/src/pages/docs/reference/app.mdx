@@ -28,7 +28,7 @@ What needs you, across projects (or the scoped project):
 - Needs input, finished runs awaiting your completion, ready tasks and failures, then In flight counts (running, scheduled in the next 24h, backlog) that open Tasks.
 - Finished rows offer one-click **Complete** (an inline confirm when it would auto-start dependents; the row stays about 6s with Undo) and **Review** (the full drawer). The group header offers **Complete all**.
 - Tree members carry a tree chip.
-- While nothing is connected, a **Connect a harness** alert links to Settings > Connections. Connection trouble shows as an alert at the top.
+- While nothing is connected, a **Connect a harness** alert links to Settings > Connections. Each connection problem the status button shows (an expired pairing, an unreachable service) is an alert at the top with **Fix in Settings**.
 - External harness alerts stay in the notifications inbox.
 
 The Dashboard works offline for planning.
@@ -39,6 +39,8 @@ Browse all work: Open, Closed or All, every task by state, or only tasks not in 
 
 - A count strip filters to one group. Completed holds the last 7 days. Scheduled (next 24h) lists upcoming scheduled starts.
 - Tree tasks link their tree (opened with the task selected).
+- **New task**: under the prompt, a **Harness** group (titled with the harness name, "Harness · OpenCode") holds what the chosen connection declares, in its order and words: model, its options (effort, worktree, base branch...), permission and mode.
+- **Task detail**: the session panel prints the chosen launch options (model and each option changed from its default) and, once the harness reports them, the branch and directory, marked "reported by" the harness.
 - **Task detail** shows a **Usage** panel when the task's harness reports what its session used (Claude Code does): turns, input tokens with cache read and cache write, output tokens, working time, and cost only when the harness reports one. Counts are compact; hover for the exact number. It reads "so far" while the task runs ([Claude Code](/docs/guides/claude-code)).
 
 Task states, actions and completion: [Tasks](/docs/concepts/tasks).
@@ -122,7 +124,7 @@ Three tabs.
 ### Connections
 
 - **Machines**: every machine, the main machine first, with online or offline, last seen, its build (flagged when it differs from the main machine's) and its connections as rows. Rename a worker inline; remove one behind a confirm that says what happens to its worker, connections and tasks. **Add machine** creates a one-time pairing link (10 minutes) and the copyable `stage worker join <link>` command, counts down, and shows when the worker joins; closing it while waiting revokes the code ([Machines](/docs/concepts/machines)).
-- **Connections**: per machine, **Add connection** lists the harnesses it can still connect. **Manage** opens a connection's drawer: T3 pairing (Pair with T3 or a pairing code), the T3 URL, Browser URL and optional admin token; the OpenCode connection (one click for the service on this machine, an `opencode pair` link for another, Advanced); the Codex connection (Connect, the command that fixes a problem, the Codex CLI path); the Claude Code connection (Connect, which Claude it uses, Check connection, Claude command); and the New tasks panel (Set as default, model pin). A disconnected connection stays as a Disconnected row with Reconnect and Forget. Details: [Connections](/docs/reference/connections).
+- **Connections**: per machine, **Add connection** lists the harnesses it can still connect. **Manage** opens a connection's drawer: T3 pairing (Pair with T3 or a pairing code), the T3 URL, Browser URL and optional admin token; the OpenCode connection (one click for the service on this machine, an `opencode pair` link for another, Advanced); the Codex connection (Connect, the command that fixes a problem, the Codex CLI path); the Claude Code connection (Connect, which Claude it uses, Check connection, Claude command); the New tasks panel (Set as default, model pin); and a **Capabilities** list of what the harness declares it can do (start tasks, stop from Stage, send follow-ups...), each available or unavailable with the harness's reason. A disconnected connection stays as a Disconnected row with Reconnect and Forget. Details: [Connections](/docs/reference/connections).
 - **Diagnostics**: independent T3, OpenCode, Codex and Claude Code connection diagnostics.
 - **Sync now**: a full sync also runs every 5 minutes.
 - **Auto-complete**: a connection can complete a task for you. A successful run whose T3 thread is settled, whose OpenCode session or Codex thread is archived, or whose Claude Code session is removed (`claude rm`), is accepted automatically (provenance shown, once per run; changing the state back undoes it; failed or interrupted runs never). On by default; toggle it per connection.

@@ -1,17 +1,16 @@
 import { useState } from "react";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import { Link } from "react-router";
-import { useProjects, useSchedules, useT3Status, useOpenCodeStatus, useHarnesses, useTasks } from "../api/queries.ts";
+import { useProjects, useSchedules, useHarnesses, useTasks } from "../api/queries.ts";
 import type { Task } from "../api/types.ts";
 import { IconCheck } from "../components/icons.tsx";
 import { useScope } from "../components/Scope.tsx";
 import { GROUP_META, GroupPanel, GroupPanelSkeleton, StatCount, useGroupFold } from "../components/TaskGroups.tsx";
 import { TaskRows } from "../components/TaskList.tsx";
-import { T3Alert } from "../components/T3Setup.tsx";
+import { useStatus } from "../components/StatusRow.tsx";
 import { CompleteAllActions, CompleteAllFailures, CompletionLinger, useCompleteAll, useCompletionLinger } from "../components/QuickComplete.tsx";
-import { ATTENTION_GROUPS, awaitingReview, harnessNotice, inGroup, type GroupKey } from "../lib/dashboard.ts";
+import { ATTENTION_GROUPS, awaitingReview, dashboardProblems, harnessNotice, inGroup, type GroupKey } from "../lib/dashboard.ts";
 import { scopedPageName } from "../lib/history.ts";
-import { LOCAL_MACHINE_ID } from "../lib/machines.ts";
 import { SETTINGS_PATH } from "../lib/settings.ts";
 import { projectWorkspace } from "../lib/projects.ts";
 import { LIVE_STATES } from "../lib/scope.ts";
@@ -58,33 +57,40 @@ function InFlight({ cells }: { cells: InFlightCell[] }) {
   );
 }
 
-/** A harness connection notice above the dashboard, spaced like T3Alert. */
-/** Planning remains available before pairing and during connection failures. */
-export function DashboardPage() {
+/**
+ * Above the Dashboard: "Connect a harness" while none is set up, else one alert per connection problem the status
+ * button shows (every set-up connection on every machine, read on its machine), linking to Settings. Planning never
+ * waits on a connection.
+ */
+function HarnessNotices() {
   const harnesses = useHarnesses();
   // The server's view (a set-up connection of any harness), as the status control uses: a disconnected harness stays quiet.
-  const notice = harnessNotice(harnesses.loaded ? harnesses.list : null, LOCAL_MACHINE_ID);
-  const t3 = useT3Status({ enabled: notice === "t3" });
-  const openCode = useOpenCodeStatus();
+  const notice = harnessNotice(harnesses.loaded ? harnesses.list : null);
+  const { row } = useStatus();
+  if (notice === "connect") {
+    return (
+      <Alert tone="need" className="mb-3.5">
+        <TextLink variant="rest" to={SETTINGS_PATH.connections}>Connect a harness</TextLink> to start tasks.
+      </Alert>
+    );
+  }
+  const problems = dashboardProblems(row.items);
+  if (problems.length === 0) return null;
+  return (
+    <div className="mb-3.5 flex flex-col gap-2">
+      {problems.map((p) => (
+        <Alert key={p.key} tone={p.tone}>
+          {p.label}. <TextLink variant="rest" to={SETTINGS_PATH.connections}>Fix in Settings</TextLink>
+        </Alert>
+      ))}
+    </div>
+  );
+}
+
+export function DashboardPage() {
   return (
     <>
-      {notice === "t3" ? (
-        <T3Alert status={t3.data} />
-      ) : notice === "connect" ? (
-        <Alert tone="need" className="mb-3.5">
-          <TextLink variant="rest" to={SETTINGS_PATH.connections}>Connect a harness</TextLink> to start tasks.
-        </Alert>
-      ) : null}
-      {openCode.data?.state === "unavailable" ? (
-        <Alert tone="need" className="mb-3.5">
-          OpenCode is unavailable. <TextLink variant="rest" to={SETTINGS_PATH.connections}>Check connection</TextLink>
-        </Alert>
-      ) : null}
-      {openCode.data?.state === "rejected" ? (
-        <Alert tone="need" className="mb-3.5">
-          OpenCode no longer accepts Stage's sign-in. <TextLink variant="rest" to={SETTINGS_PATH.connections}>Reconnect</TextLink>
-        </Alert>
-      ) : null}
+      <HarnessNotices />
       <CompletionLinger>
         <Dashboard />
       </CompletionLinger>

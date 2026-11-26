@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { normalizeT3Status } from "../src/api/client.ts";
-import { codeReason, dashboardAlert, disconnectAvailability, firstSyncLanded, primaryAction, savedBrowserUrl, setupSteps, t3Configured, t3DisconnectPrompt, t3SettingsChanges } from "../src/lib/onboarding.ts";
+import { normalizeT3Status, t3Api } from "../src/harnesses/t3/api.ts";
+import { codeReason, disconnectAvailability, firstSyncLanded, primaryAction, savedBrowserUrl, setupSteps, t3Configured, t3DisconnectPrompt, t3SettingsChanges } from "../src/harnesses/t3/onboarding.ts";
 import { fakeApi } from "./fake-transport.mjs";
 
 const SYNCED = "2026-11-17T10:00:00Z";
@@ -81,20 +81,6 @@ test("code reasons name why auto-pair is unavailable", () => {
   assert.match(codeReason(null), /pairing code/);
 });
 
-test("dashboard alert before and after first sync, toned by state", () => {
-  const after = (over) => status({ lastFullSyncAt: SYNCED, ...over });
-  assert.equal(dashboardAlert(undefined), null);
-  assert.equal(dashboardAlert(status({}))?.tone, "need", "connection recovery remains visible while planning offline");
-  assert.equal(dashboardAlert(after(connected)), null);
-  assert.deepEqual(dashboardAlert(after({ state: "unreachable", reachable: false })), {
-    tone: "bad",
-    message: "No T3 server answered at http://127.0.0.1:3773.",
-  });
-  assert.equal(dashboardAlert(after({ state: "unpaired" }))?.tone, "need");
-  assert.equal(dashboardAlert(after({ state: "expired" }))?.tone, "need");
-  assert.equal(dashboardAlert(after({ state: "rejected" }))?.tone, "bad");
-});
-
 test("an older server without onboarding fields gets a derived state and safe defaults", () => {
   const now = Date.parse("2026-11-17T10:00:00Z");
   const {
@@ -172,7 +158,7 @@ test("disconnect sends DELETE /harnesses/t3/connection and returns the normalize
     seen.push({ path, method: init.method, body: init.body });
     return Response.json(reply(base));
   });
-  const s = await api.disconnectT3();
+  const s = await t3Api(api).disconnect();
   assert.equal(s.state, "unpaired");
   assert.equal(s.tokenExpiresAt, null);
   assert.deepEqual(seen, [{ path: "/harnesses/t3/connection", method: "DELETE", body: undefined }]);
@@ -185,11 +171,11 @@ test("auto-pair and T3 settings hit their harness endpoints and return the norma
     seen.push({ path, method: init.method, body: init.body });
     return Response.json(reply({ ...base, connected: true, state: "connected" }, path.includes("auto-pair") ? replaced : undefined));
   });
-  const paired = await api.autoPair();
+  const paired = await t3Api(api).autoPair();
   assert.equal(paired.state, "connected");
   assert.deepEqual(paired.replaced, replaced, "the replaced connection rides along with the details");
-  assert.equal((await api.saveT3Settings({ url: "http://127.0.0.1:4000" })).state, "connected");
-  await api.saveT3Settings({ url: null, publicUrl: null, adminToken: "tok" });
+  assert.equal((await t3Api(api).saveSettings({ url: "http://127.0.0.1:4000" })).state, "connected");
+  await t3Api(api).saveSettings({ url: null, publicUrl: null, adminToken: "tok" });
   assert.deepEqual(seen, [
     { path: "/harnesses/t3/actions/auto-pair", method: "POST", body: undefined },
     { path: "/harnesses/t3/settings", method: "PUT", body: JSON.stringify({ url: "http://127.0.0.1:4000" }) },
