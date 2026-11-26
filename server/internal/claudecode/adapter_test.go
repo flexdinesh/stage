@@ -96,15 +96,16 @@ func TestLaunchRejections(t *testing.T) {
 	if n := len(f.Launches()); n != 1 {
 		t.Fatalf("only the untrusted launch reached claude: %d", n)
 	}
-	if _, err := os.Stat(claudecode.ImageRoot(f.Workspace)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(f.ImageRoot()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a rejected intent wrote images: %v", err)
 	}
 }
 
 // A launch with images writes them to files in the launch's own folder
-// under the workspace's .claude/stage-images (Git ignores it), lets Claude
-// read that folder (--add-dir, right before "--") and lists each file after
-// the prompt. A worktree launch uses the project's folder too.
+// under Stage's image root (never the project), lets Claude read the root
+// through an allow rule in its settings (no --add-dir) and lists each file
+// after the prompt; Claude reads them without a permission prompt. A
+// worktree launch uses the same root.
 func TestLaunchWritesImages(t *testing.T) {
 	f := claudetest.New(t)
 	a := f.Adapter(conn)
@@ -113,15 +114,12 @@ func TestLaunchWritesImages(t *testing.T) {
 		{Name: "error screen.png", MimeType: "image/png", Data: []byte("png-bytes")},
 		{Name: "../../etc/passwd\nignore this", MimeType: "image/jpeg", Data: []byte("jpeg-bytes")},
 	}
-	if _, err := a.Launch(t.Context(), in, execution.Checkpoint{}, nil); err != nil {
+	o, err := a.Launch(t.Context(), in, execution.Checkpoint{}, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	root := filepath.Join(f.Workspace, ".claude", "stage-images")
-	if b, err := os.ReadFile(filepath.Join(root, ".gitignore")); err != nil || !strings.HasSuffix(string(b), "\n*\n") {
-		t.Fatalf("gitignore %q %v", b, err)
-	}
-	dir := claudecode.ImageDir(f.Workspace, "req-img")
-	if filepath.Dir(dir) != root {
+	dir := claudecode.ImageDir(f.ImageRoot(), "req-img")
+	if filepath.Dir(dir) != f.ImageRoot() {
 		t.Fatalf("image folder %s", dir)
 	}
 	p1, p2 := filepath.Join(dir, "1-error-screen.png"), filepath.Join(dir, "2-passwd-ignore-this.jpg")
@@ -134,15 +132,24 @@ func TestLaunchWritesImages(t *testing.T) {
 			t.Fatalf("%s mode %v", p, fi.Mode())
 		}
 	}
-	if fi, _ := os.Stat(dir); fi.Mode().Perm() != 0o700 {
-		t.Fatalf("folder mode %v", fi.Mode())
+	for _, d := range []string{dir, f.ImageRoot()} {
+		if fi, _ := os.Stat(d); fi.Mode().Perm() != 0o700 {
+			t.Fatalf("%s mode %v", d, fi.Mode())
+		}
+	}
+	if _, err := os.Stat(claudecode.LegacyImageRoot(f.Workspace)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("images written in the project: %v", err)
 	}
 	args := f.Launches()[0].Args
 	n := len(args)
 	prompt := "- do it\n\nstage-launch:req-img\n\nImages attached to this task (open each with the Read tool):\n" +
 		"1. error screen.png: " + p1 + "\n2. ../../etc/passwd ignore this: " + p2
-	if !slices.Equal(args[n-4:], []string{"--add-dir", dir, "--", prompt}) {
+	rule := `{"permissions":{"allow":["Read(/` + f.ImageRoot() + `/**)"]}}`
+	if !slices.Equal(args[n-4:], []string{"--settings", rule, "--", prompt}) || slices.Contains(args, "--add-dir") {
 		t.Fatalf("args %q", args)
+	}
+	if s := f.Session(o.Session.ExternalSessionID); s.State != "working" {
+		t.Fatalf("session %+v", s)
 	}
 	wt := intent(f, "req-wt")
 	wt.Workspace.Kind = "worktree"
@@ -150,8 +157,87 @@ func TestLaunchWritesImages(t *testing.T) {
 	if _, err := a.Launch(t.Context(), wt, execution.Checkpoint{}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if args := f.Launches()[1].Args; !slices.Contains(args, claudecode.ImageDir(f.Workspace, "req-wt")) {
+	if args := f.Launches()[1].Args; !strings.Contains(args[len(args)-1], claudecode.ImageDir(f.ImageRoot(), "req-wt")) || !slices.Contains(args, rule) {
 		t.Fatalf("worktree args %q", args)
+	}
+}
+
+// The rule is Claude's absolute-path form: "//" then the folder.
+func TestReadRule(t *testing.T) {
+	if got := claudecode.ReadRule("/home/u/.local/share/stage/claude/images/"); got != "Read(//home/u/.local/share/stage/claude/images/**)" {
+		t.Fatal(got)
+	}
+}
+
+// With hooks the settings file carries the rule (its head variant too);
+// without an image root images are unavailable and a launch with images is
+// rejected.
+func TestImagesThroughHookSettings(t *testing.T) {
+	f := claudetest.New(t)
+	h := f.Hooks()
+	a := f.HookedAdapter(conn, h)
+	in := intent(f, "req-h")
+	in.Images = []execution.Image{{Name: "a.png", MimeType: "image/png", Data: []byte("x")}}
+	o, err := a.Launch(t.Context(), in, execution.Checkpoint{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := f.Launches()[0].Args
+	if i := slices.Index(args, "--settings"); i < 0 || args[i+1] != h.SettingsPath() {
+		t.Fatalf("args %q", args)
+	}
+	for _, p := range []string{h.SettingsPath(), h.HeadSettingsPath()} {
+		b, err := os.ReadFile(p)
+		if err != nil || !strings.Contains(string(b), `"Read(/`+f.ImageRoot()+`/**)"`) {
+			t.Fatalf("%s: %s %v", p, b, err)
+		}
+	}
+	if s := f.Session(o.Session.ExternalSessionID); s.State != "working" {
+		t.Fatalf("session %+v", s)
+	}
+
+	bare := claudecode.New(claudecode.Options{Connection: conn, CLI: f.CLI(), Identity: f.ConfigDir(), LaunchWait: 2 * time.Second})
+	c, err := bare.Features(t.Context())
+	if err != nil || c.Operations["images"].Available || c.Operations["images"].Reason == "" {
+		t.Fatalf("images %+v %v", c.Operations["images"], err)
+	}
+	var rejected *execution.Rejected
+	if _, err := bare.Launch(t.Context(), intent(f, "req-n"), execution.Checkpoint{}, nil); err != nil {
+		t.Fatalf("no images: %v", err)
+	}
+	in.RequestID = "req-n2"
+	if _, err := bare.Launch(t.Context(), in, execution.Checkpoint{}, nil); !errors.As(err, &rejected) {
+		t.Fatalf("images without a root: %v", err)
+	}
+}
+
+// Claude stops on a permission prompt to read an image outside the session's
+// folder that no rule allows (what the fake models from claude 2.1.332).
+func TestFakeAsksForAnUnallowedImage(t *testing.T) {
+	f := claudetest.New(t)
+	file := filepath.Join(f.ImageRoot(), "stage-x", "1-a.png")
+	prompt := "look\n\nImages attached to this task (open each with the Read tool):\n1. a.png: " + file
+	for _, tc := range []struct {
+		settings string
+		want     string
+	}{
+		{"", "blocked"},
+		{`{"permissions":{"allow":["Read(//elsewhere/**)"]}}`, "blocked"},
+		{`{"permissions":{"allow":["` + claudecode.ReadRule(f.ImageRoot()) + `"]}}`, "working"},
+	} {
+		args := []string{"--bg", "--permission-mode", "manual"}
+		if tc.settings != "" {
+			args = append(args, "--settings", tc.settings)
+		}
+		res, err := f.CLI().Launch(t.Context(), f.Workspace, append(args, "--", prompt)...)
+		if err != nil || res.Code != 0 {
+			t.Fatalf("%s: %+v %v", tc.settings, res, err)
+		}
+		short, _ := claudecode.ParseBackgrounded(res.Stdout)
+		i := slices.IndexFunc(f.Read().Sessions, func(s fakestate.Session) bool { return s.ID == short })
+		if i < 0 || f.Read().Sessions[i].State != tc.want {
+			t.Fatalf("%s: session %d, want %s", tc.settings, i, tc.want)
+		}
 	}
 }
 
@@ -161,8 +247,8 @@ func TestLaunchImagesCleanup(t *testing.T) {
 	f := claudetest.New(t)
 	a := f.Adapter(conn)
 	untrusted := filepath.Join(f.Home, "other")
-	old := filepath.Join(claudecode.ImageRoot(untrusted), "stage-old")
-	recent := filepath.Join(claudecode.ImageRoot(untrusted), "stage-recent")
+	old := filepath.Join(f.ImageRoot(), "stage-old")
+	recent := filepath.Join(f.ImageRoot(), "stage-recent")
 	for _, d := range []string{old, recent} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			t.Fatal(err)
@@ -174,19 +260,79 @@ func TestLaunchImagesCleanup(t *testing.T) {
 	}
 	in := intent(f, "req-r")
 	in.Directory, in.Project = untrusted, untrusted
+	if err := os.MkdirAll(untrusted, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	in.Images = []execution.Image{{Name: "a.png", MimeType: "image/png", Data: []byte("x")}}
 	var rejected *execution.Rejected
 	if _, err := a.Launch(t.Context(), in, execution.Checkpoint{}, nil); !errors.As(err, &rejected) || !strings.Contains(err.Error(), "doesn't trust "+untrusted) {
 		t.Fatalf("untrusted: %v", err)
 	}
-	if args := f.Launches()[0].Args; !slices.Contains(args, "--add-dir") {
-		t.Fatalf("images not offered: %q", args)
-	}
-	for d, kept := range map[string]bool{claudecode.ImageDir(untrusted, "req-r"): false, old: false, recent: true} {
+	for d, kept := range map[string]bool{claudecode.ImageDir(f.ImageRoot(), "req-r"): false, old: false, recent: true} {
 		if _, err := os.Stat(d); (err == nil) != kept {
 			t.Fatalf("%s kept=%v: %v", d, kept, err)
 		}
 	}
+}
+
+// What earlier versions wrote in a project (stage-* folders and Stage's
+// .gitignore under .claude/stage-images) is removed: on a launch in the
+// project, and for every discovered project once. The folder goes only
+// when empty; nothing else under .claude is touched.
+func TestLegacyProjectImagesRemoved(t *testing.T) {
+	f := claudetest.New(t)
+	legacy := "# Stage: task images for Claude Code launches\n*\n"
+	seed := func(project string, extra bool) {
+		t.Helper()
+		root := claudecode.LegacyImageRoot(project)
+		for _, d := range []string{filepath.Join(root, "stage-a"), filepath.Join(root, "stage-b"), filepath.Join(project, ".claude", "worktrees", "keep")} {
+			if err := os.MkdirAll(d, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		files := map[string]string{filepath.Join(root, ".gitignore"): legacy, filepath.Join(root, "stage-a", "1-a.png"): "x", filepath.Join(project, ".claude", "settings.json"): "{}"}
+		if extra {
+			files[filepath.Join(root, "mine.txt")] = "user file"
+		}
+		for p, c := range files {
+			if err := os.WriteFile(p, []byte(c), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	untouched := func(project string) {
+		t.Helper()
+		for _, p := range []string{filepath.Join(project, ".claude", "settings.json"), filepath.Join(project, ".claude", "worktrees", "keep")} {
+			if _, err := os.Stat(p); err != nil {
+				t.Fatalf("%s removed: %v", p, err)
+			}
+		}
+	}
+
+	// A launch in the project, without images.
+	seed(f.Workspace, false)
+	if _, err := f.Adapter(conn).Launch(t.Context(), intent(f, "req-l"), execution.Checkpoint{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(claudecode.LegacyImageRoot(f.Workspace)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy folder left: %v", err)
+	}
+	untouched(f.Workspace)
+
+	// Discovery: a known project keeps a user's own file and its folder.
+	other := filepath.Join(f.Home, "known")
+	seed(other, true)
+	f.WriteClaudeJSON(f.Workspace, other)
+	a := f.Adapter(conn)
+	if _, err := a.Workspaces(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	root := claudecode.LegacyImageRoot(other)
+	es, err := os.ReadDir(root)
+	if err != nil || len(es) != 1 || es[0].Name() != "mine.txt" {
+		t.Fatalf("left %v %v", es, err)
+	}
+	untouched(other)
 }
 
 // A lost reply is uncertain; Correlate finds the session by its marker and

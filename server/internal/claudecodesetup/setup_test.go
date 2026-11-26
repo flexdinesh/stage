@@ -3,6 +3,7 @@ package claudecodesetup_test
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -258,6 +259,15 @@ func TestHookEventsStatus(t *testing.T) {
 	if args := e.f.Launches()[0].Args; !slices.Contains(args, filepath.Join(e.opts.StateDir, claudecode.HooksFile)) {
 		t.Fatalf("launch args %q", args)
 	}
+	// Images go under the state dir (<data dir>/claude/images).
+	img := execution.Intent{RequestID: "r-img", ConnectionID: id, Project: e.f.Workspace, Directory: e.f.Workspace, Prompt: "x", Workspace: execution.Workspace{Kind: "root"},
+		Images: []execution.Image{{Name: "a.png", MimeType: "image/png", Data: []byte("x")}}}
+	if _, err := a.Launch(ctx, img, execution.Checkpoint{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(e.opts.StateDir, "images", "stage-r-img", "1-a.png")); err != nil {
+		t.Fatalf("image file: %v", err)
+	}
 	if code := e.f.Hook(o.Session.ExternalSessionID, "Stop", nil); code != 204 {
 		t.Fatal(code)
 	}
@@ -294,7 +304,11 @@ func TestHookEventsPollingWithoutStateDir(t *testing.T) {
 	}
 	id, _ := e.ports.Active(t.Context(), claudecode.Kind)
 	a, _ := e.local.Adapter(id)
-	if caps, _ := a.Features(t.Context()); caps.Operations[execution.OpRespond].Available {
+	caps, _ := a.Features(t.Context())
+	if caps.Operations[execution.OpRespond].Available {
 		t.Fatal("respond without hooks")
+	}
+	if caps.Operations["images"].Available {
+		t.Fatal("images without a folder")
 	}
 }

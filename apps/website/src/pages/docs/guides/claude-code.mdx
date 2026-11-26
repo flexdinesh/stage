@@ -102,9 +102,10 @@ stage harness claude
 
 prints the same, with the next step when something is wrong. Details: [Connections reference](/docs/reference/connections#claude-code).
 
+Images on the prompt reach Claude Code as files it opens: Stage writes them under its data dir (`claude/images`, kept 30 days), never into your repository, and lets Claude read that folder without asking.
+
 ## Limits
 
-- Images on the prompt are not sent to Claude Code sessions.
 - A worktree starts from origin's default branch or a needed task's branch: no other base, and Claude names the branch.
 - Follow-ups from Stage are text only, and go to background sessions Stage can see: a session you run in a terminal takes them there.
 - If Stage restarts while a prompt waits, answer that prompt in Claude.

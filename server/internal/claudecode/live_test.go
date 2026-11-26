@@ -70,11 +70,14 @@ func TestLiveClaude(t *testing.T) {
 
 	// Hooks: every launch passes the settings file; Events records what
 	// they push.
-	hooks, err := claudecode.OpenHooks(claudecode.HooksOptions{Dir: filepath.Join(scratch, "stage-claude")})
+	// Images go to Stage's own folder, outside every trusted one, as under
+	// the data dir.
+	imageRoot := filepath.Join(scratch, "stage-claude", "images")
+	hooks, err := claudecode.OpenHooks(claudecode.HooksOptions{Dir: filepath.Join(scratch, "stage-claude"), ImageRoot: imageRoot})
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := claudecode.New(claudecode.Options{Connection: 1, CLI: cli, Identity: au.ConfigDirectory, Hooks: hooks})
+	a := claudecode.New(claudecode.Options{Connection: 1, CLI: cli, Identity: au.ConfigDirectory, ImageRoot: imageRoot, Hooks: hooks})
 	var shorts []string
 	t.Cleanup(func() { liveCleanup(t, cli, state, scratch, []string{plain, repo}, shorts) })
 	t.Cleanup(func() { _ = hooks.Close() })
@@ -192,8 +195,16 @@ func TestLiveClaude(t *testing.T) {
 	}
 
 	// An image reaches Claude as a file it reads without a permission
-	// prompt (manual mode): its folder, below the trusted workspace, is
-	// added with --add-dir.
+	// prompt (manual mode): its folder is under Stage's image root, outside
+	// the trusted workspace, and the settings' Read rule allows it. The
+	// launch removes what earlier versions wrote in the project.
+	legacy := claudecode.LegacyImageRoot(plain)
+	if err := os.MkdirAll(filepath.Join(legacy, "stage-old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, ".gitignore"), []byte("# Stage: task images for Claude Code launches\n*\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
 	draw.Draw(img, img.Bounds(), &image.Uniform{C: color.RGBA{R: 220, A: 255}}, image.Point{}, draw.Src)
 	var red bytes.Buffer
@@ -202,16 +213,33 @@ func TestLiveClaude(t *testing.T) {
 	}
 	_, o = launch("live-img", plain, "root", "manual", "Look at the attached image. Reply with exactly one lowercase word: its color.",
 		execution.Image{Name: "swatch.png", MimeType: "image/png", Data: red.Bytes()})
-	done = await(o.Session, "done")
+	if _, err := os.Stat(legacy); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old project images left: %v", err)
+	}
+	for deadline := time.Now().Add(3 * time.Minute); ; time.Sleep(2 * time.Second) {
+		cur, err := a.Observe(ctx, o.Session)
+		if err == nil && cur.State == "needs_input" {
+			rs, _ := a.Requests(ctx, o.Session)
+			t.Fatalf("reading the image asked for permission: %+v %+v", cur, rs)
+		}
+		if err == nil && cur.State == "done" {
+			done = cur
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("image session never finished: %+v %v", cur, err)
+		}
+	}
 	if done.Reply == nil || !strings.Contains(strings.ToLower(done.Reply.Text), "red") {
 		t.Fatalf("image reply %+v", done.Reply)
 	}
+	t.Logf("image reply: %q", done.Reply.Text)
 	ws, err := a.Workspaces(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, w := range ws {
-		if strings.Contains(w.WorkspaceRoot, "stage-images") {
+		if strings.HasPrefix(w.WorkspaceRoot, imageRoot) {
 			t.Fatalf("the images folder became a workspace: %+v", w)
 		}
 	}

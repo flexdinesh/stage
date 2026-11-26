@@ -19,6 +19,9 @@
   evidence [E12](#e12-follow-ups); decision 8's follow-up note.
 - **Amended** 2026-11-25 by #379: decision 10 (predecessor bases),
   evidence [E10](#e10-predecessor-base).
+- **Amended** 2026-11-26 by #420 ([ADR 0007](0007-harness-boundary.md)):
+  decision 15 (images under Stage's data dir, read through an allow rule,
+  no `--add-dir`), evidence [E8](#e8-images); decision 18's text-only note.
 - **Sources:** probes of the local `claude` CLI on Linux x86_64 with a
   claude.ai (Max) login, 2026-11-25, in scratch directories with haiku
   prompts. The CLI auto-updated from 2.1.331 to 2.1.332 two minutes in;
@@ -171,13 +174,17 @@ them. 2, 3, 13 and 14 come from the evidence.
 14. **Identity keys.** Stage keys sessions on `sessionId` (and `id` for CLI
     calls), never on `pid` or `startedAt`: both change when the daemon
     restarts or wakes a session.
-15. **Images** (#381) are files. Stage writes a launch's images to
-    `<workspace>/.claude/stage-images/stage-<requestId>/` (a `*`
-    `.gitignore` in `stage-images`), passes that folder with `--add-dir`
-    and lists each file after the prompt for the Read tool. The folder is
-    below the workspace because Claude refuses an untrusted added folder
-    ([E8](#e8-images)). A worktree session's cwd is its worktree, so the
-    folder is added either way.
+15. **Images** (#381; amended by #420) are files. Stage writes a launch's
+    images to `<data dir>/claude/images/stage-<requestId>/` (on a worker,
+    its own data dir), never into the user's repository (ADR 0007 decision
+    10). The launch's one `--settings` (the hooks file, or inline JSON
+    without hooks) allows `Read(//<data dir>/claude/images/**)`, and the
+    prompt lists each file for the Read tool. No `--add-dir`: Claude
+    refuses an untrusted added folder, and the data dir is never trusted
+    ([E8](#e8-images)); the allow rule needs no trust. The adapter removes
+    the `<project>/.claude/stage-images` folders earlier versions wrote
+    (its `stage-*` folders and Stage's `.gitignore`, then the folder if
+    empty).
 16. **Push via HTTP hooks** (#377, [E9](#e9-hooks)). Every launch passes
     `--settings <state dir>/hooks-settings.json`: Claude HTTP hooks for
     `Stop`, `StopFailure`, `Notification`, `PermissionRequest`,
@@ -241,7 +248,7 @@ them. 2, 3, 13 and 14 come from the evidence.
     (about 0.5 s), so while a send delivers (at most 15 s) the adapter reads
     that session's `stopped` as running: no false interrupted. A wake that
     fails after the stop leaves the session stopped and resumable, and is
-    reported. Text only (an image needs `--add-dir`, a flag); at most
+    reported. Text only (images are not sent with follow-ups); at most
     32 KiB (one argument). The follow-up is a typed prompt (`origin.kind`
     `human`), so turns, the reply and `executionId` move on. Only the user
     sends (the route refuses agent callers), and Stage records "Follow-up
@@ -412,6 +419,13 @@ claude 2.1.332, 2026-11-25, `mise run claude:live`:
   permissions) haiku session read a PNG listed in the prompt with the Read
   tool, never blocked on a permission prompt, and named its color.
 - The added folder does not join `~/.claude.json` `projects`.
+- #420, claude 2.1.332, 2026-11-26, `mise run claude:live`: with the
+  images in a folder outside every trusted one (the test's stand-in for
+  `<data dir>/claude/images`), no `--add-dir`, and the hooks settings file
+  carrying `"permissions": {"allow": ["Read(//<that folder>/**)"]}`, a
+  `manual` haiku session in the trusted workspace read the PNG listed in
+  the prompt with the Read tool, never reached needs input (no permission
+  prompt), and replied `red`.
 ### E9 Hooks
 
 Probed 2026-11-25 on 2.1.332 (scratch folder, haiku, cleaned up), with a

@@ -473,8 +473,10 @@ func TestRemoteClaudeConnectionOnAWorkerWithoutLocalHarnesses(t *testing.T) {
 }
 
 // A task's images reach Claude as files: the launch writes them to its own
-// folder (fetched by index over a worker channel), offers the folder with
-// --add-dir and lists each file after the prompt.
+// folder under the machine's image root, never the project (fetched by
+// index over a worker channel), lets Claude read the root through an allow
+// rule in its settings (no --add-dir) and lists each file after the prompt.
+// Claude reads it without a permission prompt.
 func TestContractClaudeImages(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
 		f := claudetest.New(t)
@@ -496,16 +498,23 @@ func TestContractClaudeImages(t *testing.T) {
 			t.Fatalf("start %+v %v", got, err)
 		}
 		args := f.Launches()[0].Args
-		i := slices.Index(args, "--add-dir")
-		if i < 0 || args[i+2] != "--" {
+		i := slices.Index(args, "--settings")
+		if i < 0 || slices.Contains(args, "--add-dir") || args[i+1] != `{"permissions":{"allow":["Read(/`+f.ImageRoot()+`/**)"]}}` {
 			t.Fatalf("args %q", args)
 		}
-		file := filepath.Join(args[i+1], "1-shot.png")
+		prompt := args[len(args)-1]
+		_, file, _ := strings.Cut(prompt, "\n1. shot.png: ")
+		if filepath.Dir(filepath.Dir(file)) != f.ImageRoot() || strings.HasPrefix(file, f.Workspace) {
+			t.Fatalf("image file %q not under %s", file, f.ImageRoot())
+		}
 		if b, err := os.ReadFile(file); err != nil || !bytes.Equal(b, buf.Bytes()) {
 			t.Fatalf("image file: %v", err)
 		}
-		if prompt := args[len(args)-1]; !strings.HasSuffix(prompt, "\n1. shot.png: "+file) {
-			t.Fatalf("prompt %q", prompt)
+		if got, err := store.GetTask(ctx, task.ID); err != nil || got.State != db.StateRunning {
+			t.Fatalf("task %+v %v", got.State, err)
+		}
+		if s := f.Read().Sessions; len(s) != 1 || s[0].State != "working" {
+			t.Fatalf("session %+v", s)
 		}
 	})
 }

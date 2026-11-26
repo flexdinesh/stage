@@ -89,12 +89,6 @@ func (r schedules) EditState(ctx context.Context, id int64) (store.ScheduleEditS
 	return e, notFound(err)
 }
 
-func (r schedules) HasAttachments(ctx context.Context, id int64) (bool, error) {
-	var hasImages bool
-	err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM task_attachments WHERE schedule_id=$1)`, id).Scan(&hasImages)
-	return hasImages, err
-}
-
 func (r schedules) Update(ctx context.Context, id int64, u store.ScheduleUpdate) error {
 	var w where
 	w.arg(id)

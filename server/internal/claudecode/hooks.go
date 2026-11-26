@@ -101,13 +101,14 @@ type Nudge struct {
 // settings file that points Claude at it. One adapter (the connection's
 // current one) subscribes at a time.
 type Hooks struct {
-	path  string
-	url   string
-	token string
-	ln    net.Listener
-	srv   *http.Server
-	now   func() time.Time
-	io    time.Duration
+	path      string
+	imageRoot string
+	url       string
+	token     string
+	ln        net.Listener
+	srv       *http.Server
+	now       func() time.Time
+	io        time.Duration
 
 	mu      sync.Mutex
 	sub     *Subscription
@@ -149,9 +150,12 @@ func (s *Subscription) end() { s.once.Do(func() { close(s.done) }) }
 // HooksOptions configure OpenHooks.
 type HooksOptions struct {
 	// Dir holds HooksFile (created 0700).
-	Dir    string
-	Logger *slog.Logger
-	Now    func() time.Time
+	Dir string
+	// ImageRoot is the adapter's image root (Options.ImageRoot): the
+	// settings let Claude read it (ReadRule). Empty: no rule.
+	ImageRoot string
+	Logger    *slog.Logger
+	Now       func() time.Time
 	// IOTimeout bounds reading a hook and writing an answer (default 10s);
 	// tests shorten it.
 	IOTimeout time.Duration
@@ -199,7 +203,7 @@ func OpenHooks(o HooksOptions) (*Hooks, error) {
 		_ = ln.Close()
 		return nil, fmt.Errorf("Stage couldn't open its local hook port (unexpected address %s).", ln.Addr())
 	}
-	h := &Hooks{path: path, url: "http://127.0.0.1:" + strconv.Itoa(tcp.Port) + hookPath, token: token, ln: ln, now: o.Now, io: o.IOTimeout, pending: map[string][]*pendingRequest{}}
+	h := &Hooks{path: path, imageRoot: o.ImageRoot, url: "http://127.0.0.1:" + strconv.Itoa(tcp.Port) + hookPath, token: token, ln: ln, now: o.Now, io: o.IOTimeout, pending: map[string][]*pendingRequest{}}
 	if err := h.writeSettings(o.Dir); err != nil {
 		_ = ln.Close()
 		return nil, fmt.Errorf("Stage couldn't write its Claude Code hook settings (%v).", err)
@@ -214,6 +218,9 @@ func OpenHooks(o HooksOptions) (*Hooks, error) {
 	log.Info("claude hook listener", "url", h.url, "settings", path)
 	return h, nil
 }
+
+// ImageRoot is the image root the settings files let Claude read.
+func (h *Hooks) ImageRoot() string { return h.imageRoot }
 
 // SettingsPath is the file a launch passes with --settings.
 func (h *Hooks) SettingsPath() string { return h.path }
@@ -520,14 +527,20 @@ func (h *Hooks) deliver(n Nudge) {
 	}
 }
 
-// Claude's settings file shape, as far as Stage writes it.
-type hookSettingsFile struct {
-	Hooks    map[string][]hookMatcher `json:"hooks"`
-	Worktree *worktreeSettings        `json:"worktree,omitempty"`
+// Claude's settings shape, as far as Stage writes it (a file or a launch's
+// JSON).
+type settingsFile struct {
+	Hooks       map[string][]hookMatcher `json:"hooks,omitempty"`
+	Worktree    *worktreeSettings        `json:"worktree,omitempty"`
+	Permissions *permissionSettings      `json:"permissions,omitempty"`
 }
 
 type worktreeSettings struct {
 	BaseRef string `json:"baseRef"`
+}
+
+type permissionSettings struct {
+	Allow []string `json:"allow"`
 }
 
 type hookMatcher struct {
@@ -545,12 +558,16 @@ type httpHook struct {
 // no matcher. PermissionRequest waits up to permissionTimeout for an
 // answer in Stage; Claude prompts meanwhile.
 func HookSettings(hookURL, token string) ([]byte, error) {
-	return hookSettings(hookURL, token, nil)
+	return hookSettings(hookURL, token, nil, "")
 }
 
-// hookSettings is HookSettings with an optional worktree section.
-func hookSettings(hookURL, token string, wt *worktreeSettings) ([]byte, error) {
-	f := hookSettingsFile{Hooks: map[string][]hookMatcher{}, Worktree: wt}
+// hookSettings is HookSettings with an optional worktree section and, for
+// an image root, its ReadRule.
+func hookSettings(hookURL, token string, wt *worktreeSettings, imageRoot string) ([]byte, error) {
+	f := settingsFile{Hooks: map[string][]hookMatcher{}, Worktree: wt}
+	if imageRoot != "" {
+		f.Permissions = &permissionSettings{Allow: []string{ReadRule(imageRoot)}}
+	}
 	for _, e := range HookEvents {
 		timeout := hookTimeout
 		if e == eventPermissionRequest {
@@ -572,7 +589,7 @@ func readHookSettings(path string) (int, string) {
 	if err != nil {
 		return 0, ""
 	}
-	var f hookSettingsFile
+	var f settingsFile
 	if json.Unmarshal(b, &f) != nil {
 		return 0, ""
 	}
@@ -597,14 +614,14 @@ func (h *Hooks) writeSettings(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	b, err := hookSettings(h.url, h.token, nil)
+	b, err := hookSettings(h.url, h.token, nil, h.imageRoot)
 	if err != nil {
 		return err
 	}
 	if err := writeFile0600(dir, h.path, b); err != nil {
 		return err
 	}
-	head, err := hookSettings(h.url, h.token, &worktreeSettings{BaseRef: "head"})
+	head, err := hookSettings(h.url, h.token, &worktreeSettings{BaseRef: "head"}, h.imageRoot)
 	if err != nil {
 		return err
 	}

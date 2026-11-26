@@ -42,7 +42,6 @@ var pending = map[string]bool{
 	"internal/db/identities.go":          true,
 	"internal/db/notifications.go":       true,
 	"internal/db/projects.go":            true,
-	"internal/db/schedules.go":           true,
 	"internal/db/tasks.go":               true,
 	"internal/db/store/threads.go":       true,
 	"internal/notify/notify.go":          true,

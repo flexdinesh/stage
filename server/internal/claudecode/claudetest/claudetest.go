@@ -138,16 +138,19 @@ func (f *Fake) Environ() []string {
 // stopped fake session's process is gone at once.
 func fakePID(int) bool { return false }
 
+// ImageRoot is the adapters' image root, in Stage's (temporary) folder.
+func (f *Fake) ImageRoot() string { return filepath.Join(f.Home, "stage-claude", "images") }
+
 // Adapter is an adapter on connection over the fake.
 func (f *Fake) Adapter(connection int64) *claudecode.Adapter {
-	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second, ProcessAlive: fakePID})
+	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), ImageRoot: f.ImageRoot(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second, ProcessAlive: fakePID})
 }
 
 // Hooks opens a hook receiver in a temporary folder, closed when the test
 // ends.
 func (f *Fake) Hooks() *claudecode.Hooks {
 	f.t.Helper()
-	h, err := claudecode.OpenHooks(claudecode.HooksOptions{Dir: filepath.Join(f.Home, "stage-claude")})
+	h, err := claudecode.OpenHooks(claudecode.HooksOptions{Dir: filepath.Join(f.Home, "stage-claude"), ImageRoot: f.ImageRoot()})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -158,7 +161,7 @@ func (f *Fake) Hooks() *claudecode.Hooks {
 // HookedAdapter is Adapter with hooks: launches pass their settings file
 // and Events pushes what hooks announce.
 func (f *Fake) HookedAdapter(connection int64, h *claudecode.Hooks) *claudecode.Adapter {
-	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second, Hooks: h, ProcessAlive: fakePID,
+	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), ImageRoot: f.ImageRoot(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second, Hooks: h, ProcessAlive: fakePID,
 		SettleDelays: []time.Duration{0, 20 * time.Millisecond, 40 * time.Millisecond, 80 * time.Millisecond}})
 }
 

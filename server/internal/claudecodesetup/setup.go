@@ -71,8 +71,9 @@ type Options struct {
 	// CheckTimeout bounds each CLI check (default 20s).
 	CheckTimeout time.Duration
 	// StateDir holds the hook settings file Claude sessions Stage launches
-	// read (claudecode.HooksFile): <data dir>/claude. Empty: no push, polling
-	// alone follows sessions.
+	// read (claudecode.HooksFile) and, in images/, the launches' images:
+	// <data dir>/claude. Empty: no push, polling alone follows sessions, and
+	// no images.
 	StateDir string
 	// NewAdapter builds the adapter (nil: claudecode.New); tests shorten
 	// its timings.
@@ -173,7 +174,15 @@ func (s *Service) adapter(conn int64, bin, identity string) execution.Adapter {
 	if s.hooks != nil {
 		s.hooks.Reset()
 	}
-	return s.opts.NewAdapter(claudecode.Options{Connection: conn, CLI: s.cli(bin), Identity: identity, Hooks: s.hooks, Logger: s.log})
+	return s.opts.NewAdapter(claudecode.Options{Connection: conn, CLI: s.cli(bin), Identity: identity, ImageRoot: s.imageRoot(), Hooks: s.hooks, Logger: s.log})
+}
+
+// imageRoot is where launches write their images: <StateDir>/images.
+func (s *Service) imageRoot() string {
+	if s.opts.StateDir == "" {
+		return ""
+	}
+	return filepath.Join(s.opts.StateDir, "images")
 }
 
 // openHooks starts the hook receiver once; it closes with s.life. A
@@ -183,7 +192,7 @@ func (s *Service) openHooks() {
 		return
 	}
 	s.hooksTried = true
-	h, err := claudecode.OpenHooks(claudecode.HooksOptions{Dir: s.opts.StateDir, Logger: s.log})
+	h, err := claudecode.OpenHooks(claudecode.HooksOptions{Dir: s.opts.StateDir, ImageRoot: s.imageRoot(), Logger: s.log})
 	if err != nil {
 		s.hooksErr = err.Error() + " It checks Claude Code every few seconds instead."
 		s.log.Warn("claude hooks unavailable; polling only", "err", err)

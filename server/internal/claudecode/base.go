@@ -3,6 +3,7 @@ package claudecode
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,23 +20,35 @@ import (
 // creates, names and owns a worktree that starts from that branch's tip.
 // Stage makes no worktree itself.
 
-// headSettings makes Claude start the new worktree from the launch
-// checkout's HEAD instead of origin's default branch.
-const headSettings = `{"worktree":{"baseRef":"head"}}`
-
 // launchSettings is a launch's one --settings value: the hook settings
-// file (its head variant for a based launch), else headSettings for a
-// based launch without hooks, else none.
-func (a *Adapter) launchSettings(based bool) string {
-	switch {
-	case a.hooks != nil && based:
-		return a.hooks.HeadSettingsPath()
-	case a.hooks != nil:
+// file (its head variant for a based launch; it carries the image root's
+// ReadRule), else JSON with worktree.baseRef "head" for a based launch
+// (Claude starts the new worktree from the launch checkout's HEAD instead
+// of origin's default branch) and the ReadRule for a launch with images,
+// else none. Hooks opened for another image root are left out of a launch
+// with images, which polling follows instead.
+func (a *Adapter) launchSettings(based, images bool) string {
+	if a.hooks != nil && (!images || a.hooks.ImageRoot() == a.imageRoot) {
+		if based {
+			return a.hooks.HeadSettingsPath()
+		}
 		return a.hooks.SettingsPath()
-	case based:
-		return headSettings
 	}
-	return ""
+	var s settingsFile
+	if based {
+		s.Worktree = &worktreeSettings{BaseRef: "head"}
+	}
+	if images {
+		s.Permissions = &permissionSettings{Allow: []string{ReadRule(a.imageRoot)}}
+	}
+	if s.Worktree == nil && s.Permissions == nil {
+		return ""
+	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // checkoutBranch is the branch a checkout has checked out, read without a

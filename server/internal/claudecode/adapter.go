@@ -32,6 +32,10 @@ type Options struct {
 	// LaunchWait bounds the wait for a launched session to appear in the
 	// session list (default 5s).
 	LaunchWait time.Duration
+	// ImageRoot is the folder under Stage's data dir (on a worker, the
+	// worker's) that launches write their images to (images.go); Hooks
+	// should be opened with the same one. Empty: images are unavailable.
+	ImageRoot string
 	// Hooks is the machine's hook receiver (nil: no push and no approvals
 	// in Stage; launches pass no --settings, polling alone follows
 	// sessions, and their prompts are answered in Claude Code).
@@ -56,6 +60,7 @@ type Adapter struct {
 	logs       *transcripts
 	launchWait time.Duration
 	hooks      *Hooks
+	imageRoot  string
 	now        func() time.Time
 	log        *slog.Logger
 	// settleDelays are the waits before each read after a hook (Events).
@@ -69,6 +74,7 @@ type Adapter struct {
 	invAt  time.Time // ~/.claude.json mtime of inv
 	invKey string
 	inv    []execution.WorkspaceInfo
+	legacy sync.Once // removeLegacyImages over the first inventory
 
 	// sendMu serializes Send; wakeMu guards waking, the sessions a Send is
 	// delivering to, each until its deadline (send.go).
@@ -106,7 +112,7 @@ func New(o Options) *Adapter {
 	}
 	return &Adapter{
 		conn: o.Connection, cli: o.CLI, identity: o.Identity, launchWait: o.LaunchWait, now: o.Now, log: o.Logger,
-		hooks: o.Hooks, settleDelays: o.SettleDelays, alive: o.ProcessAlive,
+		hooks: o.Hooks, imageRoot: o.ImageRoot, settleDelays: o.SettleDelays, alive: o.ProcessAlive,
 		roster: &roster{cli: o.CLI, ttl: o.RosterTTL, now: o.Now},
 		logs:   &transcripts{now: o.Now},
 	}
@@ -197,6 +203,7 @@ const (
 	reasonAnswer = "Answer in Claude Code: copy the resume command and run it in a terminal."
 	reasonBase   = "Claude Code starts worktrees from origin's default branch, or from a predecessor's branch, and names the branch itself."
 	reasonFolder = "Open Claude Code in the folder once; Stage lists the folders Claude Code knows."
+	reasonImages = "Stage has no folder for Claude Code's images on this machine."
 )
 
 // Features is static: the catalog is Claude's aliases, not a probe.
@@ -207,7 +214,7 @@ func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 	}
 	return execution.Capabilities{
 		Operations: map[string]execution.Availability{
-			"launch": available, "stop": available, "adopt": available, "reply": available, "opening": available, "images": available,
+			"launch": available, "stop": available, "adopt": available, "reply": available, "opening": available, "images": a.images(),
 			"predecessorBase":   available,
 			"worktreeBase":      {Reason: reasonBase},
 			"registerWorkspace": {Reason: reasonFolder},
@@ -220,6 +227,14 @@ func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 		Modes:       []execution.Choice{},
 		Workspaces:  []execution.Choice{choice(workspaceRoot, "Project folder"), choice(workspaceWorktree, "Claude Code worktree")},
 	}, nil
+}
+
+// images is the images operation: available with an image root.
+func (a *Adapter) images() execution.Availability {
+	if a.imageRoot == "" {
+		return execution.Availability{Reason: reasonImages}
+	}
+	return available
 }
 
 // claudeJSON is the user's Claude state file: ~/.claude.json, or
@@ -283,6 +298,15 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 	}
 	slices.SortFunc(out, func(x, y execution.WorkspaceInfo) int { return strings.Compare(x.ID, y.ID) })
 	a.inv, a.invAt, a.invKey = out, st.ModTime(), path
+	// Once per adapter: remove what earlier versions wrote in the projects
+	// (best effort).
+	a.legacy.Do(func() {
+		for _, w := range out {
+			if err := removeLegacyImages(w.WorkspaceRoot); err != nil {
+				a.log.Warn("claude: remove old project images", "dir", LegacyImageRoot(w.WorkspaceRoot), "err", err)
+			}
+		}
+	})
 	return slices.Clone(out), nil
 }
 

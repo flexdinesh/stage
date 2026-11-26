@@ -139,7 +139,6 @@ type Schedules interface {
 	Exists(ctx context.Context, id int64) (bool, error)
 	Insert(ctx context.Context, in ScheduleInsert) (int64, error)
 	EditState(ctx context.Context, id int64) (ScheduleEditState, error)
-	HasAttachments(ctx context.Context, id int64) (bool, error)
 	// Update sets u's columns and updated_at.
 	Update(ctx context.Context, id int64, u ScheduleUpdate) error
 	// Delete removes the schedule, its runs and images (false: none).

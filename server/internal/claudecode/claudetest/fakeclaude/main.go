@@ -104,12 +104,15 @@ func run(s *fakestate.State, args []string) (int, error) {
 }
 
 func launch(s *fakestate.State, args []string) (int, error) {
-	var name, worktree, settings, prompt string
+	var name, worktree, settings, prompt, permission string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "-n", "--model", "--effort", "--permission-mode":
 			if args[i] == "-n" && i+1 < len(args) {
 				name = args[i+1]
+			}
+			if args[i] == "--permission-mode" && i+1 < len(args) {
+				permission = args[i+1]
 			}
 			i++
 		case "-w":
@@ -169,9 +172,17 @@ func launch(s *fakestate.State, args []string) (int, error) {
 	if name == "" {
 		name = "fake session"
 	}
+	status, state, waitingFor := "busy", "working", ""
+	blocked, err := readsBlocked(prompt, dir, settings, permission)
+	if err != nil {
+		return 2, err
+	}
+	if blocked {
+		status, state, waitingFor = "waiting", "blocked", "permission prompt"
+	}
 	s.Sessions = append(s.Sessions, fakestate.Session{Entry: fakestate.Entry{
 		PID: 4242, ID: id[:8], Cwd: dir, Kind: "background", StartedAt: now.UnixMilli(),
-		SessionID: id, Name: name, Status: "busy", State: "working",
+		SessionID: id, Name: name, Status: status, State: state, WaitingFor: waitingFor,
 	}, Settings: settings})
 	if err := fakestate.AppendUserOn(s.ProjectsDir, dir, id, "cli", "bg", prompt, branch, now); err != nil {
 		return 2, err
@@ -246,22 +257,9 @@ func makeWorktree(cwd, name, settings string) (string, string, error) {
 	}
 	main := filepath.Dir(common)
 	from := main
-	var s struct {
-		Worktree struct {
-			BaseRef string `json:"baseRef"`
-		} `json:"worktree"`
-	}
-	if settings != "" {
-		raw := []byte(settings)
-		if !strings.HasPrefix(strings.TrimSpace(settings), "{") {
-			// A settings file, as Claude takes either.
-			if raw, err = os.ReadFile(settings); err != nil {
-				return "", "", fmt.Errorf("--settings: %w", err)
-			}
-		}
-		if err := json.Unmarshal(raw, &s); err != nil {
-			return "", "", fmt.Errorf("--settings: %w", err)
-		}
+	s, err := readSettings(settings)
+	if err != nil {
+		return "", "", err
 	}
 	if s.Worktree.BaseRef == "head" {
 		from = cwd
@@ -275,6 +273,73 @@ func makeWorktree(cwd, name, settings string) (string, string, error) {
 		return "", "", fmt.Errorf("git worktree add: %w", err)
 	}
 	return dir, branch, nil
+}
+
+// settingsFile is what the fake reads of a --settings value.
+type settingsFile struct {
+	Worktree struct {
+		BaseRef string `json:"baseRef"`
+	} `json:"worktree"`
+	Permissions struct {
+		Allow []string `json:"allow"`
+	} `json:"permissions"`
+}
+
+// readSettings reads a --settings value: JSON or a file, as Claude takes
+// either ("": none).
+func readSettings(settings string) (settingsFile, error) {
+	var s settingsFile
+	if settings == "" {
+		return s, nil
+	}
+	raw := []byte(settings)
+	if !strings.HasPrefix(strings.TrimSpace(settings), "{") {
+		var err error
+		if raw, err = os.ReadFile(settings); err != nil {
+			return s, fmt.Errorf("--settings: %w", err)
+		}
+	}
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return s, fmt.Errorf("--settings: %w", err)
+	}
+	return s, nil
+}
+
+// readsBlocked reports whether the first turn stops on a permission prompt
+// to read an image the prompt lists (claude 2.1.332, ADR 0005 E8): Read
+// outside the session's folder asks, unless a "Read(//<folder>/**)" allow
+// rule in the settings covers the file or permissions are bypassed.
+func readsBlocked(prompt, cwd, settings, permission string) (bool, error) {
+	_, list, ok := strings.Cut(prompt, "Images attached to this task (open each with the Read tool):")
+	if !ok || permission == "bypassPermissions" {
+		return false, nil
+	}
+	s, err := readSettings(settings)
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(list), "\n") {
+		i := strings.LastIndex(line, ": ")
+		if i < 0 {
+			continue
+		}
+		p := line[i+2:]
+		if strings.HasPrefix(p, cwd+"/") {
+			continue
+		}
+		covered := false
+		for _, rule := range s.Permissions.Allow {
+			dir, prefixed := strings.CutPrefix(rule, "Read(/")
+			dir, suffixed := strings.CutSuffix(dir, "/**)")
+			if prefixed && suffixed && strings.HasPrefix(dir, "/") && strings.HasPrefix(p, dir+"/") {
+				covered = true
+			}
+		}
+		if !covered {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func claudeEnv() map[string]string {
