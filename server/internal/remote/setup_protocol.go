@@ -62,20 +62,27 @@ type ConnectorState struct {
 
 // ConnectorRequest names a connector call's harness kind and carries its
 // input: Refresh for status, Settings for configure, Action and Input for
-// run.
+// run. ConnectionID can fence a run to the connector's active connection.
 type ConnectorRequest struct {
-	Kind     string          `json:"kind"`
-	Refresh  bool            `json:"refresh,omitempty"`
-	Settings json.RawMessage `json:"settings,omitempty"`
-	Action   string          `json:"action,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
+	Kind         string          `json:"kind"`
+	Refresh      bool            `json:"refresh,omitempty"`
+	Settings     json.RawMessage `json:"settings,omitempty"`
+	Action       string          `json:"action,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	ConnectionID int64           `json:"connectionId,omitempty"`
 }
 
-// ConnectorStatus is connector.status's (and every mutation's) result: the
+// ConnectorStatus is the status, configure and disconnect reply: the
 // status after the call, and what the call replaced.
 type ConnectorStatus struct {
 	Status harness.Status `json:"status"`
 	Result harness.Result `json:"result"`
+}
+
+type connectorRunReply struct {
+	// Older workers include the status after the action.
+	Status *harness.Status `json:"status,omitempty"`
+	Result *harness.Result `json:"result"`
 }
 
 // KindRequest names a harness on the authenticated machine.

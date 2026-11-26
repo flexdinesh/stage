@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
@@ -86,7 +87,8 @@ type server struct {
 	Deps
 	log *slog.Logger
 	// mux is the /api route table (what the agent gateway route serves).
-	mux *http.ServeMux
+	mux            *http.ServeMux
+	setupMutations sync.Map
 }
 
 // NewRouter returns the /api handler.
@@ -173,6 +175,18 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/tasks/{id}/launch-link/preview", s.previewLaunchLink)
 	h("POST /api/tasks/{id}/launch-link", s.attachLaunchLink)
 	h("GET /api/connections/{connectionId}/projects", s.externalProjects)
+
+	for target, path := range map[execution.ActionTarget]string{
+		execution.TargetConnection: "/api/connections/{id}/actions",
+		execution.TargetSession:    "/api/tasks/{id}/actions",
+		execution.TargetProject:    "/api/projects/{id}/actions",
+	} {
+		handle := func(w http.ResponseWriter, r *http.Request) error {
+			return s.actions(w, r, target)
+		}
+		h("GET "+path, handle)
+		h("POST "+path+"/{action}", handle)
+	}
 
 	h("GET /api/tasks", s.listTasks)
 	h("POST /api/tasks", s.createTask)
@@ -365,7 +379,13 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 	var unavailable *remote.UnavailableError
+	var uncertain *execution.ActionUncertain
+	var forbidden actionForbidden
 	switch {
+	case errors.As(err, &forbidden):
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error(), "code": "action_forbidden"})
+	case errors.As(err, &uncertain):
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": uncertain.Error(), "code": "action_outcome_unknown"})
 	case errors.As(err, &unavailable):
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": unavailable.Message, "code": unavailable.Code})
 	case errors.Is(err, execution.ErrUnavailable):

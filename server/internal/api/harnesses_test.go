@@ -9,6 +9,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencode"
@@ -20,7 +21,7 @@ import (
 var testHarnesses = harness.MustRegistry(t3.Descriptor, opencode.Descriptor)
 
 // hostedFake is a harness that runs as local processes.
-var hostedFake = harness.Descriptor{Kind: "hosted-fake", Name: "Hosted fake", Hosting: harness.Hosted}
+var hostedFake = harness.Descriptor{Kind: "hosted-fake", Name: "Hosted fake", Sessions: harness.SessionsMachine, LocalProcesses: true}
 
 type harnessesReply struct {
 	Machine struct {
@@ -29,13 +30,15 @@ type harnessesReply struct {
 		Profile harness.Profile `json:"profile"`
 	} `json:"machine"`
 	Harnesses []struct {
-		Kind        string            `json:"kind"`
-		Name        string            `json:"name"`
-		Hosting     string            `json:"hosting"`
-		Available   bool              `json:"available"`
-		Reason      string            `json:"reason"`
-		Closures    []harness.Closure `json:"closures"`
-		LinkSchemes []string          `json:"linkSchemes"`
+		Kind           string            `json:"kind"`
+		Name           string            `json:"name"`
+		LocalProcesses bool              `json:"localProcesses"`
+		Sessions       harness.Sessions  `json:"sessions"`
+		StateReasons   []string          `json:"stateReasons"`
+		Available      bool              `json:"available"`
+		Reason         string            `json:"reason"`
+		Closures       []harness.Closure `json:"closures"`
+		LinkSchemes    []string          `json:"linkSchemes"`
 	} `json:"harnesses"`
 }
 
@@ -69,18 +72,19 @@ func TestHarnessesListDescriptorsAndMachineAvailability(t *testing.T) {
 				t.Fatalf("reply %+v", out)
 			}
 			t3h, oc, hosted := out.Harnesses[0], out.Harnesses[1], out.Harnesses[2]
-			if t3h.Kind != "t3" || t3h.Name != "T3" || !t3h.Available || len(t3h.Closures) != 1 || t3h.Closures[0].Via != "via T3 settle" {
+			if t3h.Kind != "t3" || t3h.Name != "T3" || t3h.LocalProcesses || t3h.Sessions != harness.SessionsMachine || !t3h.Available || len(t3h.Closures) != 1 || t3h.Closures[0].Via != "via T3 settle" {
 				t.Fatalf("t3 %+v", t3h)
 			}
-			if oc.Kind != "opencode" || !oc.Available || oc.Closures[0].Signal != "archived" {
+			if oc.Kind != "opencode" || oc.LocalProcesses || oc.Sessions != harness.SessionsMachine || !oc.Available || oc.Closures[0].Signal != "archived" {
 				t.Fatalf("opencode %+v", oc)
 			}
 			if !slices.Equal(t3h.LinkSchemes, []string{"t3code"}) || oc.LinkSchemes == nil || len(oc.LinkSchemes) != 0 {
 				t.Fatalf("link schemes: t3 %v, opencode %v", t3h.LinkSchemes, oc.LinkSchemes)
 			}
-			// Connected harnesses run anywhere; hosted ones only where the
-			// profile allows local processes, with a reason otherwise.
-			if hosted.Hosting != "hosted" || hosted.Available != tc.hosted || (hosted.Reason == "") == !tc.hosted || hosted.Closures == nil {
+			if oc.StateReasons == nil || len(oc.StateReasons) != 0 || t3h.StateReasons == nil || len(t3h.StateReasons) != 0 {
+				t.Fatalf("state reasons: t3 %#v, opencode %#v", t3h.StateReasons, oc.StateReasons)
+			}
+			if !hosted.LocalProcesses || hosted.Sessions != harness.SessionsMachine || hosted.Available != tc.hosted || (hosted.Reason == "") != tc.hosted || hosted.Closures == nil {
 				t.Fatalf("hosted %+v", hosted)
 			}
 		})
@@ -141,7 +145,7 @@ func TestHarnessConnectionRoutes(t *testing.T) {
 	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
 	if st.Kind != "t3" || st.Name != "T3" || st.ConnectionID != e.store.ActiveID(db.LocalMachine, "t3") || !st.Connected || !st.Configured || st.State != "connected" ||
 		len(st.Fields) != 3 || st.Fields[0].ID != "url" || st.Fields[0].Source != "default" || st.Fields[2].ID != "adminToken" || st.Fields[2].Set ||
-		len(st.Actions) != 2 || st.Actions[1].ID != "auto-pair" || st.Actions[1].Available || st.Actions[1].Reason != "fake" || st.Details["publicUrl"] != "http://127.0.0.1:3773" {
+		len(st.Actions) != 2 || st.Actions[1].ID != "auto-pair" || st.Actions[1].Available || !strings.Contains(st.Actions[1].Reason, "fake T3") || st.Details["publicUrl"] != "http://127.0.0.1:3773" {
 		t.Fatalf("status %+v", st)
 	}
 
@@ -172,12 +176,14 @@ func TestHarnessListServesClaudeCode(t *testing.T) {
 	})
 	var list struct {
 		Harnesses []struct {
-			Kind        string        `json:"kind"`
-			Hosting     string        `json:"hosting"`
-			Launch      string        `json:"launch"`
-			SessionHint *string       `json:"sessionHint"`
-			Setup       harness.Setup `json:"setup"`
-			Attribution struct {
+			Kind           string           `json:"kind"`
+			LocalProcesses bool             `json:"localProcesses"`
+			Sessions       harness.Sessions `json:"sessions"`
+			StateReasons   []string         `json:"stateReasons"`
+			Launch         string           `json:"launch"`
+			SessionHint    *string          `json:"sessionHint"`
+			Setup          harness.Setup    `json:"setup"`
+			Attribution    struct {
 				Env        string              `json:"env"`
 				Precedence *harness.Precedence `json:"precedence"`
 				Origin     *harness.Origin     `json:"origin"`
@@ -192,7 +198,8 @@ func TestHarnessListServesClaudeCode(t *testing.T) {
 		t.Fatalf("sessionHint claude %v t3 %v", cc.SessionHint, list.Harnesses[0].SessionHint)
 	}
 	p := cc.Attribution.Precedence
-	if cc.Kind != claudecode.Descriptor.Kind || cc.Hosting != "hosted" || cc.Launch != "correlated" || cc.Attribution.Env != "CLAUDE_CODE_SESSION_ID" || p == nil ||
+	if cc.Kind != claudecode.Descriptor.Kind || !cc.LocalProcesses || cc.Sessions != harness.SessionsMachine ||
+		!slices.Equal(cc.StateReasons, []string{execution.ReasonOwnerExited}) || cc.Launch != "correlated" || cc.Attribution.Env != "CLAUDE_CODE_SESSION_ID" || p == nil ||
 		len(p.Owns) != 1 || p.Owns[0] != (harness.EnvMatch{Env: "CLAUDE_CODE_SESSION_KIND", Value: "bg"}) || len(p.Yields) != 0 ||
 		cc.Attribution.Origin == nil || cc.Attribution.Origin.Env != "CLAUDE_CODE_ENTRYPOINT" || cc.Wraps != nil {
 		t.Fatalf("%+v %+v", cc, p)

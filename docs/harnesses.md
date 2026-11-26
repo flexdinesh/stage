@@ -30,9 +30,10 @@ identity, continuity proof or moved-retire policy as applicable. See
 [worker setup](execution.md#remote-machines).
 
 The worker handshake advertises protocol 2, supported kinds and traits,
-and generic settings and status calls.
-Layer 05 declares process requirements separately from machine or cloud
-session locality, and supplies status phase, reason and fix. Layers 09
+generic settings and status calls and `adapter.act`. Modules declare local
+process requirements separately from machine or cloud session locality.
+They also declare allowed state reasons and supply a connection status
+phase, facts and an optional fix. Layers 09
 and 10 separate command, observation and discovery roles, then move
 observation beside the adapter. Serve hosts the local observer and the
 worker hosts its own observer. Layer 10 adds cached public settings to the worker. The
@@ -48,22 +49,23 @@ machine operations, and session worktrees belong to the harness.
 ## Choose an extension
 
 Use [ADR 0008 P4](adr/0008-harness-foundation.md#p4) to decide whether
-Stage needs to understand the capability. Use the declared capability
-at every consumer of a Stage-wide operation.
+Stage needs to understand the capability. Type operations only when Stage
+branches on them. Declare the operations Stage relays as actions and extra
+display data as facts. Stage-wide features work without harness-specific
+actions or facts.
 
 | Extension | Use it for | Contract |
 | --- | --- | --- |
 | Descriptor policy | A rule Stage interprets, such as reserved or correlated launch, caller attribution, wrapper origins or completion signals. | Shipped descriptor. Layer 02 adds link schemes and provenance. Layer 04 adds identity policy. Layer 05 adds process placement, locality and state reasons. |
 | Typed operation | Stage behavior gated by capability, such as launch, stop, adopt, reply, opening, attention, images, respond or send. | Shipped `execution.Capabilities`. Layer 06 applies the declaration to UI controls. |
 | Launch option | A typed choice, boolean or text input the harness takes during launch, such as its worktree option. | Shipped `execution.Config` and capability options. The adapter validates and translates the value. |
-| Action | A harness-specific operation on a connection, session or project, such as labelling a session. | Layer 05 declares input fields, confirmation and allowed callers. The adapter validates the opaque input. One generic route, MCP tool and CLI command dispatch it. Layer 06 provides the renderer. |
-| Fact | A display detail, such as usage or a harness status detail. | Layer 05 carries label, value and tone on status and observations. Layer 06 renders facts in the shared UI. |
+| Action | A harness-specific operation on a connection, session or project, such as labelling a session. | Declare the input schema, confirmation, availability and allowed callers. Use the connector for connection setup, or implement `execution.Actor` and declare session and project actions in capabilities. The owner validates opaque input. |
+| Fact | A display detail, such as a harness status detail. | Relay a fact on status, observations or action results. Layer 06 renders facts in the shared UI. |
 | Optional interface | A specialized adapter protocol for a declared policy or typed operation, such as event streaming or interaction. | Shipped `execution.As[T]` reaches the interface through local and proxy placements. Layer 03 negotiates the trait. |
 
 An agent may invoke a declared action only when its declaration allows
 agents. A capability that belongs to one workspace can be exposed in that
-scope. Stage's generic consumers relay the fields and results. The exact
-action wire shape belongs to layer 05.
+scope. Stage's generic consumers relay the fields and results. [Action API](api.md#declared-actions-and-facts)
 
 ### Walkthrough: Connect local OpenCode
 
@@ -75,9 +77,8 @@ action wire shape belongs to layer 05.
    registration on the selected machine. Its [module](../server/internal/opencodesetup/module.go)
    composes that connector in both placements. The request goes through
    the worker proxy when the connector runs on a worker.
-3. [The handler](../server/internal/api/handlers_harnesses.go) validates
-   that the descriptor declares the action, resolves that machine's
-   connector and returns refreshed status. The shipped route is
+3. [The handler](../server/internal/api/handlers_actions.go) validates
+   the action declaration, caller, availability and input. The setup route is
    `POST /api/harnesses/{kind}/actions/{action}`, with a machine-scoped
    form under `/api/machines/{id}/harnesses/`.
 4. The custom [OpenCode panel](../packages/app/src/harnesses/opencode/Setup.tsx)
@@ -86,8 +87,21 @@ action wire shape belongs to layer 05.
    contract. The generic panel can render a setup action from its
    declared fields and availability. [Public setup reference source](../apps/website/src/pages/docs/reference/connections.mdx).
 
-This is a shipped connector setup action. Layer 05 owns the target scoped
-action API, MCP and CLI contract. Layer 06 owns shared rendering.
+With a connection ID, `stage action ls --connection ID` lists its
+actions and `stage action run --connection ID connect-local` runs this
+action. Layer 06 owns shared rendering.
+
+### Candidates for later layers
+
+These are candidate declarations. The owning harness would need to verify
+support and define availability before exposing one.
+
+| Harness | Candidate actions |
+| --- | --- |
+| T3 | Attach a PR reference to a session; export a session transcript. |
+| OpenCode | Share or unshare a session; fork a session in OpenCode. |
+| Claude Code | Check hook delivery on the connection; export a session transcript. |
+| Codex | Archive or restore a session; check daemon diagnostics on the connection. |
 
 ## UI slots
 

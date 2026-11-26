@@ -7,53 +7,44 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-// FieldKind is how a setup field's value is entered and shown.
-type FieldKind string
+type FieldKind = execution.FieldKind
 
 const (
-	FieldText   FieldKind = "text"
-	FieldURL    FieldKind = "url"
-	FieldSecret FieldKind = "secret" // never echoed back; status reports only whether it is set
-	FieldBool   FieldKind = "bool"
+	FieldText   = execution.FieldText
+	FieldURL    = execution.FieldURL
+	FieldSecret = execution.FieldSecret
+	FieldBool   = execution.FieldBool
 )
 
 // Field is one setup setting or action input. Settings are sent as one JSON
 // object keyed by Field.ID (PUT /api/harnesses/{kind}/settings); a null
 // value resets a setting to its default.
-type Field struct {
-	ID    string    `json:"id"`
-	Label string    `json:"label"`
-	Kind  FieldKind `json:"kind"`
-	Help  string    `json:"help,omitempty"`
-}
+type Field = execution.Field
 
-// Action is a named setup operation (POST
-// /api/harnesses/{kind}/actions/{id}) with its JSON object input.
-type Action struct {
-	ID    string  `json:"id"`
-	Label string  `json:"label"`
-	Input []Field `json:"input,omitempty"`
-}
+// Action is the shared declaration for a connection setup operation.
+type Action = execution.Action
 
 // Setup is the schema of a harness's connection setup on a machine. Hosts
 // render it generically unless they register a panel for the kind.
 type Setup struct {
-	Fields  []Field  `json:"fields"`
-	Actions []Action `json:"actions"`
+	Fields  []Field            `json:"fields"`
+	Actions []execution.Action `json:"actions"`
 	// Disconnect: DELETE /api/harnesses/{kind}/connection is supported.
 	Disconnect bool `json:"disconnect"`
 }
 
 // Action is the setup's action id.
-func (s Setup) Action(id string) (Action, bool) {
+func (s Setup) Action(id string) (execution.Action, bool) {
 	for _, a := range s.Actions {
 		if a.ID == id {
 			return a, true
 		}
 	}
-	return Action{}, false
+	return execution.Action{}, false
 }
 
 // Summary is a connector's last known state, from memory only (health,
@@ -84,6 +75,25 @@ type ActionState struct {
 	ID        string `json:"id"`
 	Available bool   `json:"available"`
 	Reason    string `json:"reason,omitempty"`
+	Code      string `json:"code,omitempty"`
+}
+
+// Phase describes what the connection needs from the user.
+type Phase string
+
+const (
+	PhaseDisconnected Phase = "disconnected"
+	PhaseNeedsSetup   Phase = "needs_setup"
+	PhaseConnecting   Phase = "connecting"
+	PhaseConnected    Phase = "connected"
+	PhaseDegraded     Phase = "degraded"
+	PhaseUnavailable  Phase = "unavailable"
+)
+
+// Fix is the guidance for a setup problem, with an optional command to copy.
+type Fix struct {
+	Text    string `json:"text"`
+	Command string `json:"command,omitempty"`
 }
 
 // Status is a connector's full setup state (GET
@@ -91,11 +101,14 @@ type ActionState struct {
 type Status struct {
 	Summary
 	// State is a harness-defined word (connected, unpaired, unavailable...).
-	State   string        `json:"state"`
-	Reason  string        `json:"reason,omitempty"`
-	Fields  []FieldState  `json:"fields"`
-	Actions []ActionState `json:"actions"`
-	Sync    *SyncStatus   `json:"sync,omitempty"`
+	State   string           `json:"state"`
+	Reason  string           `json:"reason,omitempty"`
+	Phase   Phase            `json:"phase"`
+	Facts   []execution.Fact `json:"facts,omitempty"`
+	Fix     *Fix             `json:"fix,omitempty"`
+	Fields  []FieldState     `json:"fields"`
+	Actions []ActionState    `json:"actions"`
+	Sync    *SyncStatus      `json:"sync,omitempty"`
 	// Details is the harness's own setup state for the host's panel for
 	// this kind. Generic code never reads it.
 	Details any `json:"details,omitempty"`
@@ -112,9 +125,15 @@ type SyncStatus struct {
 }
 
 // Result is an action's or setting change's outcome.
-type Result struct {
-	// Replaced is the connection the change retired (0: none).
-	Replaced int64 `json:"replaced"`
+type Result = execution.ActionResult
+
+// CheckResult reports the result of a connector's status probe.
+func (s Status) CheckResult() Result {
+	message := s.Reason
+	if message == "" {
+		message = "Connection check completed."
+	}
+	return Result{Message: message, Facts: s.Facts}
 }
 
 // Connector is one harness kind's connection setup on one machine. Each
@@ -206,42 +225,8 @@ func (c Connectors) Owner(ctx context.Context, id int64) (Descriptor, Connector,
 }
 
 func (s Setup) validate() error {
-	ids := map[string]bool{}
-	for _, f := range s.Fields {
-		if err := f.validate(); err != nil {
-			return err
-		}
-		if ids[f.ID] {
-			return fmt.Errorf("setup field %q declared twice", f.ID)
-		}
-		ids[f.ID] = true
+	if err := execution.ValidateFields(s.Fields); err != nil {
+		return err
 	}
-	acts := map[string]bool{}
-	for _, a := range s.Actions {
-		if a.ID == "" || a.Label == "" || acts[a.ID] {
-			return fmt.Errorf("setup action %q needs a unique id and a label", a.ID)
-		}
-		acts[a.ID] = true
-		in := map[string]bool{}
-		for _, f := range a.Input {
-			if err := f.validate(); err != nil {
-				return err
-			}
-			if in[f.ID] {
-				return fmt.Errorf("action %q input %q declared twice", a.ID, f.ID)
-			}
-			in[f.ID] = true
-		}
-	}
-	return nil
-}
-
-func (f Field) validate() error {
-	switch {
-	case f.ID == "" || f.Label == "":
-		return fmt.Errorf("setup field %q needs an id and a label", f.ID)
-	case f.Kind != FieldText && f.Kind != FieldURL && f.Kind != FieldSecret && f.Kind != FieldBool:
-		return fmt.Errorf("setup field %q: unknown kind %q", f.ID, f.Kind)
-	}
-	return nil
+	return execution.ValidateActions(s.Actions, execution.TargetConnection)
 }

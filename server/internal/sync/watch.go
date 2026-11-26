@@ -54,7 +54,7 @@ func (s *Service) watchAttention(ctx context.Context, connection int64) error {
 			continue
 		}
 		previous, e := s.store.Observation(ctx, ref)
-		if e = s.store.PutObservation(ctx, o); e != nil {
+		if e = s.putObservation(ctx, o); e != nil {
 			return e
 		}
 		o, e = s.store.Observation(ctx, ref)

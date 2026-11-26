@@ -220,11 +220,13 @@ func TestConnector(t *testing.T) {
 	if _, err := c.Run(t.Context(), "pair", nil); err == nil {
 		t.Fatal("unknown action ran")
 	}
-	if _, err := c.Run(t.Context(), claudecode.ActionConnect, []byte(`{}`)); err != nil {
-		t.Fatal(err)
+	if res, err := c.Run(t.Context(), claudecode.ActionConnect, []byte(`{}`)); err != nil || res.Message != "Connected to Claude Code." {
+		t.Fatal(res, err)
 	}
-	if !c.Summary(t.Context()).Connected {
-		t.Fatal("not connected")
+	st, err := c.Status(t.Context(), false)
+	if err != nil || !st.Connected || st.Phase != harness.PhaseConnected ||
+		!slices.ContainsFunc(st.Facts, func(f execution.Fact) bool { return f.ID == "events" && f.Value == "push" }) {
+		t.Fatalf("connected status: %+v, %v", st, err)
 	}
 	if hooks == nil || hooks.SettingsPath() != filepath.Join(dataDir, "claude", claudecode.HooksFile) {
 		t.Fatalf("hooks not configured under %s", dataDir)

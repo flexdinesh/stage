@@ -25,7 +25,7 @@ func TestRPCBodiesRoundTripJSON(t *testing.T) {
 	samples := map[string]any{
 		"description": description{Profile: harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true},
 			Connectors: []ConnectorState{{Kind: "t3", Summary: harness.Summary{ConnectionID: 7, Configured: true, Connected: true, LastError: "e"}}}},
-		"ConnectorRequest": ConnectorRequest{Kind: "opencode", Refresh: true, Settings: json.RawMessage(`{"endpoint":"x"}`), Action: "pair", Input: json.RawMessage(`{"link":"l"}`)},
+		"ConnectorRequest": ConnectorRequest{Kind: "opencode", Refresh: true, Settings: json.RawMessage(`{"endpoint":"x"}`), Action: "pair", Input: json.RawMessage(`{"link":"l"}`), ConnectionID: 7},
 		"ConnectorStatus": ConnectorStatus{Status: harness.Status{Summary: harness.Summary{ConnectionID: 7, Configured: true, Connected: true, LastError: "e"}, State: "connected", Reason: "r",
 			Fields: []harness.FieldState{{ID: "url", Value: "v", Set: true, Source: "saved"}}, Actions: []harness.ActionState{{ID: "pair", Available: true, Reason: "r"}},
 			Details: map[string]any{"t3Url": "http://x"}}, Result: harness.Result{Replaced: 3}},

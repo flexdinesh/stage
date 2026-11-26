@@ -1,5 +1,5 @@
 // Package harness describes the harnesses Stage runs work on: their names,
-// how they are hosted, and the policies product code reads instead of
+// where their sessions live, and the policies product code reads instead of
 // branching on a harness name. Each harness package declares its own
 // Descriptor; the server composes a fixed Registry (docs/execution.md).
 package harness
@@ -14,16 +14,12 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-// Hosting is where a harness's sessions live.
-type Hosting string
+// Sessions is where a harness stores and runs its sessions.
+type Sessions string
 
 const (
-	// Connected: Stage connects to a service the harness runs (an HTTP
-	// server). Available wherever Stage can reach it, Docker included.
-	Connected Hosting = "connected"
-	// Hosted: the harness runs as processes on the machine Stage (or a
-	// future worker) runs on. Needs a profile that allows local processes.
-	Hosted Hosting = "hosted"
+	SessionsMachine Sessions = "machine"
+	SessionsCloud   Sessions = "cloud"
 )
 
 // LaunchIdentity is how a launch learns its session's identity.
@@ -76,9 +72,13 @@ type Closure struct {
 
 // Descriptor is one harness kind's static description and policies.
 type Descriptor struct {
-	Kind    string  `json:"kind"`
-	Name    string  `json:"name"`
-	Hosting Hosting `json:"hosting"`
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+	// LocalProcesses requires a machine profile that permits local harness processes.
+	LocalProcesses bool     `json:"localProcesses"`
+	Sessions       Sessions `json:"sessions"`
+	// StateReasons lists the nonempty observation reasons this harness may report.
+	StateReasons []string `json:"stateReasons"`
 	// StableIdentity: an instance identity names one instance for good (a
 	// T3 environment id), so a retired connection with the same identity is
 	// revived. Otherwise the harness proves continuity itself.
@@ -93,7 +93,7 @@ type Descriptor struct {
 	// LinkSchemes are the URL schemes of the harness's own app links
 	// (Links.Native, links in replies), lower case, without ":".
 	LinkSchemes []string `json:"linkSchemes"`
-	// Setup is the connection setup schema (connected and hosted harnesses).
+	// Setup is the connection setup schema.
 	Setup Setup `json:"setup"`
 	// Attribution is how an agent running on this harness tells Stage its
 	// session.
@@ -123,11 +123,6 @@ type Wraps struct {
 	// Origin): Claude Code's entrypoint, Codex's originator.
 	Origins []string `json:"origins"`
 }
-
-// OwnsProcesses: the harness runs its sessions as processes Stage (or a
-// worker) owns, so it alone may report an execution lost with its owner
-// (execution.ReasonOwnerExited).
-func (d Descriptor) OwnsProcesses() bool { return d.Hosting == Hosted }
 
 // Attribution is how a calling agent's session reaches Stage. Every harness
 // can use the generic channels: an explicit callerSession argument, the
@@ -241,6 +236,9 @@ func NewRegistry(ds ...Descriptor) (*Registry, error) {
 		if ds[i].LinkSchemes == nil {
 			ds[i].LinkSchemes = []string{}
 		}
+		if ds[i].StateReasons == nil {
+			ds[i].StateReasons = []string{}
+		}
 	}
 	for _, d := range ds {
 		if d.Kind == "" || d.Name == "" {
@@ -250,8 +248,15 @@ func NewRegistry(ds ...Descriptor) (*Registry, error) {
 			return nil, fmt.Errorf("harness %s registered twice", d.Kind)
 		}
 		seen[d.Kind] = true
-		if d.Hosting != Connected && d.Hosting != Hosted {
-			return nil, fmt.Errorf("harness %s: unknown hosting %q", d.Kind, d.Hosting)
+		if d.Sessions != SessionsMachine && d.Sessions != SessionsCloud {
+			return nil, fmt.Errorf("harness %s: unknown session placement %q", d.Kind, d.Sessions)
+		}
+		seenReasons := map[string]bool{}
+		for _, reason := range d.StateReasons {
+			if reason == "" || strings.TrimSpace(reason) != reason || seenReasons[reason] {
+				return nil, fmt.Errorf("harness %s: invalid state reason %q", d.Kind, reason)
+			}
+			seenReasons[reason] = true
 		}
 		if d.Launch != LaunchReserved && d.Launch != LaunchCorrelated {
 			return nil, fmt.Errorf("harness %s: unknown launch identity %q", d.Kind, d.Launch)

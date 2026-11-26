@@ -228,6 +228,7 @@ type Capabilities struct {
 	Operations map[Op]Availability `json:"operations"`
 	Models     []Model             `json:"models"`
 	Modes      []Choice            `json:"modes"`
+	Actions    []Action            `json:"actions,omitempty"`
 }
 type Config struct {
 	Model      string        `json:"model"`
@@ -306,6 +307,7 @@ type Observation struct {
 	ExecutionID string      `json:"executionId"`
 	Reply       *Reply      `json:"reply,omitempty"`
 	Usage       *Usage      `json:"usage,omitempty"` // nil: the harness reports none (or has not yet)
+	Facts       []Fact      `json:"facts,omitempty"`
 	Closed      *Closure    `json:"closed,omitempty"`
 	// StateReason qualifies State; "" when the state speaks for itself.
 	StateReason string `json:"stateReason,omitempty"`
@@ -317,9 +319,8 @@ type Observation struct {
 }
 
 // ReasonOwnerExited: the process that owned the execution exited without
-// reporting an outcome, so the execution is interrupted. Only a harness that
-// owns its processes may report it (harness.Descriptor.OwnsProcesses; the
-// coordinator enforces it).
+// reporting an outcome, so the execution is interrupted. The coordinator
+// requires the harness to declare this reason.
 const ReasonOwnerExited = "owner_exited"
 
 // Closure signals. A closure never implies the execution succeeded.
@@ -346,14 +347,8 @@ func (o Observation) Valid() error {
 	if o.Active != (o.State == "running" || o.State == "needs_input") {
 		return errors.New("malformed observation: contradictory activity")
 	}
-	switch o.StateReason {
-	case "":
-	case ReasonOwnerExited:
-		if o.State != "interrupted" {
-			return fmt.Errorf("malformed observation: %s with state %q", o.StateReason, o.State)
-		}
-	default:
-		return fmt.Errorf("malformed observation: unknown state reason %q", o.StateReason)
+	if o.StateReason == ReasonOwnerExited && o.State != "interrupted" {
+		return fmt.Errorf("malformed observation: %s with state %q", o.StateReason, o.State)
 	}
 	return nil
 }

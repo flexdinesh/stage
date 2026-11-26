@@ -30,7 +30,7 @@ func importAt(t *testing.T, s *db.Store, ctx context.Context, connection int64, 
 // on another machine joins by remote, anything else is a new project.
 func caseImportIdentityLadder(t *testing.T, open Factory) {
 	s, ctx := setup(t, open)
-	claude := harness.Descriptor{Kind: "claude", Hosting: harness.Hosted}
+	claude := harness.Descriptor{Kind: "claude", Sessions: harness.SessionsMachine, LocalProcesses: true}
 	oc, err := s.SwitchInstance(ctx, db.LocalMachine, harness.Descriptor{Kind: "opencode"}, "instance", "", 0)
 	if err != nil {
 		t.Fatal(err)

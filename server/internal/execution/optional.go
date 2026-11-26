@@ -122,6 +122,7 @@ var optionalTraits = []optionalTrait{
 	registerTrait[Correlator]("correlator"),
 	registerTrait[EventSource]("eventSource"),
 	registerTrait[Interactive]("interactive"),
+	registerTrait[Actor]("actor"),
 }
 
 func (t optionalTrait) offered(a Adapter) bool {

@@ -90,6 +90,8 @@ func (s *Service) previewExisting(ctx context.Context, id int64, link string) (L
 	if err == nil && owner.ID != id {
 		return p, db.Conflict("Session already belongs to task #%d.", owner.ID)
 	}
+	d, _ := s.descriptor(t.Harness)
+	o.Facts = d.DisplayFacts(o.Facts)
 	p = LinkPreview{Attempt: a.Number, Revision: a.Revision, Environment: h.Identity, Observation: o}
 	return p, nil
 }
@@ -107,7 +109,7 @@ func (s *Service) LinkExisting(ctx context.Context, id int64, link string, attem
 	if err != nil {
 		return db.Task{}, err
 	}
-	if err = s.store.PutObservation(ctx, p.Observation); err != nil {
+	if err = s.putObservation(ctx, p.Observation); err != nil {
 		return db.Task{}, err
 	}
 	if err = s.store.FinishAttempt(ctx, a, p.Observation, true); err != nil {

@@ -27,6 +27,19 @@ func (s *server) executionCapabilities(w http.ResponseWriter, r *http.Request) e
 	if err != nil {
 		return err
 	}
+	if c.Actions != nil {
+		if a, err := s.Sync.Adapter(id); err == nil {
+			checked, err := validateActionCapabilities(a, c)
+			if err != nil {
+				s.log.Warn("discarded invalid action declarations", "connection", id, "err", err)
+				c.Actions = nil
+			} else {
+				c.Actions = visibleActions(checked.Actions, "", actionCaller(r))
+			}
+		} else {
+			c.Actions = nil
+		}
+	}
 	writeJSON(w, 200, c)
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -82,6 +83,7 @@ func (s *server) listHarnesses(w http.ResponseWriter, r *http.Request) error {
 		}
 		// The connectors index leaves out kinds the machine does not allow.
 		_, connectable := s.connectors().Get(m.ID, d.Kind)
+		d.Setup.Actions = visibleActions(d.Setup.Actions, execution.TargetConnection, actionCaller(r))
 		out = append(out, harnessJSON{Descriptor: d, Availability: allows(d), Connectable: connectable})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"machine": machineJSON{machineInfoJSON: s.toMachineJSON(m), Profile: profile}, "harnesses": out})
@@ -95,6 +97,8 @@ type connectionStatusJSON struct {
 	harness.Status
 	// Replaced is the connection a setting change or action just retired.
 	Replaced *db.HarnessConnection `json:"replaced,omitempty"`
+	Message  string                `json:"message,omitempty"`
+	Link     string                `json:"link,omitempty"`
 }
 
 // connector is the {kind} path value's descriptor and connector on the
@@ -154,7 +158,8 @@ func (s *server) writeConnectionStatus(w http.ResponseWriter, ctx context.Contex
 	if st.Actions == nil {
 		st.Actions = []harness.ActionState{}
 	}
-	out := connectionStatusJSON{Kind: d.Kind, Name: d.Name, Status: st}
+	st.Facts = d.DisplayFacts(append(slices.Clone(res.Facts), st.Facts...))
+	out := connectionStatusJSON{Kind: d.Kind, Name: d.Name, Status: st, Message: res.Message, Link: res.Link}
 	if res.Replaced != 0 {
 		if old, err := s.Store.GetHarnessConnection(ctx, res.Replaced); err == nil {
 			out.Replaced = &old
@@ -190,6 +195,8 @@ func (s *server) harnessSettings(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	unlock := s.lockSetupMutation(machine, d.Kind)
+	defer unlock()
 	res, err := c.Configure(r.Context(), body)
 	if err != nil {
 		return err
@@ -203,19 +210,19 @@ func (s *server) harnessAction(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	action := r.PathValue("action")
-	if _, ok := d.Setup.Action(action); !ok {
-		return fmt.Errorf("%w: %s has no setup action %q", db.ErrNotFound, d.Name, action)
-	}
-	body, err := rawBody(r)
+	res, err := s.runAction(r, actionSite{
+		descriptor: d,
+		machineID:  machine,
+		connector:  c,
+		request:    execution.ActionRequest{Target: execution.TargetConnection},
+	}, true)
 	if err != nil {
 		return err
 	}
-	res, err := c.Run(r.Context(), action, body)
-	if err != nil {
-		return err
+	if err := s.writeConnectionStatus(w, r.Context(), machine, d, c, false, res); err != nil {
+		return &db.HarnessError{Err: errors.New("The action ran, but connection status could not be refreshed. Check its status before retrying.")}
 	}
-	return s.writeConnectionStatus(w, r.Context(), machine, d, c, false, res)
+	return nil
 }
 
 // harnessDisconnect is DELETE /api/harnesses/{kind}/connection.
@@ -227,6 +234,8 @@ func (s *server) harnessDisconnect(w http.ResponseWriter, r *http.Request) error
 	if !d.Setup.Disconnect {
 		return db.Conflict("%s cannot be disconnected from Stage.", d.Name)
 	}
+	unlock := s.lockSetupMutation(machine, d.Kind)
+	defer unlock()
 	if err := c.Disconnect(r.Context()); err != nil {
 		return err
 	}

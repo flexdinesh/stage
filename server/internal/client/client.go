@@ -157,10 +157,11 @@ func (t handlerTransport) RoundTrip(req *http.Request) (res *http.Response, err 
 	return rec.Result(), nil
 }
 
-// Error is a non-2xx API response ({"error": msg}).
+// Error is a non-2xx API response ({"error": msg}, optionally with a code).
 type Error struct {
 	Status int
 	Msg    string
+	Code   string
 }
 
 func (e *Error) Error() string { return fmt.Sprintf("stage API %d: %s", e.Status, e.Msg) }
@@ -182,6 +183,7 @@ type Task struct {
 type TaskDetail struct {
 	FinalReply  *execution.Reply `json:"finalReply,omitempty"`
 	Usage       *execution.Usage `json:"usage,omitempty"` // the current session's, when its harness reports one
+	Facts       []execution.Fact `json:"facts,omitempty"`
 	Acceptances []db.Acceptance  `json:"acceptances"`
 	Task
 	Events []db.TaskEvent `json:"events"`
@@ -311,11 +313,12 @@ func (c *Client) send(req *http.Request, out any) (int, error) {
 	if res.StatusCode >= 400 {
 		var eb struct {
 			Error string `json:"error"`
+			Code  string `json:"code"`
 		}
 		if json.Unmarshal(data, &eb) != nil || eb.Error == "" {
 			eb.Error = strings.TrimSpace(string(data))
 		}
-		return 0, &Error{Status: res.StatusCode, Msg: eb.Error}
+		return 0, &Error{Status: res.StatusCode, Msg: eb.Error, Code: eb.Code}
 	}
 	if out == nil || len(data) == 0 {
 		return res.StatusCode, nil

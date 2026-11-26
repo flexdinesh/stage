@@ -102,6 +102,11 @@ func (c *Connector) Summary(context.Context) harness.Summary {
 
 // call runs one connector call on the worker and keeps its status.
 func (c *Connector) call(ctx context.Context, kind string, r ConnectorRequest) (ConnectorStatus, error) {
+	if kind == KindConnectorRun {
+		if err := ctx.Err(); err != nil {
+			return ConnectorStatus{}, err
+		}
+	}
 	if err := c.m.unavailable(); err != nil {
 		return ConnectorStatus{}, err
 	}
@@ -113,7 +118,34 @@ func (c *Connector) call(ctx context.Context, kind string, r ConnectorRequest) (
 		return ConnectorStatus{}, &UnavailableError{Code: CodeMachineNeedsUpdate, Message: "Update Stage on the worker machine to set up " + c.kind + "."}
 	}
 	r.Kind = c.kind
-	raw, err := c.m.hub.Call(ctx, c.m.id, kind, 0, r, CallTimeout)
+	var raw json.RawMessage
+	var err error
+	if r.ConnectionID != 0 {
+		// A worker that predates adapter.act would silently ignore the fence.
+		raw, err = c.m.hub.CallRequiringKind(ctx, c.m.id, kind, KindAct, r, CallTimeout)
+	} else {
+		raw, err = c.m.hub.Call(ctx, c.m.id, kind, 0, r, CallTimeout)
+	}
+	if kind == KindConnectorRun {
+		if err != nil {
+			var re *workerchan.RemoteError
+			if errors.As(err, &re) && re.Code == workerchan.CodeOperationUnavailable {
+				return ConnectorStatus{}, &UnavailableError{Code: CodeMachineNeedsUpdate, Message: "Update Stage on the worker machine to run connection actions."}
+			}
+			return ConnectorStatus{}, actionCallError(err, connectorError)
+		}
+		var out connectorRunReply
+		if err := jsonUnmarshal(raw, &out); err != nil {
+			return ConnectorStatus{}, &execution.ActionUncertain{Cause: err}
+		}
+		if out.Result == nil {
+			return ConnectorStatus{}, &execution.ActionUncertain{Cause: errors.New("worker returned no setup action result")}
+		}
+		if out.Status != nil {
+			c.m.remember(session, c.kind, out.Status.Summary)
+		}
+		return ConnectorStatus{Result: *out.Result}, nil
+	}
 	if err != nil {
 		return ConnectorStatus{}, connectorError(err)
 	}
@@ -166,10 +198,22 @@ func (c *Connector) Configure(ctx context.Context, settings json.RawMessage) (ha
 }
 
 func (c *Connector) Run(ctx context.Context, action string, input json.RawMessage) (harness.Result, error) {
+	return c.run(ctx, 0, action, input)
+}
+
+// RunForConnection runs a setup action only while connectionID owns this connector.
+func (c *Connector) RunForConnection(ctx context.Context, connectionID int64, action string, input json.RawMessage) (harness.Result, error) {
+	if connectionID <= 0 {
+		return harness.Result{}, &execution.Invalid{Reason: "Invalid setup action connection ID."}
+	}
+	return c.run(ctx, connectionID, action, input)
+}
+
+func (c *Connector) run(ctx context.Context, connectionID int64, action string, input json.RawMessage) (harness.Result, error) {
 	if action == "" {
 		return harness.Result{}, fmt.Errorf("%w: empty action", harness.ErrUnknownAction)
 	}
-	return c.mutate(ctx, KindConnectorRun, action, ConnectorRequest{Action: action, Input: input})
+	return c.mutate(ctx, KindConnectorRun, action, ConnectorRequest{Action: action, Input: input, ConnectionID: connectionID})
 }
 
 func (c *Connector) Disconnect(ctx context.Context) error {

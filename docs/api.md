@@ -8,7 +8,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 - IDs: app ids (`id`, `projectId`, `taskId`, `treeId`, `needs`) are JSON numbers. T3 ids (`externalProjectId`, `externalSessionId`) are strings.
 - `createdBy`: the user id (number) of the row's creator on `Project`, `Task`, `Tree`, `JournalEntry`, `Schedule`, `Machine` and the `GET /api/harnesses` machine. Always emitted; see [Users](#users).
 - `sourceMachineId`: the machine whose worker agent gateway forwarded the create, on `Project`, `Task`, `Tree`, `JournalEntry` and `Schedule`; `null` when not through a gateway. Always emitted; see [Users](#users).
-- Lists are wrapped: `{ "projects": [...] }`, `{ "tasks": [...] }`, ...
+- Resource lists are normally wrapped, for example `{ "projects": [...] }`. Action discovery returns an array.
 - PATCH bodies are partial: omitted fields are unchanged; `null` clears a nullable field.
 - Repeatable list query params accept repetition or commas: `?state=running&state=needs_input` == `?state=running,needs_input`.
 - `from` / `to` query params: ISO date (`2026-11-01`) or datetime. `from` inclusive, `to` exclusive. Filter on `createdAt` unless stated.
@@ -21,11 +21,11 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 |---|---|
 | 400 | invalid body or query (bad enum, missing required field, bad JSON) |
 | 401 | worker routes only: bad, used or expired pairing code, missing, invalid or revoked machine token; any route: a machine token outside `/api/worker/*` ([Machines](#machines)) |
-| 403 | rejected by the request origin policy (Host, cross-site, cross-origin) |
+| 403 | rejected by the request origin policy or the action's caller policy |
 | 404 | resource not found |
 | 409 | conflict: action not allowed in current state, duplicate unique value, T3 setup refused (other T3 environment, auto-pair unavailable) |
 | 415 | write body not `application/json` / `multipart/form-data` |
-| 502 | T3 call failed (T3 error message in `error`), or the `t3` CLI failed (auto-pair) |
+| 502 | harness call failed or an action outcome is uncertain |
 | 503 | T3 not connected (no valid token) or DB unavailable |
 | 500 | unexpected |
 
@@ -204,7 +204,7 @@ A worker's agent gateway forwards the local `/api/...` and `/mcp` requests of ag
 
 ## Harness connections (API v6)
 
-A connectable harness (a harness, `connected` or `hosted`, this server composes a connector for on the machine, and the machine allows; `connectable` in `GET /api/harnesses`) is set up through four generic routes. Its descriptor's `setup` describes them: `fields` (`[{id, label, kind: text|url|secret|bool, help?}]`), `actions` (`[{id, label, input?: [field]}]`) and `disconnect` (bool). Hosts render that schema unless they register a harness-specific panel for the kind; product code never branches on the kind. `{kind}` unknown: 404. A kind the machine does not allow (`available: false`: a hosted harness on a profile without local processes, or on a remote machine for now): all four routes answer 409 `harness_unavailable` with that `reason` as the message, and the harness is never reached. A kind without connection setup here: 409. A hosted harness has no connection until its connect action creates one; a launch on a connection of a kind its machine does not allow answers 409 `connection_unavailable` with the reason.
+The descriptor's `setup` defines settings `fields`, connection `actions` and a boolean `disconnect`. Settings and actions share the [field schema](#declared-actions-and-facts). A harness can provide its own setup panel. An unknown kind is 404. When the machine disallows the kind, these routes return 409 `harness_unavailable` with the machine's reason. A kind without a connector on the machine also returns 409. Pairing or connecting can create the first connection.
 
 ### `GET /api/harnesses/{kind}/status`
 200 `HarnessStatus`:
@@ -217,16 +217,19 @@ A connectable harness (a harness, `connected` or `hosted`, this server composes 
   "connected": true,
   "lastError": "",
   "state": "connected",
+  "phase": "connected",
   "reason": "",
   "fields": [{ "id": "url", "value": "http://127.0.0.1:3773", "set": false, "source": "default" }],
-  "actions": [{ "id": "pair", "available": true }, { "id": "auto-pair", "available": false, "reason": "not_local" }],
+  "actions": [{ "id": "pair", "available": true }, { "id": "auto-pair", "available": false, "reason": "The t3 CLI was not found on this machine." }],
+  "facts": [{ "id": "publicUrl", "label": "Browser URL", "value": "http://127.0.0.1:3773", "link": "http://127.0.0.1:3773", "copyable": true }],
   "sync": { "lastError": null, "lastFullSyncAt": "2026-11-08T10:00:00Z", "running": false, "startedAt": null, "projects": 0, "sessions": 0 },
   "details": { "...": "the harness's own setup state, below" }
 }
 ```
 - `connectionId`, `configured`, `connected`, `lastError`: as in health, from the same connector (`lastError` and `reason` are omitted when empty). `state` is a harness-defined word (T3: T3State; OpenCode: `unconfigured`, `connected`, `unavailable`, `rejected`; Codex: `connected`, `not_connected`, `signed_out`, `unreachable`, `not_installed`). `reason`: why it is not connected.
+- `phase` is `disconnected`, `needs_setup`, `connecting`, `connected`, `degraded` or `unavailable`. Optional `facts` carry display values. Optional `fix` carries `{text, command?}`. Clients may offer to copy a command.
 - `fields`: each setting's current value (`source`: `saved` or `default`). No environment variable sets a field. A secret's `value` is always `""`; `set` says whether one is stored.
-- `actions`: whether each setup action can run now, with a `reason` when not.
+- `actions` reports current setup action availability with a reason and optional error code for an unavailable action.
 - `sync`: Stage’s last setup error, last successful full sync and current full sync progress. The error and timestamps can be null.
 - `details`: the harness's setup panel state (T3: the T3 details; OpenCode: the OpenCode details; Codex: the Codex details). Generic clients ignore it.
 - Refreshes a stale probe first (bounded, T3: 3s; OpenCode health check: 4s; Codex: the daemon CLI's 20s). Codex reuses a probe for 5s; `?refresh=1` forces one.
@@ -235,7 +238,7 @@ A connectable harness (a harness, `connected` or `hosted`, this server composes 
 Body: one strict JSON object keyed by setup field id; `null` resets a setting to its default. 200 `HarnessStatus` (freshly probed), plus `replaced` (the retired connection, as in `GET /api/connections`) when the change retired the active connection. 400 invalid or unknown field. 409 the harness's own conflicts (below).
 
 ### `POST /api/harnesses/{kind}/actions/{action}`
-Body: the action's input object (strict; empty means `{}`). 200 `HarnessStatus` (not re-probed), plus `replaced` as above. 404 unknown action. Errors are the harness's (below).
+Use this route for setup before a connection ID exists. The request body is the action input object. An empty body means `{}`. Success returns the existing `HarnessStatus` with the action message, optional link and the replaced connection record when applicable. For an existing connection, the scoped route below returns the action result directly.
 
 ### `DELETE /api/harnesses/{kind}/connection`
 Forget the connection's credentials; the connection keeps its identity, tasks and history. 200 `HarnessStatus`. 409 when the descriptor's `setup.disconnect` is false.
@@ -334,7 +337,7 @@ includes tracked sessions, tasks and journals.
 - `POST /api/projects`: `{title}`, returns 201 Project. Title required, trimmed.
 - `GET /api/projects/:id`: Project or 404.
 - `PATCH /api/projects/:id`: `{title, archived}`, returns Project.
-- `GET /api/harnesses`: the harness kinds this server knows and what this machine can run: `{machine: {id, label, createdBy, profile: {kind, localProcesses}}, harnesses: [{kind, name, hosting, closures: [{signal, provenance, setting, completed, via}], linkSchemes, setup: {fields, actions, disconnect}, attribution: {metaKeys, env?, precedence?: {owns?, yields?}, origin?: {env?}}, launch, sessionHint?, wraps?: {origins}, available, reason?, connectable}]}`. `sessionHint`: what names one of the harness's sessions when a user tracks it (Codex: a thread ID or a pasted `codex resume` command; Claude Code: a session UUID, the 8-character ID `claude agents` shows, or a pasted `claude attach` or `--resume` command); hosts show it as the Track session field's hint, and the field keeps its generic copy when it is absent. `setup` and `connectable`: see [Harness connections](#harness-connections-api-v6). `launch`: `reserved` or `correlated`, how a launch learns its session identity ([execution.md](execution.md#execution-contract-v2)). `attribution`: how the harness names an agent's session: `metaKeys` are MCP `_meta` keys it sends per call, `env` the variable it sets to the session id in agent processes, which the CLI and stdio MCP read (see [Agent interface](#agent-interface)). `precedence` ranks `env` when several harness variables are set: `owns` and `yields` are `[{env, value?}]` conditions (`value` absent: any non-empty value). `origin`: the harness records the client that started each session, so another harness may wrap it; `env` is the variable holding that origin in its agents (Claude Code `CLAUDE_CODE_ENTRYPOINT`). `wraps`: the harness runs other harnesses' sessions and leaves these `origins` in them (T3: `t3-code`, `T3 Code`); Stage refuses to track such a session on the wrapped harness (409 `session_refused`, "Track it through T3"), and when the wrapper's `env` is set (or a wrapped harness's origin variable holds one of its origins) the wrapped harness's `env` yields to it ([execution.md](execution.md#harness-registry)). `profile.kind`: `desktop` (a managed per-user service: the server's, or on a remote machine the worker service), `server` (foreground `stage serve` or `stage worker run`) or `container` (the Docker image). `hosting`: `connected` (Stage connects to the harness's service; available on every profile) or `hosted` (the harness runs as processes on this machine; available only when `profile.localProcesses`, else `available: false` with a `reason`; a remote machine reports its worker's last described profile, and the reason names the worker's fix, `stage worker run --local-harnesses` or the worker service; before its worker described it since the server started, every kind is available and setup calls answer 503 `machine_offline` or `machine_setup_starting`). `closures`: the closure signals the harness reports and the copy for each: `setting` labels its auto-complete toggle, `completed` and `via` describe an inferred completion with that `provenance`. `linkSchemes`: the harness's own native URL schemes, an empty array when it declares none. The registry requires unique lower-case scheme names without a colon matching `^[a-z][a-z0-9+.-]*$` and reserves `http`, `https`, `ftp`, `ftps`, `mailto`, `tel`, `javascript`, `data`, `vbscript`, `file`, `blob`, `about`, `stage` and all `stage-` prefixes. T3 declares `t3code`. Clients use the descriptor for closure copy and for rendering harness links in replies. See [Execution contract](execution.md#execution-contract-v2).
+- `GET /api/harnesses`: the harness kinds this server knows and what this machine can run: `{machine: {id, label, createdBy, profile: {kind, localProcesses}}, harnesses: [{kind, name, localProcesses, sessions, stateReasons, closures: [{signal, provenance, setting, completed, via}], linkSchemes, setup: {fields, actions, disconnect}, attribution: {metaKeys, env?, precedence?: {owns?, yields?}, origin?: {env?}}, launch, sessionHint?, wraps?: {origins}, available, reason?, connectable}]}`. `sessionHint`: what names one of the harness's sessions when a user tracks it (Codex: a thread ID or a pasted `codex resume` command; Claude Code: a session UUID, the 8-character ID `claude agents` shows, or a pasted `claude attach` or `--resume` command); hosts show it as the Track session field's hint, and the field keeps its generic copy when it is absent. `setup` and `connectable`: see [Harness connections](#harness-connections-api-v6). `launch`: `reserved` or `correlated`, how a launch learns its session identity ([execution.md](execution.md#execution-contract-v2)). `attribution`: how the harness names an agent's session: `metaKeys` are MCP `_meta` keys it sends per call, `env` the variable it sets to the session id in agent processes, which the CLI and stdio MCP read (see [Agent interface](#agent-interface)). `precedence` ranks `env` when several harness variables are set: `owns` and `yields` are `[{env, value?}]` conditions (`value` absent: any non-empty value). `origin`: the harness records the client that started each session, so another harness may wrap it; `env` is the variable holding that origin in its agents (Claude Code `CLAUDE_CODE_ENTRYPOINT`). `wraps`: the harness runs other harnesses' sessions and leaves these `origins` in them (T3: `t3-code`, `T3 Code`); Stage refuses to track such a session on the wrapped harness (409 `session_refused`, "Track it through T3"), and when the wrapper's `env` is set (or a wrapped harness's origin variable holds one of its origins) the wrapped harness's `env` yields to it ([execution.md](execution.md#harness-registry)). `profile.kind`: `desktop` (a managed per-user service: the server's, or on a remote machine the worker service), `server` (foreground `stage serve` or `stage worker run`) or `container` (the Docker image). `localProcesses` says whether the module requires a profile that permits local processes. `sessions` says whether its sessions live on a machine or in the cloud, independently of process requirements. `stateReasons` lists the reasons the module may report with observations. A remote machine reports its worker's last advertised profile and returns the worker's fix when setup is unavailable. Before the worker advertises its profile, setup replies can return 503 `machine_offline` or `machine_setup_starting`. `closures`: the closure signals the harness reports and the copy for each: `setting` labels its auto-complete toggle, `completed` and `via` describe an inferred completion with that `provenance`. `linkSchemes`: the harness's own native URL schemes, an empty array when it declares none. The registry requires unique lower-case scheme names without a colon matching `^[a-z][a-z0-9+.-]*$` and reserves `http`, `https`, `ftp`, `ftps`, `mailto`, `tel`, `javascript`, `data`, `vbscript`, `file`, `blob`, `about`, `stage` and all `stage-` prefixes. T3 declares `t3code`. Clients use the descriptor for closure copy and for rendering harness links in replies. See [Execution contract](execution.md#execution-contract-v2).
 - `GET /api/connections`: `{connections: [{id, machineId, harness, configured, autoComplete, active, label, retiredAt, forgottenAt, tasks, bindings}]}`, active first. `machineId`: the machine that runs the instance (one local machine today). One connection per harness instance (a T3 environment, an OpenCode service); at most one active per harness on each machine. Select the returned IDs; never assume one (the T3 connection changes when another T3 replaces it). Both harnesses can be planned before setup. `autoComplete` (default true): a closure in this harness may complete a done task (see "Inferred completion"). `label`: the instance's name (T3 label, OpenCode address). `retiredAt`: when another instance replaced it (null while active); a retired connection keeps its tasks, sessions and bindings as history, is never polled, linked or launched on, and is `configured: false`. `forgottenAt`: set by DELETE. `tasks`, `bindings`: tasks and active bindings it holds.
 - `PUT /api/connections/:connectionId/auto-complete`: strict `{autoComplete: boolean}`. 200 `{connection}`; 400 missing/invalid body; 404 unknown connection.
 - `PUT /api/connections/:connectionId/new-task-config`: strict `{config: {model, options} | null}`, the model and options new tasks on the connection start with (`newTaskConfig` on its row; null or an empty config unpins). Checked against the connection's capabilities (no project). Pairing another instance of the harness carries the pin to the replacement. 200 `{connection}`; 400 unknown or replaced connection, a model or option value the connection does not offer, or a `permission` / `mode` (never pinned).
@@ -606,6 +609,59 @@ For an adapter with workspace-scoped catalogs, pass an optional Stage
 `projectId` to read the models and agents for its verified binding on that
 connection. Omitting it requests connection-wide capabilities.
 
+`actions`, when present, advertises session and project action declarations
+allowed to the caller. To check availability and run an action, select its
+actual target through the routes below.
+
+### Declared actions and facts
+
+| Target | List with GET | Run with POST |
+| --- | --- | --- |
+| Connection | `/api/connections/{id}/actions` | `/api/connections/{id}/actions/{action}` |
+| Session linked to a task | `/api/tasks/{id}/actions` | `/api/tasks/{id}/actions/{action}` |
+| Project workspace | `/api/projects/{id}/actions?connectionId=ID` | `/api/projects/{id}/actions/{action}?connectionId=ID` |
+
+The task ID resolves to its linked session on its actual connection. A project
+action requires that project's available workspace binding on the explicit
+connection. Lists return an array of declarations, including unavailable
+actions with their reasons.
+
+An action carries `{id, label, target, input?, confirm?, destructive, callers,
+availability: {available, reason?}}`. Targets are `connection`, `session`
+and `project`. Callers are `["user"]` or `["user", "agent"]`. Input fields
+carry `{id, label, kind, help?, required?, choices?}`. Kinds are `text`,
+`url`, `secret`, `bool` and `choice`. Choices carry
+`{id, label}` and the input supplies a choice ID.
+
+POST takes the input object directly, including `{}` for no input. Unknown
+or duplicate fields, wrong types, missing required values and invalid choices
+return 400. A boolean field can explicitly be `false`. The owner validates
+the opaque input against its own rules. An undeclared action, unknown target
+or task without a linked session returns 404. A disallowed agent receives
+403 `action_forbidden`. Unavailable or busy operations return 409
+(`operation_unavailable`, `action_busy` or the connector's conflict code).
+
+MCP and the worker agent gateway always use agent policy. A caller session
+header or `Stage-Action-Agent: 1` restricts a direct request to agent policy.
+The app and ordinary CLI use user policy on Stage's trusted deployment
+boundary. Caller or permission fields in action input grant no rights.
+User-only destructive actions require confirmation. The CLI uses
+`--confirm` and a confirmed client sends `Stage-Action-Confirmed: 1`.
+
+Success returns `{message, facts?, link?, replaced?, journalError?}`.
+`replaced` is the retired connection ID when applicable. A successful
+session action adds a `session_action` event naming the action, target and
+caller, with caller session provenance when available. The event excludes
+input and the raw result. `journalError` means the action succeeded and
+Stage could not record it. An offline worker before dispatch returns
+503 `machine_offline`. A lost reply after dispatch returns
+502 `action_outcome_unknown`. Check the harness before retrying.
+
+A fact carries `{id, label, value, tone?, link?, copyable?}`. Tone is
+`neutral`, `ok`, `warn` or `bad`. Labels and values are plain text.
+Links may use HTTP, HTTPS or a native scheme the harness registers.
+Observations can carry `facts`, which are also available on task detail.
+
 ### `POST /api/tasks/:id/stop`
 Interrupt the task's scoped session through its adapter. State updates via the
 poller. A task without an execution session returns 409.
@@ -829,6 +885,8 @@ Adopted tasks only (400 otherwise). Returns `{item: {itemId, runId, text, trunca
 ## API v9 changes
 
 The server and workers roll forward together at API v9. Worker channel compatibility uses its own protocol range. A legacy worker shows **Needs update** until upgraded. Later breaking changes in this coordinated harness foundation series also ship as v9.
+
+- Harness descriptors expose `localProcesses`, `sessions: "machine" | "cloud"` and `stateReasons`. Use `localProcesses` for placement decisions formerly based on `hosting`.
 
 - Tasks use `done` for finished execution and `completedAt` for acceptance. Tasks drop `settledAt` and `artifactLinks`. Task and tree lists accept `completedFrom`. Tree summaries and MCP tree rows use `completedAt` and `completed` in their counts.
 - Journal and handoff records drop `sourceThreadId`. Use `sourceSession` on journal entries and `session` on handoffs. Accepted evidence uses `externalSessionId` and `sessionLink` and drops `artifacts` and `historicalSettledAt`. The storage reader handles older evidence.
@@ -1126,6 +1184,8 @@ Reply budget per need: `min(4000, max(1000, 8000 / sources))` Unicode characters
 - `GET /api/connections/:connectionId/sessions/:id/context` returns session, owning task, current project, title and available links. The owner path reads Stage storage. An unowned session requires explicit lookup and a verified workspace binding to infer its project.
 - Task and schedule creates accept an optional destination `connectionId` and distinct `originSession`. Agent creation uses the sole project binding. Multiple bindings require a choice. Unbound projects use the caller's connection or sole configured connection. Starting requires a binding.
 - `list_projects` includes configured connections. `list_models {connectionId}` (required) returns capabilities. `executionConfig` uses the connection's model, option values, permission and mode.
+- `list_actions` and `run_action` take exactly one of `connectionId`, `taskId` or `projectId`. A project also requires `onConnectionId`. `run_action` takes `actionId` and optional `input`. Both tools use agent policy with or without caller provenance.
+- CLI `stage action ls|run` takes `--connection ID`, `--task ID` or `--project ID --on-connection ID`. For example, `stage action run --task 42 label --input - --json` reads the input JSON from stdin. Use `--confirm` for a user-only destructive action.
 - `read_ref {session}` and `stage show --target-connection ID --target-session ID` accept an opaque scoped ID. A scoped reference path is `/connections/:connectionId/sessions/:id`. `list_tasks {originSession}` uses REST query fields `originConnectionId` and `originSessionId`. A bare session id names no connection: pass the connection with it.
 - Journals: `read_journal {taskId?|treeId?, kind?, category?, q?, filterTaskId?, cursor?, limit?}` requires exactly one owner; `filterTaskId` is tree-only. `get_journal_entry {id}` retrieves full text. `append_note {taskId?|treeId?, text, requestId, category?, sourceTaskId?, callerSession?}` records caller session provenance. `get_context` includes `callerTaskId`, current `treeId` and `treeTitle`; refresh it or `get_task` before reading or contributing to a tree.
 - CLI: `stage task notes ID [list] [--kind notes|events|all --category C --q Q --limit N --cursor C]`; `stage tree notes ID` adds `--task ID` filtering. Append with `stage task notes ID add --text TEXT [--category C --request-id KEY]`, or `stage tree notes ID add --text TEXT --source-task ID`; `--text -` reads stdin. CLI generates a request key when omitted; supply `--request-id` to retry across invocations. `stage task notes ID get ENTRY_ID` and `stage tree notes ID get ENTRY_ID` retrieve full entries. Task creation/adoption use `--initial-note` / `initialNote`; task edit has no notes field. Schedule `--notes` remains a template.

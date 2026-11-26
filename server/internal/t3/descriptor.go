@@ -26,7 +26,7 @@ const (
 // instance for good; a settled thread may complete its task. It wraps the
 // sessions it runs in other harnesses (Wraps).
 var Descriptor = harness.Descriptor{
-	Kind: Kind, Name: "T3", Hosting: harness.Connected, StableIdentity: true,
+	Kind: Kind, Name: "T3", Sessions: harness.SessionsMachine, StableIdentity: true,
 	MovedRetire: func(old, next harness.Summary) bool { return !old.Configured && next.Configured },
 	LinkSchemes: []string{"t3code"},
 	Closures: []harness.Closure{{
@@ -42,9 +42,20 @@ var Descriptor = harness.Descriptor{
 			{ID: "publicUrl", Label: "Browser URL", Kind: harness.FieldURL, Help: "T3 address for Open in T3 links in the browser; null follows the T3 URL."},
 			{ID: "adminToken", Label: "Admin token", Kind: harness.FieldSecret, Help: "Optional; lets Stage renew its T3 token itself. null clears it."},
 		},
-		Actions: []harness.Action{
-			{ID: ActionPair, Label: "Pair with code", Input: []harness.Field{{ID: "code", Label: "Pairing code", Kind: harness.FieldSecret, Help: "Printed by `t3 pair` on the T3 host."}}},
-			{ID: ActionAutoPair, Label: "Pair automatically"},
+		Actions: []execution.Action{
+			{
+				ID: ActionPair, Label: "Pair with code",
+				Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
+				Input: []execution.Field{{
+					ID: "code", Label: "Pairing code", Kind: execution.FieldSecret, Required: true, Help: "Printed by `t3 pair` on the T3 host.",
+				}},
+				Availability: execution.Availability{Available: true},
+			},
+			{
+				ID: ActionAutoPair, Label: "Pair automatically",
+				Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
+				Availability: execution.Availability{Available: true},
+			},
 		},
 		Disconnect: true,
 	},

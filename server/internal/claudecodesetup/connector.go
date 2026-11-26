@@ -28,16 +28,23 @@ func (c *Connector) Configure(ctx context.Context, settings json.RawMessage) (ha
 	return harness.Result{}, c.svc.Configure(ctx, settings)
 }
 
-// Run runs connect {}.
+// Run runs connect or check.
 func (c *Connector) Run(ctx context.Context, action string, input json.RawMessage) (harness.Result, error) {
-	if action != claudecode.ActionConnect {
+	if action != claudecode.ActionConnect && action != claudecode.ActionCheck {
 		return harness.Result{}, db.Invalid("%s", harness.UnknownAction(claudecode.Descriptor, action).Error())
 	}
 	var in struct{}
 	if err := db.DecodeStrict(input, &in); err != nil {
 		return harness.Result{}, err
 	}
-	return c.svc.Connect(ctx)
+	if action == claudecode.ActionCheck {
+		return c.svc.Status(ctx, true).CheckResult(), nil
+	}
+	res, err := c.svc.Connect(ctx)
+	if err == nil {
+		res.Message = "Connected to Claude Code."
+	}
+	return res, err
 }
 
 func (c *Connector) Disconnect(ctx context.Context) error { return c.svc.Disconnect(ctx) }

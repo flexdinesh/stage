@@ -6,7 +6,43 @@ import (
 	"slices"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
+
+// RecordSessionAction records a successful dispatch. The adapter call is
+// outside this write, including when the database retries a transaction.
+func (s *Store) RecordSessionAction(ctx context.Context, taskID int64, ref SessionRef, action string, caller execution.Caller, source *SessionRef) error {
+	_, err := write(ctx, s, func(tx store.Tx) (struct{}, error) {
+		t, err := tx.Tasks().Get(ctx, taskID)
+		if err != nil {
+			return struct{}{}, err
+		}
+		var sourceID *int64
+		if source != nil {
+			exists, err := tx.Connections().Exists(ctx, source.ConnectionID)
+			if err != nil {
+				return struct{}{}, err
+			}
+			if exists {
+				id, err := ensureSession(ctx, tx, *source)
+				if err != nil {
+					return struct{}{}, err
+				}
+				sourceID = &id
+			}
+		}
+		attempt := t.LaunchAttempt
+		if t.Session == nil || *t.Session != ref {
+			return struct{}{}, Conflict("The task's linked session changed during the action.")
+		}
+		return struct{}{}, tx.Journal().InsertEvent(ctx, store.JournalEvent{
+			TaskID: &taskID, TreeID: t.TreeID, SourceSessionID: sourceID, Attempt: &attempt,
+			EventType: "session_action",
+			Text:      fmt.Sprintf("Action %q ran on session %q (connection %d), called by %s.", action, ref.ExternalSessionID, ref.ConnectionID, caller),
+		})
+	})
+	return err
+}
 
 // Derived writes (docs/storage.md "Journal events"). Every change that
 // implies a journal event or another derived row goes through one helper

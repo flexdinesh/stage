@@ -49,11 +49,12 @@ var (
 	_ execution.Correlator        = (*Adapter)(nil)
 	_ execution.EventSource       = (*Adapter)(nil)
 	_ execution.Interactive       = (*Adapter)(nil)
+	_ execution.Actor             = (*Adapter)(nil)
 )
 
 // Implements reads the current peer's declaration, never the Go proxy's methods.
 func (a *Adapter) Implements(trait string) bool {
-	return slices.Contains(a.m.traits(a.conn), trait)
+	return a.m.implements(a.conn, trait)
 }
 
 func callTrait[T any](ctx context.Context, a *Adapter, kind string, body, out any) error {

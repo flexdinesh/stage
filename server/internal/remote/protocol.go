@@ -38,6 +38,7 @@ const (
 	KindRequests             = "adapter.requests"
 	KindRespond              = "adapter.respond"
 	KindSend                 = "adapter.send"
+	KindAct                  = "adapter.act"
 	KindInventory            = "ops.inventory"
 	KindCheckout             = "ops.checkout"
 )

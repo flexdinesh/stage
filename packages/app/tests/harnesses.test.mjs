@@ -45,7 +45,7 @@ const oldT3 = connection(1, "t3", { active: false, label: "desktop", retiredAt: 
 const forgotten = connection(3, "t3", { active: false, label: "vm", retiredAt: "2026-11-01T00:00:00Z", forgottenAt: "2026-11-02T00:00:00Z" });
 const list = [t3, openCode, oldT3, forgotten];
 // Names come from the server's descriptors (GET /harnesses).
-const descriptor = (kind, name) => ({ kind, name, hosting: "connected", closures: [], available: true });
+const descriptor = (kind, name) => ({ kind, name, localProcesses: false, sessions: "machine", stateReasons: [], closures: [], available: true });
 const descriptors = [descriptor("t3", "T3"), descriptor("opencode", "OpenCode")];
 const kindName = (kind) => harnessLookup([], descriptors).kindName(kind);
 

@@ -5,36 +5,29 @@ import (
 	"encoding/json"
 	"net/url"
 
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
 // SetupField is a harness setup setting or action input (docs/api.md
 // "Harness connections").
-type SetupField struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
-	Kind  string `json:"kind"` // text | url | secret | bool
-	Env   string `json:"env,omitempty"`
-	Help  string `json:"help,omitempty"`
-}
+type SetupField = execution.Field
 
 // SetupAction is a named setup operation.
-type SetupAction struct {
-	ID    string       `json:"id"`
-	Label string       `json:"label"`
-	Input []SetupField `json:"input,omitempty"`
-}
+type SetupAction = execution.Action
 
 // HarnessDescriptor is one entry of GET /api/harnesses.
 type HarnessDescriptor struct {
-	Kind        string `json:"kind"`
-	Name        string `json:"name"`
-	Hosting     string `json:"hosting"`
-	Available   bool   `json:"available"`
-	Reason      string `json:"reason,omitempty"`
-	Connectable bool   `json:"connectable"`
-	SessionHint string `json:"sessionHint,omitempty"`
-	Attribution struct {
+	Kind           string           `json:"kind"`
+	Name           string           `json:"name"`
+	LocalProcesses bool             `json:"localProcesses"`
+	Sessions       harness.Sessions `json:"sessions"`
+	StateReasons   []string         `json:"stateReasons"`
+	Available      bool             `json:"available"`
+	Reason         string           `json:"reason,omitempty"`
+	Connectable    bool             `json:"connectable"`
+	SessionHint    string           `json:"sessionHint,omitempty"`
+	Attribution    struct {
 		MetaKeys   []string            `json:"metaKeys"`
 		Env        string              `json:"env,omitempty"`
 		Precedence *harness.Precedence `json:"precedence,omitempty"`
@@ -81,6 +74,9 @@ type HarnessStatus struct {
 	LastError    string              `json:"lastError,omitempty"`
 	State        string              `json:"state"`
 	Reason       string              `json:"reason,omitempty"`
+	Phase        harness.Phase       `json:"phase"`
+	Facts        []execution.Fact    `json:"facts,omitempty"`
+	Fix          *harness.Fix        `json:"fix,omitempty"`
 	Sync         *harness.SyncStatus `json:"sync,omitempty"`
 	Fields       []struct {
 		ID     string `json:"id"`
@@ -97,6 +93,8 @@ type HarnessStatus struct {
 	// Details is the harness's own setup state (see the harness's docs).
 	Details  json.RawMessage `json:"details,omitempty"`
 	Replaced json.RawMessage `json:"replaced,omitempty"`
+	Message  string          `json:"message,omitempty"`
+	Link     string          `json:"link,omitempty"`
 }
 
 // Harnesses lists the harness kinds and this machine's profile.
@@ -123,9 +121,13 @@ func (c *Client) ConfigureHarness(ctx context.Context, kind string, settings map
 }
 
 // RunHarnessAction runs a setup action with its input.
-func (c *Client) RunHarnessAction(ctx context.Context, kind, action string, input map[string]any) (HarnessStatus, error) {
+func (c *Client) RunHarnessAction(ctx context.Context, kind, action string, input map[string]any, caller ActionCaller) (HarnessStatus, error) {
 	var out HarnessStatus
-	err := c.do(ctx, "POST", harnessPath(kind, "/actions/"+url.PathEscape(action)), input, &out)
+	body, err := json.Marshal(input)
+	if err != nil {
+		return out, err
+	}
+	err = c.actionRequest(ctx, "POST", harnessPath(kind, "/actions/"+url.PathEscape(action)), body, caller, &out)
 	return out, err
 }
 

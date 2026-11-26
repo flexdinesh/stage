@@ -24,8 +24,14 @@ import (
 // hostedKit is a hosted harness with connection setup: a connect action
 // and disconnect.
 var hostedKit = harness.Descriptor{
-	Kind: "hosted-kit", Name: "Hosted kit", Hosting: harness.Hosted,
-	Setup: harness.Setup{Actions: []harness.Action{{ID: "connect", Label: "Connect"}}, Disconnect: true},
+	Kind: "hosted-kit", Name: "Hosted kit", Sessions: harness.SessionsMachine, LocalProcesses: true,
+	Setup: harness.Setup{
+		Actions: []harness.Action{{
+			ID: "connect", Label: "Connect", Target: execution.TargetConnection,
+			Callers: []execution.Caller{execution.CallerUser}, Availability: execution.Availability{Available: true},
+		}},
+		Disconnect: true,
+	},
 }
 
 var hostedHarnesses = harness.MustRegistry(t3.Descriptor, opencode.Descriptor, hostedKit)

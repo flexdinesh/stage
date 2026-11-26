@@ -300,7 +300,7 @@ func TestMovedConnectionsRetireOntoTheirReplacement(t *testing.T) {
 	}
 	moved := sw.New
 	// Another identity on the worker's OpenCode never pairs with anything.
-	if _, err := s.SwitchInstance(ctx, 2, harness.Descriptor{Kind: "opencode", Name: "OpenCode", Hosting: harness.Connected}, "http://oc", "oc", 0); err != nil {
+	if _, err := s.SwitchInstance(ctx, 2, harness.Descriptor{Kind: "opencode", Name: "OpenCode", Sessions: harness.SessionsMachine}, "http://oc", "oc", 0); err != nil {
 		t.Fatal(err)
 	}
 	moves, err := s.MovedConnections(ctx)
@@ -370,7 +370,7 @@ func TestRetireAndForgetLetsGoOfADisconnectedConnection(t *testing.T) {
 		t.Fatalf("forgot twice: %v", err)
 	}
 	// An empty disconnected connection is deleted outright.
-	sw, err := s.SwitchInstance(ctx, LocalMachine, harness.Descriptor{Kind: "opencode", Name: "OpenCode", Hosting: harness.Connected}, "http://oc", "oc", 0)
+	sw, err := s.SwitchInstance(ctx, LocalMachine, harness.Descriptor{Kind: "opencode", Name: "OpenCode", Sessions: harness.SessionsMachine}, "http://oc", "oc", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

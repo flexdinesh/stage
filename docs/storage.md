@@ -173,6 +173,7 @@ migration 0026 (#399).
 | Cause (helper) | Derived rows |
 | --- | --- |
 | Task event (`addTaskEvent`) | event `task_created` (no from state), `task_state_changed` (detail plus ` (from -> to)`) or `task_event` (same state), on the task and its tree, at the task event's time, with the task's session and launch attempt; the task records work when launched, adopted or entering launching, running, needs input, done, failed or interrupted, and a task with recorded work protects its tree |
+| Successful harness action on a linked session (`RecordSessionAction`) | `session_action` on the task and its tree with action ID, target and caller, including caller session provenance when available. Inputs and raw results are excluded. Dispatch occurs outside the database transaction. |
 | Note (`insertNote`) | protects its task and tree; the tree's `updated_at` becomes the note's time |
 | Tree created, config, status (`insertTree`, `updateTree`, `setTreeStatus`, `archiveDissolved`) | `tree_created` (title), `tree_config_changed` (`Title: a -> b; start mode: x -> y`, only when either changed), `tree_status_changed` (`old -> new`, only on a change) |
 | Membership (`setMembership`, `detachMembers`) | `task_moved` (task title, from and to tree) in the old and the new tree; both trees' membership revision + 1, `updated_at` now, recorded work carried over; an emptied old tree is archived (closed now), with its status event |
@@ -861,6 +862,9 @@ text, not JSON, and stay `text`.
 harness reports one (#380, no migration: a new key in the JSON). Usage is
 cumulative per session, so `PutObservation` keeps the stored usage when a
 new observation has none.
+
+The same JSON carries optional display `facts`. Old observations decode
+without facts. These values require no schema migration on either engine.
 
 ### Doc claims this audit corrects
 

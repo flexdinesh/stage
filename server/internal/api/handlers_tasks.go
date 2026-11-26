@@ -283,6 +283,8 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		obs, e := s.Store.Observation(ctx, *task.Session)
 		if e == nil {
 			out.Links, out.FinalReply, out.Usage = obs.Links, obs.Reply, obs.Usage
+			d, _ := s.registry().Lookup(task.Harness)
+			out.Facts = d.DisplayFacts(obs.Facts)
 			if obs.Branch != "" || obs.Directory != "" {
 				out.Reported = &reportedJSON{Branch: obs.Branch, Directory: obs.Directory}
 			}

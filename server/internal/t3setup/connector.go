@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -111,9 +112,25 @@ func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, e
 	if id := st.Conn.Probe.Identity; id != nil {
 		d.T3 = &IdentityRef{EnvironmentID: id.EnvironmentID, Label: id.Label, ServerVersion: id.ServerVersion}
 	}
+	phase := harness.PhaseConnected
+	var fix *harness.Fix
+	switch st.State {
+	case t3.StateUnreachable:
+		phase = harness.PhaseUnavailable
+		fix = &harness.Fix{Text: "Start T3 on its host or update the T3 URL, then check again.", Command: "t3 serve"}
+	case t3.StateUnpaired:
+		phase = harness.PhaseNeedsSetup
+		fix = &harness.Fix{Text: "Generate a pairing code on the T3 host and pair with it.", Command: "t3 pair"}
+	case t3.StateExpired, t3.StateRejected:
+		phase = harness.PhaseDegraded
+		fix = &harness.Fix{Text: "Generate a fresh pairing code on the T3 host and pair again.", Command: "t3 pair"}
+	}
 	out := harness.Status{
 		Summary: c.summary(active, st.Conn),
 		State:   string(st.State),
+		Phase:   phase,
+		Facts:   statusFacts(d),
+		Fix:     fix,
 		Details: d,
 		Fields: []harness.FieldState{
 			{ID: "url", Value: st.Endpoint.URL, Set: st.Endpoint.Source != SourceDefault, Source: urlSource(st.Endpoint.Source)},
@@ -122,13 +139,51 @@ func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, e
 		},
 		Actions: []harness.ActionState{
 			{ID: t3.ActionPair, Available: true},
-			{ID: t3.ActionAutoPair, Available: st.AutoPair.Available, Reason: st.AutoPair.Reason},
+			{ID: t3.ActionAutoPair, Available: st.AutoPair.Available, Reason: autoPairReason(st)},
 		},
 	}
 	if st.State != t3.StateConnected {
 		out.Reason = out.LastError
 	}
 	return out, nil
+}
+
+func autoPairReason(st Status) string {
+	if st.AutoPair.Available {
+		return ""
+	}
+	return unavailableMessage(st.AutoPair.Reason, st.Endpoint.URL)
+}
+
+func statusFacts(d Details) []execution.Fact {
+	var facts []execution.Fact
+	if d.T3 != nil {
+		if d.T3.Label != "" {
+			facts = append(facts, execution.Fact{ID: "instance", Label: "T3", Value: d.T3.Label})
+		}
+		if d.T3.ServerVersion != "" {
+			facts = append(facts, execution.Fact{ID: "serverVersion", Label: "Server version", Value: d.T3.ServerVersion})
+		}
+	}
+	if addr, err := NormalizeURL(d.T3URL); err == nil {
+		facts = append(facts, execution.Fact{ID: "url", Label: "T3 URL", Value: addr, Copyable: true})
+	}
+	if addr, err := NormalizeURL(d.PublicURL); err == nil {
+		facts = append(facts, execution.Fact{ID: "publicUrl", Label: "Browser URL", Value: addr, Link: addr, Copyable: true})
+	}
+	if d.EnvironmentID != nil {
+		facts = append(facts, execution.Fact{ID: "environmentId", Label: "Environment", Value: *d.EnvironmentID, Copyable: true})
+	}
+	if d.ClientID != nil {
+		facts = append(facts, execution.Fact{ID: "clientId", Label: "Client ID", Value: *d.ClientID, Copyable: true})
+	}
+	if d.TokenExpiresAt != nil {
+		facts = append(facts, execution.Fact{ID: "tokenExpiresAt", Label: "Token expires", Value: d.TokenExpiresAt.Format(time.RFC3339)})
+	}
+	if d.AdminTokenConfigured {
+		facts = append(facts, execution.Fact{ID: "adminTokenConfigured", Label: "Admin token", Value: "Saved (auto-renew)"})
+	}
+	return facts
 }
 
 // urlSource maps the endpoint source to a field source.
@@ -221,7 +276,7 @@ func (c *Connector) Run(ctx context.Context, action string, input json.RawMessag
 	if err != nil {
 		return harness.Result{}, err
 	}
-	return harness.Result{Replaced: paired.Replaced}, nil
+	return harness.Result{Message: "Paired with T3.", Replaced: paired.Replaced}, nil
 }
 
 // Disconnect forgets the token and the saved settings (Unpair).

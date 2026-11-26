@@ -96,8 +96,8 @@ func TestRemoveMachineRevokesTokenAndRetiresConnections(t *testing.T) {
 	s, ctx := setup(t)
 	g := pairMachine(t, s, ctx, "laptop")
 	keep := pairMachine(t, s, ctx, "desktop")
-	stable := harness.Descriptor{Kind: "stable", Name: "Stable", Hosting: harness.Connected, StableIdentity: true}
-	loose := harness.Descriptor{Kind: "loose", Name: "Loose", Hosting: harness.Connected}
+	stable := harness.Descriptor{Kind: "stable", Name: "Stable", Sessions: harness.SessionsMachine, StableIdentity: true}
+	loose := harness.Descriptor{Kind: "loose", Name: "Loose", Sessions: harness.SessionsMachine}
 	used, err := s.SwitchInstance(ctx, g.MachineID, stable, "env-a", "env a", 0)
 	if err != nil {
 		t.Fatal(err)

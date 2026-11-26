@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	hostedKind    = harness.Descriptor{Kind: "proc", Name: "Proc", Hosting: harness.Hosted}
-	connectedKind = harness.Descriptor{Kind: "svc", Name: "Svc", Hosting: harness.Connected}
+	hostedKind    = harness.Descriptor{Kind: "proc", Name: "Proc", Sessions: harness.SessionsMachine, LocalProcesses: true}
+	connectedKind = harness.Descriptor{Kind: "svc", Name: "Svc", Sessions: harness.SessionsMachine}
 )
 
 // A local machine allows what its profile allows; the connectors index

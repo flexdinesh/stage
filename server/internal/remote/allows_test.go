@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	connectedKind = harness.Descriptor{Kind: "svc", Name: "Svc", Hosting: harness.Connected}
-	hostedKind    = harness.Descriptor{Kind: "proc", Name: "Proc", Hosting: harness.Hosted}
+	connectedKind = harness.Descriptor{Kind: "svc", Name: "Svc", Sessions: harness.SessionsMachine}
+	hostedKind    = harness.Descriptor{Kind: "proc", Name: "Proc", Sessions: harness.SessionsMachine, LocalProcesses: true}
 )
 
 // Before its worker described it, a machine's profile is unknown: every

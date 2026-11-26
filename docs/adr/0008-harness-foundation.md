@@ -168,6 +168,9 @@ on a machine or in the cloud. Descriptors also declare state reasons.
 This lets Stage decide where code can run and explain session state
 without inferring either from the harness name.
 
+Layer 05 also switches the existing connection picker's eligibility check
+to `localProcesses` when it removes `hosting` from the descriptor.
+
 ### D9
 
 **Persist read-only evidence per workspace** (layer 07). Record file host,
