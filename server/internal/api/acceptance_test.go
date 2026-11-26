@@ -194,7 +194,7 @@ func TestConcurrentAcceptanceAndClaimReopen(t *testing.T) {
 		t.Fatal("claim lost accepted input")
 	}
 	// Restart recovery retains that same claim and request ID.
-	e.sync.RecoverLaunching(ctx)
+	e.engine.Coordinator.RecoverLaunching(ctx)
 	retry, err := e.store.TransitionTask(ctx, db.Transition{TaskID: b.ID, From: []db.TaskState{db.StateFailed}, To: db.StateLaunching, BeginAttempt: true})
 	if err != nil || retry.Attempt != claim.Attempt || retry.RequestID != claim.RequestID {
 		t.Fatalf("retry changed claim: %+v %v", retry, err)
@@ -265,7 +265,7 @@ func TestHarnessSettleInfersCompletionOncePerExecution(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	released := 0
-	e.sync.OnAccepted = func() { released++ }
+	e.engine.Coordinator.OnAccepted = func() { released++ }
 	e.autoComplete(1, true)
 	p := e.project("/w/infer")
 	a := e.task(p.ID, "source", map[string]any{"start": true})

@@ -27,14 +27,14 @@ type connection struct {
 
 func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 	e := newEnv(t, func(d *api.Deps) {
-		a, err := d.Sync.Adapter(d.Store.ActiveID(db.LocalMachine, "t3"))
+		a, err := d.Engine.Connections.Adapter(d.Store.ActiveID(db.LocalMachine, "t3"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		client := a.(*t3.Adapter).Client
 		withT3Setup(d, t3setup.Options{Client: client, Fake: true,
 			OnSwitched: func(sw harness.Switch) {
-				local, _ := d.Sync.Machines().Local(db.LocalMachine)
+				local, _ := d.Engine.Connections.Machines().Local(db.LocalMachine)
 				local.Install(sw.Old, sw.New, t3.NewConnectionAdapter(client, sw.New))
 			}})
 	})
@@ -111,7 +111,7 @@ func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 
 func TestForgettingADisconnectedConnectionRetiresIt(t *testing.T) {
 	e := newEnv(t, func(d *api.Deps) {
-		a, err := d.Sync.Adapter(d.Store.ActiveID(db.LocalMachine, "t3"))
+		a, err := d.Engine.Connections.Adapter(d.Store.ActiveID(db.LocalMachine, "t3"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +129,7 @@ func TestForgettingADisconnectedConnectionRetiresIt(t *testing.T) {
 	e.must("DELETE", fmt.Sprintf("/api/connections/%d", first), nil, 409, nil)
 
 	e.must("DELETE", "/api/harnesses/t3/connection", nil, 200, nil)
-	if _, ok := e.sync.Machines().Adapter(first); !ok {
+	if _, ok := e.engine.Connections.Machines().Adapter(first); !ok {
 		t.Fatal("a disconnected connection keeps its adapter until it is forgotten")
 	}
 	e.must("DELETE", fmt.Sprintf("/api/connections/%d", first), nil, 204, nil)
@@ -146,10 +146,10 @@ func TestForgettingADisconnectedConnectionRetiresIt(t *testing.T) {
 		t.Fatalf("an active T3 is left: %d", e.store.ActiveID(db.LocalMachine, "t3"))
 	}
 	// Its adapter is gone: pairing T3 again never reaches it.
-	if _, ok := e.sync.Machines().Adapter(first); ok {
+	if _, ok := e.engine.Connections.Machines().Adapter(first); ok {
 		t.Fatal("the forgotten connection's adapter is still installed")
 	}
-	if _, err := e.sync.Adapter(first); err == nil {
+	if _, err := e.engine.Connections.Adapter(first); err == nil {
 		t.Fatal("the forgotten connection is still reachable")
 	}
 	var prefs struct {

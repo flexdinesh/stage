@@ -1,4 +1,4 @@
-package coordinator_test
+package engine_test
 
 import (
 	"context"
@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -18,7 +18,7 @@ const laptop int64 = 2
 // twoMachineSetup: connection 2 on the local machine and 3 on the laptop,
 // both of the fake document kind, one project bound on both, one backlog
 // task per connection.
-func twoMachineSetup(t *testing.T) (*db.Store, *coordinator.Service, map[int64]*documentHarness, map[int64]db.Task) {
+func twoMachineSetup(t *testing.T) (*db.Store, *engine.Engine, map[int64]*documentHarness, map[int64]db.Task) {
 	t.Helper()
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
@@ -49,7 +49,7 @@ func twoMachineSetup(t *testing.T) (*db.Store, *coordinator.Service, map[int64]*
 		}
 		tasks[id] = task
 	}
-	svc := coordinator.NewWithAdapters(store, documentHarnesses, map[int64]execution.Adapter{2: fakes[2], 3: fakes[3]}, nil)
+	svc := engine.NewWithAdapters(store, documentHarnesses, map[int64]execution.Adapter{2: fakes[2], 3: fakes[3]}, nil)
 	return store, svc, fakes, tasks
 }
 
@@ -58,7 +58,7 @@ func TestTwoMachinesLaunchPollAndScheduleIndependently(t *testing.T) {
 	ctx := t.Context()
 	// Each launch reaches its own machine's harness only.
 	for id, task := range tasks {
-		got, err := svc.StartTask(ctx, task.ID)
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err != nil || got.State != db.StateRunning || got.Session == nil || got.Session.ConnectionID != id {
 			t.Fatalf("launch on %d: %+v %v", id, got, err)
 		}
@@ -71,7 +71,7 @@ func TestTwoMachinesLaunchPollAndScheduleIndependently(t *testing.T) {
 	// task; the laptop's task is unchanged.
 	fakes[3].offline = true
 	fakes[2].phase = "published"
-	if err := svc.PollActive(ctx); err != nil {
+	if err := svc.Coordinator.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := store.GetTask(ctx, tasks[2].ID); got.State != db.StateDone {
@@ -82,7 +82,7 @@ func TestTwoMachinesLaunchPollAndScheduleIndependently(t *testing.T) {
 	}
 	fakes[3].offline = false
 	fakes[3].phase = "published"
-	if err := svc.PollActive(ctx); err != nil {
+	if err := svc.Coordinator.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := store.GetTask(ctx, tasks[3].ID); got.State != db.StateDone {
@@ -99,7 +99,7 @@ func TestTwoMachinesLaunchPollAndScheduleIndependently(t *testing.T) {
 	if err != nil || spawned.ConnectionID != 3 {
 		t.Fatalf("spawned %+v %v", spawned, err)
 	}
-	if got, err := svc.StartTask(ctx, spawned.ID); err != nil || got.Session == nil || got.Session.ConnectionID != 3 {
+	if got, err := svc.Coordinator.StartTask(ctx, spawned.ID); err != nil || got.Session == nil || got.Session.ConnectionID != 3 {
 		t.Fatalf("scheduled launch %+v %v", got, err)
 	}
 	if fakes[3].created != 2 || fakes[2].created != 1 {
@@ -140,7 +140,7 @@ func TestTwoMachinesT3FullSyncsRunTogether(t *testing.T) {
 	}
 	var arrived gosync.WaitGroup
 	arrived.Add(2)
-	svc := coordinator.NewWithAdapters(store, nil, map[int64]execution.Adapter{
+	svc := engine.NewWithAdapters(store, nil, map[int64]execution.Adapter{
 		local:  barrierAdapter{t3.NewConnectionAdapter(t3.NewFake(), local), &arrived},
 		sw.New: barrierAdapter{t3.NewConnectionAdapter(t3.NewFake(), sw.New), &arrived},
 	}, nil)
@@ -148,20 +148,20 @@ func TestTwoMachinesT3FullSyncsRunTogether(t *testing.T) {
 	// records T3's last full sync per machine from it).
 	var mu gosync.Mutex
 	synced := map[int64]bool{}
-	svc.OnConnectionSynced = func(_ context.Context, connection int64, at time.Time) error {
+	svc.Coordinator.OnConnectionSynced = func(_ context.Context, connection int64, at time.Time) error {
 		mu.Lock()
 		defer mu.Unlock()
 		synced[connection] = !at.IsZero()
 		return nil
 	}
-	r, err := svc.FullSync(ctx)
+	r, err := svc.Coordinator.FullSync(ctx)
 	if err != nil || len(r.Unavailable) != 0 {
 		t.Fatalf("full sync %+v %v", r, err)
 	}
 	if !synced[local] || !synced[sw.New] {
 		t.Fatalf("synced connections %v", synced)
 	}
-	if svc.Progress(local).Running || svc.Progress(sw.New).Running {
+	if svc.Coordinator.Progress(local).Running || svc.Coordinator.Progress(sw.New).Running {
 		t.Fatal("progress after sync")
 	}
 }

@@ -1,4 +1,4 @@
-package coordinator_test
+package engine_test
 
 import (
 	"context"
@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -43,7 +43,7 @@ func (f *workerT3) Launch(ctx context.Context, in execution.Intent, _ execution.
 
 // movedT3Setup: the local machine's T3 is retired onto connection 3, a T3 on
 // the remote machine, with one bound project and one backlog task.
-func movedT3Setup(t *testing.T, p placement, a execution.Adapter) (*db.Store, *coordinator.Service, db.Task) {
+func movedT3Setup(t *testing.T, p placement, a execution.Adapter) (*db.Store, *engine.Engine, db.Task) {
 	t.Helper()
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
@@ -62,7 +62,7 @@ func movedT3Setup(t *testing.T, p placement, a execution.Adapter) (*db.Store, *c
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := p.coordinator(t, store, harness.MustRegistry(t3.Descriptor), map[int64]execution.Adapter{3: a}, nil)
+	svc := p.engine(t, store, harness.MustRegistry(t3.Descriptor), map[int64]execution.Adapter{3: a}, nil)
 	return store, svc, task
 }
 
@@ -75,7 +75,7 @@ func TestMovedT3LaunchConfirmsAndTransitions(t *testing.T) {
 				f := &workerT3{fakeBase: fakeBase{workspace: "volume://moved"}, parent: parent}
 				store, svc, task := movedT3Setup(t, p, f)
 				ctx := t.Context()
-				got, err := svc.StartTask(ctx, task.ID)
+				got, err := svc.Coordinator.StartTask(ctx, task.ID)
 				if err != nil || got.State != db.StateRunning || got.Session == nil || got.Session.ExternalSessionID != "thread-1" {
 					t.Fatalf("launch %+v %v", got, err)
 				}
@@ -108,7 +108,7 @@ func TestMovedT3UnrecordedLaunchKeepsSession(t *testing.T) {
 		if _, err := testDB.Pool.ExecContext(ctx, "UPDATE tasks SET state='running',session_id=(SELECT id FROM session_identities WHERE connection_id=3 AND external_id='thread-1') WHERE id=$1", other.ID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := svc.StartTask(ctx, task.ID); err == nil {
+		if _, err := svc.Coordinator.StartTask(ctx, task.ID); err == nil {
 			t.Fatal("unrecorded launch reported success")
 		}
 		a, err := store.Attempt(ctx, task.ID, 1)

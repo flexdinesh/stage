@@ -20,7 +20,7 @@ import (
 
 func withOpenCode(t *testing.T) func(*api.Deps) {
 	return func(d *api.Deps) {
-		local, _ := d.Sync.Machines().Local(db.LocalMachine)
+		local, _ := d.Engine.Connections.Machines().Local(db.LocalMachine)
 		ports := machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(opencode.Descriptor))
 		composed, err := opencodesetup.Module.Compose(t.Context(), harness.Ports{
 			Settings: ports.Settings(), Secrets: ports.Secrets(), Identity: ports, Install: local.Install,
@@ -95,7 +95,7 @@ func TestOpenCodeConnectionEndpoints(t *testing.T) {
 	if checked.Message == "" || len(checked.Facts) == 0 {
 		t.Fatalf("check result %+v", checked)
 	}
-	if _, err := e.sync.Adapter(connection); err != nil {
+	if _, err := e.engine.Connections.Adapter(connection); err != nil {
 		t.Fatalf("adapter not installed: %v", err)
 	}
 	code, st = e.status("opencode")
@@ -120,7 +120,7 @@ func TestOpenCodeConnectionEndpoints(t *testing.T) {
 	if code != 200 || st["auth"] != "none" || st["state"] != "unconfigured" || st["endpoint"] != "" {
 		t.Fatalf("after disconnect %v", st)
 	}
-	if _, err := e.sync.Adapter(connection); err == nil {
+	if _, err := e.engine.Connections.Adapter(connection); err == nil {
 		t.Fatal("adapter still installed")
 	}
 }

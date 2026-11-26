@@ -1,4 +1,4 @@
-package coordinator_test
+package engine_test
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 )
@@ -122,11 +123,11 @@ func (f *documentHarness) Attention(context.Context) ([]execution.SessionRef, er
 func (f *documentHarness) Opening(context.Context, execution.SessionRef, bool) (*execution.Reply, error) {
 	return nil, execution.ErrUnavailable
 }
-func contractSetup(t *testing.T, p placement) (*db.Store, *documentHarness, *coordinator.Service, db.Task) {
+func contractSetup(t *testing.T, p placement) (*db.Store, *documentHarness, *engine.Engine, db.Task) {
 	t.Helper()
 	store, task := contractTask(t, p)
 	fake := &documentHarness{}
-	svc := p.coordinator(t, store, documentHarnesses, map[int64]execution.Adapter{2: fake}, nil)
+	svc := p.engine(t, store, documentHarnesses, map[int64]execution.Adapter{2: fake}, nil)
 	return store, fake, svc, task
 }
 
@@ -154,7 +155,7 @@ func TestContractRestartReconcilesFrozenTwoStepIntent(t *testing.T) {
 		store, fake, svc, task := contractSetup(t, p)
 		ctx := t.Context()
 		fake.loseReply = true
-		unknown, err := svc.StartTask(ctx, task.ID)
+		unknown, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err == nil || unknown.State != db.StateLaunching || unknown.Session != nil {
 			t.Fatalf("unknown %+v %v", unknown, err)
 		}
@@ -166,13 +167,13 @@ func TestContractRestartReconcilesFrozenTwoStepIntent(t *testing.T) {
 			t.Fatalf("missing durable launch %+v %v", attempt, err)
 		}
 		fake.loseReply = false
-		restarted := p.coordinator(t, store, documentHarnesses, map[int64]execution.Adapter{2: fake}, nil)
-		restarted.RecoverLaunching(ctx)
+		restarted := p.engine(t, store, documentHarnesses, map[int64]execution.Adapter{2: fake}, nil)
+		restarted.Coordinator.RecoverLaunching(ctx)
 		// The periodic recovery path, without a second Start action.
 		if _, err := testDB.Pool.ExecContext(ctx, "UPDATE execution_attempts SET retry_at=NULL"); err != nil {
 			t.Fatal(err)
 		}
-		if err := restarted.PollActive(ctx); err != nil {
+		if err := restarted.Coordinator.PollActive(ctx); err != nil {
 			t.Fatal(err)
 		}
 		got, err := store.GetTask(ctx, task.ID)
@@ -180,14 +181,14 @@ func TestContractRestartReconcilesFrozenTwoStepIntent(t *testing.T) {
 			t.Fatalf("recovered %+v %v", got, err)
 		}
 		fake.offline = true
-		_ = restarted.PollTask(ctx, got)
+		_ = restarted.Coordinator.PollTask(ctx, got)
 		offline, _ := store.GetTask(ctx, task.ID)
 		if offline.State != db.StateRunning {
 			t.Fatal("offline changed execution", offline.State)
 		}
 		fake.offline = false
 		fake.malformed = true
-		if err := restarted.PollTask(ctx, got); err == nil {
+		if err := restarted.Coordinator.PollTask(ctx, got); err == nil {
 			t.Fatal("malformed state accepted")
 		}
 		malformed, _ := store.GetTask(ctx, task.ID)
@@ -196,7 +197,7 @@ func TestContractRestartReconcilesFrozenTwoStepIntent(t *testing.T) {
 		}
 		fake.malformed = false
 		fake.phase = "published"
-		if err := restarted.PollTask(ctx, got); err != nil {
+		if err := restarted.Coordinator.PollTask(ctx, got); err != nil {
 			t.Fatal(err)
 		}
 		preview, err := store.CompletionPreview(ctx, task.ID)
@@ -219,13 +220,13 @@ func TestContractArchivedSessionInfersCompletion(t *testing.T) {
 		store, fake, svc, task := contractSetup(t, p)
 		ctx := t.Context()
 		released := 0
-		svc.OnAccepted = func() { released++ }
-		got, err := svc.StartTask(ctx, task.ID)
+		svc.Coordinator.OnAccepted = func() { released++ }
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		fake.closed = execution.ClosedArchived
-		if err = svc.PollTask(ctx, got); err != nil {
+		if err = svc.Coordinator.PollTask(ctx, got); err != nil {
 			t.Fatal(err)
 		}
 		if evidence, _ := store.Acceptances(ctx, task.ID); len(evidence) != 0 || released != 0 {
@@ -234,7 +235,7 @@ func TestContractArchivedSessionInfersCompletion(t *testing.T) {
 		got, _ = store.GetTask(ctx, task.ID)
 		fake.phase = "published"
 		for range 2 {
-			if err = svc.PollTask(ctx, got); err != nil {
+			if err = svc.Coordinator.PollTask(ctx, got); err != nil {
 				t.Fatal(err)
 			}
 			got, _ = store.GetTask(ctx, task.ID)
@@ -252,13 +253,13 @@ func TestContractIdleClosureInfersFromStoredDone(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
 		store, fake, svc, task := contractSetup(t, p)
 		ctx := t.Context()
-		got, err := svc.StartTask(ctx, task.ID)
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		poll := func(want db.TaskState) db.Task {
 			t.Helper()
-			if err := svc.PollTask(ctx, got); err != nil {
+			if err := svc.Coordinator.PollTask(ctx, got); err != nil {
 				t.Fatal(err)
 			}
 			got, err = store.GetTask(ctx, task.ID)
@@ -286,12 +287,12 @@ func TestContractOptionalCapabilitiesAndOfflineDoNotClaim(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
 		store, fake, svc, task := contractSetup(t, p)
 		fake.disallow = true
-		if _, err := svc.StartTask(t.Context(), task.ID); err == nil {
+		if _, err := svc.Coordinator.StartTask(t.Context(), task.ID); err == nil {
 			t.Fatal("unsupported launch allowed")
 		}
 		fake.disallow = false
 		fake.offline = true
-		if _, err := svc.StartTask(t.Context(), task.ID); err == nil {
+		if _, err := svc.Coordinator.StartTask(t.Context(), task.ID); err == nil {
 			t.Fatal("offline launch allowed")
 		}
 		got, _ := store.GetTask(t.Context(), task.ID)
@@ -305,12 +306,12 @@ func TestContractSchedulesAndHandoffPreserveScopedConfiguration(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
 		store, fake, svc, source := contractSetup(t, p)
 		ctx := t.Context()
-		launched, err := svc.StartTask(ctx, source.ID)
+		launched, err := svc.Coordinator.StartTask(ctx, source.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		fake.phase = "published"
-		if err = svc.PollTask(ctx, launched); err != nil {
+		if err = svc.Coordinator.PollTask(ctx, launched); err != nil {
 			t.Fatal(err)
 		}
 		preview, err := store.CompletionPreview(ctx, source.ID)
@@ -338,7 +339,7 @@ func TestContractSchedulesAndHandoffPreserveScopedConfiguration(t *testing.T) {
 		if spawned.ConnectionID != 2 || spawned.ExecutionConfig == nil || spawned.ExecutionConfig.Model != "brain-7" {
 			t.Fatalf("schedule lost contract: %+v", spawned)
 		}
-		if _, err = svc.StartTask(ctx, spawned.ID); err != nil {
+		if _, err = svc.Coordinator.StartTask(ctx, spawned.ID); err != nil {
 			t.Fatal(err)
 		}
 		if fake.input.Config.Permission != "reviewed" {
@@ -359,12 +360,12 @@ func TestContractMalformedLaunchRemainsUnconfirmed(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
 		store, fake, svc, task := contractSetup(t, p)
 		fake.malformed = true
-		got, err := svc.StartTask(t.Context(), task.ID)
+		got, err := svc.Coordinator.StartTask(t.Context(), task.ID)
 		if err == nil || got.State != db.StateLaunching || got.Session != nil {
 			t.Fatal(got, err)
 		}
 		fake.malformed = false
-		got, err = svc.StartTask(t.Context(), task.ID)
+		got, err = svc.Coordinator.StartTask(t.Context(), task.ID)
 		if err != nil || got.Session == nil || got.LaunchAttempt != 1 || fake.created != 1 || fake.started != 1 {
 			t.Fatal(got, err)
 		}

@@ -8,8 +8,8 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/remote"
@@ -197,8 +197,8 @@ func TestPushObservationsForAnOfflineMachine(t *testing.T) {
 			}
 			return ids
 		}, nil, nil)
-		svc := coordinator.NewForMachines(store, testHarnesses, set, nil)
-		d.Sync, d.Channels, d.Machines = svc, hub, hosts
+		svc := engine.NewForMachines(store, testHarnesses, set, nil)
+		d.Engine, d.Channels, d.Machines = svc, hub, hosts
 	})
 	j := e.join("laptop")
 	sw, err := e.store.SwitchInstance(t.Context(), j.MachineID, t3.Descriptor, "env-laptop", "laptop t3", 0)

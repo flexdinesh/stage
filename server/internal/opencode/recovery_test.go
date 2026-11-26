@@ -15,9 +15,9 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/api"
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
@@ -39,8 +39,8 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	compose := func() *coordinator.Service {
-		return coordinator.NewWithAdapters(store, nil, map[int64]execution.Adapter{2: a}, nil)
+	compose := func() *engine.Engine {
+		return engine.NewWithAdapters(store, nil, map[int64]execution.Adapter{2: a}, nil)
 	}
 	for _, step := range []string{"worktree", "session", "prompt"} {
 		t.Run(step, func(t *testing.T) {
@@ -89,12 +89,12 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 			})
 			t.Cleanup(func() { a.http.Transport = nil })
 			before := f.turns.Load()
-			started, e := svc.StartTask(ctx, task.ID)
+			started, e := svc.Coordinator.StartTask(ctx, task.ID)
 			if e == nil || started.State != db.StateLaunching {
 				t.Fatalf("launch not held: %+v %v", started, e)
 			}
 			a2 := compose()
-			a2.RecoverLaunching(ctx)
+			a2.Coordinator.RecoverLaunching(ctx)
 			mu.Lock()
 			offline = false
 			mu.Unlock()
@@ -102,7 +102,7 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 			var wg sync.WaitGroup
 			for range 2 {
 				wg.Add(1)
-				go func() { defer wg.Done(); _, _ = a2.StartTask(ctx, task.ID) }()
+				go func() { defer wg.Done(); _, _ = a2.Coordinator.StartTask(ctx, task.ID) }()
 			}
 			wg.Wait()
 			if counts["worktree"] != 1 {
@@ -122,7 +122,7 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 				t.Fatalf("no confirmed session: %+v counts %v", got, counts)
 			}
 			o := observeUntil(t, a, *got.Session, "done")
-			if e = a2.PollTask(ctx, got); e != nil {
+			if e = a2.Coordinator.PollTask(ctx, got); e != nil {
 				t.Fatal(e)
 			}
 			if o.Reply == nil || counts["session"] != 1 || counts["prompt"] != 1 || f.turns.Load()-before != 1 {
@@ -172,7 +172,7 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 		t.Fatalf("native session URL %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
 	svc := compose()
-	router := api.NewRouter(api.Deps{Store: store, Sync: svc})
+	router := api.NewRouter(api.Deps{Store: store, Engine: svc})
 	path := "/api/connections/2/sessions/" + id
 	preview := httptest.NewRecorder()
 	router.ServeHTTP(preview, httptest.NewRequest("GET", path, nil))
@@ -220,14 +220,14 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 	if e != nil || waiting.State != db.StateBacklog || waiting.Session == nil || waiting.LaunchedAt != nil || waiting.FinishedAt != nil || waiting.AcceptanceID != nil {
 		t.Fatalf("idle adoption recorded work: %+v %v", waiting, e)
 	}
-	if _, e = svc.StartTask(ctx, waiting.ID); e == nil {
+	if _, e = svc.Coordinator.StartTask(ctx, waiting.ID); e == nil {
 		t.Fatal("Stage started an adopted idle session")
 	}
 	if e = a.request(ctx, "POST", "/api/session/"+idle.Data.ID+"/prompt", map[string]string{"text": "fixture-interrupt"}, nil); e != nil {
 		t.Fatal(e)
 	}
 	observeUntil(t, a, idleRef, "running")
-	if e = svc.PollActive(ctx); e != nil {
+	if e = svc.Coordinator.PollActive(ctx); e != nil {
 		t.Fatal(e)
 	}
 	active, e := store.TaskBySession(ctx, idleRef)

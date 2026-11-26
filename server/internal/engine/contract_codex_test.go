@@ -1,4 +1,4 @@
-package coordinator_test
+package engine_test
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/codex/codextest"
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -18,7 +18,7 @@ import (
 // The real Codex adapter against a fake daemon, driven by the coordinator
 // in process and behind a worker channel.
 
-func codexSetup(t *testing.T, p placement, codexDir string) (*db.Store, *codextest.Server, *coordinator.Service, db.Task) {
+func codexSetup(t *testing.T, p placement, codexDir string) (*db.Store, *codextest.Server, *engine.Engine, db.Task) {
 	t.Helper()
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
@@ -37,7 +37,7 @@ func codexSetup(t *testing.T, p placement, codexDir string) (*db.Store, *codexte
 	srv.Trust(codexDir, "trusted")
 	client := codex.NewClient(&codextest.Daemon{Srv: srv, T: t}, "test")
 	t.Cleanup(client.Close)
-	svc := p.coordinator(t, store, harness.MustRegistry(t3.Descriptor, codex.Descriptor), map[int64]execution.Adapter{3: codex.New(client, 3, "")}, nil)
+	svc := p.engine(t, store, harness.MustRegistry(t3.Descriptor, codex.Descriptor), map[int64]execution.Adapter{3: codex.New(client, 3, "")}, nil)
 	return store, srv, svc, task
 }
 
@@ -49,7 +49,7 @@ func TestContractCodexWrappedThreadRefusedAndOperationsDeclared(t *testing.T) {
 		codexDir := t.TempDir()
 		_, srv, svc, _ := codexSetup(t, p, codexDir)
 		ctx := t.Context()
-		a, err := svc.Adapter(3)
+		a, err := svc.Connections.Adapter(3)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -57,13 +57,13 @@ func TestContractCodexWrappedThreadRefusedAndOperationsDeclared(t *testing.T) {
 			t.Fatal(f.Operations, err, f.DeclaresOperations())
 		}
 		wrapped := srv.AddThread(codextest.Thread{ID: "019a0000-0000-7000-8000-00000000bbbb", Cwd: codexDir, Originator: t3.OriginOriginator})
-		err = svc.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: 3, ExternalSessionID: wrapped.ID})
+		err = svc.Coordinator.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: 3, ExternalSessionID: wrapped.ID})
 		var conflict *db.ConflictError
 		if !errors.As(err, &conflict) || conflict.Code != "session_refused" || conflict.Msg != "This Codex session was started by T3. Track it through T3." {
 			t.Fatalf("%v", err)
 		}
 		own := srv.AddThread(codextest.Thread{ID: "019a0000-0000-7000-8000-00000000aaaa", Cwd: codexDir, Originator: "codex-tui"})
-		if err := svc.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: 3, ExternalSessionID: own.ID}); err != nil {
+		if err := svc.Coordinator.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: 3, ExternalSessionID: own.ID}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -74,20 +74,20 @@ func TestContractCodexLaunchToDoneWithReplyAndResumeCommand(t *testing.T) {
 		codexDir := t.TempDir()
 		store, srv, svc, task := codexSetup(t, p, codexDir)
 		ctx := t.Context()
-		got, err := svc.StartTask(ctx, task.ID)
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err != nil || got.State != db.StateRunning || got.Session == nil {
 			t.Fatal(got, err)
 		}
 		id := got.Session.ExternalSessionID
 		srv.Wait(id)
-		if err := svc.PollTask(ctx, got); err != nil {
+		if err := svc.Coordinator.PollTask(ctx, got); err != nil {
 			t.Fatal(err)
 		}
 		if got, _ = store.GetTask(ctx, task.ID); got.State != db.StateNeedsInput {
 			t.Fatal("needs input", got.State)
 		}
 		srv.Finish(id, "completed", "Fixed.")
-		if err := svc.PollTask(ctx, got); err != nil {
+		if err := svc.Coordinator.PollTask(ctx, got); err != nil {
 			t.Fatal(err)
 		}
 		got, _ = store.GetTask(ctx, task.ID)
@@ -109,13 +109,13 @@ func TestContractCodexLostTurnReplyReconcilesOnce(t *testing.T) {
 		ctx := t.Context()
 		srv.DropReply("turn/start", 1)
 		short, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-		got, err := svc.StartTask(short, task.ID)
+		got, err := svc.Coordinator.StartTask(short, task.ID)
 		cancel()
 		if err == nil {
 			t.Fatal("lost reply confirmed", got)
 		}
 		clearRetry(t)
-		if err := svc.PollActive(ctx); err != nil {
+		if err := svc.Coordinator.PollActive(ctx); err != nil {
 			t.Fatal(err)
 		}
 		got, err = store.GetTask(ctx, task.ID)
@@ -129,14 +129,14 @@ func TestContractCodexArchiveInfersCompletion(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
 		store, srv, svc, task := codexSetup(t, p, t.TempDir())
 		ctx := t.Context()
-		got, err := svc.StartTask(ctx, task.ID)
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		srv.Finish(got.Session.ExternalSessionID, "completed", "Saved result")
 		srv.Archive(got.Session.ExternalSessionID)
 		for range 2 {
-			if err = svc.PollTask(ctx, got); err != nil {
+			if err = svc.Coordinator.PollTask(ctx, got); err != nil {
 				t.Fatal(err)
 			}
 			got, _ = store.GetTask(ctx, task.ID)
@@ -155,11 +155,11 @@ func TestContractCodexPushIngest(t *testing.T) {
 		store, srv, svc, task := codexSetup(t, p, t.TempDir())
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		got, err := svc.StartTask(ctx, task.ID)
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		go func() { _ = svc.Stream(ctx, 3) }()
+		go func() { _ = svc.Coordinator.Stream(ctx, 3) }()
 		deadline := time.Now().Add(5 * time.Second)
 		for i := 0; time.Now().Before(deadline); i++ {
 			if i%10 == 0 {
@@ -178,18 +178,18 @@ func TestContractCodexStop(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
 		store, _, svc, task := codexSetup(t, p, t.TempDir())
 		ctx := t.Context()
-		got, err := svc.StartTask(ctx, task.ID)
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		a, err := svc.Adapter(3)
+		a, err := svc.Connections.Adapter(3)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := a.Stop(ctx, *got.Session); err != nil {
 			t.Fatal(err)
 		}
-		if err := svc.PollTask(ctx, got); err != nil {
+		if err := svc.Coordinator.PollTask(ctx, got); err != nil {
 			t.Fatal(err)
 		}
 		if got, _ = store.GetTask(ctx, task.ID); got.State != db.StateInterrupted {

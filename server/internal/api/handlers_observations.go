@@ -57,7 +57,7 @@ func (s *server) pushObservations(w http.ResponseWriter, r *http.Request) error 
 	// The coordinator drives the connection (as for a launch: 409
 	// connection_unavailable when no adapter is hosted or its machine does
 	// not allow the harness).
-	a, err := s.Sync.Adapter(id)
+	a, err := s.Engine.Connections.Adapter(id)
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func (s *server) pushObservation(r *http.Request, kind string, o execution.Obser
 	// Checked before the owner lookup, so a malformed observation is
 	// reported whether or not a task owns its session. A snapshot without
 	// updatedAt would never replace a stored one.
-	if err := s.Sync.CheckObservation(kind, o); err != nil {
+	if err := s.Engine.Coordinator.CheckObservation(kind, o); err != nil {
 		return ObservationResult{Status: observationInvalid, Reason: err.Error()}, nil
 	}
 	if o.UpdatedAt.IsZero() {
@@ -156,7 +156,7 @@ func (s *server) pushObservation(r *http.Request, kind string, o execution.Obser
 	if o.UpdatedAt.After(time.Now().Add(maxPushSkew)) {
 		return ObservationResult{Status: observationInvalid, Reason: "malformed observation: updatedAt is more than 5 minutes ahead of the server's clock"}, nil
 	}
-	got, err := s.Sync.Ingest(r.Context(), o)
+	got, err := s.Engine.Coordinator.Ingest(r.Context(), o)
 	switch {
 	case err != nil:
 		return ObservationResult{}, err

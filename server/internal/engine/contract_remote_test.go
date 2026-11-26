@@ -1,4 +1,4 @@
-package coordinator_test
+package engine_test
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
@@ -22,11 +22,11 @@ import (
 
 var remotePlacement = placement{name: "remote", remote: true}
 
-func remoteSetup(t *testing.T, a execution.Adapter) (*db.Store, *remotetest.Rig, *coordinator.Service, db.Task) {
+func remoteSetup(t *testing.T, a execution.Adapter) (*db.Store, *remotetest.Rig, *engine.Engine, db.Task) {
 	t.Helper()
 	store, task := contractTask(t, remotePlacement)
 	rig := newContractWorker(t, store, map[int64]execution.Adapter{2: a})
-	svc := coordinator.NewForMachines(store, documentHarnesses, rig.Set(), nil)
+	svc := engine.NewForMachines(store, documentHarnesses, rig.Set(), nil)
 	return store, rig, svc, task
 }
 
@@ -34,9 +34,9 @@ func TestRemoteLostLaunchReplyReplaysOnce(t *testing.T) {
 	fake := &documentHarness{}
 	store, rig, svc, task := remoteSetup(t, fake)
 	ctx := t.Context()
-	svc.LaunchAttemptTimeout = 1500 * time.Millisecond
+	svc.Coordinator.LaunchAttemptTimeout = 1500 * time.Millisecond
 	rig.LoseResult(remote.KindLaunch, 1)
-	got, err := svc.StartTask(ctx, task.ID)
+	got, err := svc.Coordinator.StartTask(ctx, task.ID)
 	if err == nil || got.State != db.StateLaunching || got.Session != nil {
 		t.Fatalf("lost reply %+v %v", got, err)
 	}
@@ -52,7 +52,7 @@ func TestRemoteLostLaunchReplyReplaysOnce(t *testing.T) {
 		t.Fatalf("attempt %+v %v", attempt, err)
 	}
 	clearRetry(t)
-	if err := svc.PollActive(ctx); err != nil {
+	if err := svc.Coordinator.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	got, err = store.GetTask(ctx, task.ID)
@@ -98,7 +98,7 @@ func TestRemoteWorkerRestartMidLaunchReplaysFromCheckpoint(t *testing.T) {
 	}
 	started := make(chan result, 1)
 	go func() {
-		got, err := svc.StartTask(ctx, task.ID)
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		started <- result{got, err}
 	}()
 	select {
@@ -125,7 +125,7 @@ func TestRemoteWorkerRestartMidLaunchReplaysFromCheckpoint(t *testing.T) {
 	}
 	// Offline: recovery waits, nothing changes.
 	clearRetry(t)
-	if err := svc.PollActive(ctx); err != nil {
+	if err := svc.Coordinator.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := store.GetTask(ctx, task.ID); got.State != db.StateLaunching {
@@ -133,7 +133,7 @@ func TestRemoteWorkerRestartMidLaunchReplaysFromCheckpoint(t *testing.T) {
 	}
 	rig.StartWorker()
 	clearRetry(t)
-	if err := svc.PollActive(ctx); err != nil {
+	if err := svc.Coordinator.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.GetTask(ctx, task.ID)
@@ -148,30 +148,30 @@ func TestRemoteOfflineMachineIsAnOfflineHarness(t *testing.T) {
 	ctx := t.Context()
 	rig.StopWorker()
 	var ce *db.ConflictError
-	if _, err := svc.StartTask(ctx, task.ID); !errors.As(err, &ce) || ce.Code != "connection_unavailable" || !strings.Contains(ce.Msg, "offline") {
+	if _, err := svc.Coordinator.StartTask(ctx, task.ID); !errors.As(err, &ce) || ce.Code != "connection_unavailable" || !strings.Contains(ce.Msg, "offline") {
 		t.Fatal("offline launch", err)
 	}
 	if got, _ := store.GetTask(ctx, task.ID); got.State != db.StateBacklog || got.LaunchAttempt != 0 || fake.created != 0 {
 		t.Fatal("offline preflight dispatched work", got)
 	}
 	rig.StartWorker()
-	running, err := svc.StartTask(ctx, task.ID)
+	running, err := svc.Coordinator.StartTask(ctx, task.ID)
 	if err != nil || running.State != db.StateRunning {
 		t.Fatal(running, err)
 	}
 	rig.StopWorker()
 	fake.phase = "published"
-	if err := svc.PollTask(ctx, running); !errors.Is(err, execution.ErrUnavailable) {
+	if err := svc.Coordinator.PollTask(ctx, running); !errors.Is(err, execution.ErrUnavailable) {
 		t.Fatal("offline observe", err)
 	}
-	if err := svc.Stream(ctx, 2); err != nil {
+	if err := svc.Coordinator.Stream(ctx, 2); err != nil {
 		t.Fatal("offline stream", err)
 	}
 	if got, _ := store.GetTask(ctx, task.ID); got.State != db.StateRunning {
 		t.Fatal("offline worker implied an outcome", got.State)
 	}
 	rig.StartWorker()
-	if err := svc.PollTask(ctx, running); err != nil {
+	if err := svc.Coordinator.PollTask(ctx, running); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := store.GetTask(ctx, task.ID); got.State != db.StateDone {

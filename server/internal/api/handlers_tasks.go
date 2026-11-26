@@ -262,7 +262,7 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	s.treeChanged()
 	if req.Start {
 		// Start errors after save: the task stays created (failed + lastError).
-		if _, err := s.Sync.StartTask(r.Context(), task.ID); err != nil {
+		if _, err := s.Engine.Coordinator.StartTask(r.Context(), task.ID); err != nil {
 			s.log.Warn("start after create", "task", task.ID, "err", err)
 			if noteErr := s.Store.NoteBlockedLaunch(r.Context(), task.ID, err.Error()); noteErr != nil {
 				return noteErr
@@ -450,7 +450,7 @@ func (s *server) startTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	task, err := s.Sync.StartTask(r.Context(), id)
+	task, err := s.Engine.Coordinator.StartTask(r.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -479,7 +479,7 @@ func (s *server) stopTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	adapter, err := s.Sync.Adapter(task.ConnectionID)
+	adapter, err := s.Engine.Connections.Adapter(task.ConnectionID)
 	if err != nil {
 		return err
 	}
@@ -511,7 +511,7 @@ func (s *server) touchAndWrite(w http.ResponseWriter, r *http.Request, id int64)
 	if err != nil {
 		return err
 	}
-	if err := s.Sync.PollTask(ctx, task); err != nil {
+	if err := s.Engine.Coordinator.PollTask(ctx, task); err != nil {
 		s.log.Warn("poll after session action", "task", id, "err", err)
 	} else if task, err = s.Store.GetTask(ctx, id); err != nil {
 		return err

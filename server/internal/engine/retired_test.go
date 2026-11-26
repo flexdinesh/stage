@@ -1,4 +1,4 @@
-package coordinator_test
+package engine_test
 
 import (
 	"context"
@@ -8,9 +8,9 @@ import (
 	gosync "sync"
 	"testing"
 
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -53,22 +53,22 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := coordinator.NewWithAdapters(store, t3Harnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewConnectionAdapter(a, first)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := engine.NewWithAdapters(store, t3Harnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewConnectionAdapter(a, first)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	task, err := store.CreateTask(ctx, db.NewTask{ProjectID: p.ID, ConnectionID: first, Title: "run", Prompt: "p"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if task, err = svc.StartTask(ctx, task.ID); err != nil || task.Session == nil {
+	if task, err = svc.Coordinator.StartTask(ctx, task.ID); err != nil || task.Session == nil {
 		t.Fatalf("start %+v %v", task, err)
 	}
 	thread := task.Session.ExternalSessionID
 	if err := a.SetStatus(thread, t3.StatusRunning); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.PollActive(ctx); err != nil {
+	if err := svc.Coordinator.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.WatchAttention(ctx); err != nil {
+	if err := svc.Coordinator.WatchAttention(ctx); err != nil {
 		t.Fatal(err)
 	}
 	before, err := store.GetTask(ctx, task.ID)
@@ -82,19 +82,19 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 		t.Fatalf("switch %+v %v", sw, err)
 	}
 	b := &readsT3{Fake: t3.NewFake()}
-	local, _ := svc.Machines().Local(db.LocalMachine)
+	local, _ := svc.Connections.Machines().Local(db.LocalMachine)
 	local.Install(sw.Old, sw.New, t3.NewConnectionAdapter(b, sw.New))
 	if err := a.SetStatus(thread, t3.StatusIdle); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := svc.PollActive(ctx); err != nil {
+	if err := svc.Coordinator.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.WatchAttention(ctx); err != nil {
+	if err := svc.Coordinator.WatchAttention(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.FullSync(ctx); err != nil {
+	if _, err := svc.Coordinator.FullSync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if b.read(thread) {
@@ -105,10 +105,10 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 		t.Fatalf("replaced task changed %+v %v", after, err)
 	}
 	var conflict *db.ConflictError
-	if _, err := svc.Adapter(first); !errors.As(err, &conflict) || conflict.Code != "connection_retired" {
+	if _, err := svc.Connections.Adapter(first); !errors.As(err, &conflict) || conflict.Code != "connection_retired" {
 		t.Fatalf("adapter for replaced connection: %v", err)
 	}
-	if err := svc.PollTask(ctx, after); !errors.As(err, &conflict) || conflict.Code != "connection_retired" {
+	if err := svc.Coordinator.PollTask(ctx, after); !errors.As(err, &conflict) || conflict.Code != "connection_retired" {
 		t.Fatalf("poll replaced task: %v", err)
 	}
 }

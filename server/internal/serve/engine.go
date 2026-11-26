@@ -16,8 +16,8 @@ import (
 // retries) rather than leaving the server unready (docs/runtime.md).
 const postgresStartTimeout = 30 * time.Second
 
-// engine is the composed storage engine.
-type engine interface {
+// storageEngine is the composed storage engine.
+type storageEngine interface {
 	store.Engine
 	Close() error
 }
@@ -25,7 +25,7 @@ type engine interface {
 // openEngine opens the engine cfg.Database selects (docs/storage.md
 // "Engines and selection"): SQLite at <DataDir>/stage.db, or Postgres at
 // the URL. It logs the engine, never the URL.
-func openEngine(ctx context.Context, cfg config.Config, instanceID string, logger *slog.Logger) (engine, error) {
+func openEngine(ctx context.Context, cfg config.Config, instanceID string, logger *slog.Logger) (storageEngine, error) {
 	if cfg.Database.Engine() == config.EnginePostgres {
 		ctx, cancel := context.WithTimeout(ctx, postgresStartTimeout)
 		defer cancel()
@@ -47,7 +47,7 @@ func openEngine(ctx context.Context, cfg config.Config, instanceID string, logge
 
 // acquireOwnership takes the engine's ownership lease, bounded like
 // openEngine on Postgres.
-func acquireOwnership(ctx context.Context, cfg config.Config, eng engine) (store.Lease, error) {
+func acquireOwnership(ctx context.Context, cfg config.Config, eng storageEngine) (store.Lease, error) {
 	if cfg.Database.Engine() == config.EnginePostgres {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, postgresStartTimeout)

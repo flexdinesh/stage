@@ -218,7 +218,7 @@ func (s *server) startTree(w http.ResponseWriter, r *http.Request) error {
 	}
 	started, failed := []taskJSON{}, []treeStartError{}
 	for _, taskID := range ids {
-		task, err := s.Sync.StartTask(ctx, taskID)
+		task, err := s.Engine.Coordinator.StartTask(ctx, taskID)
 		if err != nil {
 			failed = append(failed, treeStartError{TaskID: taskID, Error: err.Error()})
 			continue

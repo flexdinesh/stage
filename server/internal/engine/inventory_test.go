@@ -1,4 +1,4 @@
-package coordinator_test
+package engine_test
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
@@ -47,18 +47,18 @@ func TestInventoryCallsOpsForHostedLocalWorkspaces(t *testing.T) {
 	host.Install(dbtest.T3Connection, dbtest.T3Connection, a)
 	const unplaced = 999
 	host.Install(unplaced, unplaced, a)
-	svc := coordinator.NewForMachines(store, nil, machine.MustSet(host), nil)
+	svc := engine.NewForMachines(store, nil, machine.MustSet(host), nil)
 
-	got, err := svc.Inventory(t.Context(), dbtest.T3Connection)
+	got, err := svc.Coordinator.Inventory(t.Context(), dbtest.T3Connection)
 	if err != nil || !reflect.DeepEqual(got, rows) || calls != 0 {
 		t.Fatalf("network inventory %+v, ops called %d times: %v", got, calls, err)
 	}
 	rows = append(rows, execution.WorkspaceInfo{ID: "local", WorkspaceRoot: "/local", Local: true})
-	got, err = svc.Inventory(t.Context(), unplaced)
+	got, err = svc.Coordinator.Inventory(t.Context(), unplaced)
 	if err != nil || !reflect.DeepEqual(got, rows) || calls != 0 {
 		t.Fatalf("unplaced inventory %+v, ops called %d times: %v", got, calls, err)
 	}
-	got, err = svc.Inventory(t.Context(), dbtest.T3Connection)
+	got, err = svc.Coordinator.Inventory(t.Context(), dbtest.T3Connection)
 	if err != nil || len(got) != 2 || got[0] != rows[0] || got[1].Evidence == nil || got[1].Evidence.CanonicalPath != "/canonical" || calls != 1 {
 		t.Fatalf("local inventory %+v, ops called %d times: %v", got, calls, err)
 	}
@@ -76,9 +76,9 @@ func TestFullSyncPollsLinkedTasksAfterInventoryFailure(t *testing.T) {
 		}
 		return fake.Workspaces(ctx)
 	}}
-	svc := coordinator.NewWithAdapters(store, documentHarnesses, map[int64]execution.Adapter{task.ConnectionID: a}, nil)
+	svc := engine.NewWithAdapters(store, documentHarnesses, map[int64]execution.Adapter{task.ConnectionID: a}, nil)
 
-	started, err := svc.StartTask(ctx, task.ID)
+	started, err := svc.Coordinator.StartTask(ctx, task.ID)
 	if err != nil || started.State != db.StateRunning {
 		t.Fatalf("launch %+v: %v", started, err)
 	}
@@ -90,7 +90,7 @@ func TestFullSyncPollsLinkedTasksAfterInventoryFailure(t *testing.T) {
 	}
 	failed = true
 	fake.phase = "published"
-	result, err := svc.FullSync(ctx)
+	result, err := svc.Coordinator.FullSync(ctx)
 	if !errors.Is(err, inventoryErr) || result.Projects != 0 || result.Sessions != 1 || !slices.Equal(result.Unavailable, []int64{task.ConnectionID}) {
 		t.Fatalf("sync result %+v: %v", result, err)
 	}

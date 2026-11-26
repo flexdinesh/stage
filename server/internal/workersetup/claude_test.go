@@ -12,8 +12,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest"
 	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
 	"github.com/flexdinesh/stage/server/internal/codex"
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/remote"
@@ -93,8 +93,8 @@ func TestRemoteClaudeConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := coordinator.NewForMachines(r.store, registry, r.set, quiet())
-	got, err := svc.StartTask(ctx, task.ID)
+	svc := engine.NewForMachines(r.store, registry, r.set, quiet())
+	got, err := svc.Coordinator.StartTask(ctx, task.ID)
 	if err != nil || got.State != db.StateRunning || got.Session == nil {
 		t.Fatalf("start %+v %v", got, err)
 	}

@@ -32,7 +32,7 @@ type harnessJSON struct {
 // harnessMachine is the {id} path value's machine (none: the local
 // machine, the /api/harnesses alias); 404 when unknown or removed.
 func (s *server) harnessMachine(r *http.Request) (db.MachineInfo, error) {
-	id := s.Sync.Machines().DefaultID()
+	id := s.Engine.Connections.Machines().DefaultID()
 	if r.PathValue("id") != "" {
 		var err error
 		if id, err = pathID(r); err != nil {
@@ -56,7 +56,7 @@ func (s *server) listHarnesses(w http.ResponseWriter, r *http.Request) error {
 	}
 	// The machine's hosting profile and policy (its host in the machine set).
 	var profile harness.Profile
-	hm, hosted := s.Sync.Machines().Get(m.ID)
+	hm, hosted := s.Engine.Connections.Machines().Get(m.ID)
 	if hosted {
 		profile = hm.Profile()
 	}
@@ -115,7 +115,7 @@ func (s *server) connector(r *http.Request) (int64, harness.Descriptor, harness.
 	if !ok {
 		return m.ID, d, nil, fmt.Errorf("%w: unknown harness %q", db.ErrNotFound, r.PathValue("kind"))
 	}
-	if hm, ok := s.Sync.Machines().Get(m.ID); ok {
+	if hm, ok := s.Engine.Connections.Machines().Get(m.ID); ok {
 		if a := hm.Allows(d); !a.Available {
 			return m.ID, d, nil, &db.ConflictError{Code: "harness_unavailable", Msg: a.Reason}
 		}
@@ -138,7 +138,7 @@ func (s *server) writeConnectionStatus(w http.ResponseWriter, ctx context.Contex
 	}
 	var progress coordinator.Progress
 	if st.ConnectionID != 0 {
-		progress = s.Sync.Progress(st.ConnectionID)
+		progress = s.Engine.Coordinator.Progress(st.ConnectionID)
 	}
 	st.Sync = &harness.SyncStatus{
 		LastError: saved.LastError, LastFullSyncAt: saved.LastFullSyncAt,
@@ -193,7 +193,7 @@ func (s *server) connectionFacts(w http.ResponseWriter, r *http.Request) error {
 
 func (s *server) harnessSummary(summary harness.Summary) harness.Summary {
 	if summary.Configured && summary.LastError == "" {
-		summary.LastError = s.Sync.StreamError(summary.ConnectionID)
+		summary.LastError = s.Engine.Coordinator.StreamError(summary.ConnectionID)
 	}
 	return summary
 }

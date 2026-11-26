@@ -17,7 +17,7 @@ func (s *server) taskRequests(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	rs, err := s.Sync.Requests(r.Context(), id)
+	rs, err := s.Engine.Coordinator.Requests(r.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -51,7 +51,7 @@ func (s *server) respondRequest(w http.ResponseWriter, r *http.Request) error {
 	if err := decodeStrict(r, &in); err != nil {
 		return err
 	}
-	t, err := s.Sync.Respond(r.Context(), id, r.PathValue("rid"), in)
+	t, err := s.Engine.Coordinator.Respond(r.Context(), id, r.PathValue("rid"), in)
 	if err != nil {
 		return err
 	}
@@ -72,7 +72,7 @@ func (s *server) sendMessage(w http.ResponseWriter, r *http.Request) error {
 	if err := decodeStrict(r, &in); err != nil {
 		return err
 	}
-	t, err := s.Sync.Send(r.Context(), id, in)
+	t, err := s.Engine.Coordinator.Send(r.Context(), id, in)
 	if err != nil {
 		return err
 	}

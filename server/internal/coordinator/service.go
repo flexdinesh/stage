@@ -52,17 +52,13 @@ type Service struct {
 	watchSeeded                                                    gosync.Map // connection IDs with a successful first observation pass
 }
 
-// NewForMachines coordinates the harnesses machines host. Each in-process
-// machine's change hook must call ConnectionsChanged.
-func NewForMachines(store *db.Store, reg *harness.Registry, machines *machine.Set, log *slog.Logger) *Service {
+// New coordinates execution across hosted harness connections.
+func New(store *db.Store, conns *machine.Connections, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{store: store, conns: machine.NewConnections(store, machines, reg), log: log, FullSyncEvery: 5 * time.Minute, PollEvery: 5 * time.Second, StalePollEvery: time.Minute, LaunchAttemptTimeout: 40 * time.Second, kickSync: make(chan struct{}, 1), started: time.Now()}
+	return &Service{store: store, conns: conns, log: log, FullSyncEvery: 5 * time.Minute, PollEvery: 5 * time.Second, StalePollEvery: time.Minute, LaunchAttemptTimeout: 40 * time.Second, kickSync: make(chan struct{}, 1), started: time.Now()}
 }
-
-// Machines are the machines this coordinator drives.
-func (s *Service) Machines() *machine.Set { return s.conns.Machines() }
 
 func (s *Service) Ops(id int64) (machine.Ops, bool) { return s.conns.Ops(id) }
 

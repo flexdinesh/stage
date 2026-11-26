@@ -52,7 +52,7 @@ func (s *server) toMachineJSON(m db.MachineInfo) machineInfoJSON {
 		CreatedBy: m.CreatedBy, CreatedAt: m.CreatedAt, Connections: m.Connections,
 	}
 	version := m.Version
-	if m.ID == s.Sync.Machines().DefaultID() {
+	if m.ID == s.Engine.Connections.Machines().DefaultID() {
 		out.Kind, out.Online, out.Status, version = "local", true, machineOnline, buildinfo.Version
 	} else {
 		p := s.Channels.Presence(m.ID)
@@ -355,6 +355,6 @@ func writeAuthErr(w http.ResponseWriter, err error) bool {
 
 // machineReachable reports whether the local host or a ready worker can answer.
 func (s *server) machineReachable(machine int64) bool {
-	m, ok := s.Sync.Machines().Get(machine)
+	m, ok := s.Engine.Connections.Machines().Get(machine)
 	return ok && m.Online()
 }

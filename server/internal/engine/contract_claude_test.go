@@ -1,4 +1,4 @@
-package coordinator_test
+package engine_test
 
 import (
 	"bytes"
@@ -18,6 +18,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest/fakestate"
 	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -28,13 +29,13 @@ import (
 
 const claudeConn = 3
 
-func claudeSetup(t *testing.T, p placement, f *claudetest.Fake) (*db.Store, *coordinator.Service, db.Task, *claudecode.Adapter) {
+func claudeSetup(t *testing.T, p placement, f *claudetest.Fake) (*db.Store, *engine.Engine, db.Task, *claudecode.Adapter) {
 	t.Helper()
 	return claudeSetupWith(t, p, f, f.Adapter(claudeConn))
 }
 
 // claudeSetupWith is claudeSetup on adapter a (one with hooks).
-func claudeSetupWith(t *testing.T, p placement, f *claudetest.Fake, a *claudecode.Adapter) (*db.Store, *coordinator.Service, db.Task, *claudecode.Adapter) {
+func claudeSetupWith(t *testing.T, p placement, f *claudetest.Fake, a *claudecode.Adapter) (*db.Store, *engine.Engine, db.Task, *claudecode.Adapter) {
 	t.Helper()
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
@@ -49,7 +50,7 @@ func claudeSetupWith(t *testing.T, p placement, f *claudetest.Fake, a *claudecod
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := p.coordinator(t, store, harness.MustRegistry(t3.Descriptor, claudecode.Descriptor), map[int64]execution.Adapter{claudeConn: a}, nil)
+	svc := p.engine(t, store, harness.MustRegistry(t3.Descriptor, claudecode.Descriptor), map[int64]execution.Adapter{claudeConn: a}, nil)
 	return store, svc, task, a
 }
 
@@ -61,12 +62,12 @@ func TestContractClaudeLostReplyDispatchesOnce(t *testing.T) {
 		store, svc, task, _ := claudeSetup(t, p, f)
 		ctx := t.Context()
 		f.Update(func(s *fakestate.State) { s.Launch = fakestate.CrashAfterCreate })
-		if got, err := svc.StartTask(ctx, task.ID); err == nil || got.State != db.StateLaunching {
+		if got, err := svc.Coordinator.StartTask(ctx, task.ID); err == nil || got.State != db.StateLaunching {
 			t.Fatalf("lost reply %+v %v", got, err)
 		}
 		for range 2 {
 			clearRetry(t)
-			if err := svc.PollActive(ctx); err != nil {
+			if err := svc.Coordinator.PollActive(ctx); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -87,14 +88,14 @@ func TestContractClaudeStatesReplyAndStop(t *testing.T) {
 		f := claudetest.New(t)
 		store, svc, task, a := claudeSetup(t, p, f)
 		ctx := t.Context()
-		got, err := svc.StartTask(ctx, task.ID)
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err != nil || got.State != db.StateRunning || got.Session == nil {
 			t.Fatalf("start %+v %v", got, err)
 		}
 		ref := *got.Session
 		poll := func(want db.TaskState) db.Task {
 			t.Helper()
-			if err := svc.PollActive(ctx); err != nil {
+			if err := svc.Coordinator.PollActive(ctx); err != nil {
 				t.Fatal(err)
 			}
 			got, err := store.GetTask(ctx, task.ID)
@@ -130,7 +131,7 @@ func TestContractClaudeFollowUp(t *testing.T) {
 		store, svc, task, _ := claudeSetup(t, p, f)
 		ctx := t.Context()
 		done := claudeFinish(t, store, svc, f, task)
-		got, err := svc.Send(ctx, task.ID, execution.Message{Text: "now add tests"})
+		got, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: "now add tests"})
 		if err != nil || got.State != db.StateRunning || *got.Session != *done.Session {
 			t.Fatalf("send %+v %v", got, err)
 		}
@@ -142,11 +143,11 @@ func TestContractClaudeFollowUp(t *testing.T) {
 			t.Fatalf("events %+v %v", evs, err)
 		}
 		var ce *db.ConflictError
-		if _, err := svc.Send(ctx, task.ID, execution.Message{Text: "and docs"}); !errors.As(err, &ce) || ce.Code != "session_busy" || !strings.Contains(ce.Msg, "is working") {
+		if _, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: "and docs"}); !errors.As(err, &ce) || ce.Code != "session_busy" || !strings.Contains(ce.Msg, "is working") {
 			t.Fatalf("busy: %v", err)
 		}
 		var invalid *db.InvalidError
-		if _, err := svc.Send(ctx, task.ID, execution.Message{Text: strings.Repeat("x", coordinator.MaxMessage+1)}); !errors.As(err, &invalid) {
+		if _, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: strings.Repeat("x", coordinator.MaxMessage+1)}); !errors.As(err, &invalid) {
 			t.Fatalf("oversized: %v", err)
 		}
 	})
@@ -154,9 +155,9 @@ func TestContractClaudeFollowUp(t *testing.T) {
 
 // claudeFinish runs the task's session to Claude's done with a reply and
 // polls it: the task is done, not yet accepted.
-func claudeFinish(t *testing.T, store *db.Store, svc *coordinator.Service, f *claudetest.Fake, task db.Task) db.Task {
+func claudeFinish(t *testing.T, store *db.Store, svc *engine.Engine, f *claudetest.Fake, task db.Task) db.Task {
 	t.Helper()
-	got, err := svc.StartTask(t.Context(), task.ID)
+	got, err := svc.Coordinator.StartTask(t.Context(), task.ID)
 	if err != nil || got.Session == nil {
 		t.Fatalf("start %+v %v", got, err)
 	}
@@ -165,9 +166,9 @@ func claudeFinish(t *testing.T, store *db.Store, svc *coordinator.Service, f *cl
 	return claudePoll(t, store, svc, got, db.StateDone)
 }
 
-func claudePoll(t *testing.T, store *db.Store, svc *coordinator.Service, task db.Task, want db.TaskState) db.Task {
+func claudePoll(t *testing.T, store *db.Store, svc *engine.Engine, task db.Task, want db.TaskState) db.Task {
 	t.Helper()
-	if err := svc.PollTask(t.Context(), task); err != nil {
+	if err := svc.Coordinator.PollTask(t.Context(), task); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.GetTask(t.Context(), task.ID)
@@ -186,7 +187,7 @@ func TestContractClaudeRemovalCompletesDoneTask(t *testing.T) {
 		store, svc, task, _ := claudeSetup(t, p, f)
 		ctx := t.Context()
 		released := 0
-		svc.OnAccepted = func() { released++ }
+		svc.Coordinator.OnAccepted = func() { released++ }
 		got := claudeFinish(t, store, svc, f, task)
 		if got.AcceptanceID != nil {
 			t.Fatal("done completed before removal")
@@ -227,7 +228,7 @@ func TestContractClaudeRemovalWithoutInference(t *testing.T) {
 		t.Run("needs input", func(t *testing.T) {
 			f := claudetest.New(t)
 			store, svc, task, _ := claudeSetup(t, p, f)
-			got, err := svc.StartTask(t.Context(), task.ID)
+			got, err := svc.Coordinator.StartTask(t.Context(), task.ID)
 			if err != nil || got.Session == nil {
 				t.Fatalf("start %+v %v", got, err)
 			}
@@ -261,7 +262,7 @@ func TestContractClaudeUntrustedFolderReturnsToBacklog(t *testing.T) {
 		f := claudetest.New(t)
 		f.Update(func(s *fakestate.State) { s.Trusted = nil })
 		store, svc, task, _ := claudeSetup(t, p, f)
-		if _, err := svc.StartTask(t.Context(), task.ID); err == nil {
+		if _, err := svc.Coordinator.StartTask(t.Context(), task.ID); err == nil {
 			t.Fatal("untrusted launch succeeded")
 		}
 		got, err := store.GetTask(t.Context(), task.ID)
@@ -301,7 +302,7 @@ func TestContractClaudeWorktreeOption(t *testing.T) {
 		if _, err := store.ChangeAcceptance(ctx, pred.ID, db.AcceptanceRequest{RequestID: "accept-pred", Revision: preview.Revision, EvidenceVersion: preview.EvidenceVersion}, false); err != nil {
 			t.Fatal(err)
 		}
-		got, err := svc.StartTask(ctx, dep.ID)
+		got, err := svc.Coordinator.StartTask(ctx, dep.ID)
 		if err != nil || got.State != db.StateRunning || got.Session == nil {
 			t.Fatalf("dependent start %+v %v", got, err)
 		}
@@ -323,7 +324,7 @@ func TestContractClaudeT3SessionRefused(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
 		f := claudetest.New(t)
 		_, svc, _, _ := claudeSetup(t, p, f)
-		a, err := svc.Adapter(claudeConn)
+		a, err := svc.Connections.Adapter(claudeConn)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -332,7 +333,7 @@ func TestContractClaudeT3SessionRefused(t *testing.T) {
 		}
 		id := "55555555-5555-4555-8555-555555555555"
 		f.AddInteractive(id, f.Workspace, t3.OriginEntrypoint, "from T3")
-		err = svc.RefreshScopedSession(t.Context(), execution.SessionRef{ConnectionID: claudeConn, ExternalSessionID: id})
+		err = svc.Coordinator.RefreshScopedSession(t.Context(), execution.SessionRef{ConnectionID: claudeConn, ExternalSessionID: id})
 		var conflict *db.ConflictError
 		if !errors.As(err, &conflict) || conflict.Code != "session_refused" || conflict.Msg != "This Claude Code session was started by T3. Track it through T3." {
 			t.Fatalf("%v", err)
@@ -350,10 +351,10 @@ func TestContractClaudeDiscoveredSessionsAreSilent(t *testing.T) {
 		store, svc, _, _ := claudeSetup(t, p, f)
 		ctx := t.Context()
 		var events []coordinator.SessionChange
-		svc.OnSessionChange = func(_ context.Context, c coordinator.SessionChange) { events = append(events, c) }
+		svc.Coordinator.OnSessionChange = func(_ context.Context, c coordinator.SessionChange) { events = append(events, c) }
 		watch := func() {
 			t.Helper()
-			if err := svc.WatchAttention(ctx); err != nil {
+			if err := svc.Coordinator.WatchAttention(ctx); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -408,8 +409,8 @@ func TestRemoteClaudeConnectionOnAWorkerWithoutLocalHarnesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	rig := newContractWorker(t, store, map[int64]execution.Adapter{claudeConn: f.Adapter(claudeConn)})
-	svc := coordinator.NewForMachines(store, harness.MustRegistry(claudecode.Descriptor), rig.Set(), nil)
-	if _, err := svc.Adapter(claudeConn); err != nil {
+	svc := engine.NewForMachines(store, harness.MustRegistry(claudecode.Descriptor), rig.Set(), nil)
+	if _, err := svc.Connections.Adapter(claudeConn); err != nil {
 		t.Fatalf("hosted: %v", err)
 	}
 	rig.StopWorker()
@@ -418,7 +419,7 @@ func TestRemoteClaudeConnectionOnAWorkerWithoutLocalHarnesses(t *testing.T) {
 	var conflict *db.ConflictError
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		_, err := svc.Adapter(claudeConn)
+		_, err := svc.Connections.Adapter(claudeConn)
 		if errors.As(err, &conflict) && conflict.Code == "connection_unavailable" && strings.Contains(conflict.Msg, "stage worker run --local-harnesses") {
 			return
 		}
@@ -450,7 +451,7 @@ func TestContractClaudeImages(t *testing.T) {
 		if _, err := store.UpdateTask(ctx, task.ID, db.TaskPatch{AttachmentIDs: db.Optional[[]int64]{Set: true, V: []int64{att.ID}}}); err != nil {
 			t.Fatal(err)
 		}
-		got, err := svc.StartTask(ctx, task.ID)
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err != nil || got.State != db.StateRunning {
 			t.Fatalf("start %+v %v", got, err)
 		}
@@ -484,7 +485,7 @@ func TestContractClaudeHooksPushWithoutPolling(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
 		f := claudetest.New(t)
 		store, svc, task, a := claudeSetupWith(t, p, f, f.HookedAdapter(claudeConn, f.Hooks()))
-		got, err := svc.StartTask(t.Context(), task.ID)
+		got, err := svc.Coordinator.StartTask(t.Context(), task.ID)
 		if err != nil || got.State != db.StateRunning || got.Session == nil {
 			t.Fatalf("start %+v %v", got, err)
 		}
@@ -494,7 +495,7 @@ func TestContractClaudeHooksPushWithoutPolling(t *testing.T) {
 		streamed := make(chan struct{})
 		go func() {
 			defer close(streamed)
-			_ = svc.Stream(ctx, claudeConn)
+			_ = svc.Coordinator.Stream(ctx, claudeConn)
 		}()
 		t.Cleanup(func() {
 			cancel()

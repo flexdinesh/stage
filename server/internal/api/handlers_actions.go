@@ -109,7 +109,7 @@ func (s *server) resolveActionSite(r *http.Request, target execution.ActionTarge
 			Directory:         site.binding.Workspace,
 		}
 	}
-	site.adapter, err = s.Sync.Adapter(conn.ID)
+	site.adapter, err = s.Engine.Connections.Adapter(conn.ID)
 	return site, actionError(err)
 }
 

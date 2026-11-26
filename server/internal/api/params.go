@@ -205,6 +205,6 @@ func requiredText(name string, o *db.Optional[string]) error {
 }
 
 func (s *server) connected(ctx context.Context, id int64) bool {
-	a, e := s.Sync.Adapter(id)
+	a, e := s.Engine.Connections.Adapter(id)
 	return e == nil && a.Health(ctx).Available
 }

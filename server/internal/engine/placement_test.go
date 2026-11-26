@@ -1,13 +1,13 @@
-package coordinator_test
+package engine_test
 
 import (
 	"context"
 	"log/slog"
 	"testing"
 
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
@@ -46,15 +46,15 @@ func (p placement) machine(t *testing.T, pool *sqlite.DB) int64 {
 	return remoteMachine
 }
 
-// coordinator drives adapters: hosted in process, or proxied to a worker
+// engine drives adapters: hosted in process, or proxied to a worker
 // that serves them (a new main server and worker per call).
-func (p placement) coordinator(t *testing.T, store *db.Store, reg *harness.Registry, adapters map[int64]execution.Adapter, log *slog.Logger) *coordinator.Service {
+func (p placement) engine(t *testing.T, store *db.Store, reg *harness.Registry, adapters map[int64]execution.Adapter, log *slog.Logger) *engine.Engine {
 	t.Helper()
 	if !p.remote {
-		return coordinator.NewWithAdapters(store, reg, adapters, log)
+		return engine.NewWithAdapters(store, reg, adapters, log)
 	}
 	rig := newContractWorker(t, store, adapters)
-	return coordinator.NewForMachines(store, reg, rig.Set(), log)
+	return engine.NewForMachines(store, reg, rig.Set(), log)
 }
 
 type contractConnector struct{ harness.Connector }

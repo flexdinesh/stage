@@ -1,4 +1,4 @@
-package coordinator_test
+package engine_test
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -33,13 +33,13 @@ func TestLastWordReadOnlyWhenAtRestAndChanged(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	ctx := context.Background()
 	client := &replyClient{Fake: t3.NewFake()}
-	svc := coordinator.NewWithAdapters(store, nil, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc := engine.NewWithAdapters(store, nil, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	res, err := client.LaunchThread(ctx, t3.LaunchInput{ProjectID: "p", Title: "t"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	id := res.ThreadID
-	if err := svc.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}); err != nil {
+	if err := svc.Coordinator.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.InsertProject(ctx, db.Project{Title: "p", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: "p", Workspace: "/w/p"}}}); err != nil {
@@ -56,7 +56,7 @@ func TestLastWordReadOnlyWhenAtRestAndChanged(t *testing.T) {
 	}
 	refresh := func(wantCalls int) {
 		t.Helper()
-		if err := svc.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}); err != nil {
+		if err := svc.Coordinator.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}); err != nil {
 			t.Fatal(err)
 		}
 		if client.calls != wantCalls {

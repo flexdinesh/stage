@@ -22,7 +22,7 @@ func (s *server) getOpeningPrompt(w http.ResponseWriter, r *http.Request) error 
 	if !task.Adopted || task.Session == nil {
 		return db.Invalid("opening prompt requires an adopted task")
 	}
-	adapter, err := s.Sync.Adapter(task.ConnectionID)
+	adapter, err := s.Engine.Connections.Adapter(task.ConnectionID)
 	if err != nil {
 		return err
 	}

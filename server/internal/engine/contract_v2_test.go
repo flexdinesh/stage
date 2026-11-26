@@ -1,4 +1,4 @@
-package coordinator_test
+package engine_test
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 )
@@ -182,7 +182,7 @@ func (f *hostedHarness) Send(_ context.Context, _ execution.SessionRef, m execut
 
 // v2Setup registers connection 3 of kind with a, one bound project and one
 // backlog task.
-func v2Setup(t *testing.T, p placement, kind string, a execution.Adapter) (*db.Store, *coordinator.Service, db.Task) {
+func v2Setup(t *testing.T, p placement, kind string, a execution.Adapter) (*db.Store, *engine.Engine, db.Task) {
 	t.Helper()
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
@@ -197,7 +197,7 @@ func v2Setup(t *testing.T, p placement, kind string, a execution.Adapter) (*db.S
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := p.coordinator(t, store, v2Harnesses, map[int64]execution.Adapter{3: a}, nil)
+	svc := p.engine(t, store, v2Harnesses, map[int64]execution.Adapter{3: a}, nil)
 	return store, svc, task
 }
 
@@ -213,7 +213,7 @@ func TestContractCorrelatedLaunchDispatchesOnce(t *testing.T) {
 		f := &assignedHarness{fakeBase: fakeBase{workspace: "volume://v2"}, loseReply: true}
 		store, svc, task := v2Setup(t, p, "assigned", f)
 		ctx := t.Context()
-		got, err := svc.StartTask(ctx, task.ID)
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err == nil || got.State != db.StateLaunching || f.created != 1 {
 			t.Fatalf("lost reply %+v %v created %d", got, err, f.created)
 		}
@@ -223,7 +223,7 @@ func TestContractCorrelatedLaunchDispatchesOnce(t *testing.T) {
 		}
 		f.loseReply = false
 		clearRetry(t)
-		if err := svc.PollActive(ctx); err != nil {
+		if err := svc.Coordinator.PollActive(ctx); err != nil {
 			t.Fatal(err)
 		}
 		got, err = store.GetTask(ctx, task.ID)
@@ -238,13 +238,13 @@ func TestContractCorrelatedLaunchNotFoundStaysUnconfirmed(t *testing.T) {
 		f := &assignedHarness{fakeBase: fakeBase{workspace: "volume://v2"}, failBeforeCreate: true}
 		store, svc, task := v2Setup(t, p, "assigned", f)
 		ctx := t.Context()
-		if _, err := svc.StartTask(ctx, task.ID); err == nil {
+		if _, err := svc.Coordinator.StartTask(ctx, task.ID); err == nil {
 			t.Fatal("uncertain launch reported success")
 		}
 		f.failBeforeCreate = false
 		for range 2 {
 			clearRetry(t)
-			if err := svc.PollActive(ctx); err != nil {
+			if err := svc.Coordinator.PollActive(ctx); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -260,8 +260,8 @@ func TestContractCorrelatedLaunchNeedsCorrelator(t *testing.T) {
 		store, task := contractTask(t, p)
 		d := documentHarnesses.All()[0]
 		d.Launch = harness.LaunchCorrelated
-		svc := p.coordinator(t, store, harness.MustRegistry(d), map[int64]execution.Adapter{2: &documentHarness{}}, nil)
-		if _, err := svc.StartTask(t.Context(), task.ID); err == nil || !strings.Contains(err.Error(), "cannot reconcile") {
+		svc := p.engine(t, store, harness.MustRegistry(d), map[int64]execution.Adapter{2: &documentHarness{}}, nil)
+		if _, err := svc.Coordinator.StartTask(t.Context(), task.ID); err == nil || !strings.Contains(err.Error(), "cannot reconcile") {
 			t.Fatal("correlated launch without a correlator", err)
 		}
 		got, _ := store.GetTask(t.Context(), task.ID)
@@ -276,7 +276,7 @@ func TestContractPushIngest(t *testing.T) {
 		f := &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}}
 		store, svc, task := v2Setup(t, p, "hosted", f)
 		ctx := t.Context()
-		got, err := svc.StartTask(ctx, task.ID)
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err != nil || got.State != db.StateRunning || got.Session == nil {
 			t.Fatal(got, err)
 		}
@@ -286,7 +286,7 @@ func TestContractPushIngest(t *testing.T) {
 		done.UpdatedAt = done.UpdatedAt.Add(time.Second)
 		unowned := f.snapshot(execution.SessionRef{ConnectionID: 3, ExternalSessionID: "elsewhere"})
 		f.pushes = []execution.Observation{unowned, done}
-		if err := svc.Stream(ctx, 3); err != nil {
+		if err := svc.Coordinator.Stream(ctx, 3); err != nil {
 			t.Fatal(err)
 		}
 		got, _ = store.GetTask(ctx, task.ID)
@@ -296,7 +296,7 @@ func TestContractPushIngest(t *testing.T) {
 		other := done
 		other.Session.ConnectionID = 2
 		f.pushes = []execution.Observation{other}
-		if err := svc.Stream(ctx, 3); err == nil || !strings.Contains(err.Error(), "another connection") {
+		if err := svc.Coordinator.Stream(ctx, 3); err == nil || !strings.Contains(err.Error(), "another connection") {
 			t.Fatal("pushed observation crossed connections", err)
 		}
 	})
@@ -307,12 +307,12 @@ func TestContractObservationStateReasons(t *testing.T) {
 		f := &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}}
 		store, svc, task := v2Setup(t, p, "hosted", f)
 		ctx := t.Context()
-		got, err := svc.StartTask(ctx, task.ID)
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		f.state, f.reason = "interrupted", execution.ReasonOwnerExited
-		if err := svc.PollTask(ctx, got); err != nil {
+		if err := svc.Coordinator.PollTask(ctx, got); err != nil {
 			t.Fatal(err)
 		}
 		if got, _ = store.GetTask(ctx, task.ID); got.State != db.StateInterrupted {
@@ -322,25 +322,25 @@ func TestContractObservationStateReasons(t *testing.T) {
 		// The coordinator accepts extra declared reasons, with the usual
 		// activity checks. owner_exited always requires interrupted.
 		o := execution.Observation{Session: execution.SessionRef{ConnectionID: 3, ExternalSessionID: "a"}, Project: "proj", State: "failed", StateReason: "preempted"}
-		if err := svc.CheckObservation(assignedDescriptor.Kind, o); err != nil {
+		if err := svc.Coordinator.CheckObservation(assignedDescriptor.Kind, o); err != nil {
 			t.Fatal("declared extra reason", err)
 		}
-		if err := svc.CheckObservation(hostedDescriptor.Kind, o); err == nil || !strings.Contains(err.Error(), o.StateReason) {
+		if err := svc.Coordinator.CheckObservation(hostedDescriptor.Kind, o); err == nil || !strings.Contains(err.Error(), o.StateReason) {
 			t.Fatal("undeclared extra reason", err)
 		}
 		o.StateReason = execution.ReasonOwnerExited
-		if err := svc.CheckObservation(hostedDescriptor.Kind, o); err == nil || !strings.Contains(err.Error(), "failed") {
+		if err := svc.Coordinator.CheckObservation(hostedDescriptor.Kind, o); err == nil || !strings.Contains(err.Error(), "failed") {
 			t.Fatal("owner_exited must interrupt", err)
 		}
 
 		// The document harness has no declared reasons.
 		dstore, doc, dsvc, dtask := contractSetup(t, p)
-		running, err := dsvc.StartTask(ctx, dtask.ID)
+		running, err := dsvc.Coordinator.StartTask(ctx, dtask.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		dsvc2 := p.coordinator(t, dstore, documentHarnesses, map[int64]execution.Adapter{2: lostOwner{doc}}, nil)
-		if err := dsvc2.PollTask(ctx, running); err == nil || !strings.Contains(err.Error(), execution.ReasonOwnerExited) {
+		dsvc2 := p.engine(t, dstore, documentHarnesses, map[int64]execution.Adapter{2: lostOwner{doc}}, nil)
+		if err := dsvc2.Coordinator.PollTask(ctx, running); err == nil || !strings.Contains(err.Error(), execution.ReasonOwnerExited) {
 			t.Fatal("undeclared owner_exited was accepted", err)
 		}
 		if got, _ := dstore.GetTask(ctx, dtask.ID); got.State != db.StateRunning {
@@ -367,13 +367,13 @@ func TestContractInteraction(t *testing.T) {
 		}}
 		_, svc, task := v2Setup(t, p, "hosted", f)
 		ctx := t.Context()
-		if _, err := svc.Requests(ctx, task.ID); err == nil {
+		if _, err := svc.Coordinator.Requests(ctx, task.ID); err == nil {
 			t.Fatal("requests without a session")
 		}
-		if _, err := svc.StartTask(ctx, task.ID); err != nil {
+		if _, err := svc.Coordinator.StartTask(ctx, task.ID); err != nil {
 			t.Fatal(err)
 		}
-		rs, err := svc.Requests(ctx, task.ID)
+		rs, err := svc.Coordinator.Requests(ctx, task.ID)
 		if err != nil || len(rs) != 2 || rs[0].ID != "q1" || rs[0].Preview != "go test ./..." || rs[0].TextOption != "no" {
 			t.Fatal(rs, err)
 		}
@@ -381,36 +381,36 @@ func TestContractInteraction(t *testing.T) {
 			t.Fatal("question round trip", rs[1])
 		}
 		var invalid *db.InvalidError
-		if _, err := svc.Respond(ctx, task.ID, "q1", execution.Response{}); !errors.As(err, &invalid) {
+		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q1", execution.Response{}); !errors.As(err, &invalid) {
 			t.Fatal("empty response accepted", err)
 		}
-		if _, err := svc.Respond(ctx, task.ID, "missing", execution.Response{Option: "yes"}); !errors.Is(err, db.ErrNotFound) {
+		if _, err := svc.Coordinator.Respond(ctx, task.ID, "missing", execution.Response{Option: "yes"}); !errors.Is(err, db.ErrNotFound) {
 			t.Fatal("unknown request", err)
 		}
-		if _, err := svc.Respond(ctx, task.ID, "q1", execution.Response{Option: "bad"}); !errors.As(err, &invalid) || invalid.Msg != "pick allow or deny" {
+		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q1", execution.Response{Option: "bad"}); !errors.As(err, &invalid) || invalid.Msg != "pick allow or deny" {
 			t.Fatal("invalid answer", err)
 		}
-		if _, err := svc.Respond(ctx, task.ID, "q1", execution.Response{Option: "yes"}); err != nil || f.responses["q1"].Option != "yes" {
+		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q1", execution.Response{Option: "yes"}); err != nil || f.responses["q1"].Option != "yes" {
 			t.Fatal(err, f.responses)
 		}
-		if _, err := svc.Respond(ctx, task.ID, "q2", execution.Response{Answers: map[string][]string{"0": {"Red", "teal"}}}); err != nil || len(f.responses["q2"].Answers["0"]) != 2 {
+		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q2", execution.Response{Answers: map[string][]string{"0": {"Red", "teal"}}}); err != nil || len(f.responses["q2"].Answers["0"]) != 2 {
 			t.Fatal("answers", err, f.responses)
 		}
-		if _, err := svc.Send(ctx, task.ID, execution.Message{Text: "also update docs"}); err != nil || len(f.messages) != 1 {
+		if _, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: "also update docs"}); err != nil || len(f.messages) != 1 {
 			t.Fatal(err, f.messages)
 		}
 		f.respondOff = "read-only session"
 		var ce *db.ConflictError
-		if _, err := svc.Requests(ctx, task.ID); !errors.As(err, &ce) || ce.Code != "operation_unavailable" || !strings.Contains(ce.Msg, "read-only session") {
+		if _, err := svc.Coordinator.Requests(ctx, task.ID); !errors.As(err, &ce) || ce.Code != "operation_unavailable" || !strings.Contains(ce.Msg, "read-only session") {
 			t.Fatal("unavailable operation", err)
 		}
 
 		// A harness without the interface: operation_unavailable, nothing else limited.
 		_, _, dsvc, dtask := contractSetup(t, p)
-		if _, err := dsvc.StartTask(ctx, dtask.ID); err != nil {
+		if _, err := dsvc.Coordinator.StartTask(ctx, dtask.ID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := dsvc.Send(ctx, dtask.ID, execution.Message{Text: "hi"}); !errors.As(err, &ce) || ce.Code != "operation_unavailable" {
+		if _, err := dsvc.Coordinator.Send(ctx, dtask.ID, execution.Message{Text: "hi"}); !errors.As(err, &ce) || ce.Code != "operation_unavailable" {
 			t.Fatal("non-interactive harness", err)
 		}
 	})

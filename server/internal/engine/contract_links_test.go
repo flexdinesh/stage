@@ -1,4 +1,4 @@
-package coordinator_test
+package engine_test
 
 import (
 	"bytes"
@@ -12,8 +12,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/client"
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
@@ -33,17 +33,17 @@ func TestContractTaskLinksAndAcceptedHandoff(t *testing.T) {
 		store, task := contractTask(t, p)
 		fake := &documentHarness{}
 		adapters := map[int64]execution.Adapter{task.ConnectionID: fake}
-		var svc *coordinator.Service
+		var svc *engine.Engine
 		if p.remote {
 			rig := remotetest.NewWithConnectors(t, remoteMachine, adapters, map[string]harness.Connector{
 				task.Harness: documentLinkConnector{connectionID: task.ConnectionID},
 			})
-			svc = coordinator.NewForMachines(store, documentHarnesses, rig.Set(), nil)
+			svc = engine.NewForMachines(store, documentHarnesses, rig.Set(), nil)
 		} else {
-			svc = coordinator.NewWithAdapters(store, documentHarnesses, adapters, nil)
+			svc = engine.NewWithAdapters(store, documentHarnesses, adapters, nil)
 		}
 		ctx := t.Context()
-		srv := httptest.NewServer(api.NewRouter(api.Deps{Store: store, Sync: svc, Harnesses: documentHarnesses}))
+		srv := httptest.NewServer(api.NewRouter(api.Deps{Store: store, Engine: svc, Harnesses: documentHarnesses}))
 		t.Cleanup(srv.Close)
 		c := client.New(srv.URL)
 		home := t.TempDir()
@@ -73,7 +73,7 @@ func TestContractTaskLinksAndAcceptedHandoff(t *testing.T) {
 		checkLinks(execution.Links{}, "")
 		launchedLinks := execution.Links{Web: "https://documents.invalid/live", Native: "documents://session/live", Command: "documents resume live"}
 		fake.links = &launchedLinks
-		launched, err := svc.StartTask(ctx, task.ID)
+		launched, err := svc.Coordinator.StartTask(ctx, task.ID)
 		if err != nil || launched.Session == nil {
 			t.Fatalf("launch %+v: %v", launched, err)
 		}
@@ -82,7 +82,7 @@ func TestContractTaskLinksAndAcceptedHandoff(t *testing.T) {
 		publishedLinks := execution.Links{Native: "documents://session/published"}
 		fake.links = &publishedLinks
 		fake.phase = "published"
-		if err := svc.PollTask(ctx, launched); err != nil {
+		if err := svc.Coordinator.PollTask(ctx, launched); err != nil {
 			t.Fatal(err)
 		}
 		checkLinks(publishedLinks, publishedLinks.Native)
@@ -118,7 +118,7 @@ func TestContractTaskLinksAndAcceptedHandoff(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := svc.StartTask(ctx, next.ID); err != nil {
+		if _, err := svc.Coordinator.StartTask(ctx, next.ID); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(fake.input.Prompt, publishedLinks.Native) || strings.Contains(fake.input.Prompt, launchedLinks.Web) {

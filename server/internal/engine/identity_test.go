@@ -1,4 +1,4 @@
-package coordinator_test
+package engine_test
 
 import (
 	"encoding/json"
@@ -14,9 +14,9 @@ import (
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest"
 	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/codex/codextest"
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -102,10 +102,10 @@ func (r *identityRig) connection(kind string, machine int64) int64 {
 
 // sync runs connection id's discovery refresh and import, as the sync pass
 // does.
-func (r *identityRig) sync(svc *coordinator.Service, id int64) {
+func (r *identityRig) sync(svc *engine.Engine, id int64) {
 	r.t.Helper()
 	ctx := r.t.Context()
-	ws, err := svc.Inventory(ctx, id)
+	ws, err := svc.Coordinator.Inventory(ctx, id)
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestIdentityOneRepoAcrossFourHarnesses(t *testing.T) {
 	r := newIdentityRig(t)
 	repo := gitRepo(t, filepath.Join(tempRoot(t), "app"), acmeApp)
 	t3c, occ, ccc, cxc := r.connection(t3.Kind, 1), r.connection(opencode.Kind, 1), r.connection(claudecode.Kind, 1), r.connection(codex.Kind, 1)
-	svc := coordinator.NewWithAdapters(r.store, nil, map[int64]execution.Adapter{
+	svc := engine.NewWithAdapters(r.store, nil, map[int64]execution.Adapter{
 		t3c: t3Adapter(execution.WorkspaceInfo{Title: "app", WorkspaceRoot: repo, OriginRemote: acmeApp, Repo: "github.com/acme/app", RepoPath: "."}),
 		occ: openCodeAdapter(t, occ, ocProject{"oc-app", repo, "git"}),
 		ccc: claudeAdapter(t, ccc, repo),
@@ -245,7 +245,7 @@ func TestIdentityPlainDirectoryStaysManual(t *testing.T) {
 	r := newIdentityRig(t)
 	plain := mkdir(t, filepath.Join(tempRoot(t), "notes"))
 	occ, ccc, cxc := r.connection(opencode.Kind, 1), r.connection(claudecode.Kind, 1), r.connection(codex.Kind, 1)
-	svc := coordinator.NewWithAdapters(r.store, nil, map[int64]execution.Adapter{
+	svc := engine.NewWithAdapters(r.store, nil, map[int64]execution.Adapter{
 		occ: openCodeAdapter(t, occ, ocProject{"oc-notes", plain, ""}),
 		ccc: claudeAdapter(t, ccc, plain),
 		cxc: codexAdapter(t, cxc, plain),
@@ -270,7 +270,7 @@ func TestIdentityTwoMachinesSameRemote(t *testing.T) {
 	two := gitRepo(t, filepath.Join(root, "m2", "src", "app"), "https://github.com/acme/app")
 	bare := gitRepo(t, filepath.Join(root, "m2", "scratch"), "")
 	c1, c2 := r.connection(claudecode.Kind, 1), r.connection(claudecode.Kind, 2)
-	svc := coordinator.NewWithAdapters(r.store, nil, map[int64]execution.Adapter{
+	svc := engine.NewWithAdapters(r.store, nil, map[int64]execution.Adapter{
 		c1: claudeAdapter(t, c1, one),
 		c2: claudeAdapter(t, c2, two, bare),
 	}, nil)
@@ -305,7 +305,7 @@ func TestIdentityAmbiguousRemoteWaits(t *testing.T) {
 	for i, c := range conns {
 		adapters[c] = claudeAdapter(t, c, dirs[i])
 	}
-	svc := coordinator.NewWithAdapters(r.store, nil, adapters, nil)
+	svc := engine.NewWithAdapters(r.store, nil, adapters, nil)
 	ctx := t.Context()
 	for i, title := range []string{"App one", "App two"} {
 		if _, err := r.store.InsertProject(ctx, db.Project{Title: title, Bindings: []db.ProjectBinding{{ConnectionID: conns[i], ExternalProjectID: dirs[i], Workspace: dirs[i]}}}); err != nil {
@@ -329,7 +329,7 @@ func TestIdentityMonorepoSubprojects(t *testing.T) {
 	a := mkdir(t, filepath.Join(mono, "packages", "a"))
 	cx, cc, t3c := r.connection(codex.Kind, 1), r.connection(claudecode.Kind, 1), r.connection(t3.Kind, 2)
 	remoteA, remoteB := "/m2/mono/packages/a", "/m2/mono/packages/b"
-	svc := coordinator.NewWithAdapters(r.store, nil, map[int64]execution.Adapter{
+	svc := engine.NewWithAdapters(r.store, nil, map[int64]execution.Adapter{
 		cx: codexAdapter(t, cx, a),
 		cc: claudeAdapter(t, cc, mono, a),
 		t3c: t3Adapter(
@@ -370,8 +370,8 @@ func TestIdentityInventoryWhereTheFilesLive(t *testing.T) {
 		repo := gitRepo(t, filepath.Join(tempRoot(t), "app"), acmeApp)
 		plain := mkdir(t, filepath.Join(tempRoot(t), "notes"))
 		c := r.connection(claudecode.Kind, p.machine(t, r.pool))
-		svc := p.coordinator(t, r.store, nil, map[int64]execution.Adapter{c: claudeAdapter(t, c, repo, plain)}, nil)
-		ws, err := svc.Inventory(t.Context(), c)
+		svc := p.engine(t, r.store, nil, map[int64]execution.Adapter{c: claudeAdapter(t, c, repo, plain)}, nil)
+		ws, err := svc.Coordinator.Inventory(t.Context(), c)
 		if err != nil {
 			t.Fatal(err)
 		}

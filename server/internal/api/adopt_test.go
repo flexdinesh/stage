@@ -68,7 +68,7 @@ func launchSession(t *testing.T, e *env, project, title string) string {
 func runningSession(t *testing.T, e *env, project, title string) string {
 	t.Helper()
 	id := launchSession(t, e, project, title)
-	if err := e.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}); err != nil {
+	if err := e.engine.Coordinator.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -237,7 +237,7 @@ func TestCancelledSessionHoldsUntilSettled(t *testing.T) {
 
 	// Settled with the last run still cancelled: passes.
 	_ = e.fake.Settle(s)
-	if _, err := e.sync.FullSync(context.Background()); err != nil {
+	if _, err := e.engine.Coordinator.FullSync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	e.poll()

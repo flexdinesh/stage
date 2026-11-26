@@ -7,8 +7,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/codex/codextest"
 	"github.com/flexdinesh/stage/server/internal/codexsetup"
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencode"
@@ -26,7 +26,7 @@ func codexEnv(t *testing.T) (*env, *codextest.Server) {
 	e := newEnv(t, func(d *api.Deps) {
 		local := machine.NewLocal(db.LocalMachine, harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true}, nil)
 		set := machine.MustSet(local)
-		svc := coordinator.NewForMachines(d.Store, codexHarnesses, set, nil)
+		svc := engine.NewForMachines(d.Store, codexHarnesses, set, nil)
 		local.OnChange(svc.ConnectionsChanged)
 		ports := machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), codexHarnesses)
 		setup, err := codexsetup.New(t.Context(), codexsetup.Options{
@@ -38,7 +38,7 @@ func codexEnv(t *testing.T) (*env, *codextest.Server) {
 		}
 		t.Cleanup(setup.Close)
 		local.SetConnector(codex.Kind, codexsetup.NewConnector(setup))
-		d.Harnesses, d.Sync = codexHarnesses, svc
+		d.Harnesses, d.Engine = codexHarnesses, svc
 		d.LiveConnectors = func() harness.Connectors {
 			c, err := set.Connectors(codexHarnesses)
 			if err != nil {

@@ -123,7 +123,7 @@ func (s *server) executionCapabilities(w http.ResponseWriter, r *http.Request) e
 		return err
 	}
 	if c.Actions != nil {
-		if a, err := s.Sync.Adapter(id); err == nil {
+		if a, err := s.Engine.Connections.Adapter(id); err == nil {
 			checked, err := validateActionCapabilities(a, c)
 			if err != nil {
 				s.log.Warn("discarded invalid action declarations", "connection", id, "err", err)
@@ -140,7 +140,7 @@ func (s *server) executionCapabilities(w http.ResponseWriter, r *http.Request) e
 }
 func (s *server) capabilities(ctx context.Context, d taskDestination) (execution.Capabilities, error) {
 	var empty execution.Capabilities
-	a, err := s.Sync.Adapter(d.connectionID)
+	a, err := s.Engine.Connections.Adapter(d.connectionID)
 	if err != nil {
 		return empty, err
 	}
@@ -243,7 +243,7 @@ func (s *server) previewLaunchLink(w http.ResponseWriter, r *http.Request) error
 	if err = decodeStrict(r, &in); err != nil {
 		return err
 	}
-	p, err := s.Sync.PreviewExisting(r.Context(), id, in.Link)
+	p, err := s.Engine.Coordinator.PreviewExisting(r.Context(), id, in.Link)
 	if err != nil {
 		return err
 	}
@@ -264,7 +264,7 @@ func (s *server) attachLaunchLink(w http.ResponseWriter, r *http.Request) error 
 	if err = decodeStrict(r, &in); err != nil {
 		return err
 	}
-	t, err := s.Sync.LinkExisting(r.Context(), id, in.Link, in.Attempt, in.Revision, in.Environment)
+	t, err := s.Engine.Coordinator.LinkExisting(r.Context(), id, in.Link, in.Attempt, in.Revision, in.Environment)
 	if err != nil {
 		return err
 	}

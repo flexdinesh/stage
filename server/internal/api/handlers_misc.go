@@ -76,7 +76,7 @@ func requestSession(r *http.Request) (db.SessionRef, error) {
 
 // A session's directory can be a worktree. Verify its external project's workspace with the adapter.
 func (s *server) workspaceFor(r *http.Request, o execution.Observation) (*db.ProjectBinding, error) {
-	a, err := s.Sync.Adapter(o.Session.ConnectionID)
+	a, err := s.Engine.Connections.Adapter(o.Session.ConnectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func (s *server) prepareAdoption(r *http.Request, ref db.SessionRef) (*db.Projec
 	if !errors.Is(err, db.ErrNotFound) {
 		return nil, err
 	}
-	a, err := s.Sync.Adapter(ref.ConnectionID)
+	a, err := s.Engine.Connections.Adapter(ref.ConnectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (s *server) prepareAdoption(r *http.Request, ref db.SessionRef) (*db.Projec
 	if op := f.Operations[execution.OpAdopt]; !op.Available {
 		return nil, db.Conflict("adoption unavailable on this connection: %s", op.Reason)
 	}
-	if err := s.Sync.RefreshScopedSession(ctx, ref); err != nil {
+	if err := s.Engine.Coordinator.RefreshScopedSession(ctx, ref); err != nil {
 		return nil, err
 	}
 	o, err := s.Store.Observation(ctx, ref)
@@ -166,7 +166,7 @@ func (s *server) sessionContext(w http.ResponseWriter, r *http.Request) error {
 		if !errors.Is(err, db.ErrNotFound) {
 			return err
 		}
-		if err = s.Sync.RefreshScopedSession(ctx, ref); err != nil {
+		if err = s.Engine.Coordinator.RefreshScopedSession(ctx, ref); err != nil {
 			return err
 		}
 		o, e := s.Store.Observation(ctx, ref)

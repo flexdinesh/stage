@@ -22,9 +22,9 @@ import (
 	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	stageharness "github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/listen"
@@ -43,7 +43,7 @@ type harness struct {
 	url     string
 	handler http.Handler // the /api router
 	fake    *t3.Fake
-	sync    *coordinator.Service
+	engine  *engine.Engine
 	store   *db.Store
 	caller  agentctx.Caller
 	execs   [][]string
@@ -61,8 +61,8 @@ func newHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
 	h.fake = t3.NewFake()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	reg := stageharness.MustRegistry(t3.Descriptor, opencode.Descriptor)
-	h.sync = coordinator.NewWithAdapters(store, reg, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(h.fake)}, log)
-	local, _ := h.sync.Machines().Local(db.LocalMachine)
+	h.engine = engine.NewWithAdapters(store, reg, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(h.fake)}, log)
+	local, _ := h.engine.Connections.Machines().Local(db.LocalMachine)
 	ports := machine.NewStorePorts(store.OnMachine(db.LocalMachine), reg)
 	openCode, err := opencodesetup.Module.Compose(t.Context(), stageharness.Ports{
 		Settings: ports.Settings(), Secrets: ports.Secrets(), Identity: ports, Install: local.Install,
@@ -83,7 +83,7 @@ func newHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
 	}
 	deps := api.Deps{
 		Config: config.Config{},
-		Store:  store, Sync: h.sync, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:  store, Engine: h.engine, Push: notify.New(store, "https://stage.test", log), Logger: log,
 		Harnesses: reg, Connectors: connectors,
 	}
 	for _, opt := range opts {
@@ -135,7 +135,7 @@ func (h *harness) project(root string) db.Project {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	if _, err := h.sync.FullSync(ctx); err != nil {
+	if _, err := h.engine.Coordinator.FullSync(ctx); err != nil {
 		h.t.Fatal(err)
 	}
 	// The sync pass imports the T3 project.
@@ -171,7 +171,7 @@ func TestTaskCommands(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.sync.RefreshScopedSession(t.Context(), *t3Session(out.ThreadID)); err != nil {
+	if err := h.engine.Coordinator.RefreshScopedSession(t.Context(), *t3Session(out.ThreadID)); err != nil {
 		t.Fatal(err)
 	}
 	h.caller = agentctx.Caller{Session: t3Session(out.ThreadID), Cwd: "/elsewhere"}
@@ -245,7 +245,7 @@ func TestTreeCommandsAndOriginSessionFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: out.ThreadID}); err != nil {
+	if err := h.engine.Coordinator.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: out.ThreadID}); err != nil {
 		t.Fatal(err)
 	}
 	h.caller = agentctx.Caller{Session: t3Session(out.ThreadID)}
@@ -361,7 +361,7 @@ func TestTreeCommandsAndOriginSessionFilter(t *testing.T) {
 	if err := h.fake.SetStatus(launched.Session.ExternalSessionID, t3.StatusCompleted); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.sync.PollActive(ctx); err != nil {
+	if err := h.engine.Coordinator.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
 	preview, err := h.store.CompletionPreview(ctx, third.ID)
@@ -391,7 +391,7 @@ func TestSessionsAdoptCommand(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := h.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: out.ThreadID}); err != nil {
+		if err := h.engine.Coordinator.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: out.ThreadID}); err != nil {
 			t.Fatal(err)
 		}
 		return out.ThreadID

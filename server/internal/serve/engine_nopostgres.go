@@ -11,6 +11,6 @@ import (
 
 // openPostgres refuses: this binary has no Postgres adapter (config.Load
 // already refuses the URL; this backs up a Config built another way).
-func openPostgres(context.Context, config.DatabaseURL, string, *slog.Logger) (engine, error) {
+func openPostgres(context.Context, config.DatabaseURL, string, *slog.Logger) (storageEngine, error) {
 	return nil, config.Invalid(config.ErrNoPostgres)
 }

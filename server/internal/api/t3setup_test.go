@@ -72,7 +72,7 @@ type setupT3 struct {
 }
 
 func (s *setupT3) opt(d *api.Deps) {
-	a, _ := d.Sync.Adapter(d.Store.ActiveID(db.LocalMachine, "t3"))
+	a, _ := d.Engine.Connections.Adapter(d.Store.ActiveID(db.LocalMachine, "t3"))
 	client := a.(*t3.Adapter).Client
 	withT3Setup(d, t3setup.Options{
 		Client:   client,
@@ -269,7 +269,7 @@ func TestT3StatusReportsSyncProgress(t *testing.T) {
 	gate, reached := make(chan struct{}), make(chan struct{}, 1)
 	e.t3.listGate.Store(&listGate{gate: gate, reached: reached})
 	done := make(chan error, 1)
-	go func() { _, err := e.sync.FullSync(context.Background()); done <- err }()
+	go func() { _, err := e.engine.Coordinator.FullSync(context.Background()); done <- err }()
 	<-reached
 	var st t3Status
 	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
