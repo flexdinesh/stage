@@ -13,19 +13,19 @@ export function prefillConfig(connection: Pick<HarnessConnection, "newTaskConfig
 
 /**
  * The connection a new task on a project starts on (0: none; the user picks), as the server picks one for a request
- * without it: the default when the project is available there, else the project's only active binding, else (with a
- * default set) its first available binding, the main machine's first, then by machine and connection id.
+ * without it: the default when its primary is available, else the project's only active connection, else (with a
+ * default set) its first available primary, the main machine's first, then by machine and connection id.
  */
 export function newTaskConnection(
-  bindings: readonly Pick<ProjectBinding, "connectionId" | "connectionActive" | "status">[],
+  bindings: readonly Pick<ProjectBinding, "connectionId" | "connectionActive" | "status" | "primary">[],
   defaultId: number | null,
   machineOf: (connectionId: number) => number,
 ): number {
   const active = bindings.filter((b) => b.connectionActive);
-  const available = active.filter((b) => b.status === "available");
+  const available = active.filter((b) => b.primary && b.status === "available");
   if (defaultId !== null && available.some((b) => b.connectionId === defaultId)) return defaultId;
-  const only = active.length === 1 ? active[0] : undefined;
-  if (only !== undefined) return only.connectionId;
+  const connections = new Set(active.map((b) => b.connectionId));
+  if (connections.size === 1) return active[0]?.connectionId ?? 0;
   if (defaultId === null) return 0;
   const first = available.toSorted((a, b) => machineOf(a.connectionId) - machineOf(b.connectionId) || a.connectionId - b.connectionId)[0];
   return first?.connectionId ?? 0;

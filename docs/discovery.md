@@ -1,6 +1,6 @@
 # Workspace discovery and project identity
 
-Stage owns the project and its stable ID. A harness reports its workspaces and owns its sessions and their checkouts. This is the target contract for [ADR 0008 D9](adr/0008-harness-foundation.md#d9) and [D10](adr/0008-harness-foundation.md#d10).
+Stage owns the project and its stable ID. A harness reports its workspaces and owns its sessions and their checkouts. The evidence and identity rules implement [ADR 0008 D9](adr/0008-harness-foundation.md#d9) and [D10](adr/0008-harness-foundation.md#d10).
 
 | Layer | Delivers |
 | --- | --- |
@@ -23,24 +23,25 @@ Each inventory row identifies a workspace by connection, external ID and reporte
 
 `machine.Ops` reads filesystem evidence where the files live, in process or on the worker. It reads Git metadata directly, including worktree pointers and the common configuration. Evidence collection is read-only and requires no Git binary. A loopback URL can be a tunnel or a container. A connection's machine and matching path strings alone provide no file host proof. Layer 07 removes shared path mappings. A proven missing directory makes the row unavailable and retains its last evidence. Other inspection errors supply no fresh filesystem proof.
 
-Normalize supported network origin URLs to `host[:port]/repository/path`. SSH and HTTPS spellings can converge. Lowercase the host, strip its trailing dot, drop credentials, query strings, fragments and default ports, and trim surrounding path slashes and a terminal `.git`. Preserve repository path case and non-default ports. Local paths, drive paths, file URLs and ambiguous paths yield no remote key. Mirrors, SSH host aliases, Git URL rewrites and provider-specific spelling can require manual review.
+Normalize SSH, HTTPS, HTTP and Git network origin URLs to `host[:port]/repository/path`. SSH and HTTPS spellings can converge. Lowercase the host, strip its trailing dot, drop credentials, query strings, fragments and default ports, and trim surrounding path slashes and a terminal `.git`. Reject empty paths and ambiguous escapes. Preserve repository path case and non-default ports. Local paths, drive paths, file URLs and ambiguous paths yield no remote key. Mirrors, SSH host aliases, Git `insteadOf` rewrites and provider-specific spelling can require manual review.
 
 ## Identity keys and resolution (07)
 
-A pathless workspace binds by connection and external ID, including when the harness also supplies an origin. Layer 07 must apply this rule before considering the remote key. For workspaces with paths, use the first applicable key. These tuples are schematic. Stored keys preserve component boundaries.
+Choose the first applicable key in this table. Remote and checkout key components escape percent signs and hash signs to preserve tuple boundaries.
 
-| Key | Scope |
-| --- | --- |
-| Remote + known subpath | All connections and machines. The same origin and subpath identify one project across clones and worktrees. |
-| File host + checkout key + subpath | One file host. Covers a checkout with no usable remote key and its linked worktrees. |
-| File host + canonical path | One file host. Covers a plain directory or another locally proven path with no checkout key. |
-| Connection + external ID | One connection. Covers pathless workspaces and workspaces without stronger evidence. |
+| Priority | Key | When it applies |
+| --- | --- | --- |
+| 1 | `external:<connection>:<externalId>` | The reported path is empty, even when the harness reported both origin and subpath. |
+| 2 | `remote:<remote>#<subpath>` | The path is present and both remote and subpath are known. This key spans connections, machines, clones and worktrees. |
+| 3 | `local:<fileHost>:<checkoutKey>#<subpath>` | The file host and Git common directory are known. This key spans linked worktrees on that host. |
+| 4 | `dir:<fileHost>:<canonicalPath>` | The file host and canonical directory are known. |
+| 5 | `external:<connection>:<externalId>` | The workspace lacks stronger evidence. |
 
-Import, Resolve now and bind preview use one resolver over stored evidence. It evaluates available unbound rows and preserves existing bindings, including those whose workspace is unavailable.
+Automatic import and Resolve now use one resolver over stored evidence. The bind picker uses the stored resolution from the same resolver. Resolve now plans available unbound rows, most recently active first, then by external ID and path. Each planned binding is visible to later placements in the same plan. Existing bindings stay attached, including when their workspace is unavailable.
 
 1. **Bound.** Keep the existing project. Other projects with active bindings under the same key are merge suggestions.
 2. **Review, declined.** A saved decline prevents automatic placement.
-3. **Join or review, moved.** Compare an available workspace with active bindings whose old workspace is unavailable on that same connection. A matching key or a matching inode hint on the same known file host can connect them. Exactly one old binding and one eligible replacement rebind automatically. Multiple plausible old bindings or replacements go to review with candidates.
+3. **Join or review, moved.** Compare an available workspace with active bindings whose old workspace is unavailable on that same connection. A matching key or a matching inode hint on the same known file host can connect them. Exactly one old binding and one available, unbound, undeclined replacement rebind automatically, including when the replacement is manual-bind only. Retired connections contribute to key matching and are excluded from move matching. Multiple plausible old bindings or replacements go to review with candidates.
 4. **New, external.** An external-key workspace with no existing binding or move can start its own project, subject to import policy.
 5. **Join or review by key.** Join when one project owns the key. Several owners yield **review, ambiguous**. Active bindings on retired connections still count here. For local keys, unrefreshed legacy bindings can match the old same-machine path until refreshed. A manual-bind-only or archived workspace with one ordinary match yields **review, suggested**.
 6. **New.** With no key match, the workspace can start a project. Automatic import creates it only when the harness policy allows import and the workspace is unarchived. Other new rows are available for manual placement.
@@ -53,15 +54,180 @@ A project can have several active workspaces on a connection and one primary. Ta
 
 Discovery review shows **New**, **Suggested**, **Ambiguous**, **Declined** and **Moved** with reasons and candidate projects. A person can bind a workspace to an existing project, create a project, decline it or undo the decline. A decline is scoped to the connection and recorded under both the workspace's identity key and external key. It can survive a changed external ID or a changed path. Unbinding declines that workspace, and removing a primary promotes a remaining binding. A manual bind clears its decline and can replace a binding to resolve a move.
 
-Merge is directional. Its preview names the survivor and counts the workspaces, tasks, schedules and snippets that move. Confirmation checks for stale inputs and can be blocked by a launching task in the source project. The merged ID becomes an alias. An existing project link opens the current surviving project, including after a later merge, and API responses use the survivor's ID. Keep separate dismisses the pair's suggestion. Split moves one binding to a new project and dismisses the pair's merge suggestion. Tasks, schedules and snippets stay with the source. A task that explicitly chose the split workspace needs a new choice. The source must keep at least one active workspace.
+Merge is directional. Its preview names the survivor and counts the workspaces, tasks, schedules and snippets that move. Confirmation checks for stale inputs and can be blocked by a launching task in the source project. The merged ID becomes an alias. An existing project link opens the current surviving project, including after a later merge, and API responses use the survivor's ID. Keep separate dismisses the pair's suggestion. Split moves one binding to a new project and dismisses the pair's merge suggestion. Tasks, schedules and snippets stay with the source. Tasks and schedules that explicitly chose the split workspace need a new choice. The source must keep at least one active workspace.
 
 The layer 08 views show machine, harness, path or external ID, availability and primary. Cached offline rows stay visible with their machine status. Declines remain visible outside the actionable count. The exact layout and interaction design belong to layer 08.
 
-## Worked examples (07)
+## Resolver examples (07)
 
-- On a laptop, Codex reports a trusted directory at `/home/jo/app`, whose origin is `git@git.example:Org/App.git`. On a build machine, Claude Code reports the checkout root at `/work/app`, whose origin is `https://git.example/Org/App`. Both have the key `(git.example/Org/App, .)`. The first import creates the project. The second joins it. A separate clone or linked worktree of that origin at the root also joins, subject to its import policy.
-- A fork at `git.example/Jo/App` has its own key even when it lists `git.example/Org/App` as upstream. In a monorepo, `packages/api`, `packages/web` and `.` have distinct keys under the same origin.
-- An OpenCode network service reports `/home/jo/app` with unknown file host and no origin. That path provides no evidence about the laptop directory, so Stage uses the service's connection and external ID. A service that reports a usable origin and subpath can still join by remote evidence. Equal paths on two known hosts also give separate local keys when both lack an origin.
+The verdict is for the second workspace unless specified. Rows are eligible for import unless the example says otherwise.
+
+| # | Workspace evidence | Verdict |
+| --- | --- | --- |
+| 1 | Two harnesses on one file host attest the same path. | Join by remote and subpath when known, otherwise by local evidence. |
+| 2 | A checkout root and a linked worktree root. | Join by remote or, without one, by common directory plus the root subpath. |
+| 3 | Two independent clones on one host. | Join by remote when both have the same remote and subpath. Each clone without a remote has its own local checkout key. |
+| 4 | Codex on a laptop reports `git@git.example:Org/App.git` at the root. Claude Code on a worker reports `https://git.example/Org/App` at the root. | Join by `remote:git.example/Org/App#.` |
+| 5 | Separate checkouts on two machines, without remotes. | New, using distinct host-scoped keys. |
+| 6 | A fork at `git.example/Jo/App` lists `git.example/Org/App` as upstream. | New. The fork's origin sets its key. |
+| 7 | One monorepo reports `packages/api`, `packages/web` and `.`. | New for each subpath. |
+| 8 | An old workspace becomes unavailable and the checkout reappears on the same connection. | Join as moved when the identity key or same-host inode hint identifies exactly one source and one replacement. Competing sources or replacements go to moved review. |
+| 9 | A bound workspace changes origin URL. | The binding survives. A clone with either origin can join while an active binding still carries its key. |
+| 10 | A harness reports an empty path, even with origin and subpath. | New by external key, then bound. If an earlier path-bearing row used that same external key and became unavailable, a unique pathless replacement can match a move. |
+| 11 | A network service without an attested file host reports the same path as a local checkout. | New by external key if remote evidence is missing. A reported remote and known subpath can join when its reported path is present. |
+| 12 | A workspace is unbound, then rediscovered under a different external ID but the same identity key. | Declined review on that connection. |
+| 13 | A replacement instance reports a workspace whose key is still held on the retired connection. | Join by key. A locally attested workspace can join by the old same-machine path if the owner is an unrefreshed legacy row and the candidate uses a local key. |
+
+## Layer 08 API handoff
+
+See [the route reference](api.md#workspace-discovery-and-project-identity)
+for actions, validation and errors. These examples use an existing project
+`42` and connection `7`.
+
+### Resolve preview and confirmation
+
+`POST /api/connections/7/resolve` with `{"apply":false}` previews an eligible
+second workspace joining project `42`.
+
+```json
+{
+  "applied": false,
+  "previewToken": "6c7341a963ef7c5e4f8eb376ac9bbfac8b62b3363e378f941fcb2272556c9bbb",
+  "placements": [
+    {
+      "workspace": {
+        "connectionId": 7,
+        "externalId": "/work/app-review",
+        "title": "App review checkout",
+        "workspace": "/work/app-review",
+        "available": true,
+        "importable": true,
+        "harnessArchived": false,
+        "activeAt": null,
+        "projectId": null,
+        "bindingId": null,
+        "primary": false,
+        "fileHost": 2,
+        "canonicalPath": "/work/app-review",
+        "remote": "git.example/Org/App",
+        "subpath": ".",
+        "identityKey": "remote:git.example/Org/App#.",
+        "evidenceAt": "2026-11-27T02:00:00Z",
+        "evidenceSource": "machine",
+        "declined": false,
+        "resolution": {"outcome": "join", "reason": "", "rule": "remote", "candidates": []}
+      },
+      "outcome": "join",
+      "reason": "",
+      "rule": "remote",
+      "projectId": 42,
+      "newProjectTitle": "",
+      "candidates": [],
+      "acts": true
+    }
+  ],
+  "created": 0,
+  "joined": 1,
+  "moved": 0,
+  "review": 0
+}
+```
+
+Confirm with `{"apply":true,"previewToken":"<token from preview>"}`.
+If another operation already bound that workspace, confirmation can return
+this 409 with a fresh empty plan. The same error envelope wraps a fresh
+merge preview after a stale merge confirmation.
+
+```json
+{
+  "error": "The preview changed. Review it again.",
+  "code": "preview_changed",
+  "preview": {
+    "applied": false,
+    "previewToken": "413685b32733b2658e2a57753ed03e3dc9a6146d93d9aa52d489397510dd8052",
+    "placements": [],
+    "created": 0,
+    "joined": 0,
+    "moved": 0,
+    "review": 0
+  }
+}
+```
+
+### Review
+
+`GET /api/workspaces/review` reads cached inventory. A row may still be
+present when its machine is offline. Use its connection and machine
+status to explain connectivity. The row adds a top-level display reason
+to the workspace object. This example shows a Claude Code subdirectory
+that can be manually bound to an existing project. Declines and new rows are excluded from `attention`.
+
+```json
+{
+  "workspaces": [
+    {
+      "connectionId": 8,
+      "externalId": "/work/app-extra/packages/web",
+      "title": "Web",
+      "workspace": "/work/app-extra/packages/web",
+      "available": true,
+      "importable": false,
+      "harnessArchived": false,
+      "activeAt": null,
+      "projectId": null,
+      "bindingId": null,
+      "primary": false,
+      "fileHost": 2,
+      "canonicalPath": "/work/app-extra/packages/web",
+      "remote": "git.example/Org/App",
+      "subpath": "packages/web",
+      "identityKey": "remote:git.example/Org/App#packages/web",
+      "evidenceAt": "2026-11-27T02:00:00Z",
+      "evidenceSource": "machine",
+      "declined": false,
+      "resolution": {"outcome": "review", "reason": "suggested", "rule": "remote", "candidates": [43]},
+      "reason": "suggested"
+    }
+  ],
+  "merges": [],
+  "counts": {"new": 0, "suggested": 1, "ambiguous": 0, "declined": 0, "moved": 0, "merges": 0},
+  "attention": 1
+}
+```
+
+### Multiple workspaces
+
+After apply, `GET /api/projects/42` includes these two bindings on the same
+connection. The example shows the `bindings` field of the project response.
+
+```json
+{
+  "bindings": [
+    {
+      "id": 55, "projectId": 42, "connectionId": 7, "machineId": 2,
+      "harness": "codex", "externalProjectId": "/work/app", "title": "App",
+      "workspace": "/work/app", "revision": 1, "status": "available",
+      "observedWorkspace": "/work/app", "connectionActive": true, "connectionLabel": "Codex",
+      "primary": true, "rule": "new", "remote": "git.example/Org/App",
+      "subpath": ".", "fileHost": 2, "evidenceAt": "2026-11-27T02:00:00Z", "facts": []
+    },
+    {
+      "id": 56, "projectId": 42, "connectionId": 7, "machineId": 2,
+      "harness": "codex", "externalProjectId": "/work/app-review", "title": "App review checkout",
+      "workspace": "/work/app-review", "revision": 2, "status": "available",
+      "observedWorkspace": null, "connectionActive": true, "connectionLabel": "Codex",
+      "primary": false, "rule": "remote", "remote": "git.example/Org/App",
+      "subpath": ".", "fileHost": 2, "evidenceAt": "2026-11-27T02:00:00Z", "facts": []
+    }
+  ]
+}
+```
+
+Send `bindingId: 56` with the task or schedule and the same connection ID.
+Use `GET /api/connections/7/capabilities?projectId=42&bindingId=56` and
+`/api/projects/42/actions?connectionId=7&bindingId=56` for scoped catalogs
+and actions. The task reports `workspace: {"bindingId":56,"path":"/work/app-review","source":"chosen"}`
+before launch and `source: "pinned"` once the destination is stored.
 
 ## Refresh and adapter contract (07 behavior, 09 ownership)
 
@@ -69,7 +235,7 @@ A harness implements `Workspaces` with stable external IDs within its connection
 
 Return success only for a complete snapshot. A successful empty snapshot is authoritative and marks prior rows unavailable. An unreachable service, missing inventory source or known partial response returns an error. Stage retains its last good inventory, skips refresh and import, reports the inventory error and continues polling linked tasks. Layer 08 distinguishes an empty review from an unavailable inventory source.
 
-The shipped discovery loop runs once on start, then every five minutes per connection, and accepts refresh kicks. Connections refresh independently, with one full sync in flight per connection. Layer 07 changes the failure path. Layer 09 gives the reader and loop to `discovery`, which consumes `execution.Inventory` and machine operations, with task polling through a narrow coordinator interface. It carries the existing timing forward. Additional retry or backoff policy remains open. How T3 could verify its file host remains open for layer 07. Until verified, T3's file host is unknown.
+The shipped discovery loop runs once on start, then every five minutes per connection, and accepts refresh kicks. Connections refresh independently, with one full sync in flight per connection. Layer 07 changes the failure path. Layer 09 gives the reader and loop to `discovery`, which consumes `execution.Inventory` and machine operations, with task polling through a narrow coordinator interface. It carries the existing timing forward. Additional retry or backoff policy remains open. T3 leaves its file host unknown.
 
 ## Shipped inventory
 
@@ -77,9 +243,7 @@ The table follows the adapters' `Workspaces` methods. Where an adapter supplies 
 
 | Harness | External ID and path | Origin source | Import policy | Failure or partial inventory |
 | --- | --- | --- | --- | --- |
-| [T3](../server/internal/t3/adapter.go) | T3 project ID and reported workspace root. Locality is unset. | The [repository locator](../server/internal/t3/wire.go) supplies the remote when it names `origin` and a subpath when known. The fork-parent field is ignored. Machine inventory can also use a declared shared path. | Live, unarchived T3 projects are eligible. Current import requires a path. | [Paging](../server/internal/t3/tools.go) discards accumulated rows on call or decode failure, a nonadvancing cursor or a page-limit overrun. A final page without a project array can decode as empty. |
-| [OpenCode](../server/internal/opencode/workspace.go) | Project ID and canonical path from the service. Local only in local-auth mode. Worktrees are a separate inventory. | No origin from the project endpoint. Machine inventory can read a local or mapped checkout. | Unarchived VCS projects except `global`. Plain directories are manual-bind only. | Request or decode failure, a null list, or any row missing ID, canonical path or required timestamps fails the inventory. An empty array succeeds. |
-| [Claude Code](../server/internal/claudecode/adapter.go) | Clean absolute path from the state file's project map doubles as ID. Local. Claude-managed worktree paths are skipped. | Machine inventory reads the local checkout. | Checkout top only. Other directories are manual-bind only. | Stat, read or parse errors fail the inventory. A missing state file currently returns a successful empty list. A parsed list can be reused when the file and modification time match. |
+| [T3](../server/internal/t3/adapter.go) | T3 project ID and reported workspace root. Locality is unset. | The [repository locator](../server/internal/t3/wire.go) supplies the remote when it names `origin` and a subpath when known. The fork-parent field is ignored. | Live, unarchived T3 projects are eligible. | [Paging](../server/internal/t3/tools.go) discards accumulated rows on call or decode failure, a nonadvancing cursor or a page-limit overrun. A final page without a project array can decode as empty. |
+| [OpenCode](../server/internal/opencode/workspace.go) | Project ID and canonical path from the service. Local only in local-auth mode. Worktrees are a separate inventory. | No origin from the project endpoint. Machine inventory can read a checkout in local-auth mode. | Unarchived VCS projects except `global`. Plain directories are manual-bind only. | Request or decode failure, a null list, or any row missing ID, canonical path or required timestamps fails the inventory. An empty array succeeds. |
+| [Claude Code](../server/internal/claudecode/adapter.go) | Clean absolute path from the state file's project map doubles as ID. Local. Claude-managed worktree paths are skipped. | Machine inventory reads the local checkout. | Checkout top only. Other directories are manual-bind only. | Stat, read or parse errors fail the inventory. A missing state file fails inventory. Run Claude Code once to create it. A parsed list can be reused when the file and modification time match. |
 | [Codex](../server/internal/codex/adapter.go) | Clean absolute path from trusted `config/read` projects doubles as ID. Local. | Machine inventory reads the local checkout. | Any trusted directory inside a Git checkout. Other trusted directories are manual-bind only. | RPC failure, missing config or malformed projects fails the inventory. Missing or null `projects` in an otherwise valid config yields an empty list. A failed directory stat leaves the workspace listed. |
-
-The shipped import and Match paths use different evidence. Match calls Git for checkout proof. Import relies on connection machine and path in ways that can conflate network-service and local paths. Shipped bindings require a path and allow only one active binding per project per connection. A move can produce a second project and strand task launches. Merge and split are absent. Import follows harness archive state, and its per-connection lock allows cross-connection races on Postgres. A full sync returns early on inventory error, although separate observation loops still run. Claude Code inventory also attempts a one-time cleanup of legacy Stage image files in project directories. Layer 07 owns the read-only discovery requirement and the backend fallout from these behaviors.

@@ -108,7 +108,7 @@ func TestBindingOwnershipAndPinnedDestination(t *testing.T) {
 	if _, err = s.TransitionTask(ctx, Transition{TaskID: 1, To: StateLaunching, BeginAttempt: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.BindProject(ctx, ProjectBinding{ProjectID: p.ID, ConnectionID: 1, ExternalProjectID: "new", Workspace: "/new"}); err != nil {
+	if _, err = s.BindProject(ctx, ProjectBinding{ProjectID: p.ID, ConnectionID: 1, ExternalProjectID: "new", Workspace: "/new", Replaces: p.Bindings[0].ID}); err != nil {
 		t.Fatal(err)
 	}
 	dest, err := s.LaunchDestination(ctx, 1, 1)

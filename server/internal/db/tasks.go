@@ -43,6 +43,7 @@ type NewTask struct {
 	ConnectionID    int64
 	OriginSession   *SessionRef
 	ProjectID       int64
+	BindingID       *int64
 	Title           string
 	Prompt          string
 	InitialNote     string
@@ -72,12 +73,21 @@ var errStartAndNeeds = Invalid("a task can have a start time or needs, not both"
 // CreateTask inserts a backlog task (+ creation event) and places it in its
 // tree with its needs (the whole insert fails on a rule violation).
 func (s *Store) CreateTask(ctx context.Context, in NewTask) (Task, error) {
-	return s.createTask(ctx, in, nil)
-}
-
-// createTask is CreateTask with extra run inside the insert transaction.
-func (s *Store) createTask(ctx context.Context, in NewTask, extra func(tx store.Tx, id int64) error) (Task, error) {
-	id, err := write(ctx, s, func(tx store.Tx) (int64, error) { return s.insertTask(ctx, tx, in, extra) })
+	id, err := write(ctx, s, func(tx store.Tx) (int64, error) {
+		if err := tx.Projects().LockIdentity(ctx); err != nil {
+			return 0, err
+		}
+		project, err := projectID(ctx, tx, in.ProjectID)
+		if err != nil {
+			return 0, err
+		}
+		if err := validateBinding(ctx, tx, project, in.ConnectionID, in.BindingID); err != nil {
+			return 0, err
+		}
+		in := in
+		in.ProjectID = project
+		return s.insertTask(ctx, tx, in, nil)
+	})
 	if err != nil {
 		return Task{}, err
 	}
@@ -112,7 +122,7 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 		originID = &value
 	}
 	id, err := tx.Tasks().Insert(ctx, store.TaskInsert{
-		ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt,
+		ProjectID: in.ProjectID, BindingID: in.BindingID, Title: in.Title, Prompt: in.Prompt,
 		StartAt: in.StartAt, StartTz: in.StartTz, ScheduleID: in.ScheduleID, Handoff: in.Handoff,
 		StartMode: in.StartMode, ConnectionID: in.ConnectionID, OriginSessionID: originID, ExecutionConfig: config,
 		CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx),
@@ -163,13 +173,15 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 }
 
 // TaskPatch is a partial task update (JSON body of PATCH /api/tasks/:id).
-// Nullable fields: startMode (Null clears).
+// A null bindingId selects the primary. A null startMode inherits the tree mode.
 type TaskPatch struct {
 	ValidatedConnection int64                      `json:"-"`
 	ValidatedProject    int64                      `json:"-"`
+	ValidatedBinding    *int64                     `json:"-"`
 	ConnectionID        Optional[int64]            `json:"connectionId"`
 	ExecutionConfig     Optional[execution.Config] `json:"executionConfig"`
 	ProjectID           Optional[int64]            `json:"projectId"`
+	BindingID           Optional[int64]            `json:"bindingId"`
 	Title               Optional[string]           `json:"title"`
 	Prompt              Optional[string]           `json:"prompt"`
 	AttachmentIDs       Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
@@ -184,7 +196,7 @@ type TaskPatch struct {
 
 // restrictedSet reports whether a field editable only in backlog is present.
 func (p TaskPatch) restrictedSet() bool {
-	return p.ConnectionID.Set || p.ExecutionConfig.Set || p.ProjectID.Set || p.Prompt.Set || p.AttachmentIDs.Set ||
+	return p.ConnectionID.Set || p.ExecutionConfig.Set || p.ProjectID.Set || p.BindingID.Set || p.Prompt.Set || p.AttachmentIDs.Set ||
 		p.StartAt.Set || p.Handoff.Set || p.StartMode.Set
 }
 
@@ -192,11 +204,17 @@ func (p TaskPatch) restrictedSet() bool {
 // may change (Conflict otherwise).
 func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, error) {
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		if err := tx.Projects().LockIdentity(ctx); err != nil {
+			return err
+		}
+		if err := tx.Tasks().Lock(ctx, id); err != nil {
+			return err
+		}
 		e, err := tx.Tasks().EditState(ctx, id)
 		if err != nil {
 			return err
 		}
-		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject) {
+		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject || !equalPtr(e.BindingID, p.ValidatedBinding)) {
 			return Conflict("The destination changed during editing. Refresh and choose the task settings again.")
 		}
 		if e.State != StateBacklog && p.restrictedSet() {
@@ -225,12 +243,17 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 				return err
 			}
 		}
-		if p.ProjectID.Set {
-			if err := requireProject(ctx, tx, p.ProjectID.V); err != nil {
+		if u.ProjectID.Set {
+			u.ProjectID.V, err = projectID(ctx, tx, u.ProjectID.V)
+			if err != nil {
 				return err
 			}
 		}
-		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !p.Title.Set && !p.Prompt.Set &&
+		u.BindingID, err = bindingPatch(ctx, tx, e.ProjectID, e.ConnectionID, u.ProjectID, p.ConnectionID, p.BindingID)
+		if err != nil {
+			return err
+		}
+		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !u.BindingID.Set && !p.Title.Set && !p.Prompt.Set &&
 			!p.Handoff.Set && !p.StartMode.Set && !p.AttachmentIDs.Set && !p.StartAt.Set {
 			return nil
 		}
@@ -293,22 +316,35 @@ func (s *Store) ArchiveTask(ctx context.Context, id int64, archived bool) (Task,
 // DuplicateTask copies a task's config and images into a new backlog task
 // (no tree, no needs). An adopted session cannot be duplicated (Conflict).
 func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
-	src, err := s.GetTask(ctx, id)
+	dst, err := write(ctx, s, func(tx store.Tx) (int64, error) {
+		if err := tx.Projects().LockIdentity(ctx); err != nil {
+			return 0, err
+		}
+		if err := tx.Tasks().Lock(ctx, id); err != nil {
+			return 0, err
+		}
+		src, err := tx.Tasks().Get(ctx, id)
+		if err != nil {
+			return 0, err
+		}
+		if src.Adopted {
+			return 0, Conflict("task %d tracks an adopted session: it has no prompt to duplicate", id)
+		}
+		in := NewTask{
+			ProjectID: src.ProjectID, ConnectionID: src.ConnectionID, BindingID: src.BindingID,
+			ExecutionConfig: src.ExecutionConfig, Title: src.Title, Prompt: src.Prompt,
+		}
+		return s.insertTask(ctx, tx, in, func(tx store.Tx, dst int64) error {
+			if err := tx.Attachments().CopyToTask(ctx, store.OwnerTask, src.ID, dst); err != nil {
+				return err
+			}
+			return tx.Journal().Duplicated(ctx, dst, src.ID, ActingUser(ctx), ActingMachine(ctx))
+		})
+	})
 	if err != nil {
 		return Task{}, err
 	}
-	if src.Adopted {
-		return Task{}, Conflict("task %d tracks an adopted session: it has no prompt to duplicate", id)
-	}
-	copyImages := func(tx store.Tx, dst int64) error {
-		if err := tx.Attachments().CopyToTask(ctx, store.OwnerTask, src.ID, dst); err != nil {
-			return err
-		}
-		return tx.Journal().Duplicated(ctx, dst, src.ID, ActingUser(ctx), ActingMachine(ctx))
-	}
-	return s.createTask(ctx, NewTask{
-		ProjectID: src.ProjectID, ConnectionID: src.ConnectionID, ExecutionConfig: src.ExecutionConfig, Title: src.Title, Prompt: src.Prompt,
-	}, copyImages)
+	return s.GetTask(ctx, dst)
 }
 
 // TouchTask bumps updated_at (re-arms polling of failed/interrupted tasks).
@@ -347,6 +383,11 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 	err := s.e.Write(ctx, func(tx store.Tx) error {
 		// Write may rerun fn (Postgres retry): start each run from scratch.
 		res = TransitionResult{}
+		if t.BeginAttempt {
+			if err := tx.Projects().LockIdentity(ctx); err != nil {
+				return err
+			}
+		}
 		// Launch claim: one attempt begins per task and attempt number.
 		if err := tx.Tasks().Lock(ctx, t.TaskID); err != nil {
 			return err

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import type { ExternalProject, HarnessConnection, Project, ProjectBinding } from "../api/types.ts";
+import type { HarnessConnection, Project, ProjectBinding, Workspace, WorkspaceRef } from "../api/types.ts";
 import { rebindCandidate, replacedPaths, retiredBindings } from "../lib/harnesses.ts";
 import { repoLabel } from "../lib/projects.ts";
 import { invalidateWork, keys, useHarnesses, useMachines } from "../api/queries.ts";
@@ -8,53 +8,74 @@ import { machineTag, withMachine } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
 import { Alert, Button, ConfirmInline, Drawer, EmptyState, ErrorText, Field, Hint, Input, Meta, Muted, Panel, QueryState, Radio, SubHeading, TextLink, cx, rowClass } from "./ui.tsx";
 
-export function BindWorkspaceDrawer({
+function BindWorkspaceDrawer({
   project,
   connectionId,
-  suggestions,
+  current,
+  refresh,
   onClose,
 }: {
   project: Project;
   connectionId: number;
-  suggestions: Record<string, string>;
+  current: ProjectBinding | undefined;
+  refresh: () => Promise<void>;
   onClose: () => void;
 }) {
   const api = useApi();
-  const qc = useQueryClient();
   const [query, setQuery] = useState("");
-  const [picked, setPicked] = useState<ExternalProject | null>(null);
+  const [selection, setSelection] = useState<WorkspaceRef | null>(null);
   const harnesses = useHarnesses();
   const { machines } = useMachines();
   const name = withMachine(harnesses.name(connectionId), machineTag(machines, harnesses.connection(connectionId)?.machineId ?? 0));
   const harness = harnesses.harness(connectionId);
   // The replaced binding's path is marked, never preselected.
   const samePath = harness === null ? new Set<string>() : replacedPaths(project, harness);
-  const external = useExternalProjects(connectionId, true);
+  const inventory = useWorkspaces(connectionId, true);
+  const candidates = inventory.data?.workspaces ?? [];
+  const replaces = current?.status === "available" ? undefined : current?.id;
+  const changePrimary = current?.primary === true && replaces === undefined;
+  const confirmLabel = changePrimary ? "Use as primary" : replaces === undefined ? "Bind workspace" : "Replace workspace";
+  const canPick = (candidate: Workspace) => candidate.available && (
+    candidate.projectId === null ||
+    (changePrimary && candidate.projectId === project.id && !candidate.primary && candidate.bindingId !== null)
+  );
+  const picked = candidates.find((candidate) =>
+    selection?.externalId === candidate.externalId && selection.workspace === candidate.workspace && canPick(candidate),
+  );
   const bind = useMutation({
-    mutationFn: (candidate: ExternalProject) => api.bindProject(project.id, candidate),
+    mutationFn: (candidate: Workspace) =>
+      candidate.bindingId !== null
+        ? api.setPrimaryBinding(project.id, candidate.bindingId)
+        : api.bindProject(project.id, {
+            connectionId,
+            externalProjectId: candidate.externalId,
+            workspace: candidate.workspace,
+            ...(replaces === undefined ? {} : { replaces }),
+            ...(changePrimary ? { primary: true } : {}),
+          }),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: keys.projects });
+      await refresh();
       onClose();
     },
   });
-  const candidates = (external.data?.projects ?? []).filter((candidate) =>
-    `${candidate.title} ${candidate.workspace}`.toLowerCase().includes(query.toLowerCase()),
+  const matches = candidates.filter((candidate) =>
+    `${candidate.title} ${candidate.externalId} ${candidate.workspace}`.toLowerCase().includes(query.toLowerCase()),
   );
   return (
     <Drawer
-      title="Bind workspace"
+      title={changePrimary ? "Change primary workspace" : confirmLabel}
       onClose={onClose}
       footer={
         <>
           <Button
             variant="primary"
             busy={bind.isPending}
-            disabled={picked === null}
+            disabled={picked === undefined || inventory.isFetching}
             onClick={() => {
-              if (picked !== null) bind.mutate(picked);
+              if (picked !== undefined) bind.mutate(picked);
             }}
           >
-            Bind workspace
+            {confirmLabel}
           </Button>
           <Button onClick={onClose}>Cancel</Button>
         </>
@@ -62,9 +83,9 @@ export function BindWorkspaceDrawer({
     >
       <div className="flex flex-col gap-3.5">
         <Muted>
-          Choose the {name} workspace for {project.title}. New launches use
-          this workspace. Existing sessions and launches already in progress keep their original
-          workspace.
+          {changePrimary
+            ? `Choose the default ${name} workspace for new launches on ${project.title}.`
+            : `Choose a ${name} workspace for ${project.title}. Existing sessions and launches in progress keep their workspace.`}
         </Muted>
         <Field label="Find workspace">
           {(id) => (
@@ -76,44 +97,41 @@ export function BindWorkspaceDrawer({
             />
           )}
         </Field>
-        <QueryState isPending={external.isPending} error={external.error} hasData={external.data !== undefined}>
+        <QueryState isPending={inventory.isPending} error={inventory.error} hasData={inventory.data !== undefined}>
           <Panel title={`${name} workspaces`} flush>
-            {candidates.length === 0 ? (
+            {matches.length === 0 ? (
               <EmptyState inset>No matching workspaces. Open the project in {name} and refresh.</EmptyState>
             ) : (
-              candidates.map((candidate) => {
-                const unavailable =
-                  candidate.projectId !== null && candidate.projectId !== project.id;
-                const selected =
-                  picked?.externalId === candidate.externalId &&
-                  picked.workspace === candidate.workspace;
+              matches.map((candidate) => {
+                const owner = candidate.projectId;
+                const unavailable = !canPick(candidate);
+                const suggestion = unavailable ? null : workspaceSuggestion(candidate.resolution, project.id);
+                const title = candidate.title || candidate.externalId;
+                const path = candidate.workspace || (title === candidate.externalId ? "" : candidate.externalId);
+                const detail = [path, repoLabel(candidate.remote)].filter(Boolean).join(" · ");
                 return (
                   <label
-                    key={`${candidate.externalId}:${candidate.workspace}`}
+                    key={JSON.stringify([candidate.externalId, candidate.workspace])}
                     className={cx(rowClass, "flex items-start gap-3")}
                   >
                     <Radio
                       name="workspace"
-                      checked={selected}
+                      checked={picked === candidate}
                       disabled={unavailable || bind.isPending}
-                      onChange={() => setPicked(candidate)}
+                      onChange={() => setSelection(candidate)}
                       className="mt-0.5"
                     />
                     <span className="min-w-0">
-                      <span className="block text-small font-medium">
-                        {candidate.title || candidate.externalId}
-                      </span>
-                      <Meta className="block break-all">
-                        {candidate.workspace}
-                        {candidate.repo === "" ? null : ` · ${repoLabel(candidate.repo)}`}
-                      </Meta>
-                      <span className="block text-small text-muted">
-                        {unavailable
-                          ? `Bound to Stage project #${candidate.projectId}. Unbind it there first.`
-                          : (suggestions[candidate.externalId] ??
-                            "Choose the directory you want this project to use.")}
-                      </span>
-                      {!unavailable && samePath.has(candidate.workspace) ? (
+                      <span className="block break-all text-small font-medium">{title}</span>
+                      {detail === "" ? null : <Meta className="block break-all">{detail}</Meta>}
+                      {owner !== null ? (
+                        <Hint inline className="block">
+                          {owner === project.id ? "Already bound to this project" : `Bound to Stage project #${owner}`}
+                        </Hint>
+                      ) : null}
+                      {candidate.available ? null : <Hint inline className="block">Workspace unavailable</Hint>}
+                      {suggestion ? <Hint inline className="block">{suggestion}</Hint> : null}
+                      {!unavailable && candidate.workspace !== "" && samePath.has(candidate.workspace) ? (
                         <Hint inline className="block">Same path as the replaced binding</Hint>
                       ) : null}
                     </span>
@@ -125,9 +143,9 @@ export function BindWorkspaceDrawer({
         </QueryState>
         <div className="flex flex-wrap gap-2">
           <Button
-            busy={external.isFetching}
+            busy={inventory.isFetching}
             onClick={() => {
-              void external.refetch();
+              void inventory.refetch();
             }}
           >
             Refresh workspaces
@@ -142,20 +160,37 @@ export function BindWorkspaceDrawer({
   );
 }
 
-/** A connection's workspace inventory (shared by the drawer and the one-click rebind). */
 /** How discovery bound a workspace; manual bindings show no label. */
-const autoOriginLabel: Record<ProjectBinding["origin"], string | null> = {
+const bindingRuleLabel: Record<ProjectBinding["rule"], string | null> = {
   manual: null,
-  imported: "auto · imported",
-  path: "auto · same path",
+  new: "auto · imported",
+  local: "auto · same local workspace",
   remote: "auto · same Git remote",
+  moved: "auto · moved workspace",
 };
 
-function useExternalProjects(connectionId: number, enabled: boolean) {
+const suggestionLabel: Partial<Record<Workspace["resolution"]["rule"], string>> = {
+  local: "Suggested for this project by local workspace",
+  remote: "Suggested for this project by Git remote and subpath",
+  moved: "Possible move from this project",
+};
+
+function workspaceSuggestion(resolution: Workspace["resolution"], projectId: number): string | null {
+  if (resolution.candidates.includes(projectId)) return suggestionLabel[resolution.rule] ?? null;
+  if (resolution.outcome !== "join") return null;
+  switch (resolution.rule) {
+    case "local": return "Discovery matched a local workspace";
+    case "remote": return "Discovery matched the Git remote and subpath";
+    case "moved": return "Discovery matched a moved workspace";
+    default: return null;
+  }
+}
+
+function useWorkspaces(connectionId: number, enabled: boolean) {
   const api = useApi();
   return useQuery({
-    queryKey: ["external-projects", connectionId],
-    queryFn: () => api.externalProjects(connectionId),
+    queryKey: [...keys.workspaces, connectionId],
+    queryFn: () => api.workspaces(connectionId),
     enabled,
     retry: false,
   });
@@ -165,15 +200,16 @@ export function ProjectWorkspace({ project }: { project: Project }) {
   const api = useApi();
   const qc = useQueryClient();
   const harnesses = useHarnesses();
-  const [binding, setBinding] = useState<number | null>(null);
-  const [suggestions, setSuggestions] = useState<Record<string, string>>({});
-  const [matched, setMatched] = useState("");
+  const [binding, setBinding] = useState<{ connectionId: number; current: ProjectBinding | undefined } | null>(null);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(project.title);
   // Bindings change the project and its workspace lookups (awaited) and what its tasks can start (behind).
   const refresh = async () => {
     void invalidateWork(qc);
-    await Promise.all([qc.invalidateQueries({ queryKey: keys.projects }), qc.invalidateQueries({ queryKey: ["external-projects"] })]);
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: keys.projects }),
+      qc.invalidateQueries({ queryKey: keys.workspaces }),
+    ]);
   };
   const update = useMutation({
     // Archive sends the live title, never the draft: the endpoint takes both fields.
@@ -181,18 +217,6 @@ export function ProjectWorkspace({ project }: { project: Project }) {
     onSuccess: async () => {
       setEditing(false);
       await refresh();
-    },
-  });
-  const match = useMutation({
-    mutationFn: (id: number) => api.matchWorkspace(project.id, id),
-    onSuccess: async (result, id) => {
-      if (result.bound) {
-        setMatched(`${harnesses.name(id)} bound by shared Git checkout and subproject.`);
-        await refresh();
-      } else {
-        setSuggestions(result.suggestions);
-        setBinding(id);
-      }
     },
   });
   return (
@@ -239,22 +263,13 @@ export function ProjectWorkspace({ project }: { project: Project }) {
               <ErrorText error={update.error} />
             </div>
           ) : null}
-          <ErrorText error={harnesses.error ?? match.error} />
-          {matched ? (
-            <p role="status" className="text-small">
-              {matched}
-            </p>
-          ) : null}
+          <ErrorText error={harnesses.error} />
           {harnesses.connectedList.map((c) => (
             <ConnectionWorkspace
               key={c.id}
               project={project}
               connection={c}
-              matching={match.isPending && match.variables === c.id}
-              onMatch={() => {
-                setMatched("");
-                match.mutate(c.id);
-              }}
+              onMatch={(current) => setBinding({ connectionId: c.id, current })}
               refresh={refresh}
             />
           ))}
@@ -263,8 +278,9 @@ export function ProjectWorkspace({ project }: { project: Project }) {
       {binding !== null ? (
         <BindWorkspaceDrawer
           project={project}
-          connectionId={binding}
-          suggestions={suggestions}
+          connectionId={binding.connectionId}
+          current={binding.current}
+          refresh={refresh}
           onClose={() => setBinding(null)}
         />
       ) : null}
@@ -272,67 +288,89 @@ export function ProjectWorkspace({ project }: { project: Project }) {
   );
 }
 
-/** One active connection's binding: status, repair, unbind, and the trail of bindings on replaced connections. */
+/** A connection's current workspaces and its bindings on replaced connections. */
 function ConnectionWorkspace({
   project,
   connection: c,
-  matching,
   onMatch,
   refresh,
 }: {
   project: Project;
   connection: HarnessConnection;
-  matching: boolean;
-  onMatch: () => void;
+  onMatch: (current?: ProjectBinding) => void;
   refresh: () => Promise<void>;
 }) {
   const api = useApi();
-  const [confirmUnbind, setConfirmUnbind] = useState(false);
+  const [confirmUnbind, setConfirmUnbind] = useState<number | null>(null);
   const { machines } = useMachines();
   const name = withMachine(useHarnesses().kindName(c.harness), machineTag(machines, c.machineId));
-  const current = project.bindings.find((b) => b.connectionId === c.id);
+  const current = project.bindings.filter((b) => b.connectionActive && b.connectionId === c.id)
+    .toSorted((a, b) => Number(b.primary) - Number(a.primary));
   const previous = retiredBindings(project, c.harness);
   // Only an unbound project with a replaced binding looks for the same path on this connection.
-  const external = useExternalProjects(c.id, current === undefined && previous.length > 0);
-  const candidate = rebindCandidate(project, c, external.data?.projects ?? []);
+  const inventory = useWorkspaces(c.id, current.length === 0 && previous.length > 0);
+  const candidate = rebindCandidate(project, c, inventory.data?.workspaces ?? []);
   const unbind = useMutation({
-    mutationFn: () => api.unbindProject(project.id, c.id),
+    mutationFn: (bindingId: number) => api.unbindProject(project.id, bindingId),
     onSuccess: async () => {
-      setConfirmUnbind(false);
+      setConfirmUnbind(null);
       await refresh();
     },
   });
   const rebind = useMutation({
-    mutationFn: (target: ExternalProject) => api.bindProject(project.id, target),
+    mutationFn: (target: Workspace) => api.bindProject(project.id, {
+      connectionId: c.id,
+      externalProjectId: target.externalId,
+      workspace: target.workspace,
+    }),
     onSuccess: refresh,
   });
   return (
     <section className="flex flex-col gap-2 border-t border-line pt-3">
       <SubHeading title={`${name} workspace`} />
-      {current === undefined ? (
+      {current.length === 0 ? (
         <Muted>Plan tasks here. Bind a workspace before launching.</Muted>
-      ) : (
-        <>
-          <p className="break-all font-mono text-meta">{current.workspace}</p>
-          {autoOriginLabel[current.origin] === null ? null : (
-            <p className="font-mono text-meta text-muted">{autoOriginLabel[current.origin]}</p>
+      ) : current.map((b) => (
+        <div className="flex flex-col gap-2" key={b.id}>
+          <p className="break-all font-mono text-meta">{b.workspace || b.title || b.externalProjectId}</p>
+          {current.length > 1 && b.primary ? <Meta>Primary workspace</Meta> : null}
+          {bindingRuleLabel[b.rule] === null ? null : (
+            <Meta>{bindingRuleLabel[b.rule]}</Meta>
           )}
-          {current.status === "available" ? null : (
+          {b.status === "available" ? null : (
             <Alert>
-              {current.status === "changed"
-                ? `The harness changed this workspace to ${current.observedWorkspace ?? "an unknown path"}. Confirm the workspace before launching.`
-                : "This workspace is unavailable. Choose a replacement to launch new work. Existing tasks and history remain here."}
+              {b.status === "changed"
+                ? `The harness changed this workspace to ${b.observedWorkspace || "a workspace without a path"}. Confirm the workspace to use it again.`
+                : "This workspace is unavailable. Choose a replacement to use it again. Existing tasks and history remain here."}
             </Alert>
           )}
-        </>
-      )}
+          <div className="flex min-w-0 flex-wrap gap-2">
+            {b.primary || b.status !== "available" ? (
+              <Button disabled={unbind.isPending} onClick={() => onMatch(b)}>
+                {b.status === "changed" ? "Confirm changed path" : b.status === "missing" ? "Replace workspace" : "Change workspace"}
+              </Button>
+            ) : null}
+            <Button variant="ghost" disabled={unbind.isPending} onClick={() => {
+              unbind.reset();
+              setConfirmUnbind(b.id);
+            }}>
+              Unbind
+            </Button>
+          </div>
+          {confirmUnbind === b.id ? (
+            <ConfirmInline confirmLabel="Unbind workspace" busy={unbind.isPending} error={unbind.error} stackActionsOnPhone onConfirm={() => unbind.mutate(b.id)} onCancel={() => setConfirmUnbind(null)}>
+              Unbind <span className="break-all">{b.workspace || b.title || b.externalProjectId}</span>? Stage keeps existing tasks and history. Discovery skips this workspace until you bind it again.
+            </ConfirmInline>
+          ) : null}
+        </div>
+      ))}
       {previous.map((b) => (
         <p key={b.id} className="break-all font-mono text-meta text-muted">
-          Previously {b.workspace} on replaced {name}
+          Previously {b.workspace || b.title || b.externalProjectId} on replaced {name}
           {b.connectionLabel === "" ? "" : ` '${b.connectionLabel}'`}
         </p>
       ))}
-      <div className="flex min-w-0 flex-wrap gap-2">
+      {current.length === 0 ? <div className="flex min-w-0 flex-wrap gap-2">
         {candidate === null ? null : (
           <Button
             variant="primary"
@@ -344,26 +382,9 @@ function ConnectionWorkspace({
             <span className="min-w-0 truncate">Bind {candidate.workspace}</span>
           </Button>
         )}
-        <Button busy={matching} onClick={onMatch}>
-          {current === undefined
-            ? "Bind workspace"
-            : current.status === "changed"
-              ? "Confirm changed path"
-              : "Change workspace"}
-        </Button>
-        {current === undefined ? null : (
-          <Button variant="ghost" onClick={() => setConfirmUnbind(true)}>
-            Unbind
-          </Button>
-        )}
-      </div>
-      <ErrorText error={rebind.error ?? unbind.error} />
-      {confirmUnbind ? (
-        <ConfirmInline confirmLabel="Unbind workspace" busy={unbind.isPending} onConfirm={() => unbind.mutate()} onCancel={() => setConfirmUnbind(false)}>
-          Unbind this workspace? Planning and history remain available. New launches need a binding. Discovery won&apos;t bind this workspace
-          again; bind it here to undo.
-        </ConfirmInline>
-      ) : null}
+        <Button onClick={() => onMatch()}>Bind workspace</Button>
+      </div> : null}
+      <ErrorText error={rebind.error} />
     </section>
   );
 }

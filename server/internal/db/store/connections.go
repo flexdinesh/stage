@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
@@ -47,14 +48,7 @@ type Move struct {
 	Old, New int64
 }
 
-// SharedPath maps a harness directory to the directory Stage sees.
-type SharedPath struct {
-	ConnectionID int64  `json:"connectionId"`
-	HarnessRoot  string `json:"harnessRoot"`
-	StageRoot    string `json:"stageRoot"`
-}
-
-// Connections is the harness connections repository, including shared paths.
+// Connections is the harness connections repository.
 type Connections interface {
 	// Lock locks the connection rows id until the unit of work ends, on engines
 	// with row locks (Postgres FOR NO KEY UPDATE, ascending id; a missing row
@@ -118,7 +112,7 @@ type Connections interface {
 	ForgetState(ctx context.Context, id int64) (active, forgotten bool, err error)
 	DeleteBindings(ctx context.Context, id int64) error
 	// Forget clears identity, marks it forgotten, deactivates its bindings
-	// and drops its discovery and shared paths.
+	// and drops its discovery and workspace declines.
 	Forget(ctx context.Context, id int64) error
 	// Moved lists active stable identities also active on another machine.
 	Moved(ctx context.Context) ([]Move, error)
@@ -129,11 +123,6 @@ type Connections interface {
 	// retired included), its sessions' observations (nil: unobserved), and
 	// whether a task on it is launching.
 	Evidence(ctx context.Context, id int64) ([]ProjectBinding, []*execution.Observation, bool, error)
-
-	// SharedPaths lists machine's shared paths (0: every machine).
-	SharedPaths(ctx context.Context, machine int64) ([]SharedPath, error)
-	DeleteSharedPath(ctx context.Context, connectionID int64, harnessRoot string) error
-	PutSharedPath(ctx context.Context, p SharedPath) error
 }
 
 // ProjectBinding binds a Stage project to a harness project and workspace.
@@ -148,11 +137,16 @@ type ProjectBinding struct {
 	Status            string  `json:"status"`
 	ObservedWorkspace *string `json:"observedWorkspace"`
 	// ConnectionActive is false for a binding on a replaced instance.
-	ConnectionActive bool   `json:"connectionActive"`
-	ConnectionLabel  string `json:"connectionLabel"`
-	// Origin: manual (user bound), imported (discovery created the project
-	// for it), path (discovery bound it to the project at that path on this
-	// machine) or remote (discovery bound it to the one project with the same
-	// origin remote and subproject on another machine).
-	Origin string `json:"origin"`
+	ConnectionActive bool             `json:"connectionActive"`
+	ConnectionLabel  string           `json:"connectionLabel"`
+	Primary          bool             `json:"primary"`
+	Rule             string           `json:"rule"`
+	MachineID        int64            `json:"machineId"`
+	Title            string           `json:"title"`
+	Remote           string           `json:"remote"`
+	Subpath          string           `json:"subpath"`
+	FileHost         *int64           `json:"fileHost"`
+	EvidenceAt       *time.Time       `json:"evidenceAt"`
+	Facts            []execution.Fact `json:"facts"`
+	Replaces         int64            `json:"-"`
 }

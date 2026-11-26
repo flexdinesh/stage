@@ -9,6 +9,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/schedule"
 )
 
@@ -224,5 +225,47 @@ func TestRunnersPerConnectionFireOnlyTheirMachinesSchedules(t *testing.T) {
 	}
 	if got := launchedOn(); !slices.Equal(got, []int64{laptop, local}) {
 		t.Fatalf("launched on %v", got)
+	}
+}
+
+func TestScheduleWithMissingChosenWorkspaceHoldsOccurrence(t *testing.T) {
+	store := db.NewStore(testDB.Reset(t))
+	ctx := t.Context()
+	project, err := store.InsertProject(ctx, db.Project{Title: "Project", Bindings: []db.ProjectBinding{
+		{ConnectionID: dbtest.T3Connection, ExternalProjectID: "primary", Workspace: "/primary"},
+		{ConnectionID: dbtest.T3Connection, ExternalProjectID: "chosen", Workspace: "/chosen"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(project.Bindings, func(b db.ProjectBinding) bool { return b.ExternalProjectID == "chosen" })
+	if i < 0 {
+		t.Fatalf("chosen workspace missing: %+v", project.Bindings)
+	}
+	id := project.Bindings[i].ID
+	sc, err := store.CreateSchedule(ctx, db.NewSchedule{
+		ProjectID: project.ID, ConnectionID: dbtest.T3Connection, BindingID: &id,
+		Title: "Review", Prompt: "p", Cron: "*/5 * * * *", Tz: "UTC",
+	})
+	if err != nil || sc.NextRunAt == nil {
+		t.Fatalf("schedule %+v, %v", sc, err)
+	}
+	if _, err := store.RefreshWorkspaces(ctx, dbtest.T3Connection, []execution.WorkspaceInfo{{ID: "primary", WorkspaceRoot: "/primary"}}); err != nil {
+		t.Fatal(err)
+	}
+	launcher := &fakeLauncher{store: store}
+	runner := schedule.NewRunner(store, launcher, nil)
+	runner.Now = func() time.Time { return sc.NextRunAt.Add(time.Second) }
+	if err := runner.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetSchedule(ctx, sc.ID)
+	if err != nil || got.LastTaskID == nil {
+		t.Fatalf("schedule after reconciliation %+v, %v", got, err)
+	}
+	task, err := store.GetTask(ctx, *got.LastTaskID)
+	if err != nil || task.State != db.StateBacklog || task.StartAt != nil || task.LaunchAttempt != 0 ||
+		task.LastError == nil || task.BindingID == nil || *task.BindingID != id {
+		t.Fatalf("occurrence was not held: %+v, %v", task, err)
 	}
 }

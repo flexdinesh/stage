@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -20,157 +21,126 @@ func git(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// A workspace under a declared shared path gets its repository metadata
-// from the Stage-side checkout; one outside it, or with a Repo already,
-// keeps what it had.
-func TestLocalInventoryReadsRepoThroughSharedRoots(t *testing.T) {
-	stageRoot := t.TempDir()
-	repo := filepath.Join(stageRoot, "app")
-	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, ".git", "config"), []byte("[remote \"origin\"]\n\turl = https://github.com/o/app.git\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(repo, "packages", "web"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	in := []execution.WorkspaceInfo{{ID: "a", WorkspaceRoot: "/harness/app"}, {ID: "b", WorkspaceRoot: "/elsewhere/other"}, {ID: "c", WorkspaceRoot: "/harness/app", Repo: "github.com/kept/repo"}, {ID: "d", WorkspaceRoot: "/harness/app/packages/web"}}
-	out, err := machine.LocalOps{}.Inventory(t.Context(), in, []machine.SharedRoot{{HarnessRoot: "/harness", StageRoot: stageRoot}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out[0].Repo != "github.com/o/app" || out[0].RepoPath != "." || out[1].Repo != "" || out[2].Repo != "github.com/kept/repo" ||
-		out[3].Repo != "github.com/o/app" || out[3].RepoPath != "packages/web" {
-		t.Fatalf("repos %+v", out)
-	}
-	if in[0].Repo != "" {
-		t.Fatal("inventory changed its input")
-	}
-}
-
-// Checkout proves the Git common directory and subproject only through a
-// shared root; two roots onto one checkout prove the same family, a linked
-// worktree shares its main checkout's common directory, and a symlink out
-// of the root proves nothing.
-func TestLocalCheckoutRequiresExplicitSharedRoots(t *testing.T) {
-	ops := machine.LocalOps{}
-	root := t.TempDir()
-	git(t, root, "init", "-q")
-	git(t, root, "commit", "-q", "--allow-empty", "-m", "init")
-	sub := filepath.Join(root, "app")
-	if err := os.Mkdir(sub, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t3Roots := []machine.SharedRoot{{HarnessRoot: "/t3", StageRoot: root}}
-	ocRoots := []machine.SharedRoot{{HarnessRoot: "/oc", StageRoot: root}}
-	a, err := ops.Checkout(t.Context(), t3Roots, "/t3/app")
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ := ops.Checkout(t.Context(), ocRoots, "/oc/app")
-	if a.Common == "" || !a.SameCheckout(b) || a.Subproject != "app" || a.RepoPath != "app" {
-		t.Fatal(a, b)
-	}
-	if top, _ := ops.Checkout(t.Context(), ocRoots, "/oc"); top.SameCheckout(a) {
-		t.Fatal("different subproject matched")
-	}
-
-	// A linked worktree reaches the same common directory.
-	wt := filepath.Join(t.TempDir(), "wt")
-	git(t, root, "worktree", "add", "-q", wt)
-	if err := os.Mkdir(filepath.Join(wt, "app"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	linked, _ := ops.Checkout(t.Context(), []machine.SharedRoot{{HarnessRoot: "/linked", StageRoot: wt}}, "/linked/app")
-	if !linked.SameCheckout(a) {
-		t.Fatalf("linked worktree %+v vs %+v", linked, a)
-	}
-
-	// A symlinked root resolves to the same checkout.
-	link := filepath.Join(t.TempDir(), "link")
-	if err := os.Symlink(root, link); err != nil {
-		t.Fatal(err)
-	}
-	viaLink, _ := ops.Checkout(t.Context(), []machine.SharedRoot{{HarnessRoot: "/l", StageRoot: link}}, "/l/app")
-	if !viaLink.SameCheckout(a) {
-		t.Fatalf("symlinked root %+v", viaLink)
-	}
-
-	if err := os.Symlink(t.TempDir(), filepath.Join(root, "escape")); err != nil {
-		t.Fatal(err)
-	}
-	for _, dir := range []string{sub, "/t3/missing", "/oc/escape"} {
-		if p, _ := ops.Checkout(t.Context(), ocRoots, dir); p.Common != "" {
-			t.Errorf("unexpected proof for %s", dir)
-		}
-	}
-	if p, _ := ops.Checkout(t.Context(), nil, "/t3/app"); p != (machine.CheckoutEvidence{}) {
-		t.Fatal("proof without a shared root")
-	}
-
-	// Another repository never matches.
-	other := t.TempDir()
-	git(t, other, "init", "-q")
-	if o, _ := ops.Checkout(t.Context(), []machine.SharedRoot{{HarnessRoot: "/o", StageRoot: other}}, "/o"); o.Common == "" || o.SameCheckout(a) {
-		t.Fatalf("other repository %+v", o)
-	}
-}
-
-// A workspace local to the machine is read in place with no declared
-// shared path; a remote one never is. ImportIf decides Importable from the
-// files: a checkout's top, or anywhere inside one, and never a plain
-// directory, with or without an origin remote.
-func TestLocalInventoryReadsLocalWorkspacesInPlace(t *testing.T) {
+func TestLocalInventoryReadsWorkspaceEvidence(t *testing.T) {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	repo, bare, plain := filepath.Join(root, "app"), filepath.Join(root, "bare"), filepath.Join(root, "notes")
+	repo := filepath.Join(root, "app")
+	linked := filepath.Join(root, "linked")
 	sub := filepath.Join(repo, "packages", "web")
-	for _, d := range []string{sub, bare, plain} {
+	plain := filepath.Join(root, "notes")
+	for _, d := range []string{sub, plain} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	git(t, repo, "init", "-q")
-	git(t, repo, "remote", "add", "origin", "git@github.com:o/app.git")
-	git(t, bare, "init", "-q")
-	ws := func(dir string, rule execution.ImportRule, local bool) execution.WorkspaceInfo {
-		return execution.WorkspaceInfo{ID: dir, WorkspaceRoot: dir, Local: local, ImportIf: rule}
-	}
-	in := []execution.WorkspaceInfo{
-		ws(repo, execution.ImportCheckoutTop, true),
-		ws(sub, execution.ImportCheckoutTop, true),
-		ws(sub, execution.ImportInCheckout, true),
-		ws(bare, execution.ImportCheckoutTop, true),
-		ws(plain, execution.ImportInCheckout, true),
-		ws(repo, "", false),
-		{ID: "harness", WorkspaceRoot: repo, Local: true, Importable: true},
-	}
-	out, err := machine.LocalOps{}.Inventory(t.Context(), in, nil)
-	if err != nil {
+	git(t, repo, "commit", "-q", "--allow-empty", "-m", "init")
+	git(t, repo, "remote", "add", "origin", "git@github.com:Org/App.git")
+	git(t, repo, "worktree", "add", "-q", linked)
+	other := filepath.Join(root, "other")
+	if err := os.Mkdir(other, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	type got struct {
-		importable     bool
-		repo, repoPath string
+	git(t, other, "init", "-q")
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(repo, alias); err != nil {
+		t.Fatal(err)
 	}
-	want := []got{
-		{true, "github.com/o/app", "."},
-		{false, "github.com/o/app", "packages/web"},
-		{true, "github.com/o/app", "packages/web"},
-		{true, "", ""},
-		{false, "", ""},
-		{false, "", ""},
-		{true, "github.com/o/app", "."},
+	t.Setenv("PATH", t.TempDir())
+
+	ws := []execution.WorkspaceInfo{
+		{WorkspaceRoot: alias, Local: true, ImportIf: execution.ImportCheckoutTop, Repo: "host/reported", RepoPath: "."},
+		{WorkspaceRoot: sub, Local: true, ImportIf: execution.ImportCheckoutTop, Importable: true},
+		{WorkspaceRoot: sub, Local: true, ImportIf: execution.ImportInCheckout},
+		{WorkspaceRoot: linked, Local: true, ImportIf: execution.ImportCheckoutTop},
+		{WorkspaceRoot: other, Local: true, ImportIf: execution.ImportCheckoutTop},
+		{WorkspaceRoot: plain, Local: true, ImportIf: execution.ImportInCheckout},
+		{WorkspaceRoot: repo, Importable: true, Repo: "host/reported", RepoPath: "."},
 	}
-	for i, w := range out {
-		if g := (got{w.Importable, w.Repo, w.RepoPath}); g != want[i] {
-			t.Errorf("%d %s: %+v, want %+v", i, w.WorkspaceRoot, g, want[i])
+	ops := machine.LocalOps{}
+	out, err := ops.Inventory(t.Context(), ws)
+	if err != nil || len(out) != len(ws) {
+		t.Fatalf("inventory %+v: %v", out, err)
+	}
+	repoKey := filepath.Join(repo, ".git")
+	const origin = "github.com/Org/App"
+	for i, want := range []struct {
+		allowed                         bool
+		path, checkout, subpath, remote string
+	}{
+		{true, repo, repoKey, ".", origin},
+		{false, sub, repoKey, "packages/web", origin},
+		{true, sub, repoKey, "packages/web", origin},
+		{true, linked, repoKey, ".", origin},
+		{true, other, filepath.Join(other, ".git"), ".", ""},
+		{false, plain, "", "", ""},
+	} {
+		got := out[i]
+		e := got.Evidence
+		if e == nil || e.CanonicalPath != want.path || e.CheckoutKey != want.checkout || e.Subpath != want.subpath || e.Remote != want.remote || e.Gone || got.Importable != want.allowed {
+			t.Errorf("workspace %d: %+v, evidence %+v, want %+v", i, got, e, want)
+		}
+		if got.WorkspaceRoot != ws[i].WorkspaceRoot || got.Repo != ws[i].Repo || got.RepoPath != ws[i].RepoPath {
+			t.Errorf("workspace %d changed harness facts: %+v", i, got)
 		}
 	}
-	if roots := machine.RootsFor(in[5], nil); len(roots) != 0 {
-		t.Fatalf("remote workspace roots %+v", roots)
+	if out[6] != ws[6] || ws[0].Importable || ws[0].Evidence != nil || !ws[1].Importable {
+		t.Fatalf("inventory changed its input or non-local row: %+v", out)
+	}
+	e := out[5].Evidence
+	if (runtime.GOOS == "linux" || runtime.GOOS == "darwin") && (e == nil || e.InodeHint == "") {
+		t.Fatalf("expected inode hint for a directory on %s", runtime.GOOS)
+	}
+	if e != nil && e.InodeHint != "" {
+		moved := filepath.Join(root, "renamed")
+		if err := os.Rename(plain, moved); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := ops.Inventory(t.Context(), []execution.WorkspaceInfo{{WorkspaceRoot: moved, Local: true}})
+		if err != nil || len(rows) != 1 || rows[0].Evidence == nil || rows[0].Evidence.InodeHint != e.InodeHint || rows[0].Evidence.CanonicalPath != moved {
+			t.Fatalf("renamed directory %+v, evidence before move %+v: %v", rows, e, err)
+		}
+	}
+}
+
+func TestLocalInventoryOnlyMarksMissingDirectoriesGone(t *testing.T) {
+	root := t.TempDir()
+	missing := filepath.Join(root, "missing")
+	dangling := filepath.Join(root, "dangling")
+	loop := filepath.Join(root, "loop")
+	file := filepath.Join(root, "file")
+	if err := os.Symlink(missing, dangling); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(loop, loop); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		path string
+		gone bool
+	}{
+		{missing, true},
+		{dangling, true},
+		{loop, false},
+		{file, false},
+		{"relative", false},
+		{"", false},
+	} {
+		ws := []execution.WorkspaceInfo{{WorkspaceRoot: tc.path, Local: true, ImportIf: execution.ImportInCheckout, Importable: true}}
+		out, err := machine.LocalOps{}.Inventory(t.Context(), ws)
+		if err != nil || len(out) != 1 {
+			t.Fatalf("inventory %+v: %v", out, err)
+		}
+		evidence := out[0].Evidence
+		if (tc.gone && (evidence == nil || *evidence != (execution.WorkspaceEvidence{Gone: true}))) ||
+			(!tc.gone && evidence != nil) || out[0].Importable {
+			t.Errorf("path %q want gone=%v, got evidence %+v and importable=%v", tc.path, tc.gone, evidence, out[0].Importable)
+		}
 	}
 }

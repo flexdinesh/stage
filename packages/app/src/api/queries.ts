@@ -15,6 +15,7 @@ export const keys = {
   pairing: ["pairing"],
   harnesses: ["harnesses"],
   projects: ["projects"],
+  workspaces: ["workspaces"],
   tasks: ["tasks"],
   task: ["task"],
   snippets: ["snippets"],
@@ -216,6 +217,7 @@ export function refreshAfterFirstSync(qc: QueryClient): Promise<void> {
   return Promise.all([
     invalidateWork(qc),
     qc.invalidateQueries({ queryKey: keys.projects }),
+    qc.invalidateQueries({ queryKey: keys.workspaces }),
   ]).then(() => undefined);
 }
 
@@ -448,6 +450,7 @@ export function invalidateConnectionChange(
     qc.invalidateQueries({ queryKey: keys.connections }),
     qc.invalidateQueries({ queryKey: keys.machines }),
     qc.invalidateQueries({ queryKey: keys.projects }),
+    qc.invalidateQueries({ queryKey: keys.workspaces }),
     qc.invalidateQueries({ queryKey: ["capabilities"] }),
     qc.invalidateQueries({ queryKey: scopedKey(keys.harnesses) }),
     qc.invalidateQueries({ queryKey: ["capabilities"] }),
@@ -472,7 +475,7 @@ type CapabilityScope = { projectId: number; id: number; revision: number };
 export function connectionCapabilityOptions(api: Pick<ReturnType<typeof useApi>, "capabilities">, connectionId: number, scope?: CapabilityScope) {
   return queryOptions({
     queryKey: scope === undefined ? ["capabilities", connectionId, "", false] : ["capabilities", connectionId, scope.projectId, scope.id, scope.revision],
-    queryFn: () => api.capabilities(connectionId, scope?.projectId),
+    queryFn: () => api.capabilities(connectionId, scope === undefined ? undefined : { projectId: scope.projectId, bindingId: scope.id }),
     staleTime: 60_000,
     retry: false,
   });

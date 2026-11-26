@@ -35,6 +35,7 @@ type actionHarness struct {
 func (*actionHarness) Workspaces(context.Context) ([]execution.WorkspaceInfo, error) {
 	return []execution.WorkspaceInfo{
 		{ID: "repo", Title: "repo", WorkspaceRoot: hostedWorkspace},
+		{ID: "alternate", Title: "alternate", WorkspaceRoot: "/work/alternate"},
 		{ID: "other", Title: "other", WorkspaceRoot: "/work/other"},
 	}, nil
 }
@@ -54,6 +55,16 @@ func (*actionHarness) Features(ctx context.Context) (execution.Capabilities, err
 		{ID: "busy", Label: "Busy", Target: execution.TargetSession, Callers: both, Availability: available},
 		{ID: "later", Label: "Later", Target: execution.TargetSession, Callers: both, Availability: execution.Availability{Reason: "Connect first."}},
 		{ID: "open-workspace", Label: "Open workspace", Target: execution.TargetProject, Callers: both, Availability: available},
+	}
+	return c, err
+}
+
+func (a *actionHarness) FeaturesForWorkspace(ctx context.Context, project, _ string) (execution.Capabilities, error) {
+	c, err := a.Features(ctx)
+	for i := range c.Actions {
+		if c.Actions[i].ID == "label" {
+			c.Actions[i].Label = "Label in " + project
+		}
 	}
 	return c, err
 }
@@ -161,20 +172,31 @@ func TestDeclaredActionsLocalAndWorker(t *testing.T) {
 				}
 				return p
 			}
-			first := project(conn, "repo", hostedWorkspace)
-			second := project(conn, "other", "/work/other")
-			third := project(noActor, "third", "/work/third")
-			for id, projects := range map[int64][]db.Project{conn: {first, second}, noActor: {third}} {
-				var workspaces []execution.WorkspaceInfo
-				for _, p := range projects {
-					workspaces = append(workspaces, execution.WorkspaceInfo{
-						ID: p.Title, Title: p.Title, WorkspaceRoot: p.Bindings[0].Workspace,
-					})
-				}
+			actorWorkspaces, err := actor.Workspaces(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for id, workspaces := range map[int64][]execution.WorkspaceInfo{
+				conn: actorWorkspaces, noActor: {{ID: "third", Title: "third", WorkspaceRoot: "/work/third"}},
+			} {
 				if _, err := e.store.RefreshWorkspaces(ctx, id, workspaces); err != nil {
 					t.Fatal(err)
 				}
 			}
+			first := project(conn, "repo", hostedWorkspace)
+			second := project(conn, "other", "/work/other")
+			third := project(noActor, "third", "/work/third")
+			var withAlternate db.Project
+			e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", first.ID), map[string]any{
+				"connectionId": conn, "externalProjectId": "alternate", "workspace": "/work/alternate",
+			}, http.StatusOK, &withAlternate)
+			index := slices.IndexFunc(withAlternate.Bindings, func(b db.ProjectBinding) bool {
+				return b.ExternalProjectID == "alternate"
+			})
+			if index < 0 {
+				t.Fatalf("alternate binding was not added: %+v", withAlternate)
+			}
+			alternate := withAlternate.Bindings[index]
 			task, err := e.store.CreateTask(ctx, db.NewTask{ProjectID: first.ID, ConnectionID: conn, Title: "Task", Prompt: "Start"})
 			if err != nil {
 				t.Fatal(err)
@@ -185,6 +207,10 @@ func TestDeclaredActionsLocalAndWorker(t *testing.T) {
 			if err != nil || task.Session == nil {
 				t.Fatalf("launch: %+v %v", task, err)
 			}
+			primaryPath := func(bindingID int64) string {
+				return fmt.Sprintf("/api/projects/%d/bindings/%d/primary", first.ID, bindingID)
+			}
+			e.must("PUT", primaryPath(alternate.ID), nil, http.StatusOK, nil)
 			agent := map[string]string{"Stage-Action-Agent": "1", "Stage-Caller-Session": fmt.Sprintf("%d:agent-session", conn)}
 			var actions []execution.Action
 			e.must("GET", path, nil, http.StatusOK, &actions)
@@ -193,6 +219,10 @@ func TestDeclaredActionsLocalAndWorker(t *testing.T) {
 			}) {
 				t.Fatalf("user actions %+v", actions)
 			}
+			if !slices.ContainsFunc(actions, func(a execution.Action) bool { return a.ID == "label" && a.Label == "Label in repo" }) {
+				t.Fatalf("session actions left the workspace pinned at launch: %+v", actions)
+			}
+			e.must("PUT", primaryPath(first.Bindings[0].ID), nil, http.StatusOK, nil)
 			if rec := raw(t, e.h, "GET", path, agent, nil, &actions); rec.Code != 200 || len(actions) != 3 ||
 				slices.ContainsFunc(actions, func(a execution.Action) bool { return a.ID == "clear" }) {
 				t.Fatalf("agent actions %s", rec.Body)
@@ -266,6 +296,27 @@ func TestDeclaredActionsLocalAndWorker(t *testing.T) {
 			}
 			e.must("POST", actionPath(first.ID, noActor), json.RawMessage(`{}`), http.StatusNotFound, nil)
 			e.must("POST", actionPath(third.ID, noActor), json.RawMessage(`{}`), http.StatusConflict, nil)
+			scope := actionPath(first.ID, conn)
+			explicit := fmt.Sprintf("%s&bindingId=%d", scope, alternate.ID)
+			e.must("POST", explicit, json.RawMessage(`{}`), http.StatusOK, &result)
+			if req := <-actor.calls; req.Project == nil || req.Project.ExternalProjectID != "alternate" || req.Project.Directory != alternate.Workspace {
+				t.Fatalf("explicit binding routed to the wrong workspace: %+v", req)
+			}
+			e.must("POST", scope+"&bindingId=0", json.RawMessage(`{}`), http.StatusBadRequest, nil)
+			e.must("POST", fmt.Sprintf("%s&bindingId=%d", scope, second.Bindings[0].ID), json.RawMessage(`{}`), http.StatusNotFound, nil)
+			e.must("POST", fmt.Sprintf("%s&bindingId=%d", actionPath(first.ID, noActor), alternate.ID), json.RawMessage(`{}`), http.StatusNotFound, nil)
+			mergePath := fmt.Sprintf("/api/projects/%d/merge", first.ID)
+			var merge db.MergeResult
+			e.must("POST", mergePath, map[string]any{"from": second.ID}, http.StatusOK, &merge)
+			e.must("POST", mergePath, map[string]any{
+				"from": second.ID, "confirm": true, "previewToken": merge.PreviewToken,
+			}, http.StatusOK, nil)
+			e.must("POST", fmt.Sprintf("%s&bindingId=%d", actionPath(second.ID, conn), alternate.ID), json.RawMessage(`{}`), http.StatusOK, &result)
+			if req := <-actor.calls; req.Project == nil || req.Project.ExternalProjectID != "alternate" {
+				t.Fatalf("alias action routed to the wrong workspace: %+v", req)
+			}
+			e.must("DELETE", fmt.Sprintf("/api/projects/%d/bindings/%d", first.ID, alternate.ID), nil, http.StatusOK, nil)
+			e.must("POST", explicit, json.RawMessage(`{}`), http.StatusNotFound, nil)
 			if rec := raw(t, e.h, "POST", path+"/clear", map[string]string{"Stage-Action-Confirmed": "1"}, json.RawMessage(`{}`), &result); rec.Code != 200 ||
 				!strings.Contains(result.JournalError, "action ran") || len(actor.calls) != 1 {
 				t.Fatalf("journal failure %d %s, calls %d", rec.Code, rec.Body, len(actor.calls))

@@ -289,10 +289,9 @@ func TestLaunchImagesCleanup(t *testing.T) {
 }
 
 // What earlier versions wrote in a project (stage-* folders and Stage's
-// .gitignore under .claude/stage-images) is removed: on a launch in the
-// project, and for every discovered project once. The folder goes only
-// when empty; nothing else under .claude is touched.
-func TestLegacyProjectImagesRemoved(t *testing.T) {
+// .gitignore under .claude/stage-images) is removed on launch. Workspace
+// inventory leaves the project tree as it found it.
+func TestLegacyProjectImagesRemovedOnLaunch(t *testing.T) {
 	f := claudetest.New(t)
 	legacy := "# Stage: task images for Claude Code launches\n*\n"
 	seed := func(project string, extra bool) {
@@ -332,7 +331,7 @@ func TestLegacyProjectImagesRemoved(t *testing.T) {
 	}
 	untouched(f.Workspace)
 
-	// Discovery: a known project keeps a user's own file and its folder.
+	// Inventory reads the known project without changing its files.
 	other := filepath.Join(f.Home, "known")
 	seed(other, true)
 	f.WriteClaudeJSON(f.Workspace, other)
@@ -341,9 +340,10 @@ func TestLegacyProjectImagesRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := claudecode.LegacyImageRoot(other)
-	es, err := os.ReadDir(root)
-	if err != nil || len(es) != 1 || es[0].Name() != "mine.txt" {
-		t.Fatalf("left %v %v", es, err)
+	for _, name := range []string{".gitignore", "stage-a", "stage-b", "mine.txt"} {
+		if _, err := os.Stat(filepath.Join(root, name)); err != nil {
+			t.Fatalf("inventory changed %s: %v", name, err)
+		}
 	}
 	untouched(other)
 }
@@ -716,11 +716,11 @@ func TestHealthAndWorkspaces(t *testing.T) {
 	}
 	// Harness facts only: the machine's ops read the Git evidence.
 	for _, w := range ws {
-		if w.ID != w.WorkspaceRoot || !w.Local || w.ImportIf != execution.ImportCheckoutTop || w.Importable {
+		if w.ID != w.WorkspaceRoot || !w.Local || w.ImportIf != execution.ImportCheckoutTop || w.Importable || w.Evidence != nil {
 			t.Fatalf("%+v", w)
 		}
 	}
-	if ws, err = (machine.LocalOps{}).Inventory(t.Context(), ws, nil); err != nil {
+	if ws, err = (machine.LocalOps{}).Inventory(t.Context(), ws); err != nil {
 		t.Fatal(err)
 	}
 	for _, w := range ws {
@@ -734,11 +734,13 @@ func TestHealthAndWorkspaces(t *testing.T) {
 	if _, err := a.Workspaces(t.Context()); err == nil {
 		t.Fatal("a malformed state file must fail, not empty the inventory")
 	}
-	if err := os.Remove(filepath.Join(f.Home, ".claude.json")); err != nil {
+	path := filepath.Join(f.Home, ".claude.json")
+	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	if ws, err := a.Workspaces(t.Context()); err != nil || len(ws) != 0 {
-		t.Fatalf("no file: %+v %v", ws, err)
+	if ws, err := a.Workspaces(t.Context()); ws != nil || !errors.Is(err, os.ErrNotExist) ||
+		!strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "run claude once") {
+		t.Fatalf("missing state: %+v %v", ws, err)
 	}
 }
 

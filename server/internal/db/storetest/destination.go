@@ -19,9 +19,10 @@ func caseNewTaskDestination(t *testing.T, open Factory) {
 		return 1
 	}
 	b := func(id int64, status string, active bool) db.ProjectBinding {
-		return db.ProjectBinding{ConnectionID: id, Status: status, ConnectionActive: active}
+		return db.ProjectBinding{ConnectionID: id, Status: status, ConnectionActive: active, Primary: true}
 	}
 	ptr := func(id int64) *int64 { return &id }
+	secondary := db.ProjectBinding{ConnectionID: 3, Status: "available", ConnectionActive: true}
 	for _, tc := range []struct {
 		name     string
 		bindings []db.ProjectBinding
@@ -29,6 +30,8 @@ func caseNewTaskDestination(t *testing.T, open Factory) {
 		want     int64
 	}{
 		{"no default, one binding", []db.ProjectBinding{b(3, "available", true)}, nil, 3},
+		{"no default, several workspaces on one connection", []db.ProjectBinding{b(3, "available", true), secondary}, nil, 3},
+		{"available secondary does not replace missing default primary", []db.ProjectBinding{b(1, "available", true), b(3, "missing", true), secondary}, ptr(3), 1},
 		{"no default, one binding missing", []db.ProjectBinding{b(3, "missing", true)}, nil, 3},
 		{"no default, two bindings", []db.ProjectBinding{b(1, "available", true), b(3, "available", true)}, nil, 0},
 		{"no default, replaced binding only", []db.ProjectBinding{b(1, "available", false)}, nil, 0},

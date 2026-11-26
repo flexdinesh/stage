@@ -18,6 +18,7 @@ import { AcceptedResult } from "../components/Completion.tsx";
 import { BlockedReason, LaunchBlockAlert, useStartTask, useStopTask } from "../components/LaunchGate.tsx";
 import { DeclaredActions } from "../components/DeclaredActions.tsx";
 import { HarnessFacts } from "../components/HarnessPresentation.tsx";
+import { workspaceBinding } from "../lib/projects.ts";
 import { StateControl } from "../components/StateControl.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { UsagePanel } from "../components/Usage.tsx";
@@ -449,9 +450,9 @@ function SessionPanel({ task }: { task: TaskDetail }) {
   const name = kindName(task.harness);
   const title = `${name} session`;
   const projects = useProjects();
-  const binding = projects.data?.projects.find((project) => project.id === task.projectId)?.bindings
-    .find((item) => item.connectionId === task.connectionId && item.status === "available" && item.connectionActive);
-  const caps = useConnectionCapabilities(task.connectionId, true, binding);
+  const bindings = projects.data?.projects.find((project) => project.id === task.projectId)?.bindings;
+  const binding = workspaceBinding(bindings ?? [], task.connectionId, task.workspace?.bindingId ?? task.bindingId);
+  const caps = useConnectionCapabilities(task.connectionId, true, binding?.status === "available" ? binding : undefined);
   const meta = <LaunchMeta parts={launchParts(task.executionConfig, caps.data)} reported={task.reported} harness={name} />;
   const session = task.session;
   if (session === null) {

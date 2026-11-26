@@ -53,6 +53,8 @@ type Task struct {
 	ExecutionConfig *execution.Config `json:"executionConfig"`
 	Launch          *Attempt          `json:"launch,omitempty"`
 	ConnectionID    int64             `json:"connectionId"`
+	BindingID       *int64            `json:"bindingId"`
+	Workspace       *TaskWorkspace    `json:"workspace"`
 	// Harness of the connection; ConnectionActive is false once its
 	// instance was replaced (ConnectionLabel names that instance).
 	Harness                 string      `json:"harness"`
@@ -195,6 +197,13 @@ func (s HandoffSource) Label() string {
 	return fmt.Sprintf("session %q", s.Title)
 }
 
+// TaskWorkspace describes the workspace projected for a task or schedule.
+type TaskWorkspace struct {
+	BindingID int64  `json:"bindingId"`
+	Path      string `json:"path"`
+	Source    string `json:"source"` // pinned, chosen or primary
+}
+
 type LaunchDestination struct {
 	ConnectionID      int64
 	ExternalProjectID string
@@ -246,6 +255,7 @@ type TransitionResult struct {
 // TaskInsert is a new backlog task's columns (Handoff nil = on).
 type TaskInsert struct {
 	ProjectID       int64
+	BindingID       *int64
 	Title           string
 	Prompt          string
 	StartAt         *time.Time
@@ -281,6 +291,7 @@ type TaskEditState struct {
 	Adopted         bool
 	ConnectionID    int64
 	ProjectID       int64
+	BindingID       *int64
 	Needs           int
 }
 
@@ -288,6 +299,7 @@ type TaskEditState struct {
 // ExecutionConfig and StartMode Null clears).
 type TaskUpdate struct {
 	ConnectionID    Optional[int64]
+	BindingID       Optional[int64]
 	ExecutionConfig Optional[execution.Config]
 	ProjectID       Optional[int64]
 	Title           Optional[string]

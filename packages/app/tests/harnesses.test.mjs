@@ -177,7 +177,7 @@ const binding = (connectionId, harness, workspace, extra = {}) => ({
   connectionLabel: "",
   ...extra,
 });
-const external = (workspace, projectId = null) => ({ connectionId: 5, externalId: `x-${workspace}`, title: "stage", workspace, projectId });
+const external = (workspace, projectId = null, available = true) => ({ connectionId: 5, externalId: `x-${workspace}`, title: "stage", workspace, projectId, available });
 
 test("one-click rebind offers the active connection's workspace at exactly the replaced path", () => {
   const project = { id: 7, bindings: [binding(1, "t3", "/home/u/stage", { connectionActive: false, connectionLabel: "desktop" })] };
@@ -185,7 +185,7 @@ test("one-click rebind offers the active connection's workspace at exactly the r
   assert.equal(rebindCandidate(project, t3, [external("/home/u/stage/sub"), external("/home/u/stag"), exact]), exact);
   assert.equal(rebindCandidate(project, t3, [external("/home/u/stage/")]), null, "paths match exactly, no normalising");
   assert.equal(rebindCandidate(project, t3, [external("/home/u/stage", 8)]), null, "another project owns it");
-  assert.deepEqual(rebindCandidate(project, t3, [external("/home/u/stage", 7)]), external("/home/u/stage", 7));
+  assert.equal(rebindCandidate(project, t3, [external("/home/u/stage", null, false)]), null, "the workspace is unavailable");
   assert.equal(rebindCandidate(project, openCode, [exact]), null, "only the same harness's replaced bindings count");
 });
 
@@ -193,6 +193,8 @@ test("no one-click rebind once the project is bound on the active connection, or
   const bound = { id: 7, bindings: [binding(1, "t3", "/home/u/stage", { connectionActive: false }), binding(5, "t3", "/elsewhere")] };
   assert.equal(rebindCandidate(bound, t3, [external("/home/u/stage")]), null);
   assert.equal(rebindCandidate({ id: 7, bindings: [] }, t3, [external("/home/u/stage")]), null);
+  const pathless = { id: 7, bindings: [binding(1, "t3", "", { connectionActive: false })] };
+  assert.equal(rebindCandidate(pathless, t3, [external("")]), null, "two empty paths do not match");
 });
 
 test("the bind drawer marks the replaced binding's path per harness", () => {
@@ -278,11 +280,11 @@ test("session and workspace endpoints take the connection id", async () => {
   const paths = [];
   const { api } = fakeApi(async (path) => {
     paths.push(path);
-    return Response.json({ projects: [], task: null });
+    return Response.json({ workspaces: [], task: null });
   });
   await api.sessionContext({ connectionId: 5, externalSessionId: "a/b" });
-  await api.externalProjects(5);
-  assert.deepEqual(paths, ["/connections/5/sessions/a%2Fb/context", "/connections/5/projects"]);
+  await api.workspaces(5);
+  assert.deepEqual(paths, ["/connections/5/sessions/a%2Fb/context", "/connections/5/workspaces"]);
 });
 
 test("a session row opens the host destination, else copies the resume command, else offers nothing", () => {

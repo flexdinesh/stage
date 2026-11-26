@@ -20,14 +20,11 @@ import (
 	"github.com/flexdinesh/stage/server/internal/worker"
 )
 
-// codexDir is the trusted project the fake daemon runs threads in.
-const codexDir = "/w/app"
-
 // codexOptions run Codex's setup against the fake daemon.
-func codexOptions(t *testing.T) (*codextest.Server, *codexsetup.Options) {
+func codexOptions(t *testing.T, dir string) (*codextest.Server, *codexsetup.Options) {
 	t.Helper()
 	srv := codextest.New(t)
-	srv.Trust(codexDir, "trusted")
+	srv.Trust(dir, "trusted")
 	d := &codextest.Daemon{Srv: srv, T: t}
 	return srv, &codexsetup.Options{Version: "test", Daemon: func(string) codex.Daemon { return d }}
 }
@@ -40,7 +37,8 @@ func codexOptions(t *testing.T) (*codextest.Server, *codexsetup.Options) {
 // with the configured CLI. Disconnect is recorded on the main server and
 // leaves the daemon running.
 func TestRemoteCodexConnectsAndRunsATaskOverTheChannel(t *testing.T) {
-	srv, opts := codexOptions(t)
+	codexDir := t.TempDir()
+	srv, opts := codexOptions(t, codexDir)
 	r := newRigWith(t, map[string]string{}, rigOptions{profile: localHarnesses, codex: opts})
 	ctx := t.Context()
 	m := r.machine()
@@ -135,7 +133,7 @@ func TestRemoteCodexConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 // machine refuses the kind with the fix, and the connectors index leaves
 // it out.
 func TestRemoteCodexNeedsAWorkerThatAllowsLocalHarnesses(t *testing.T) {
-	_, opts := codexOptions(t)
+	_, opts := codexOptions(t, t.TempDir())
 	r := newRigWith(t, map[string]string{}, rigOptions{profile: harness.Profile{Kind: harness.ProfileServer}, codex: opts})
 	a := r.machine().Allows(codex.Descriptor)
 	if a.Available || a.Reason != "Codex runs on this machine only when its Stage worker allows local harnesses: use the worker service, or run stage worker run --local-harnesses." {
@@ -158,7 +156,7 @@ func TestRemoteCodexNeedsAWorkerThatAllowsLocalHarnesses(t *testing.T) {
 // main server reports the machine needs an update for Codex, and Codex
 // reads unavailable, never as a connect that fails.
 func TestRemoteCodexSkippedWhenServerOmitsKind(t *testing.T) {
-	_, opts := codexOptions(t)
+	_, opts := codexOptions(t, t.TempDir())
 	r := newRigWith(t, map[string]string{}, rigOptions{profile: localHarnesses, claude: claudeOptions(claudetest.New(t)), codex: opts, omittedKinds: []string{codex.Kind}})
 	ctx := t.Context()
 	if _, err := r.connector(claudecode.Kind).Status(ctx, false); err != nil {

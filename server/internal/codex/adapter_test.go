@@ -354,22 +354,23 @@ func TestWorkspacesAreTrustedProjectsWithGitImportable(t *testing.T) {
 	}
 	// Harness facts only: the machine's ops read the Git evidence.
 	for _, w := range ws {
-		if !w.Local || w.ImportIf != execution.ImportInCheckout || w.Importable || w.Repo != "" {
+		if !w.Local || w.ImportIf != execution.ImportInCheckout || w.Importable || w.Repo != "" || w.Evidence != nil {
 			t.Fatalf("harness facts %+v", w)
 		}
 	}
-	if ws, err = (machine.LocalOps{}).Inventory(t.Context(), ws, nil); err != nil {
+	if ws, err = (machine.LocalOps{}).Inventory(t.Context(), ws); err != nil {
 		t.Fatal(err)
 	}
 	for _, w := range ws {
 		switch w.WorkspaceRoot {
 		case sub:
-			if !w.Importable || w.ID != sub || w.Title != "web" || w.Repo != "github.com/acme/app" || w.RepoPath != "web" {
-				t.Fatalf("repo workspace %+v", w)
+			e := w.Evidence
+			if !w.Importable || w.ID != sub || w.Title != "web" || w.Repo != "" || e == nil || e.Remote != "github.com/acme/app" || e.Subpath != "web" {
+				t.Fatalf("repo workspace %+v, evidence %+v", w, e)
 			}
 		case plain:
-			if w.Importable || w.Repo != "" {
-				t.Fatalf("plain dir importable %+v", w)
+			if w.Importable || w.Repo != "" || w.Evidence == nil || w.Evidence.CheckoutKey != "" {
+				t.Fatalf("plain directory %+v, evidence %+v", w, w.Evidence)
 			}
 		default:
 			t.Fatalf("unexpected %+v", w)

@@ -49,6 +49,7 @@ func (s *server) resolveActionSite(r *http.Request, target execution.ActionTarge
 		return site, err
 	}
 	ctx := r.Context()
+	var bindingID *int64
 	site.request.Target = target
 	switch target {
 	case execution.TargetConnection:
@@ -62,7 +63,11 @@ func (s *server) resolveActionSite(r *http.Request, target execution.ActionTarge
 			return site, fmt.Errorf("%w: the task has no linked session", db.ErrNotFound)
 		}
 		site.connectionID, site.taskID, site.request.Session = task.ConnectionID, task.ID, task.Session
-		site.binding, err = s.actionBinding(ctx, task.ProjectID, task.ConnectionID)
+		bindingID = task.BindingID
+		if task.Workspace != nil && task.Workspace.Source == "pinned" {
+			bindingID = &task.Workspace.BindingID
+		}
+		site.binding, err = s.actionBinding(ctx, task.ProjectID, task.ConnectionID, bindingID)
 		if err != nil {
 			return site, err
 		}
@@ -71,8 +76,11 @@ func (s *server) resolveActionSite(r *http.Request, target execution.ActionTarge
 		if err != nil || site.connectionID <= 0 {
 			return site, db.Invalid("A positive connectionId is required for project actions.")
 		}
-		if r.URL.Query().Has("bindingId") {
-			return site, db.Invalid("Use connectionId to select the project's workspace binding.")
+		if q := r.URL.Query(); q.Has("bindingId") {
+			bindingID, err = queryInt64(q, "bindingId")
+			if err != nil || bindingID == nil || *bindingID <= 0 {
+				return site, db.Invalid("A positive bindingId is required.")
+			}
 		}
 	}
 	conn, err := s.Store.GetHarnessConnection(ctx, site.connectionID)
@@ -89,7 +97,7 @@ func (s *server) resolveActionSite(r *http.Request, target execution.ActionTarge
 		return site, nil
 	}
 	if target == execution.TargetProject {
-		site.binding, err = s.actionBinding(ctx, id, conn.ID)
+		site.binding, err = s.actionBinding(ctx, id, conn.ID, bindingID)
 		if err != nil {
 			return site, err
 		}
@@ -105,22 +113,25 @@ func (s *server) resolveActionSite(r *http.Request, target execution.ActionTarge
 	return site, actionError(err)
 }
 
-// actionBinding resolves a workspace only on the target connection.
-func (s *server) actionBinding(ctx context.Context, projectID, connectionID int64) (*db.ProjectBinding, error) {
-	p, err := s.Store.GetProject(ctx, projectID)
+// actionBinding selects an available binding on the target connection.
+func (s *server) actionBinding(ctx context.Context, projectID, connectionID int64, bindingID *int64) (*db.ProjectBinding, error) {
+	id, err := s.projectID(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	var match *db.ProjectBinding
+	p, err := s.Store.GetProject(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	for _, b := range p.Bindings {
-		if b.ConnectionID == connectionID && b.Status == "available" {
-			if match != nil {
-				return nil, db.Conflict("This project has multiple available workspaces on the selected connection.")
-			}
-			match = &b
+		if b.ConnectionID != connectionID || !b.ConnectionActive || b.Status != "available" {
+			continue
+		}
+		if bindingID == nil && b.Primary || bindingID != nil && b.ID == *bindingID {
+			return &b, nil
 		}
 	}
-	return match, nil
+	return nil, nil
 }
 
 // actionCapabilities uses the same workspace scope for discovery and dispatch.
@@ -335,6 +346,13 @@ func (s *server) runAction(r *http.Request, site actionSite, setupRoute bool) (e
 				return w.ID == workspace.ExternalProjectID && w.WorkspaceRoot == workspace.Directory && w.DeletedAt == nil
 			}) {
 				return result, fmt.Errorf("%w: the harness no longer reports the selected workspace binding", db.ErrNotFound)
+			}
+			b, err := s.actionBinding(ctx, site.binding.ProjectID, site.connectionID, &site.binding.ID)
+			if err != nil {
+				return result, err
+			}
+			if b == nil || b.ExternalProjectID != workspace.ExternalProjectID || b.Workspace != workspace.Directory {
+				return result, fmt.Errorf("%w: the selected workspace binding changed", db.ErrNotFound)
 			}
 		}
 		if !s.Store.ConnectionActive(site.connectionID) {

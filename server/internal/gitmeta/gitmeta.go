@@ -1,152 +1,116 @@
-// Package gitmeta reads repository metadata without a git binary (the
-// release image has none). The normalized origin remote plus subproject
-// path is a cross-machine match key for project import; it is never proof
-// that two checkouts on one machine are the same repository
-// (docs/architecture.md "Project import").
+// Package gitmeta reads checkout metadata without running Git.
 package gitmeta
 
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// maxConfig bounds a read of .git files; real ones are a few KiB.
+// maxConfig bounds each metadata read.
 const maxConfig = 1 << 20
 
-// RemoteIdentity normalizes a remote URL to host/path ("github.com/o/r").
-// Credentials, local directory and file remotes yield "".
-func RemoteIdentity(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if !strings.Contains(raw, "://") {
-		host, path, ok := strings.Cut(raw, ":")
-		if !ok || host == "" || strings.ContainsAny(host, "/\\") {
-			return ""
-		}
-		raw = "ssh://" + host + "/" + path
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.Path == "" || (u.Scheme != "ssh" && u.Scheme != "https" && u.Scheme != "http" && u.Scheme != "git") {
-		return ""
-	}
-	return strings.ToLower(u.Host) + strings.TrimSuffix(strings.TrimRight(u.Path, "/"), ".git")
+// Info describes the nearest Git checkout, including linked worktrees and
+// submodules. A checkout can have a common directory without a remote.
+type Info struct {
+	Top       string
+	CommonDir string
+	Remote    string
+	Subpath   string
 }
 
-// OriginRepo is the normalized origin remote of the checkout rooted at dir
-// ("" when dir is no Git checkout, has no origin, or is unreadable). It
-// follows a linked worktree's .git file and commondir to the shared config.
-func OriginRepo(dir string) string {
-	common, ok := commonDir(dir)
-	if !ok {
-		return ""
-	}
-	b, ok := read(filepath.Join(common, "config"))
-	if !ok {
-		return ""
-	}
-	return RemoteIdentity(originURL(b))
-}
-
-// Checkout locates the Git checkout containing dir, searching dir and its
-// parents but never above stop. repo is the checkout's normalized origin
-// remote and sub the slash-separated path from the checkout top to dir ("."
-// at the top). Both are "" when stop does not contain dir or the nearest
-// checkout has no usable origin.
-func Checkout(dir, stop string) (repo, sub string) {
-	top := Top(dir, stop)
-	if top == "" {
-		return "", ""
-	}
-	if repo = OriginRepo(top); repo == "" {
-		return "", ""
-	}
-	rel, err := filepath.Rel(top, filepath.Clean(dir))
-	if err != nil {
-		return "", ""
-	}
-	return repo, filepath.ToSlash(rel)
-}
-
-// Top is the nearest directory at or above dir holding .git, never above
-// stop ("" when there is none or stop does not contain dir).
-func Top(dir, stop string) string {
-	dir, stop = filepath.Clean(dir), filepath.Clean(stop)
-	if _, ok := beneath(stop, dir); !ok {
-		return ""
+// Inspect reads Git metadata for a canonical absolute workspace directory.
+// The first .git entry governs the workspace, even if it is unreadable.
+func Inspect(dir string) Info {
+	if !filepath.IsAbs(dir) {
+		return Info{}
 	}
 	for top := dir; ; top = filepath.Dir(top) {
-		if _, err := os.Stat(filepath.Join(top, ".git")); err == nil {
-			return top
+		dotGit := filepath.Join(top, ".git")
+		fi, err := os.Stat(dotGit)
+		if err == nil {
+			common := commonDir(dotGit, fi)
+			if common == "" {
+				return Info{}
+			}
+			rel, err := filepath.Rel(top, dir)
+			if err != nil {
+				return Info{}
+			}
+			b, _ := read(filepath.Join(common, "config"))
+			return Info{Top: top, CommonDir: common, Remote: RemoteIdentity(originURL(b)), Subpath: filepath.ToSlash(rel)}
 		}
-		if top == stop || top == filepath.Dir(top) {
-			return ""
+		if !errors.Is(err, os.ErrNotExist) || top == filepath.Dir(top) {
+			return Info{}
+		}
+		// A dangling .git symlink still shadows any outer checkout.
+		if _, err := os.Lstat(dotGit); !errors.Is(err, os.ErrNotExist) {
+			return Info{}
 		}
 	}
 }
 
-// Translate maps a harness-side directory under harnessRoot to the same
-// directory under stageRoot (a declared shared path). It refuses a target
-// whose symlinks resolve outside stageRoot.
-func Translate(harnessRoot, stageRoot, dir string) (string, bool) {
-	rel, ok := beneath(harnessRoot, dir)
-	if !ok || stageRoot == "" {
-		return "", false
-	}
-	root, err := filepath.EvalSymlinks(stageRoot)
+// read accepts small regular metadata files.
+func read(path string) ([]byte, error) {
+	fi, err := os.Stat(path)
 	if err != nil {
-		return "", false
+		return nil, err
 	}
-	target, err := filepath.EvalSymlinks(filepath.Join(root, rel))
-	if err != nil {
-		return "", false
+	if !fi.Mode().IsRegular() || fi.Size() > maxConfig {
+		return nil, errors.New("invalid Git metadata file")
 	}
-	if _, ok = beneath(root, target); !ok {
-		return "", false
-	}
-	return target, true
-}
-
-func beneath(root, dir string) (string, bool) {
-	rel, err := filepath.Rel(root, dir)
-	return rel, err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-func read(path string) ([]byte, bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
 	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, maxConfig))
-	return b, err == nil
+	return io.ReadAll(io.LimitReader(f, maxConfig))
 }
 
-func commonDir(dir string) (string, bool) {
-	dotGit := filepath.Join(dir, ".git")
-	info, err := os.Stat(dotGit)
-	if err != nil {
-		return "", false
-	}
+func commonDir(dotGit string, info os.FileInfo) string {
 	gitDir := dotGit
 	if !info.IsDir() {
-		b, ok := read(dotGit)
-		if !ok {
-			return "", false
+		b, err := read(dotGit)
+		if err != nil {
+			return ""
 		}
-		target, found := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir:")
-		if !found {
-			return "", false
+		target, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir:")
+		target = strings.TrimSpace(target)
+		if !ok || target == "" {
+			return ""
 		}
-		gitDir = resolve(dir, strings.TrimSpace(target))
+		gitDir = resolve(filepath.Dir(dotGit), target)
 	}
-	if b, ok := read(filepath.Join(gitDir, "commondir")); ok {
-		return resolve(gitDir, strings.TrimSpace(string(b))), true
+	// Resolve the gitdir first so that a relative commondir is interpreted
+	// on the same filesystem path as the rest of its metadata.
+	gitDir = canonicalDirectory(gitDir)
+	if gitDir == "" {
+		return ""
 	}
-	return gitDir, true
+	b, err := read(filepath.Join(gitDir, "commondir"))
+	if errors.Is(err, os.ErrNotExist) {
+		return gitDir
+	}
+	target := strings.TrimSpace(string(b))
+	if err != nil || target == "" {
+		return ""
+	}
+	return canonicalDirectory(resolve(gitDir, target))
+}
+
+func canonicalDirectory(dir string) string {
+	p, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return ""
+	}
+	if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
+		return ""
+	}
+	return p
 }
 
 func resolve(base, p string) string {

@@ -73,7 +73,6 @@ type Adapter struct {
 	invAt  time.Time // ~/.claude.json mtime of inv
 	invKey string
 	inv    []execution.WorkspaceInfo
-	legacy sync.Once // removeLegacyImages over the first inventory
 
 	// sendMu serializes Send; wakeMu guards waking, the sessions a Send is
 	// delivering to, each until its deadline (send.go).
@@ -253,9 +252,8 @@ const worktreeMarker = "/.claude/worktrees/"
 
 // Workspaces are the folders Claude Code knows (the projects of its state
 // file), local to the machine; a Git checkout's top is importable, which
-// the machine's ops decide (ImportCheckoutTop). No file: none. An
-// unreadable or malformed file is an error, so discovery keeps its last
-// inventory.
+// the machine's ops decide (ImportCheckoutTop). A missing, unreadable or
+// malformed file fails the inventory.
 func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, error) {
 	home := a.cli.home()
 	configDir := a.identity
@@ -265,7 +263,7 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 	path := claudeJSON(configDir, home)
 	st, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return []execution.WorkspaceInfo{}, nil
+		return nil, fmt.Errorf("run claude once to initialize its state: %w", err)
 	}
 	if err != nil {
 		return nil, err
@@ -295,15 +293,6 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 	}
 	slices.SortFunc(out, func(x, y execution.WorkspaceInfo) int { return strings.Compare(x.ID, y.ID) })
 	a.inv, a.invAt, a.invKey = out, st.ModTime(), path
-	// Once per adapter: remove what earlier versions wrote in the projects
-	// (best effort).
-	a.legacy.Do(func() {
-		for _, w := range out {
-			if err := removeLegacyImages(w.WorkspaceRoot); err != nil {
-				a.log.Warn("claude: remove old project images", "dir", LegacyImageRoot(w.WorkspaceRoot), "err", err)
-			}
-		}
-	})
 	return slices.Clone(out), nil
 }
 

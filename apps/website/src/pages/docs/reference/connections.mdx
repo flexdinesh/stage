@@ -16,7 +16,7 @@ Harness settings are never environment variables. `T3_URL`, `T3_PUBLIC_URL`, `T3
 
 A new install has no connections. You can create projects and plan tasks before connecting a harness. While nothing is connected, the Dashboard shows a **Connect a harness** alert that links to Settings > Connections, which offers **Connect T3** and **Connect OpenCode**.
 
-After connecting, bind each Stage project's workspace on every harness you use ([Projects](/docs/concepts/projects)). When a project has both bindings, pick the destination on each new task. Sync never imports projects automatically or overwrites Stage titles and archive state. A missing workspace keeps its Stage project and history. A changed path needs confirmation before launching.
+After connecting, Stage discovers eligible workspaces and imports them into projects. You can also bind existing workspaces yourself. On a connection with several workspaces for a project, Stage uses the primary unless the task specifies a binding. Stage owns project titles and archive state. Missing workspaces preserve their projects and history. See [Projects](/docs/concepts/projects).
 
 ## CLI
 
@@ -81,7 +81,7 @@ Paste it as **Admin token** in Settings > Connections > T3 (Manage), or run `sta
 
 - **Disconnect** forgets the token, the T3 URL, the Browser URL and the admin token and stops syncing. Tasks and bindings stay; pairing the same T3 again resumes it.
 - A disconnected connection stays in Settings as a **Disconnected** row with what remains on it, **Reconnect** (opens its setup) and **Forget** (lets go of it; its tasks keep their history, read-only).
-- **Switch to another T3**: Disconnect, set the T3 URL, and pair the other T3. Tasks from the first T3 stay as read-only history, and nothing is bound to the new T3 until you rebind each project. Pairing the first T3 again restores its tasks and bindings.
+- **Switch to another T3**: Disconnect, set the T3 URL, and pair the other T3. Tasks from the first T3 stay as read-only history, and discovery resolves the new T3's workspaces from available evidence. Pairing the first T3 again restores its tasks and bindings.
 - A disconnected T3 whose environment is paired again on another machine moves onto that connection automatically at the next sync.
 
 ### Status and troubleshooting

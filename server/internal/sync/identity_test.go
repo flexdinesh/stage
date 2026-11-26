@@ -206,7 +206,7 @@ func codexAdapter(t *testing.T, connection int64, dirs ...string) execution.Adap
 
 // One repository on one machine, known to all four harnesses: the T3
 // project, the OpenCode checkout, the Claude folder and the Codex trusted
-// project are one Stage project, bound by path.
+// project are one Stage project, bound by repository and subpath.
 func TestIdentityOneRepoAcrossFourHarnesses(t *testing.T) {
 	r := newIdentityRig(t)
 	repo := gitRepo(t, filepath.Join(tempRoot(t), "app"), acmeApp)
@@ -225,11 +225,11 @@ func TestIdentityOneRepoAcrossFourHarnesses(t *testing.T) {
 		t.Fatalf("projects %+v", ps)
 	}
 	for _, b := range ps[0].Bindings {
-		want := db.BindingPath
+		want := "remote"
 		if b.ConnectionID == t3c {
-			want = db.BindingImported
+			want = "new"
 		}
-		if b.Workspace != repo || b.Origin != want {
+		if b.Workspace != repo || b.Rule != want {
 			t.Fatalf("binding %+v", b)
 		}
 	}
@@ -278,11 +278,11 @@ func TestIdentityTwoMachinesSameRemote(t *testing.T) {
 	r.sync(svc, c2)
 	p1, _ := r.owner(c1, one)
 	p2, b2 := r.owner(c2, two)
-	if p1 == nil || p2 == nil || p1.ID != p2.ID || b2.Origin != db.BindingRemote {
+	if p1 == nil || p2 == nil || p1.ID != p2.ID || b2.Rule != "remote" {
 		t.Fatalf("same remote: %+v %+v", p1, p2)
 	}
 	p3, b3 := r.owner(c2, bare)
-	if p3 == nil || p3.ID == p1.ID || b3.Origin != db.BindingImported {
+	if p3 == nil || p3.ID == p1.ID || b3.Rule != "new" {
 		t.Fatalf("no remote: %+v", p3)
 	}
 	if d := r.discovered(c2, two); d != (discovered{"github.com/acme/app", ".", true}) {
@@ -347,7 +347,7 @@ func TestIdentityMonorepoSubprojects(t *testing.T) {
 	pra, bra := r.owner(t3c, remoteA)
 	prb, _ := r.owner(t3c, remoteB)
 	ptop, _ := r.owner(cc, mono)
-	if pa == nil || pra == nil || pra.ID != pa.ID || bra.Origin != db.BindingRemote {
+	if pa == nil || pra == nil || pra.ID != pa.ID || bra.Rule != "remote" {
 		t.Fatalf("same subproject: %+v %+v", pa, pra)
 	}
 	if prb == nil || prb.ID == pa.ID || ptop == nil || ptop.ID == pa.ID || ptop.ID == prb.ID {
@@ -377,7 +377,7 @@ func TestIdentityInventoryWhereTheFilesLive(t *testing.T) {
 		}
 		i := slices.IndexFunc(ws, func(w execution.WorkspaceInfo) bool { return w.WorkspaceRoot == repo })
 		j := slices.IndexFunc(ws, func(w execution.WorkspaceInfo) bool { return w.WorkspaceRoot == plain })
-		if i < 0 || j < 0 || !ws[i].Importable || ws[i].Repo != "github.com/acme/app" || ws[i].RepoPath != "." || ws[j].Importable || ws[j].Repo != "" {
+		if i < 0 || j < 0 || !ws[i].Importable || ws[i].Evidence == nil || ws[i].Evidence.Remote != "github.com/acme/app" || ws[i].Evidence.Subpath != "." || ws[j].Importable || ws[j].Evidence == nil || ws[j].Evidence.Remote != "" {
 			t.Fatalf("inventory %+v", ws)
 		}
 	})

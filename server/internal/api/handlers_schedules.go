@@ -28,11 +28,11 @@ func (s *server) scheduleJSON(sc db.Schedule) db.Schedule {
 
 func (s *server) listSchedules(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
-	var f db.ScheduleFilter
-	var err error
-	if f.ProjectID, err = queryInt64(q, "project"); err != nil {
+	project, err := s.projectFilter(r, "project")
+	if err != nil {
 		return err
 	}
+	f := db.ScheduleFilter{ProjectID: project}
 	if v := strings.TrimSpace(q.Get("dueWithin")); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil || d < 0 {
@@ -84,20 +84,15 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := s.validateSelection(r.Context(), in.ConnectionID, in.ProjectID, in.ExecutionConfig); err != nil {
+	if err := s.validateTaskDestination(r.Context(), in); err != nil {
 		return err
-	}
-	if len(in.AttachmentIDs) > 0 {
-		if err := s.requireImages(r.Context(), in.ConnectionID, in.ProjectID); err != nil {
-			return err
-		}
 	}
 	if err := validCron(req.Cron, req.Tz); err != nil {
 		return err
 	}
 	sc, err := s.Store.CreateSchedule(r.Context(), db.NewSchedule{
 		ExecutionConfig: in.ExecutionConfig, ConnectionID: in.ConnectionID,
-		ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt,
+		ProjectID: in.ProjectID, BindingID: in.BindingID, Title: in.Title, Prompt: in.Prompt,
 		Notes: req.Notes, AttachmentIDs: in.AttachmentIDs,
 		Cron: req.Cron, Tz: req.Tz, Paused: req.Paused, OriginSession: in.OriginSession,
 	})
@@ -147,30 +142,16 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	p.ValidatedConnection, p.ValidatedProject = current.ConnectionID, current.ProjectID
-	connection := current.ConnectionID
-	if p.ConnectionID.Set {
-		connection = p.ConnectionID.V
-		if err := s.plannedConnection(r.Context(), connection); err != nil {
-			return err
-		}
-	}
-	projectID := current.ProjectID
-	if p.ProjectID.Set {
-		projectID = p.ProjectID.V
-	}
-	if err := s.requirePatchImages(r.Context(), connection, projectID, connection != current.ConnectionID, current.Attachments, p.AttachmentIDs); err != nil {
-		return err
-	}
-	if p.ExecutionConfig.Set && (connection != current.ConnectionID || projectID != current.ProjectID || !sameSelection(current.ExecutionConfig, p.ExecutionConfig.Ptr())) {
-		if err := s.validateSelection(r.Context(), connection, projectID, p.ExecutionConfig.Ptr()); err != nil {
-			return err
-		}
-	}
+	p.ValidatedConnection, p.ValidatedProject, p.ValidatedBinding = current.ConnectionID, current.ProjectID, current.BindingID
 	if err := validateConfigPatch(configPatch{
-		ConnectionID: connection, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt,
+		ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt,
 		AttachmentIDs: &p.AttachmentIDs,
 	}); err != nil {
+		return err
+	}
+	original := taskDestination{current.ConnectionID, current.ProjectID, current.BindingID}
+	if err := s.validateDestinationPatch(r.Context(), original, p.ConnectionID, &p.ProjectID, p.BindingID,
+		current.ExecutionConfig, p.ExecutionConfig, current.Attachments, p.AttachmentIDs); err != nil {
 		return err
 	}
 	if p.Notes.Set && p.Notes.Null {

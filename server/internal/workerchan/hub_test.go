@@ -424,9 +424,9 @@ func TestVersionRangeSelectsHighestOverlap(t *testing.T) {
 		local, peer VersionRange
 		version     int
 	}{
-		{CurrentRange(), CurrentRange(), 2},
-		{CurrentRange(), VersionRange{1, 1}, 0},
-		{VersionRange{1, 1}, CurrentRange(), 0},
+		{CurrentRange(), CurrentRange(), 3},
+		{CurrentRange(), VersionRange{2, 2}, 0},
+		{VersionRange{2, 2}, CurrentRange(), 0},
 		{VersionRange{1, 4}, VersionRange{2, 5}, 4},
 		{VersionRange{1, 2}, VersionRange{2, 5}, 2},
 		{VersionRange{3, 4}, VersionRange{1, 2}, 0},

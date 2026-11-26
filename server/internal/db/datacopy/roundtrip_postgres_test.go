@@ -27,8 +27,8 @@ const legacyEvidence = `{"threadId":"thread-1", "executionState":"settled",  "a"
 // edge values: non-ASCII and metacharacter text, evidence JSON with odd key
 // order and whitespace, queried JSON with number forms jsonb normalizes,
 // BLOBs with 0x00 and 0xff, microsecond and (from schema defaults)
-// millisecond timestamps, NULLs, booleans, and a deleted top ID (snippets
-// 3) that Postgres must not reissue.
+// millisecond timestamps, NULLs, booleans, and deleted top IDs that
+// Postgres must not reissue.
 var seedSQL = []string{
 	`INSERT INTO users (id, display_name, created_at) VALUES (2, 'Ünïcode user ✓', '2026-11-01T10:00:00.123456Z')`,
 	`INSERT INTO identities (user_id, provider, subject) VALUES (2, 'github', 'sub-1')`,
@@ -40,7 +40,6 @@ var seedSQL = []string{
 	`INSERT INTO harness_connections (id, machine_id, harness, auto_complete, identity, stable_identity, label, active, new_task_config, last_known_facts) VALUES (2, 1, 'opencode', 0, 'oc-1', 1, 'OpenCode', 1, '{"b": 1, "a": [1.0, 2e0, -0.5]}', '[{"id":"version","label":"Version","value":"2.3"}]')`,
 	`INSERT INTO harness_connections (id, machine_id, harness, active, retired_at, forgotten_at) VALUES (3, 2, 't3', 0, '2026-11-04T01:02:03.456789Z', '2026-11-04T02:00:00.000000Z')`,
 	`INSERT INTO session_identities (id, connection_id, external_id) VALUES (1, 1, 'thread-1'), (2, 2, 'oc-session')`,
-	`INSERT INTO shared_paths (connection_id, harness_root, stage_root) VALUES (2, '/h', '/s')`,
 	`UPDATE harness_settings SET settings = '{"url":"http://t3","publicUrl":null}' WHERE machine_id = 1 AND kind = 't3'`,
 	`UPDATE harness_settings SET settings = '{"endpoint":"http://oc","browserEndpoint":"https://browser","webClient":"","auth":"basic"}' WHERE machine_id = 1 AND kind = 'opencode'`,
 	`INSERT INTO harness_settings (machine_id, kind, settings, updated_at) VALUES
@@ -54,12 +53,23 @@ var seedSQL = []string{
 	  (1, 't3', 'once', '2026-11-05T10:00:00.123456Z'),
 	  (2, 't3', NULL, NULL)`,
 	`UPDATE preferences SET default_connection_id = 2, notify_events = '["done", "failed"]' WHERE id = 1`,
-	`INSERT INTO projects (id, title, origin, imported_connection_id, imported_at, archive_owner, created_by_user_id, source_machine_id) VALUES (1, 'Proj ✓', 'discovered', 2, '2026-11-06T00:00:00.000000Z', 'user', 2, 2)`,
-	`INSERT INTO project_bindings (id, project_id, connection_id, external_project_id, workspace, origin) VALUES (1, 1, 1, 'ext-1', '/w', 'manual')`,
-	`INSERT INTO external_projects (connection_id, external_id, title, workspace, available, repo) VALUES (2, 'ext-2', 'Ext', '/w2', 1, 'git@x')`,
-	`INSERT INTO schedules (id, project_id, title, prompt, cron, tz, next_run_at, connection_id, origin_session_id, execution_config) VALUES (1, 1, 'Nightly', 'p', '0 0 * * *', 'UTC', '2026-11-07T00:00:00.000000Z', 1, 1, '{"model":"x","options":[]}')`,
+	`INSERT INTO projects (id, title, origin, imported_connection_id, imported_at, created_by_user_id, source_machine_id)
+	  VALUES (1, 'Proj ✓', 'discovered', 2, '2026-11-06T00:00:00.000000Z', 2, 2)`,
+	`INSERT INTO projects (id, title, archived_at) VALUES (2, 'Separate', '2026-11-06T01:03:00.123456Z')`,
+	`INSERT INTO project_bindings (id, project_id, connection_id, external_project_id, workspace, is_primary, rule)
+	  VALUES (1, 1, 1, 'ext-1', '/w', 1, 'manual'), (2, 1, 1, 'ext-1-secondary', '/old/w2', 0, 'moved')`,
+	`INSERT INTO external_projects (connection_id, external_id, title, workspace, available, repo, repo_path, file_host, canonical_path, checkout_key, inode_hint, evidence_at, evidence_source, resolution, resolution_reason, resolution_rule, candidates)
+	  VALUES (2, 'ext-2', 'Ext', '/w2', 1, 'example.org/Proj', 'packages/app', 1, '/work/w2', '/work/.git', '7:19', '2026-11-06T02:00:00.123456Z', 'machine', 'review', 'ambiguous', 'remote', '[1, 2]')`,
+	`INSERT INTO workspace_declines (connection_id, identity_key, declined_at) VALUES (2, 'external:2:declined', '2026-11-06T01:30:00.000000Z')`,
+	`INSERT INTO project_aliases (alias_id, project_id, title, merged_at, merged_by_user_id) VALUES (9, 1, 'Merged', '2026-11-06T01:00:00.000000Z', 2)`,
+	`INSERT INTO project_events (id, project_id, type, text, created_at, created_by_user_id) VALUES
+	  (4, 1, 'project_merged', 'Merged project 9', '2026-11-06T01:00:00.000000Z', 2),
+	  (9, 1, 'workspace_moved', 'Moved /old/w2', '2026-11-06T02:00:00.000000Z', 1)`,
+	`DELETE FROM project_events WHERE id = 9`,
+	`INSERT INTO project_merge_dismissals (project_id, other_id) VALUES (1, 2)`,
+	`INSERT INTO schedules (id, project_id, title, prompt, cron, tz, next_run_at, connection_id, origin_session_id, execution_config, binding_id) VALUES (1, 1, 'Nightly', 'p', '0 0 * * *', 'UTC', '2026-11-07T00:00:00.000000Z', 1, 1, '{"model":"x","options":[]}', 2)`,
 	`INSERT INTO task_trees (id, title, status, closed_at, recorded_work, membership_revision) VALUES (1, 'Tree', 'done', '2026-11-08T00:00:00.000000Z', 1, 2)`,
-	`INSERT INTO tasks (id, project_id, title, prompt, state, launch_attempt, launched_at, finished_at, schedule_id, tree_id, start_at, start_tz, connection_id, session_id, execution_config, recorded_work, acceptance_revision, acceptance_id) VALUES (1, 1, 'First', 'do it', 'done', 1, '2026-11-09T00:00:00.000001Z', '2026-11-09T01:00:00.999999Z', 1, 1, '2026-11-09T00:00:00.000000Z', 'UTC', 1, 1, '{"permission":"full-access","options":[{"id":"worktree","value":true},{"id":"branch","value":"b"}]}', 1, 1, 1)`,
+	`INSERT INTO tasks (id, project_id, title, prompt, state, launch_attempt, launched_at, finished_at, schedule_id, tree_id, start_at, start_tz, connection_id, session_id, execution_config, recorded_work, acceptance_revision, acceptance_id, binding_id) VALUES (1, 1, 'First', 'do it', 'done', 1, '2026-11-09T00:00:00.000001Z', '2026-11-09T01:00:00.999999Z', 1, 1, '2026-11-09T00:00:00.000000Z', 'UTC', 1, 1, '{"permission":"full-access","options":[{"id":"worktree","value":true},{"id":"branch","value":"b"}]}', 1, 1, 1, 1)`,
 	`INSERT INTO tasks (id, project_id, title, prompt, tree_id) VALUES (2, 1, 'needle %_\ "quoted"', 'prompt with
 newline and 日本語', 1)`,
 	`INSERT INTO task_needs (task_id, need_id) VALUES (2, 1)`,
@@ -258,7 +268,7 @@ func TestRoundTrip(t *testing.T) {
 	lite.Close()
 
 	// Evidence keeps its exact bytes; IDs continue past the high-water
-	// mark (snippets 3 was deleted before the copy).
+	// mark (snippet 3 and project event 9 were deleted before the copy).
 	var evidence string
 	if err := dst.Pool().QueryRow(ctx, `SELECT evidence FROM task_acceptances WHERE id = 1`).Scan(&evidence); err != nil {
 		t.Fatal(err)
@@ -266,12 +276,14 @@ func TestRoundTrip(t *testing.T) {
 	if evidence != legacyEvidence {
 		t.Fatalf("evidence bytes changed: %q", evidence)
 	}
-	for table, want := range map[string]int64{"snippets": 4, "users": 3, "machines": 3, "harness_connections": 4, "tasks": 3, "push_subscriptions": 2} {
+	for table, want := range map[string]int64{"snippets": 4, "project_events": 10, "users": 3, "machines": 3, "harness_connections": 4, "tasks": 3, "push_subscriptions": 2} {
 		var id int64
 		q := `INSERT INTO ` + table + ` DEFAULT VALUES RETURNING id`
 		switch table {
 		case "snippets":
 			q = `INSERT INTO snippets (name, body) VALUES ('new', 'b') RETURNING id`
+		case "project_events":
+			q = `INSERT INTO project_events (project_id, type, text) VALUES (1, 'project_split', 'split') RETURNING id`
 		case "users":
 			q = `INSERT INTO users (display_name) VALUES ('new') RETURNING id`
 		case "harness_connections":

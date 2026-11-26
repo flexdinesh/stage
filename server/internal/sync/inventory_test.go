@@ -1,53 +1,106 @@
 package sync_test
 
 import (
-	"io"
-	"log/slog"
-	"os"
-	"path/filepath"
+	"context"
+	"errors"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
-	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/machine"
+	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
-// A workspace under a declared shared path gets its repository metadata
-// from the Stage-side checkout; one outside it gets none.
-func TestInventoryReadsRepoThroughSharedPaths(t *testing.T) {
+type inventoryAdapter struct {
+	execution.Adapter
+	inventory func() ([]execution.WorkspaceInfo, error)
+}
+
+func (a inventoryAdapter) Workspaces(context.Context) ([]execution.WorkspaceInfo, error) {
+	return a.inventory()
+}
+
+type inventoryOps func([]execution.WorkspaceInfo) ([]execution.WorkspaceInfo, error)
+
+func (fn inventoryOps) Inventory(_ context.Context, rows []execution.WorkspaceInfo) ([]execution.WorkspaceInfo, error) {
+	return fn(rows)
+}
+
+func TestInventoryCallsOpsForHostedLocalWorkspaces(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
-	stageRoot := t.TempDir()
-	repo := filepath.Join(stageRoot, "app")
-	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+	rows := []execution.WorkspaceInfo{{ID: "network", WorkspaceRoot: "/reported"}}
+	var calls int
+	host := machine.NewLocal(db.LocalMachine, harness.Profile{}, inventoryOps(func(got []execution.WorkspaceInfo) ([]execution.WorkspaceInfo, error) {
+		calls++
+		if !reflect.DeepEqual(got, rows) {
+			t.Fatalf("machine received %+v, want %+v", got, rows)
+		}
+		got = slices.Clone(got)
+		got[1].Evidence = &execution.WorkspaceEvidence{CanonicalPath: "/canonical"}
+		return got, nil
+	}))
+	a := inventoryAdapter{inventory: func() ([]execution.WorkspaceInfo, error) { return rows, nil }}
+	host.Install(dbtest.T3Connection, dbtest.T3Connection, a)
+	const unplaced = 999
+	host.Install(unplaced, unplaced, a)
+	svc := coordinator.NewForMachines(store, machine.MustSet(host), nil)
+
+	got, err := svc.Inventory(t.Context(), dbtest.T3Connection)
+	if err != nil || !reflect.DeepEqual(got, rows) || calls != 0 {
+		t.Fatalf("network inventory %+v, ops called %d times: %v", got, calls, err)
+	}
+	rows = append(rows, execution.WorkspaceInfo{ID: "local", WorkspaceRoot: "/local", Local: true})
+	got, err = svc.Inventory(t.Context(), unplaced)
+	if err != nil || !reflect.DeepEqual(got, rows) || calls != 0 {
+		t.Fatalf("unplaced inventory %+v, ops called %d times: %v", got, calls, err)
+	}
+	got, err = svc.Inventory(t.Context(), dbtest.T3Connection)
+	if err != nil || len(got) != 2 || got[0] != rows[0] || got[1].Evidence == nil || got[1].Evidence.CanonicalPath != "/canonical" || calls != 1 {
+		t.Fatalf("local inventory %+v, ops called %d times: %v", got, calls, err)
+	}
+}
+
+func TestFullSyncPollsLinkedTasksAfterInventoryFailure(t *testing.T) {
+	ctx := t.Context()
+	store, task := contractTask(t, placement{})
+	fake := &documentHarness{}
+	inventoryErr := errors.New("inventory source unavailable")
+	failed := false
+	a := inventoryAdapter{Adapter: fake, inventory: func() ([]execution.WorkspaceInfo, error) {
+		if failed {
+			return nil, inventoryErr
+		}
+		return fake.Workspaces(ctx)
+	}}
+	svc := coordinator.NewWithAdapters(store, map[int64]execution.Adapter{task.ConnectionID: a}, nil)
+	svc.Harnesses = documentHarnesses
+
+	started, err := svc.StartTask(ctx, task.ID)
+	if err != nil || started.State != db.StateRunning {
+		t.Fatalf("launch %+v: %v", started, err)
+	}
+	if _, err := store.RefreshWorkspaces(ctx, task.ConnectionID, []execution.WorkspaceInfo{
+		{ID: "collection-z", WorkspaceRoot: "volume://checkout"},
+		{ID: "pending", Title: "Pending import", WorkspaceRoot: "/pending", Importable: true},
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, ".git", "config"), []byte("[remote \"origin\"]\n\turl = https://github.com/o/app.git\n"), 0o644); err != nil {
-		t.Fatal(err)
+	failed = true
+	fake.phase = "published"
+	result, err := svc.FullSync(ctx)
+	if !errors.Is(err, inventoryErr) || result.Projects != 0 || result.Sessions != 1 || !slices.Equal(result.Unavailable, []int64{task.ConnectionID}) {
+		t.Fatalf("sync result %+v: %v", result, err)
 	}
-	if err := store.SetSharedPath(t.Context(), db.SharedPath{ConnectionID: store.ActiveID(db.LocalMachine, "t3"), HarnessRoot: "/harness", StageRoot: stageRoot}); err != nil {
-		t.Fatal(err)
+	got, err := store.GetTask(ctx, task.ID)
+	if err != nil || got.State != db.StateDone {
+		t.Fatalf("linked task %+v: %v", got, err)
 	}
-	if err := os.MkdirAll(filepath.Join(repo, "packages", "web"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	fake := t3.NewFake()
-	fake.AddProject("app", "/harness/app")
-	fake.AddProject("web", "/harness/app/packages/web")
-	fake.AddProject("other", "/elsewhere/other")
-	svc := t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(fake)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	ws, err := svc.Inventory(t.Context(), store.ActiveID(db.LocalMachine, "t3"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	repos := map[string][2]string{}
-	for _, w := range ws {
-		repos[w.WorkspaceRoot] = [2]string{w.Repo, w.RepoPath}
-	}
-	if repos["/harness/app"] != [2]string{"github.com/o/app", "."} ||
-		repos["/harness/app/packages/web"] != [2]string{"github.com/o/app", "packages/web"} ||
-		repos["/elsewhere/other"] != [2]string{} {
-		t.Fatalf("repos %v", repos)
+	projects, err := store.ListProjects(ctx, "all")
+	if err != nil || len(projects) != 1 || len(projects[0].Bindings) != 1 || projects[0].Bindings[0].Status != "available" {
+		t.Fatalf("inventory was refreshed or imported: %+v: %v", projects, err)
 	}
 }

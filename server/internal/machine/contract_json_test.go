@@ -10,7 +10,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
-	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencodesetup"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
@@ -50,7 +49,16 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		Closed: &execution.Closure{Signal: execution.ClosedSettled}, StateReason: execution.ReasonOwnerExited, Origin: "cli",
 		Facts: []execution.Fact{{ID: "review", Label: "Review", Value: "Ready", Link: "https://web/review", Copyable: true, Tone: execution.ToneOK}},
 	}
-	binding := db.ProjectBinding{ID: 1, ProjectID: 2, ConnectionID: 7, Harness: "kind", ExternalProjectID: "p", Workspace: "/w", Revision: 3, Status: "available", ObservedWorkspace: &str, ConnectionActive: true, ConnectionLabel: "box", Origin: db.BindingPath}
+	machineID := int64(3)
+	binding := db.ProjectBinding{
+		ID: 1, ProjectID: 2, ConnectionID: 7, Harness: "kind", ExternalProjectID: "p", Workspace: "/w", Revision: 3,
+		Status: "available", ObservedWorkspace: &str, ConnectionActive: true, ConnectionLabel: "box", Primary: true,
+		Rule: "canonical_path", MachineID: machineID, Title: "Workspace", Remote: "github.com/o/r", Subpath: ".",
+		FileHost: &machineID, EvidenceAt: &at, Facts: observation.Facts,
+	}
+	evidence := execution.WorkspaceEvidence{
+		CanonicalPath: "/w", CheckoutKey: "/w/.git", Subpath: ".", Remote: "github.com/o/r", InodeHint: "64769:1234", Gone: true,
+	}
 	samples := map[string]any{
 		// Adapter contract (execution.Adapter and its optional interfaces).
 		"SessionRef":   ref,
@@ -59,7 +67,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		"WorkspaceInfo": execution.WorkspaceInfo{
 			OriginRemote: "git@github.com:o/r.git", ID: "p", Title: "r", WorkspaceRoot: "/w", ArchivedAt: &at, DeletedAt: &later,
 			CreatedAt: at, UpdatedAt: later, Importable: true, ActiveAt: &at, Repo: "github.com/o/r", RepoPath: "packages/web",
-			Local: true, ImportIf: execution.ImportInCheckout,
+			Local: true, ImportIf: execution.ImportInCheckout, Evidence: &evidence,
 		},
 		"Capabilities": execution.Capabilities{
 			Permissions: []execution.Choice{choice}, Options: []execution.Option{option}, ModeLabel: "Agent",
@@ -110,15 +118,13 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		"OpenCodeSetup":     opencodesetup.SetupSettings{Endpoint: "http://oc", BrowserEndpoint: "http://ocb", WebClient: "http://ocw", Auth: opencodesetup.AuthPaired},
 		"CodexSettings":     codexsetup.SetupSettings{Binary: "/opt/codex/bin/codex", Connected: true},
 		// Machine ops.
-		"SharedRoot":       machine.SharedRoot{HarnessRoot: "/srv", StageRoot: "/home/u/src"},
-		"CheckoutEvidence": machine.CheckoutEvidence{Common: "64769:1234", Subproject: "app", Remote: "github.com/o/r", RepoPath: "app"},
-		"SharedPath":       db.SharedPath{ConnectionID: 7, HarnessRoot: "/srv", StageRoot: "/home/u/src"},
+		"FilesystemWorkspaceEvidence": evidence,
 	}
 	for name, v := range samples {
 		t.Run(name, func(t *testing.T) {
 			rv := reflect.ValueOf(v)
 			for i := range rv.NumField() {
-				if f := rv.Type().Field(i); f.IsExported() && rv.Field(i).IsZero() {
+				if f := rv.Type().Field(i); f.IsExported() && f.Tag.Get("json") != "-" && rv.Field(i).IsZero() {
 					t.Fatalf("sample leaves %s zero: set every field", f.Name)
 				}
 			}

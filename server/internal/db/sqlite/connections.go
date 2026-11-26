@@ -179,8 +179,8 @@ func (r connections) execAll(ctx context.Context, id any, qs ...string) error {
 func (r connections) FollowReplacement(ctx context.Context, from, to int64) error {
 	for _, q := range []string{
 		`UPDATE preferences SET default_connection_id=$2 WHERE default_connection_id=$1`,
-		`UPDATE tasks SET connection_id=$2,updated_at=stage_now() WHERE connection_id=$1 AND state='backlog' AND session_id IS NULL`,
-		`UPDATE schedules SET connection_id=$2,updated_at=stage_now() WHERE connection_id=$1`,
+		`UPDATE tasks SET connection_id=$2,binding_id=NULL,updated_at=stage_now() WHERE connection_id=$1 AND state='backlog' AND session_id IS NULL`,
+		`UPDATE schedules SET connection_id=$2,binding_id=NULL,updated_at=stage_now() WHERE connection_id=$1`,
 	} {
 		if _, err := r.Exec(ctx, q, from, to); err != nil {
 			return err
@@ -194,13 +194,14 @@ func (r connections) ClearDefault(ctx context.Context, id int64) error {
 }
 
 func (r connections) ClearDiscovery(ctx context.Context, id int64) error {
-	return r.execAll(ctx, id, `DELETE FROM external_projects WHERE connection_id=$1`)
+	return r.execAll(ctx, id, `DELETE FROM external_projects WHERE connection_id=$1`,
+		`DELETE FROM workspace_declines WHERE connection_id=$1`)
 }
 
 func (r connections) Delete(ctx context.Context, id int64) error {
 	return r.execAll(ctx, id,
 		`DELETE FROM external_projects WHERE connection_id=$1`,
-		`DELETE FROM shared_paths WHERE connection_id=$1`,
+		`DELETE FROM workspace_declines WHERE connection_id=$1`,
 		`DELETE FROM harness_connections WHERE id=$1`)
 }
 
@@ -233,7 +234,7 @@ func (r connections) Forget(ctx context.Context, id int64) error {
 		`UPDATE harness_connections SET identity='',forgotten_at=stage_now() WHERE id=$1`,
 		`UPDATE project_bindings SET active=0 WHERE connection_id=$1`,
 		`DELETE FROM external_projects WHERE connection_id=$1`,
-		`DELETE FROM shared_paths WHERE connection_id=$1`)
+		`DELETE FROM workspace_declines WHERE connection_id=$1`)
 }
 
 func (r connections) Moved(ctx context.Context) ([]store.Move, error) {
@@ -282,29 +283,6 @@ func (r connections) Evidence(ctx context.Context, id int64) ([]store.ProjectBin
 	var pending bool
 	err = r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE connection_id=$1 AND state='launching')`, id).Scan(&pending)
 	return bindings, observations, pending, err
-}
-
-func (r connections) SharedPaths(ctx context.Context, machine int64) ([]store.SharedPath, error) {
-	rows, err := r.Query(ctx, `SELECT p.connection_id,p.harness_root,p.stage_root FROM shared_paths p JOIN harness_connections c ON c.id=p.connection_id
- WHERE $1=0 OR c.machine_id=$1 ORDER BY p.connection_id,length(p.harness_root) DESC,p.harness_root`, machine)
-	if err != nil {
-		return nil, err
-	}
-	return collectRows(rows, func(r rowScanner) (store.SharedPath, error) {
-		var p store.SharedPath
-		err := r.Scan(&p.ConnectionID, &p.HarnessRoot, &p.StageRoot)
-		return p, err
-	})
-}
-
-func (r connections) DeleteSharedPath(ctx context.Context, connectionID int64, harnessRoot string) error {
-	_, err := r.Exec(ctx, `DELETE FROM shared_paths WHERE connection_id=$1 AND harness_root=$2`, connectionID, harnessRoot)
-	return err
-}
-
-func (r connections) PutSharedPath(ctx context.Context, p store.SharedPath) error {
-	_, err := r.Exec(ctx, `INSERT INTO shared_paths(connection_id,harness_root,stage_root) VALUES($1,$2,$3) ON CONFLICT(connection_id,harness_root) DO UPDATE SET stage_root=excluded.stage_root`, p.ConnectionID, p.HarnessRoot, p.StageRoot)
-	return err
 }
 
 func (connections) Lock(context.Context, int64) error { return nil }

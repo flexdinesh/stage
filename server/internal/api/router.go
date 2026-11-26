@@ -120,15 +120,21 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/sync", s.runSync)
 
 	h("GET /api/projects", s.listProjects)
-	h("GET /api/shared-paths", s.sharedPaths)
-	h("PUT /api/shared-paths", s.sharedPaths)
-	h("POST /api/projects/{id}/bindings/{connectionId}/match", s.matchWorkspace)
+	h("GET /api/shared-paths", removedRoute("GET /api/connections/{connectionId}/workspaces"))
+	h("PUT /api/shared-paths", removedRoute("PUT /api/projects/{id}/binding"))
+	h("POST /api/projects/{id}/bindings/{connectionId}/match", removedRoute("POST /api/connections/{connectionId}/resolve"))
 	h("POST /api/projects", s.createProject)
 	h("GET /api/projects/{id}", s.getProject)
 	h("PATCH /api/projects/{id}", s.updateProject)
 	h("PUT /api/projects/{id}/binding", s.bindProject)
-	h("DELETE /api/projects/{id}/binding", s.unbindProject)
-	h("DELETE /api/projects/{id}/bindings/{connectionId}", s.unbindProject)
+	h("DELETE /api/projects/{id}/binding", removedRoute("DELETE /api/projects/{id}/bindings/{bindingId}"))
+	h("DELETE /api/projects/{id}/bindings/{bindingId}", s.unbindProject)
+	h("PUT /api/projects/{id}/bindings/{bindingId}/primary", s.setPrimaryBinding)
+	h("POST /api/projects/{id}/merge", s.mergeProjects)
+	h("POST /api/projects/{id}/merge-dismissals", s.dismissProjectMerge)
+	h("POST /api/projects/{id}/split", s.splitProject)
+	h("GET /api/projects/{id}/events", s.projectEvents)
+	h("GET /api/workspaces/review", s.reviewWorkspaces)
 	h("GET /api/harnesses", s.listHarnesses)
 	h("GET /api/harnesses/{kind}/status", s.harnessStatus)
 	h("PUT /api/harnesses/{kind}/settings", s.harnessSettings)
@@ -175,7 +181,11 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/connections/{connectionId}/observations", s.pushObservations)
 	h("POST /api/tasks/{id}/launch-link/preview", s.previewLaunchLink)
 	h("POST /api/tasks/{id}/launch-link", s.attachLaunchLink)
-	h("GET /api/connections/{connectionId}/projects", s.externalProjects)
+	h("GET /api/connections/{connectionId}/projects", removedRoute("GET /api/connections/{connectionId}/workspaces"))
+	h("GET /api/connections/{connectionId}/workspaces", s.workspaces)
+	h("POST /api/connections/{connectionId}/resolve", s.resolveWorkspaces)
+	h("POST /api/connections/{connectionId}/workspaces/decline", s.setWorkspaceDeclined(true))
+	h("POST /api/connections/{connectionId}/workspaces/undecline", s.setWorkspaceDeclined(false))
 
 	for target, path := range map[execution.ActionTarget]string{
 		execution.TargetConnection: "/api/connections/{id}/actions",
@@ -368,6 +378,15 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+func removedRoute(replacement string) func(http.ResponseWriter, *http.Request) error {
+	return func(w http.ResponseWriter, _ *http.Request) error {
+		writeJSON(w, http.StatusGone, map[string]string{
+			"code": "removed", "error": "Removed. Use " + replacement + ".",
+		})
+		return nil
+	}
+}
+
 // writeErr maps app errors to contract statuses.
 func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	var (
@@ -375,6 +394,7 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		conflict   *db.ConflictError
 		harnessErr *db.HarnessError
 		pushErr    *notify.PushError
+		changed    *db.PreviewChangedError
 	)
 	if writeAuthErr(w, err) {
 		return
@@ -395,6 +415,10 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusBadRequest, invalid.Msg)
 	case errors.Is(err, db.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
+	case errors.As(err, &changed):
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"code": "preview_changed", "error": changed.Error(), "preview": changed.Fresh,
+		})
 	case errors.As(err, &conflict) && conflict.Code != "":
 		writeJSON(w, http.StatusConflict, map[string]string{"error": conflict.Msg, "code": conflict.Code})
 	case errors.As(err, &conflict):

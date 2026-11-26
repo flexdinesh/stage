@@ -8,16 +8,11 @@ import (
 	"syscall"
 )
 
-// fileKey identifies path's file on this machine by device and inode: what
-// os.SameFile compares on Unix.
-func fileKey(path string) (string, bool) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return "", false
-	}
-	st, ok := fi.Sys().(*syscall.Stat_t)
+// inodeHint identifies the directory on this machine by device and inode.
+func inodeHint(info os.FileInfo) string {
+	st, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
-		return "", false
+		return ""
 	}
-	return strconv.FormatUint(uint64(st.Dev), 10) + ":" + strconv.FormatUint(st.Ino, 10), true
+	return strconv.FormatUint(uint64(st.Dev), 10) + ":" + strconv.FormatUint(uint64(st.Ino), 10)
 }

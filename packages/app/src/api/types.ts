@@ -33,6 +33,7 @@ export interface ApiErrorBody {
   error: string;
   /** Machine-readable reason on some 409s (e.g. already_answered, request_stale). */
   code?: string;
+  preview?: WorkspaceResolveResult | ProjectMergeResult;
 }
 
 /** T3 ProviderOptionSelection, e.g. { id: "effort", value: "low" }. */
@@ -80,6 +81,7 @@ export interface Project {
   id: number;
   title: string;
   bindings: ProjectBinding[];
+  aliases: ProjectAlias[];
   archivedAt: string | null;
   createdAt: string;
   /** User id of its creator. */
@@ -109,34 +111,126 @@ export interface ProjectList {
   imports: ImportSummary[];
 }
 
-export interface CreateProjectRequest { title: string }
-export interface ProjectBinding {
- id: number;
- projectId: number;
- connectionId: number;
- harness: Harness;
- externalProjectId: string;
- workspace: string;
- revision: number;
- status: "available" | "missing" | "changed";
- observedWorkspace: string | null;
- /** False when the binding's connection was replaced: history only, never repaired. */
- connectionActive: boolean;
- /** The connection's T3 environment label or OpenCode address. */
- connectionLabel: string;
- /** manual: a user bound it; imported: discovery created the project for it; path: discovery bound it to the project already at that path on this machine; remote: discovery bound it to the one project with the same Git origin remote and subproject on another machine. */
- origin: "manual" | "imported" | "path" | "remote";
-}
-export interface ExternalProject {
- connectionId: number;
- externalId: string;
- title: string;
- workspace: string;
- projectId: number | null;
- /** Normalized origin remote, "" when unknown. */
- repo: string;
+export interface ProjectAlias {
+  id: number;
+  title: string;
+  mergedAt: string;
 }
 
+export interface CreateProjectRequest {
+  title: string;
+  bindings?: WorkspaceBindingInput[];
+}
+
+interface WorkspaceBindingInput {
+  connectionId: number;
+  externalProjectId: string;
+  workspace: string;
+}
+
+export interface BindWorkspaceRequest extends WorkspaceBindingInput {
+  primary?: boolean;
+  replaces?: number;
+}
+
+export interface ProjectBinding {
+  id: number;
+  projectId: number;
+  connectionId: number;
+  machineId: number;
+  harness: Harness;
+  externalProjectId: string;
+  title: string;
+  workspace: string;
+  revision: number;
+  status: "available" | "missing" | "changed";
+  observedWorkspace: string | null;
+  /** False when the binding's connection was replaced: history only, never repaired. */
+  connectionActive: boolean;
+  /** The connection's T3 environment label or OpenCode address. */
+  connectionLabel: string;
+  primary: boolean;
+  rule: "manual" | "new" | "remote" | "local" | "moved";
+  remote: string;
+  subpath: string;
+  fileHost: number | null;
+  evidenceAt: string | null;
+  facts: HarnessFact[];
+}
+
+export interface WorkspaceRef {
+  externalId: string;
+  workspace: string;
+}
+
+export type WorkspaceReviewReason = "suggested" | "ambiguous" | "declined" | "moved";
+
+export interface WorkspaceResolution {
+  outcome: "bound" | "join" | "new" | "review";
+  reason: WorkspaceReviewReason | "";
+  rule: "existing" | "declined" | "moved" | "external" | "remote" | "local" | "none";
+  candidates: number[];
+}
+
+export interface Workspace extends WorkspaceRef {
+  connectionId: number;
+  title: string;
+  available: boolean;
+  importable: boolean;
+  harnessArchived: boolean;
+  activeAt: string | null;
+  projectId: number | null;
+  bindingId: number | null;
+  primary: boolean;
+  fileHost: number | null;
+  canonicalPath: string;
+  remote: string;
+  subpath: string;
+  identityKey: string;
+  evidenceAt: string | null;
+  evidenceSource: string;
+  declined: boolean;
+  resolution: WorkspaceResolution;
+}
+
+export interface WorkspaceResolveResult {
+  applied: boolean;
+  previewToken: string;
+  placements: (WorkspaceResolution & {
+    workspace: Workspace;
+    projectId: number | null;
+    newProjectTitle: string;
+    acts: boolean;
+  })[];
+  created: number;
+  joined: number;
+  moved: number;
+  review: number;
+}
+
+export interface WorkspaceReview {
+  workspaces: (Workspace & { reason: WorkspaceReviewReason | "new" })[];
+  merges: { identityKey: string; projectIds: number[] }[];
+  counts: Record<WorkspaceReviewReason | "new" | "merges", number>;
+  attention: number;
+}
+
+export interface ProjectMergeResult {
+  preview: boolean;
+  project: Project;
+  from: Pick<Project, "id" | "title">;
+  moves: { tasks: number; schedules: number; snippets: number; workspaces: number };
+  blocked: { code: string; reason: string } | null;
+  previewToken: string;
+}
+
+export interface ProjectEvent {
+  id: number;
+  type: "workspace_moved" | "project_merged" | "project_split";
+  text: string;
+  createdAt: string;
+  createdBy: number;
+}
 
 // ---- Tasks ----
 
@@ -406,6 +500,12 @@ export interface LaunchLinkPreview {
     facts?: HarnessFact[];
   };
 }
+export interface TaskWorkspace {
+  bindingId: number;
+  path: string;
+  source: "pinned" | "chosen" | "primary";
+}
+
 export interface Task {
   links?: ExecutionLinks;
   executionConfig?: ExecutionConfig | null;
@@ -413,6 +513,8 @@ export interface Task {
   session: SessionRef | null;
   originSession: SessionRef | null;
   connectionId: number;
+  bindingId: number | null;
+  workspace: TaskWorkspace | null;
   harness: Harness;
   /** False once the task's connection was replaced: read-only history, Stage no longer follows it. */
   connectionActive: boolean;
@@ -758,6 +860,7 @@ export interface TaskList {
 
 export interface CreateTaskRequest {
   connectionId?: number;
+  bindingId?: number | null;
   executionConfig?: ExecutionConfig;
   projectId: number;
   title: string;
@@ -783,6 +886,7 @@ export interface CreateTaskRequest {
 
 export interface UpdateTaskRequest {
   connectionId?: number;
+  bindingId?: number | null;
   executionConfig?: ExecutionConfig;
   projectId?: number;
   title?: string;
@@ -857,6 +961,7 @@ export type ScheduleRunOutcome = (typeof SCHEDULE_RUN_OUTCOMES)[number];
 export interface Schedule {
   executionConfig?: ExecutionConfig | null;
   connectionId: number;
+  bindingId: number | null;
   originSession: SessionRef | null;
   id: number;
   projectId: number;
@@ -911,6 +1016,7 @@ export interface ScheduleListQuery {
 
 export interface CreateScheduleRequest {
   connectionId?: number;
+  bindingId?: number | null;
   executionConfig?: ExecutionConfig;
   projectId: number;
   title: string;

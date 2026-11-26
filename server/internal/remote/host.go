@@ -231,18 +231,11 @@ func (h *Host) Handlers() map[string]workerchan.WorkerHandler {
 			if err := decode(env, &r); err != nil {
 				return nil, err
 			}
-			ws, err := h.local.Ops().Inventory(ctx, r.Workspaces, r.Roots)
+			ws, err := h.local.Ops().Inventory(ctx, r.Workspaces)
 			if ws == nil {
 				ws = []execution.WorkspaceInfo{}
 			}
 			return ws, err
-		},
-		KindCheckout: func(ctx context.Context, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
-			var r CheckoutRequest
-			if err := decode(env, &r); err != nil {
-				return nil, err
-			}
-			return h.local.Ops().Checkout(ctx, r.Roots, r.Directory)
 		},
 	}
 }

@@ -344,7 +344,7 @@ func (s *Store) RemoveMachine(ctx context.Context, id int64) error {
 	if id == LocalMachine {
 		return &ConflictError{Msg: "This computer runs the Stage server and cannot be removed.", Code: "local_machine"}
 	}
-	err := s.e.Write(ctx, func(tx store.Tx) error {
+	err := s.writeConnectionIdentity(ctx, func(tx store.Tx) error {
 		removed, err := tx.Machines().MarkRemoved(ctx, id)
 		if err != nil {
 			return err

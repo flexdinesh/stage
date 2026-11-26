@@ -82,6 +82,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{"unconfigured defaults retained", nil, checkV0036HarnessSetupDefaults},
 	},
 	37: {{"existing connection and task evidence retained", seedV0037ConnectionFacts, checkV0037ConnectionFacts}},
+	38: {{"identity history and workspace bindings", seedV0038ProjectIdentity, checkV0038ProjectIdentity}},
 }
 
 // TestStepwiseMigrations is the upgrade coverage (no releases exist yet):
@@ -837,4 +838,90 @@ func seedV0037ConnectionFacts(t *testing.T, pool *sqlite.DB) {
 func checkV0037ConnectionFacts(t *testing.T, pool *sqlite.DB) {
 	wantRows(t, pool, `SELECT id,identity,label,last_known_facts FROM harness_connections WHERE id=42`, "42|instance|Desk|NULL")
 	wantRows(t, pool, `SELECT connection_id,json_extract(execution_config,'$.options[0].value') FROM tasks WHERE id=1`, "42|0")
+}
+
+func seedV0038ProjectIdentity(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	seedV0032(
+		`INSERT INTO harness_connections(id,machine_id,harness) VALUES (42,1,'opencode'),(43,1,'t3')`,
+		`INSERT INTO projects(id,title,archived_at,archive_owner) VALUES
+		 (1,'User archived','2026-11-01T00:00:00.000000Z','user'),
+		 (2,'Harness archived','2026-11-02T00:00:00.000000Z','harness'),
+		 (3,'Open',NULL,NULL),(4,'Another',NULL,NULL)`,
+		`INSERT INTO project_bindings(id,project_id,connection_id,external_project_id,workspace,origin,active) VALUES
+		 (1,1,42,'manual','/manual','manual',TRUE),(2,2,42,'imported','/imported','imported',TRUE),
+		 (3,3,42,'path','/path','path',TRUE),(4,4,42,'remote','/remote','remote',TRUE),
+		 (5,1,42,'manual','/old','path',FALSE)`,
+		`INSERT INTO external_projects(connection_id,external_id,title,workspace,available,repo,repo_path,declined_at) VALUES
+		 (42,'manual','M','/manual',TRUE,'Example.org/Org/RePo','.',NULL),
+		 (42,'manual','M','/old',FALSE,'','',NULL),
+		 (42,'imported','I','/imported',TRUE,'','',NULL),(42,'path','P','/path',TRUE,'','',NULL),
+		 (42,'remote','R','/remote',TRUE,'','',NULL),
+		 (42,'declined','D','/d',TRUE,'EXAMPLE.org/A%#B','Dir%#X','2026-11-01T00:00:00.000000Z'),
+		 (42,'declined','D','/other',TRUE,'','', '2026-11-02T00:00:00.000000Z'),
+		 (42,'second','D','/d2',TRUE,'EXAMPLE.org/A%#B','Dir%#X','2026-11-03T00:00:00.000000Z'),
+		 (42,'pathless','D','',TRUE,'EXAMPLE.org/Pathless','.','2026-11-02T00:00:00.000000Z'),
+		 (42,'unknown-subpath','D','/unknown',TRUE,'EXAMPLE.org/Unknown','','2026-11-02T00:00:00.000000Z'),
+		 (43,'declined','D','/d',TRUE,'EXAMPLE.org/A%#B','Dir%#X','2026-11-01T00:00:00.000000Z')`,
+		`INSERT INTO shared_paths(connection_id,harness_root,stage_root) VALUES(42,'/h','/s')`,
+		`INSERT INTO tasks(id,project_id,title,prompt,connection_id) VALUES(1,1,'T','p',42)`,
+		`INSERT INTO schedules(id,project_id,title,prompt,cron,tz,connection_id) VALUES(1,1,'S','p','0 0 * * *','UTC',42)`,
+	)(t, pool)
+}
+
+func checkV0038ProjectIdentity(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	wantRows(t, pool, `SELECT id || '|' || rule || '|' || CASE WHEN is_primary THEN 'primary' ELSE 'secondary' END
+	 FROM project_bindings ORDER BY id`,
+		"1|manual|primary", "2|new|primary", "3|local|primary", "4|remote|primary", "5|local|secondary")
+	wantRows(t, pool, `SELECT external_id || '|' || workspace || '|' || resolution || '|' || resolution_rule
+	 FROM external_projects WHERE external_id IN ('manual','imported','path','remote') ORDER BY external_id,workspace`,
+		"imported|/imported|bound|existing", "manual|/manual|bound|existing", "manual|/old||", "path|/path|bound|existing", "remote|/remote|bound|existing")
+	wantRows(t, pool, `SELECT repo || '|' || repo_path FROM external_projects WHERE workspace='/manual'`, "example.org/org/repo|.")
+	wantRows(t, pool, `SELECT 'legacy' FROM external_projects WHERE workspace='/manual' AND file_host IS NULL
+	 AND canonical_path='' AND checkout_key='' AND inode_hint='' AND evidence_at IS NULL AND evidence_source=''
+	 AND resolution_reason='' AND candidates='[]'`, "legacy")
+	wantRows(t, pool, `SELECT id || '' FROM projects WHERE archived_at = '2026-11-01T00:00:00.000000Z'
+	 OR archived_at = '2026-11-02T00:00:00.000000Z' ORDER BY id`, "1", "2")
+	wantRows(t, pool, `SELECT id || '' FROM projects WHERE archived_at IS NULL ORDER BY id`, "3", "4")
+	wantRows(t, pool, `SELECT connection_id || '|' || identity_key || '|' ||
+	 CASE declined_at WHEN '2026-11-01T00:00:00.000000Z' THEN '1' WHEN '2026-11-02T00:00:00.000000Z' THEN '2'
+	 WHEN '2026-11-03T00:00:00.000000Z' THEN '3' ELSE '?' END
+	 FROM workspace_declines ORDER BY connection_id,identity_key`,
+		"42|external:42:declined|2", "42|external:42:pathless|2", "42|external:42:second|3",
+		"42|external:42:unknown-subpath|2", "42|remote:example.org/a%25%23b#Dir%25%23X|3",
+		"43|external:43:declined|1", "43|remote:example.org/a%25%23b#Dir%25%23X|1")
+
+	if tableExists(t, pool, "shared_paths") || indexExists(t, pool, "project_binding_active") {
+		t.Fatal("legacy shared paths or active-binding index remains")
+	}
+	for table, column := range map[string]string{"projects": "archive_owner", "project_bindings": "origin", "external_projects": "declined_at"} {
+		if columnExists(t, pool, table, column) {
+			t.Errorf("legacy column %s.%s remains", table, column)
+		}
+	}
+
+	bindingsUnset := `SELECT 'task' FROM tasks WHERE id=1 AND binding_id IS NULL
+	 UNION ALL SELECT 'schedule' FROM schedules WHERE id=1 AND binding_id IS NULL ORDER BY 1`
+	wantRows(t, pool, bindingsUnset, "schedule", "task")
+	seedV0032(
+		`INSERT INTO project_bindings(id,project_id,connection_id,external_project_id,workspace) VALUES (6,1,42,'extra','/extra')`,
+		`INSERT INTO project_bindings(id,project_id,connection_id,external_project_id,workspace,is_primary,active)
+		 VALUES (7,1,42,'inactive','/inactive',TRUE,FALSE),(8,1,43,'extra','/extra',TRUE,TRUE)`,
+		`UPDATE tasks SET binding_id=6 WHERE id=1`,
+		`UPDATE schedules SET binding_id=6 WHERE id=1`,
+	)(t, pool)
+	wantRows(t, pool, `SELECT id || '' FROM project_bindings WHERE project_id=1 AND connection_id=42 AND active ORDER BY id`, "1", "6")
+	wantRows(t, pool, `SELECT rule FROM project_bindings WHERE id=6 AND NOT is_primary`, "manual")
+
+	mustFail(t, pool, "second active primary", `UPDATE project_bindings SET is_primary=TRUE WHERE id=6`)
+	mustFail(t, pool, "duplicate active workspace", `INSERT INTO project_bindings(id,project_id,connection_id,external_project_id,workspace) VALUES (9,2,42,'extra','/extra')`)
+	mustFail(t, pool, "unknown file host", `UPDATE external_projects SET file_host=999 WHERE workspace='/manual'`)
+	mustFail(t, pool, "candidates must be an array", `UPDATE external_projects SET candidates='{}' WHERE workspace='/manual'`)
+	mustFail(t, pool, "invalid dismissal pair", `INSERT INTO project_merge_dismissals(project_id,other_id) VALUES (2,1)`)
+	mustFail(t, pool, "invalid task binding", `UPDATE tasks SET binding_id=999 WHERE id=1`)
+	mustFail(t, pool, "invalid schedule binding", `UPDATE schedules SET binding_id=999 WHERE id=1`)
+
+	seedV0032(`DELETE FROM project_bindings WHERE id=6`)(t, pool)
+	wantRows(t, pool, bindingsUnset, "schedule", "task")
 }

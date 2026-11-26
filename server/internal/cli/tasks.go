@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agenttools"
+	"github.com/flexdinesh/stage/server/internal/db"
 )
 
 // list is a repeatable string flag.
@@ -37,6 +38,7 @@ func csv(s string) []string {
 // add/edit).
 type configFlags struct {
 	connection                         int64
+	binding                            db.Optional[int64]
 	executionConfig                    *agenttools.ConfigInput
 	project, title, prompt, promptFile string
 	images                             list
@@ -77,6 +79,18 @@ func (f *configFlags) configInputFlag(c *cmd) {
 func (f *configFlags) register(c *cmd) {
 	f.configInputFlag(c)
 	c.fs.Int64Var(&f.connection, "connection", 0, "destination connection ID")
+	c.fs.Func("binding", "workspace binding ID (empty restores the primary)", func(raw string) error {
+		if raw == "" {
+			f.binding = db.Optional[int64]{Set: true, Null: true}
+			return nil
+		}
+		id, err := parseID(raw)
+		if err != nil {
+			return err
+		}
+		f.binding = db.Optional[int64]{Set: true, V: id}
+		return nil
+	})
 	c.fs.StringVar(&f.project, "project", "", "project id or title")
 	c.fs.StringVar(&f.title, "title", "", "title")
 	c.fs.StringVar(&f.prompt, "prompt", "", "prompt text (- = stdin)")
@@ -114,7 +128,7 @@ func (f *configFlags) create(c *cmd) (agenttools.ConfigArgs, error) {
 		return agenttools.ConfigArgs{}, usagef("--title and --prompt are required")
 	}
 	return agenttools.ConfigArgs{
-		ConnectionID: f.connection, ExecutionConfig: f.executionConfig, Project: f.project, Title: f.title, Prompt: prompt,
+		ConnectionID: f.connection, BindingID: f.binding.Ptr(), ExecutionConfig: f.executionConfig, Project: f.project, Title: f.title, Prompt: prompt,
 		ImagePaths: f.images,
 	}, nil
 }
@@ -143,7 +157,7 @@ func (f *configFlags) update(c *cmd, id int64) (agenttools.UpdateArgs, error) {
 		return agenttools.UpdateArgs{}, err
 	}
 	a := agenttools.UpdateArgs{
-		ConnectionID: f.connection, ExecutionConfig: f.executionConfig, ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
+		ConnectionID: f.connection, BindingID: f.binding, ExecutionConfig: f.executionConfig, ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
 	}
 	if promptSet {
 		a.Prompt = &prompt

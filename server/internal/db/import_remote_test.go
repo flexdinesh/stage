@@ -67,21 +67,21 @@ func TestImportJoinsSameRepoAtAnotherPathOnAnotherMachine(t *testing.T) {
 		t.Fatalf("result %+v, %d projects", r, projectCount(t, pool))
 	}
 	b, ok := bindingOn(t, s, ctx, p.ID, laptopT3)
-	if !ok || b.Origin != BindingRemote || b.Workspace != "/Users/b/code/stage" || b.ExternalProjectID != "laptop-stage" {
+	if !ok || b.Rule != "remote" || b.Workspace != "/Users/b/code/stage" || b.ExternalProjectID != "laptop-stage" {
 		t.Fatalf("laptop binding %+v", b)
 	}
-	// The laptop's OpenCode at the same path joins by path on its machine.
-	if r = refreshImport(t, s, ctx, laptopOC, ws("oc-stage", "/Users/b/code/stage")); r.Bound != 1 {
+	// The local service reads the same remote and subpath on its file host.
+	if r = refreshImport(t, s, ctx, laptopOC, ws("oc-stage", "/Users/b/code/stage", remote("github.com/o/stage", "."))); r.Bound != 1 {
 		t.Fatalf("laptop OpenCode %+v", r)
 	}
-	if b, ok = bindingOn(t, s, ctx, p.ID, laptopOC); !ok || b.Origin != BindingPath {
+	if b, ok = bindingOn(t, s, ctx, p.ID, laptopOC); !ok || b.Rule != "remote" {
 		t.Fatalf("laptop OpenCode binding %+v", b)
 	}
 	// A third machine matches the one project through two machines' bindings.
 	if r = refreshImport(t, s, ctx, thirdT3, ws("desk", "/srv/stage", remote("github.com/o/stage", "."))); r.Bound != 1 {
 		t.Fatalf("third machine %+v", r)
 	}
-	if b, ok = bindingOn(t, s, ctx, p.ID, thirdT3); !ok || b.Origin != BindingRemote {
+	if b, ok = bindingOn(t, s, ctx, p.ID, thirdT3); !ok || b.Rule != "remote" {
 		t.Fatalf("third machine binding %+v", b)
 	}
 	// Repeat passes are no-ops.
@@ -96,11 +96,11 @@ func TestImportSamePathOnAnotherMachineNeverMerges(t *testing.T) {
 	s, ctx, pool := twoMachineStore(t)
 	local := s.ActiveID(LocalMachine, "t3")
 	refreshImport(t, s, ctx, local,
-		ws("plain", "/w/plain"),
+		ws("plain", "/w/plain", directoryEvidence),
 		ws("app", "/w/app", remote("github.com/o/app", ".")),
 	)
 	r := refreshImport(t, s, ctx, laptopT3,
-		ws("plain-l", "/w/plain"),
+		ws("plain-l", "/w/plain", directoryEvidence),
 		ws("app-l", "/w/app", remote("github.com/o/other", ".")),
 	)
 	if r.Created != 2 || r.Bound != 0 || projectCount(t, pool) != 4 {
@@ -135,7 +135,7 @@ func TestImportMatchesMonorepoSubprojects(t *testing.T) {
 	}
 	for title, want := range map[string]string{"a": "/src/mono/packages/a", "root": "/src/mono"} {
 		p, _ := byTitle(t, s, ctx, title)
-		if b, ok := bindingOn(t, s, ctx, p.ID, laptopT3); !ok || b.Workspace != want || b.Origin != BindingRemote {
+		if b, ok := bindingOn(t, s, ctx, p.ID, laptopT3); !ok || b.Workspace != want || b.Rule != "remote" {
 			t.Errorf("%s laptop binding %+v", title, b)
 		}
 	}
@@ -161,17 +161,21 @@ func TestImportWithoutRemoteOrSubprojectNeverMergesAcrossMachines(t *testing.T) 
 	}
 }
 
-// Remote is never proof within one machine: a second local checkout of the
-// same repo is its own project, and two such projects make a match from
-// another machine ambiguous.
+// Two manually separated projects with one key make a later match ambiguous.
 func TestImportLeavesAmbiguousRemoteMatchForManualBinding(t *testing.T) {
 	s, ctx, pool := twoMachineStore(t)
 	const key = "github.com/o/stage"
-	r := refreshImport(t, s, ctx, s.ActiveID(LocalMachine, "t3"), ws("one", "/a/stage", remote(key, ".")), ws("two", "/b/stage", remote(key, ".")))
-	if r.Created != 2 {
-		t.Fatalf("local checkouts %+v", r)
+	connection := s.ActiveID(LocalMachine, "t3")
+	for _, one := range []struct{ id, path string }{{"one", "/a/stage"}, {"two", "/b/stage"}} {
+		_, err := s.InsertProject(ctx, Project{Title: one.id, Bindings: []ProjectBinding{
+			{ConnectionID: connection, ExternalProjectID: one.id, Workspace: one.path},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
-	if r = refreshImport(t, s, ctx, laptopT3, ws("l", "/l/stage", remote(key, "."))); r != (ImportResult{}) || projectCount(t, pool) != 2 {
+	refreshImport(t, s, ctx, connection, ws("one", "/a/stage", remote(key, ".")), ws("two", "/b/stage", remote(key, ".")))
+	if r := refreshImport(t, s, ctx, laptopT3, ws("l", "/l/stage", remote(key, "."))); r != (ImportResult{}) || projectCount(t, pool) != 2 {
 		t.Fatalf("ambiguous %+v, %d projects", r, projectCount(t, pool))
 	}
 	// A manual bind still works.
@@ -179,21 +183,19 @@ func TestImportLeavesAmbiguousRemoteMatchForManualBinding(t *testing.T) {
 	if _, err := s.BindProject(ctx, ProjectBinding{ProjectID: one.ID, ConnectionID: laptopT3, ExternalProjectID: "l", Workspace: "/l/stage"}); err != nil {
 		t.Fatal(err)
 	}
-	if b, ok := bindingOn(t, s, ctx, one.ID, laptopT3); !ok || b.Origin != BindingManual {
+	if b, ok := bindingOn(t, s, ctx, one.ID, laptopT3); !ok || b.Rule != "manual" {
 		t.Fatalf("manual binding %+v", b)
 	}
 }
 
-// The one remote owner already lives on this machine at another path:
-// joining it would merge two local checkouts by remote alone.
-func TestImportLeavesRemoteOwnerPlacedOnThisMachine(t *testing.T) {
+func TestImportJoinsRemoteOwnerPlacedOnThisMachine(t *testing.T) {
 	s, ctx, pool := twoMachineStore(t)
 	const key = "github.com/o/stage"
 	refreshImport(t, s, ctx, laptopT3, ws("l", "/l/stage", remote(key, ".")))
 	if r := refreshImport(t, s, ctx, s.ActiveID(LocalMachine, "t3"), ws("a", "/a/stage", remote(key, "."))); r.Bound != 1 {
 		t.Fatalf("local join %+v", r)
 	}
-	if r := refreshImport(t, s, ctx, localOC, ws("c", "/c/stage", remote(key, "."))); r != (ImportResult{}) || projectCount(t, pool) != 1 {
+	if r := refreshImport(t, s, ctx, localOC, ws("c", "/c/stage", remote(key, "."))); r.Bound != 1 || projectCount(t, pool) != 1 {
 		t.Fatalf("second local checkout %+v, %d projects", r, projectCount(t, pool))
 	}
 }
@@ -207,16 +209,23 @@ func TestImportRemoteMatchHonorsDeclines(t *testing.T) {
 	if r := refreshImport(t, s, ctx, laptopT3, laptop); r.Bound != 1 {
 		t.Fatalf("join %+v", r)
 	}
-	if _, err := s.UnbindProject(ctx, p.ID, laptopT3); err != nil {
+	bound, ok := bindingOn(t, s, ctx, p.ID, laptopT3)
+	if !ok {
+		t.Fatal("expected laptop binding")
+	}
+	if _, err := s.UnbindProject(ctx, p.ID, bound.ID); err != nil {
 		t.Fatal(err)
 	}
-	if r := refreshImport(t, s, ctx, laptopT3, laptop); r != (ImportResult{}) {
+	rediscovered := ws("new-laptop-id", "/l/stage", remote(key, "."))
+	if r := refreshImport(t, s, ctx, laptopT3, rediscovered); r != (ImportResult{}) {
 		t.Fatalf("declined workspace rejoined %+v", r)
 	}
+	// Restore the original row before binding it manually.
+	refreshImport(t, s, ctx, laptopT3, laptop)
 	if _, err := s.BindProject(ctx, ProjectBinding{ProjectID: p.ID, ConnectionID: laptopT3, ExternalProjectID: "l", Workspace: "/l/stage"}); err != nil {
 		t.Fatal(err)
 	}
-	if b, ok := bindingOn(t, s, ctx, p.ID, laptopT3); !ok || b.Origin != BindingManual {
+	if b, ok := bindingOn(t, s, ctx, p.ID, laptopT3); !ok || b.Rule != "manual" {
 		t.Fatalf("manual rebind %+v", b)
 	}
 	if s.ConnectionMachine(laptopT3) != laptopMachine {

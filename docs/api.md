@@ -186,7 +186,7 @@ The machine removes itself (`stage worker leave`): 204, with the effects of `DEL
 #### `GET /api/worker/channel`
 The worker channel's down half is a `text/event-stream` ([runtime.md](runtime.md#worker-channel)). Send inclusive integer bounds in `Stage-Channel-Protocol-Min` and `Stage-Channel-Protocol-Max`, with min at least 1 and max at least min. Invalid bounds return 400 `invalid_channel_protocol`. A disjoint range or a legacy worker with no range returns 409 `channel_protocol_mismatch` after token authentication. `Stage-Version` identifies the worker build. `Stage-Worker-Gateway` lists its agent gateway listener URLs, comma-separated.
 
-- `hello`: `{ "session": "...", "machineId": 2, "protocolRange": { "min": 2, "max": 2 }, "protocolVersion": 2, "kinds": [], "channelKinds": [], "heartbeatSec": 15, "timeoutSec": 45 }`. The version is the highest shared version.
+- `hello`: `{ "session": "...", "machineId": 2, "protocolRange": { "min": 3, "max": 3 }, "protocolVersion": 3, "kinds": [], "channelKinds": [], "heartbeatSec": 15, "timeoutSec": 45 }`. The version is the highest shared version.
 - `rpc`: an envelope `{ "id", "kind", "deadline"?, "connectionId"?, "call"?, "body"?, "error"? }`. Calls include `ping`, the worker's advertised `adapter.*`, `ops.*` and `connector.*`, and `cancel` for a caller that stopped waiting. [Request bodies and errors](execution.md#remote-machines).
 - `: keepalive` comments every 15s.
 
@@ -282,7 +282,7 @@ T3's setup: fields `url`, `publicUrl` and `adminToken` (secret), actions `pair` 
 - `sync`: the running full sync (`projects` and `threads` mirrored so far); all zero when none runs.
 - `connectionId`: this machine's active T3 connection (0 when none). It changes when another T3 replaces it.
 
-Instances: each T3 environment is its own harness connection (`GET /api/connections`); one T3 connection is active per machine at a time (these routes set up the local machine's). There is no default harness: a fresh install has no T3 connection until the first successful pairing creates one (or a refreshed status finds a valid token and the T3 identity). The first successful pairing stamps the active connection with that environment (a server paired before identities existed is stamped the first time it reads a valid token and the T3 identity). While paired, the T3 URL may change only to an address serving the same environment. Pairing a different environment replaces the connection: the old one retires with its tasks, sessions, bindings and mirror (history only: never polled, linked or launched on again), a new connection becomes active, and unlaunched backlog tasks and schedules move to it. Nothing is bound on the new connection until the user rebinds. Pairing a retired connection's environment again revives it (its bindings and tasks come back). A connection that never held anything is restamped in place instead. Moved instances: when a disconnected T3 connection's environment is active and connected on another machine (the T3 was paired again from a worker), the server retires the disconnected one onto it: unlaunched backlog tasks, schedules and the default connection move there, and its tasks stay as history. It checks at startup, every full sync interval (5 minutes), after a pairing, when a worker connects and after `POST /api/sync`; it never retires a connection on an offline worker (its state is unknown) or one that is still connected.
+Instances: each T3 environment is its own harness connection (`GET /api/connections`); one T3 connection is active per machine at a time (these routes set up the local machine's). There is no default harness: a fresh install has no T3 connection until the first successful pairing creates one (or a refreshed status finds a valid token and the T3 identity). The first successful pairing stamps the active connection with that environment (a server paired before identities existed is stamped the first time it reads a valid token and the T3 identity). While paired, the T3 URL may change only to an address serving the same environment. Pairing a different environment replaces the connection: the old one retires with its tasks, sessions, bindings and mirror (history only: never polled, linked or launched on again), a new connection becomes active, and unlaunched backlog tasks and schedules move to it. Discovery places workspaces on the new connection using stored identity evidence. Pairing a retired connection's environment again revives it (its bindings and tasks come back). A connection that never held anything is restamped in place instead. Moved instances: when a disconnected T3 connection's environment is active and connected on another machine (the T3 was paired again from a worker), the server retires the disconnected one onto it: unlaunched backlog tasks, schedules and the default connection move there, and its tasks stay as history. It checks at startup, every full sync interval (5 minutes), after a pairing, when a worker connects and after `POST /api/sync`; it never retires a connection on an offline worker (its state is unknown) or one that is still connected.
 
 ### Action `pair`
 Paste fallback: exchange a pairing code from `t3 pair` for a token.
@@ -310,59 +310,82 @@ Refresh external workspace discovery and task-owned sessions, then import delibe
 ## Projects
 
 Stage owns project IDs, titles and archive state. Creating a project needs no
-harness. Discovery never renames or deletes Stage projects. The sync pass imports
-deliberate harness projects through the project identity ladder: a matching
-workspace path on the same machine binds to the existing project, the one
-project bound on another machine to the same Git origin remote and subproject
-gains it, ambiguous matches wait for a manual bind, a new workspace creates a
-project, and a discovered project with no tasks follows its harness archive
-until a user archives or unarchives it
-([architecture.md](architecture.md#project-import)). Existing T3 projects keep
-their Stage IDs and migrate to explicit bindings.
+harness. Discovery imports workspaces through the
+[project identity resolver](discovery.md). Project IDs in paths, bodies and
+filters also accept merged aliases. Responses use the surviving ID.
 
-`Project`: `{id, title, bindings, archivedAt, createdAt, createdBy, sourceMachineId, updatedAt, lastActivityAt, origin, importedAt, repos}`.
-`bindings` contains active `{id, projectId, connectionId, harness,
-externalProjectId, workspace, revision, status, observedWorkspace, origin}` records.
-Status is `available`, `missing` or `changed`. Binding `origin` is `manual`,
-`imported` (discovery created the project for it), `path` (discovery bound it
-to the project at that path on the same machine) or `remote` (discovery bound
-it to the one project bound on another machine to the same Git origin remote
-and subproject). Project `origin` is `discovered` or null;
-`importedAt` is when discovery created it. `repos` lists the distinct
-normalized origin remotes (`host/owner/name`) of its bound workspaces. The
-remote is a cross-machine match key, never proof within one machine
-([architecture.md](architecture.md#project-import)). Paths belong to bindings, never to Stage identity. Activity
-includes tracked sessions, tasks and journals.
+`Project` is `{id, title, bindings, aliases, archivedAt, createdAt, createdBy, sourceMachineId, updatedAt, lastActivityAt, origin, importedAt, repos}`.
+`aliases` lists `{id, title, mergedAt}`. Project `origin` is `discovered` or
+null. `repos` lists distinct normalized origin remotes from active bindings.
+Activity includes tracked sessions, tasks and journals.
 
-- `GET /api/projects?archived=false|true|all`: `{projects: Project[], imports: [{connectionId, harness, count, at}]}`. `imports` counts, per connection, the projects discovery created in the last 7 days, newest first.
-- `POST /api/projects`: `{title}`, returns 201 Project. Title required, trimmed.
-- `GET /api/projects/:id`: Project or 404.
-- `PATCH /api/projects/:id`: `{title, archived}`, returns Project.
+`ProjectBinding` is `{id, projectId, connectionId, machineId, harness, externalProjectId, title, workspace, revision, status, observedWorkspace, connectionActive, connectionLabel, primary, rule, remote, subpath, fileHost, evidenceAt, facts}`.
+`status` is `available`, `missing` or `changed`. `rule` is `manual`, `new`,
+`remote`, `local` or `moved`. `fileHost` and `evidenceAt` may be null.
+Workspace `facts` use the declared fact shape. Stage adds an archive fact
+when the harness archived the workspace.
+
+- `GET /api/projects?archived=false|true|all` returns `{projects: Project[], imports: [{connectionId, harness, count, at}]}`. `imports` counts, per connection, projects discovery created in the last seven days.
+- `POST /api/projects` takes `{title, bindings?: [{connectionId, externalProjectId, workspace}]}` and returns 201 Project. The trimmed title is required. Creation and initial bindings commit together.
+- `GET /api/projects/:id` returns Project or 404.
+- `PATCH /api/projects/:id` takes `{title, archived}` and returns Project.
+
+### Workspace discovery and project identity
+
+`Workspace` is `{connectionId, externalId, title, workspace, available, importable, harnessArchived, activeAt, projectId, bindingId, primary, fileHost, canonicalPath, remote, subpath, identityKey, evidenceAt, evidenceSource, declined, resolution}`.
+An empty `workspace` is a valid pathless row. `projectId` and `bindingId`
+are null for unbound rows. `resolution` is `{outcome, reason, rule, candidates}`.
+Outcomes are `bound`, `join`, `new` and `review`. Review reasons are
+`suggested`, `ambiguous`, `declined` and `moved`. `candidates` lists project IDs.
+See [storage](storage.md#project-identity) for persisted values.
+
+| Route | Request | Result |
+| --- | --- | --- |
+| `GET /api/connections/:connectionId/workspaces` | Live refresh | 200 `{workspaces: Workspace[]}` with available rows. |
+| `POST /api/connections/:connectionId/resolve` | `{apply: false}` for a preview, `{apply: true, previewToken}` to confirm | 200 `{applied, previewToken, placements, created, joined, moved, review}`. |
+| `GET /api/workspaces/review` | Reads cached rows on active connections | 200 `{workspaces, merges, counts, attention}`. |
+| `PUT /api/projects/:id/binding` | `{connectionId, externalProjectId, workspace, primary?, replaces?}` | 200 Project. Revalidates the exact row. `replaces` identifies a binding of the same project and connection to move. 409 `workspace_bound` for another owner or conflict if the workspace changed. |
+| `DELETE /api/projects/:id/bindings/:bindingId` | Unbind one workspace | 200 Project. Records a decline and promotes another binding when needed. |
+| `PUT /api/projects/:id/bindings/:bindingId/primary` | Set the primary on this binding's connection | 200 Project, 404 unknown or foreign binding, 409 inactive binding. |
+| `POST /api/connections/:connectionId/workspaces/decline` and `.../undecline` | `{externalId, workspace}` | 204, 404 unknown row, 409 `workspace_bound` when declining a bound row. |
+| `POST /api/projects/:id/merge` | `{from}` for a preview, `{from, confirm: true, previewToken}` to confirm into `:id` | 200 `{preview, previewToken, project, from: {id, title}, moves: {tasks, schedules, snippets, workspaces}, blocked}`. `blocked` is null or `{code, reason}`. A launching task in the source blocks confirmation with 409 `task_launching`. |
+| `POST /api/projects/:id/merge-dismissals` | `{otherId}` to keep the pair separate | 204. |
+| `POST /api/projects/:id/split` | `{bindingId, title?}` | 201 `{project, source}`, 404 unknown binding, 409 `split_last_workspace`. |
+| `GET /api/projects/:id/events` | Latest project identity events | 200 `{events: [{id, type, text, createdAt, createdBy}]}`, newest first, up to 100. |
+
+Live refresh can return 409 `connection_retired` or
+`connection_unavailable`, or 502 on a harness inventory failure. It updates
+stored evidence and availability. Resolve preview leaves placements
+unapplied. The workspace placement shape is `{workspace: Workspace, outcome, reason, rule, projectId, newProjectTitle, candidates, acts}`.
+`created`, `joined` and `moved` count planned writes. `review` counts
+placements that need review. A preview includes `newProjectTitle` and a null
+`projectId` for a planned new project and for later placements that join it.
+Applied placements return their assigned project IDs.
+
+Resolve and merge require the corresponding preview token at confirmation.
+If inputs changed, the server returns 409
+`{error, code: "preview_changed", preview}`. `preview` is the fresh full
+preview for the operation, including its new token. Review it before
+confirming again. See [layer 08 response examples](discovery.md#layer-08-api-handoff).
+
+Review rows extend `Workspace` with a top-level `reason` of `new` or a
+review reason. `merges` lists `{identityKey, projectIds}`. `counts` has
+`new`, `suggested`, `ambiguous`, `declined`, `moved` and `merges`.
+`attention` sums suggested, ambiguous, moved and merge counts.
+
+The old `GET /api/connections/:connectionId/projects`, `GET` and `PUT`
+`/api/shared-paths`, `POST /api/projects/:id/bindings/:connectionId/match`
+and `DELETE /api/projects/:id/binding` return 410 `{error, code: "removed"}`
+with the replacement route in `error`. Stage binds workspaces reported by
+the harness. Add new workspaces in the harness before refreshing.
+
 - `GET /api/harnesses`: the harness kinds this server knows and what this machine can run: `{machine: {id, label, createdBy, profile: {kind, localProcesses}}, harnesses: [{kind, name, localProcesses, sessions, stateReasons, closures: [{signal, provenance, setting, completed, via}], linkSchemes, webAddress?, setup: {fields, actions, disconnect}, attribution: {metaKeys, env?, precedence?: {owns?, yields?}, origin?: {env?}}, launch, sessionHint?, wraps?: {origins}, available, reason?, connectable}]}`. `sessionHint`: what names one of the harness's sessions when a user tracks it (Codex: a thread ID or a pasted `codex resume` command; Claude Code: a session UUID, the 8-character ID `claude agents` shows, or a pasted `claude attach` or `--resume` command); hosts show it as the Track session field's hint, and the field keeps its generic copy when it is absent. `setup` and `connectable`: see [Harness connections](#harness-connections-api-v6). `launch`: `reserved` or `correlated`, how a launch learns its session identity ([execution.md](execution.md#execution-contract-v2)). `attribution`: how the harness names an agent's session: `metaKeys` are MCP `_meta` keys it sends per call, `env` the variable it sets to the session id in agent processes, which the CLI and stdio MCP read (see [Agent interface](#agent-interface)). `precedence` ranks `env` when several harness variables are set: `owns` and `yields` are `[{env, value?}]` conditions (`value` absent: any non-empty value). `origin`: the harness records the client that started each session, so another harness may wrap it; `env` is the variable holding that origin in its agents (Claude Code `CLAUDE_CODE_ENTRYPOINT`). `wraps`: the harness runs other harnesses' sessions and leaves these `origins` in them (T3: `t3-code`, `T3 Code`); Stage refuses to track such a session on the wrapped harness (409 `session_refused`, "Track it through T3"), and when the wrapper's `env` is set (or a wrapped harness's origin variable holds one of its origins) the wrapped harness's `env` yields to it ([execution.md](execution.md#harness-registry)). `profile.kind`: `desktop` (a managed per-user service: the server's, or on a remote machine the worker service), `server` (foreground `stage serve` or `stage worker run`) or `container` (the Docker image). `localProcesses` says whether the module requires a profile that permits local processes. `sessions` says whether its sessions live on a machine or in the cloud, independently of process requirements. `stateReasons` lists the reasons the module may report with observations. A remote machine reports its worker's last advertised profile and returns the worker's fix when setup is unavailable. Before the worker advertises its profile, setup replies can return 503 `machine_offline` or `machine_setup_starting`. `closures`: the closure signals the harness reports and the copy for each: `setting` labels its auto-complete toggle, `completed` and `via` describe an inferred completion with that `provenance`. `linkSchemes`: the harness's own native URL schemes, an empty array when it declares none. The registry requires unique lower-case scheme names without a colon matching `^[a-z][a-z0-9+.-]*$` and reserves `http`, `https`, `ftp`, `ftps`, `mailto`, `tel`, `javascript`, `data`, `vbscript`, `file`, `blob`, `about`, `stage` and all `stage-` prefixes. T3 declares `t3code`. `webAddress` is true when a session link can need a browser address in connection settings. Clients use the descriptor for closure copy and for rendering harness links in replies. See [Execution contract](execution.md#execution-contract-v2).
 - `GET /api/connections`: `{connections: [{id, machineId, harness, configured, autoComplete, active, label, retiredAt, forgottenAt, tasks, bindings}]}`, active first. `machineId`: the machine that runs the instance (one local machine today). One connection per harness instance (a T3 environment, an OpenCode service); at most one active per harness on each machine. Select the returned IDs; never assume one (the T3 connection changes when another T3 replaces it). Both harnesses can be planned before setup. `autoComplete` (default true): a closure in this harness may complete a done task (see "Inferred completion"). `label`: the instance's name (T3 label, OpenCode address). `retiredAt`: when another instance replaced it (null while active); a retired connection keeps its tasks, sessions and bindings as history, is never polled, linked or launched on, and is `configured: false`. `forgottenAt`: set by DELETE. `tasks`, `bindings`: tasks and active bindings it holds.
 - `PUT /api/connections/:connectionId/auto-complete`: strict `{autoComplete: boolean}`. 200 `{connection}`; 400 missing/invalid body; 404 unknown connection.
 - `PUT /api/connections/:connectionId/new-task-config`: strict `{config: {model, options} | null}`, the model and options new tasks on the connection start with (`newTaskConfig` on its row; null or an empty config unpins). Checked against the connection's capabilities (no project). Pairing another instance of the harness carries the pin to the replacement. 200 `{connection}`; 400 unknown or replaced connection, a model or option value the connection does not offer, or a `permission` / `mode` (never pinned).
-- `DELETE /api/connections/:connectionId`: forget a retired connection, or an active one that is disconnected (`configured: false`) on a machine that answers (the local machine or an online worker): it retires (the default connection is cleared; its tasks, backlog and schedules stay as history) and is forgotten at once. Removed outright when no task, session or launch references it; otherwise its tasks and history stay (still naming it), its identity is cleared (that instance can no longer revive it; pairing it again starts a new connection), its bindings are deactivated, and its discovered projects and shared paths are dropped. 204. 404 unknown or already forgotten. 409 the connection is connected (`Disconnect it first`), or its machine is offline.
+- `DELETE /api/connections/:connectionId`: forget a retired connection, or an active one that is disconnected (`configured: false`) on a machine that answers (the local machine or an online worker): it retires (the default connection is cleared; its tasks, backlog and schedules stay as history) and is forgotten at once. Removed outright when no task, session or launch references it; otherwise its tasks and history stay (still naming it), its identity is cleared (that instance can no longer revive it; pairing it again starts a new connection), its bindings are deactivated, and its cached workspace inventory is dropped. 204. 404 unknown or already forgotten. 409 the connection is connected (`Disconnect it first`), or its machine is offline.
 - `POST /api/connections/:connectionId/observations`: an external bridge or hook pushes observations of the connection's sessions, for a harness Stage cannot poll or stream well ([execution.md](execution.md#execution-contract-v2) "Push"). Strict body `{observations: Observation[]}`, 1 to 100 (body at most 1 MiB); `Observation` uses the adapter contract's JSON. Keys are `session` (`{connectionId, externalSessionId}`), `project`, `title`, `state`, `active`, `archived`, `child`, `branch`, `directory`, `links`, `createdAt`, `updatedAt`, `startedAt`, `endedAt`, `executionId`, `config`, and optional `parent`, `reply`, `usage`, `closed`, `stateReason` and `origin`. `links` may contain `web`, `native` and `command`. `reply` contains `itemId`, `runId`, `text`, `truncated` and `updatedAt`. For the removed keys and their 400 responses, see [API v9 changes](#api-v9-changes). Each goes through the same validation and ingest path as an `execution.EventSource` event: the harness's policies, the task transition, inferred completion. `updatedAt` orders snapshots: one older than the stored observation never replaces it. 200 `{results: [{status, reason?}]}`, one per observation in order: `ingested` (the owning task took it), `ignored` (no task owns the session, left to discovery; or its task is launching and the launch reconciles it), `invalid` (malformed: unknown state or reason, contradictory activity, missing identity or `updatedAt`, an `updatedAt` more than 5 minutes ahead of the server's clock (it would pin the stored snapshot), a reason the harness may not report; nothing changes; `reason` says why). Polling continues and reconciles. 400 bad JSON, unknown field, an empty or oversized batch, or any observation whose session is on another connection (nothing is ingested); 404 unknown connection; 409 `connection_retired` (a replaced connection) or `connection_unavailable` with the reason, as for a launch (no adapter hosted for it; its machine does not allow the harness; or its machine is offline or needs an update: an offline worker is an offline harness, so nothing changes); 403 `gateway_forbidden` through a worker's agent gateway for a connection of another machine. A storage failure is 500 after the observations before it were ingested; pushing the batch again is safe. No MCP tool or CLI command pushes.
 - Retired connections: binding a project, creating or moving a task or schedule to a retired connection returns 409 `code: "connection_retired"`. Tasks carry `harness`, `connectionActive` and `connectionLabel`; project bindings carry `connectionActive` and `connectionLabel`. A task on a retired T3 connection has null T3 links.
-- `GET /api/connections/:connectionId/projects`: live discovery, returns
-  `{projects: [{connectionId, externalId, title, workspace, projectId, repo}]}`.
-  `projectId` is the current explicit owner, or null. `repo` is the normalized
-  origin remote, `""` when unknown.
-- `PUT /api/projects/:id/binding`: `{connectionId, externalProjectId, workspace}`.
-  Revalidates the exact external project and path on the selected harness before binding. One active
-  binding per project/connection; one Stage owner per external workspace.
-  Rebinding retires the previous revision. Conflicts return 409.
-- `DELETE /api/projects/:id/binding`: unbind T3, retaining history. Unbinding
-  (either route) declines the workspace: discovery never binds it again until a
-  manual bind. Rebinding a project away from a workspace declines it too.
-- Removed: `POST /api/connections/t3/projects` (registering a directory in
-  T3). Stage never asks a harness to create a project ([ADR 0007](adr/0007-harness-boundary.md)
-  decision 11): add it in the harness, then refresh discovery. It answers
-  404.
-
-Use `GET /api/shared-paths` to read declared filesystem mappings. PUT to the same route with `{connectionId, harnessRoot, stageRoot}` to set a mapping. An empty Stage root removes it. `POST /api/projects/:id/bindings/:connectionId/match` checks live inventory and returns `{bound, suggestions, projects}` (`suggestions`: the reason per external project id). It walks the same ladder as import: the same path, or a shared Git common directory and subproject (below a shared path, or in place for a harness local to its machine), on the same machine, or the same Git origin remote and subproject as the one project bound on another machine, binds when it places exactly one unbound workspace in this project. Any other Git remote match (with the same subproject when both are known) requires confirmation. DELETE the scoped binding to unbind.
-
 OpenCode's setup: fields `endpoint`, `browserEndpoint`, `webClient`, `username`, `password` and `newInstance`; actions `connect-local` (`{newInstance}`) and `pair` (`{link, newInstance}`); disconnect. `GET /api/harnesses/opencode/status` `details` reports connectionId, state (`unconfigured`, `connected`, `unavailable`, or `rejected` when the service answers 401/403), diagnostic reason, checkedAt, endpoint, browserEndpoint, webClient, hasCredentials, and:
 
 - `auth`: `none`, `local` (the service on the Stage server's machine, authenticated from its registration file), `paired` (a token from an `opencode pair` link) or `basic` (entered credentials).
@@ -384,7 +407,7 @@ Claude Code's setup (kind `claude`, hosted: only where the machine allows local 
 - `POST /api/harnesses/claude/actions/connect`: checks the command (`--version`) and the login (`auth status`), then records the machine's connection with Claude's `configDirectory` as its identity (label `Claude Code (~/.claude)`, never the account) and installs the adapter. The same config directory keeps the connection. 409 codes: `claude_not_found`, `claude_unresponsive` (no answer within 20 seconds, or an unreadable status), `claude_logged_out`.
 - `DELETE /api/harnesses/claude/connection`: disconnect. Removes the adapter, survives restarts, keeps the connection's tasks and history; connect again resumes it. Never locked.
 
-Instance check: an address change is checked against the stored identity evidence (bindings and observed sessions): a service that serves them is the same service at a new address and keeps the connection (as does a change on a connection that holds nothing). Otherwise 409 `code: "instance_changed"`, or `code: "instance_returned"` when the service proves to be a retired connection's (it serves that connection's workspaces and sessions), and nothing changes; resend with `newInstance: true` to confirm: the current connection retires (as for T3, see Instances), and a new one becomes active, or the proven retired one revives. A different service with the same repository at the same path is never bound silently. `connectionId` in the status changes with it.
+Instance check: an address change is checked against the stored identity evidence (bindings and observed sessions): a service that serves them is the same service at a new address and keeps the connection (as does a change on a connection that holds nothing). Otherwise 409 `code: "instance_changed"`, or `code: "instance_returned"` when the service proves to be a retired connection's (it serves that connection's workspaces and sessions), and nothing changes; resend with `newInstance: true` to confirm: the current connection retires (as for T3, see Instances), and a new one becomes active, or the proven retired one revives. A different service gets its own connection. Discovery resolves its workspaces after the change is confirmed. `connectionId` in the status changes with it.
 
 Codex's setup (hosted; [ADR 0006](adr/0006-codex-app-server-harness.md)): field `binary` (the Codex CLI path; empty or `null` uses `codex` on PATH), action `connect` (`{}`), disconnect. `GET /api/harnesses/codex/status` `state`: `connected`, `not_connected`, `signed_out` (the daemon answers but Codex has no login), `unreachable` (the daemon is down or not answering), `not_installed` (the CLI is missing). `details`: `{binary, cliVersion, appServerVersion, codexHome, daemon: running|stopped|unknown, account: {type, email, plan} | null, fix, checkedAt}`. `fix` is a shell command that fixes the current problem (`codex login`, `codex app-server daemon start`), else `""`.
 
@@ -394,13 +417,16 @@ Codex's setup (hosted; [ADR 0006](adr/0006-codex-app-server-harness.md)): field 
 
 Codex tasks: respond and send report unavailable (answer in Codex); every Codex session's links carry `command`, the `cd <dir> && codex resume <id>` line to copy. Adoption accepts a thread id or that command; a thread T3 started (originator `T3 Code`, which T3 wraps) is refused with "This Codex session was started by T3. Track it through T3."
 
-Request `/api/connections/:connectionId/capabilities?projectId=ID` for workspace-specific options. A REST create with one binding can omit connectionId. Multiple bindings require an explicit connectionId. An unbound request without connectionId is 400 (no default harness). Task and schedule edits can change the destination with an explicit connectionId, executionConfig and workspace before launch. The scoped session context route supports explicit adoption previews. Task detail includes a bounded finalReply, the session's `usage` when its harness reports one, and `links.web`, `links.native` or `links.command` when available. `links.command` is a shell command that resumes the session in the harness's own client; hosts offer to copy it (Copy resume command) when there is no destination to open. Capabilities may list harness-wide `options` (any model) beside each model's `options`; an `executionConfig` may set the union, and option ids never collide (capabilities that reuse an id are rejected).
+Request `/api/connections/:connectionId/capabilities?projectId=ID&bindingId=ID` for options for a specific workspace. Omit `bindingId` to use the primary. See [Preferences](#preferences) for connection selection on create. Task and schedule requests accept `bindingId` to select a workspace before launch. The scoped session context route supports explicit adoption previews. Task detail includes a bounded finalReply, the session's `usage` when its harness reports one, and `links.web`, `links.native` or `links.command` when available. `links.command` is a shell command that resumes the session in the harness's own client; hosts offer to copy it (Copy resume command) when there is no destination to open. Capabilities may list harness-wide `options` (any model) beside each model's `options`; an `executionConfig` may set the union, and option ids never collide (capabilities that reuse an id are rejected).
 
 External deletion or connection failure retains Stage metadata, tasks and history.
-An observed path change requires explicit confirmation. Future unclaimed launches
-use the active binding; claimed attempts and uncertain retries retain their original
-connection, external project, workspace and binding revision. Restoring connectivity
-cannot redirect a retry.
+A uniquely identified workspace move can rebind automatically and carries
+explicit task and schedule choices forward. Unclaimed launches use the
+chosen binding or the primary. An explicit choice that no longer belongs
+to the project and connection, or is unavailable, blocks launch with 409
+`binding_unavailable`. An absent usable primary returns `binding_required`.
+Claimed attempts and uncertain retries retain the original connection,
+external project, path and binding revision.
 
 ### Identity contract (API 5)
 
@@ -524,6 +550,7 @@ Body `CreateTaskRequest`:
   "title": "Say OK",             // required
   "prompt": "reply OK",          // required
   "connectionId": 1,             // the harness connection; omitted only when the project's bindings or the default connection choose one (else 400)
+  "bindingId": null,              // optional workspace binding, null uses the primary
   "executionConfig": { "model": "", "options": [], "permission": "", "mode": "" }, // optional; "" = harness default
   "initialNote": "",             // optional: first task journal note
   "treeId": null,                // optional: join this tree (tree rules)
@@ -606,9 +633,11 @@ render options by `kind` and `label` and never name one. Task/schedule `executio
 Legacy T3 request fields remain supported through translation. Create requests
 cannot combine neutral config with legacy model/permission fields.
 
-For an adapter with workspace-scoped catalogs, pass an optional Stage
-`projectId` to read the models and agents for its verified binding on that
-connection. Omitting it requests connection-wide capabilities.
+For workspace-scoped catalogs, pass `projectId` and optional `bindingId`.
+An explicit binding must belong to that project and connection.
+A workspace-scoped adapter requires an available binding and uses the
+primary when `bindingId` is omitted. Omitting both requests connection-wide
+capabilities. A supplied `bindingId` requires `projectId`.
 
 `actions`, when present, advertises session and project action declarations
 allowed to the caller. To check availability and run an action, select its
@@ -626,7 +655,9 @@ Choice launch options may supply `valueLabels`, keyed by their string values. Th
 
 The task ID resolves to its linked session on its actual connection. A project
 action requires that project's available workspace binding on the explicit
-connection. Lists return an array of declarations, including unavailable
+connection. Pass `bindingId` on either project action route to select a
+specific workspace. Omitting it uses the primary. Stale and foreign
+bindings are rejected. Lists return an array of declarations, including unavailable
 actions with their reasons.
 
 An action carries `{id, label, target, input?, primary?, confirm?, destructive, callers,
@@ -887,7 +918,7 @@ Adopted tasks only (400 otherwise). Returns `{item: {itemId, runId, text, trunca
 
 ## API v9 changes
 
-The server and workers roll forward together at API v9. Worker channel compatibility uses its own protocol range. A legacy worker shows **Needs update** until upgraded. Later breaking changes in this coordinated harness foundation series also ship as v9.
+The server and workers roll forward together at API v9. Layer 07 raises the independent worker protocol from 2 to 3. A legacy worker shows **Needs update** until upgraded. Later breaking changes in this coordinated harness foundation series also ship as v9.
 
 - Harness descriptors expose `localProcesses`, `sessions: "machine" | "cloud"` and `stateReasons`. Use `localProcesses` for placement decisions formerly based on `hosting`.
 
@@ -988,11 +1019,22 @@ Reusable prompt text, inserted into prompts, follow-ups and notes by typing `/` 
 - `PATCH /api/snippets/:id` partial of the POST body → 200 `Snippet`. 400, 404, 409 as above.
 - `DELETE /api/snippets/:id` → 204. 404.
 
+### Task and schedule workspace selection
+
+Create and update accept `bindingId`. On update, omission keeps the choice
+unless the project or connection changes. Explicit null restores primary
+selection. A non-null binding must be active on the task or schedule's
+project and connection, or the request returns 400. Tasks and schedules
+return their nullable `bindingId`. Task detail also returns
+`workspace: {bindingId, path, source} | null`. Source is `pinned` for a stored
+launch destination, `chosen` for an explicit binding or `primary` for the
+default selection.
+
 ## Preferences
 
 The default connection and the global notification filter. New-task defaults live with each connection: its model pin is `newTaskConfig` on [`GET /api/connections`](#harness-connections-api-v6) (`PUT /api/connections/:connectionId/new-task-config`). A new task starts on the default connection and prefills the model and options pinned there, else the harness default. Permission and mode are never pinned: they start at the harness default.
 
-A task or schedule created without `connectionId` starts on the default connection when its project has an available binding there, else on the project's only active binding, else (with a default set) on its first available binding (the main machine's first, then by machine and connection id). With no default and several bindings it is 400. The web app's new-task form preselects the same connection.
+A task or schedule created without `connectionId` starts on the default connection when its project has an available primary there, else on the project's only active bound connection, else (with a default set) on its first bound connection with an available primary (the main machine's first, then by machine and connection ID). With no default and several bound connections it is 400. The web app's new-task form preselects the same connection.
 
 ### `GET /api/preferences`
 200 `{ "defaultConnectionId": number | null, "notifyEvents": NotificationEvent[] }`. `defaultConnectionId` is null when unset or when its connection is no longer active (its machine removed); pairing another instance of its harness moves it to the replacement. `notifyEvents` is the global notification filter. It returns enabled events in display order (`needs_input`, `failed`, `ready`, `done`).
@@ -1185,15 +1227,17 @@ Reply budget per need: `min(4000, max(1000, 8000 / sources))` Unicode characters
 - Agents on a remote machine use the same interfaces unchanged through the worker's agent gateway ([runtime.md](runtime.md#agent-gateway)): it owns that machine's default socket, so `stage` and `stage mcp` find it with no `--url`, and an opt-in TCP listener serves HTTP MCP. Caller attribution works as above; the main server also records the forwarding machine (`sourceMachineId`). The launch instructions of a session on a remote machine name the gateway, never `STAGE_PUBLIC_URL`: its TCP listener when the worker reported one (`the HTTP API at http://127.0.0.1:7381/api (MCP at …/mcp) on this machine's Stage agent gateway`), else its socket with a `curl --unix-socket` hint, else the gateway without an address. Sessions on the main server's machine keep `STAGE_PUBLIC_URL`.
 - `GET /api/connections/resolve?harness=KIND` returns the active configured connection of KIND (the `GET /api/connections` row) on the request's machine: the forwarding machine of a request through a worker's agent gateway, else the server's. 400 unknown kind; 404 `{error, code: "no_active_connection"}` when the machine has none.
 - `GET /api/connections/:connectionId/sessions/:id/context` returns session, owning task, current project, title and available links. The owner path reads Stage storage. An unowned session requires explicit lookup and a verified workspace binding to infer its project.
-- Task and schedule creates accept an optional destination `connectionId` and distinct `originSession`. Agent creation uses the sole project binding. Multiple bindings require a choice. Unbound projects use the caller's connection or sole configured connection. Starting requires a binding.
-- `list_projects` includes configured connections. `list_models {connectionId}` (required) returns capabilities. `executionConfig` uses the connection's model, option values, permission and mode.
-- `list_actions` and `run_action` take exactly one of `connectionId`, `taskId` or `projectId`. A project also requires `onConnectionId`. `run_action` takes `actionId` and optional `input`. Both tools use agent policy with or without caller provenance.
-- CLI `stage action ls|run` takes `--connection ID`, `--task ID` or `--project ID --on-connection ID`. For example, `stage action run --task 42 label --input - --json` reads the input JSON from stdin. Use `--confirm` for a user-only destructive action.
+- `get_context` returns the caller task's pinned launch `bindingId`, or its saved choice when it has no launch pin. It returns null when neither exists.
+- Task and schedule creates accept an optional destination `connectionId` and distinct `originSession`. Several bindings on one connection still share that destination. Set `bindingId` to pick a workspace there. Unbound projects use the caller's connection or sole configured connection. Starting requires a binding.
+- `list_projects` includes configured connections. `list_models {connectionId, projectId?, bindingId?}` returns capabilities. `executionConfig` uses the connection's model, option values, permission and mode.
+- `list_actions` and `run_action` take exactly one of `connectionId`, `taskId` or `projectId`. A project also requires `onConnectionId` and accepts optional `bindingId`. `run_action` takes `actionId` and optional `input`. Both tools use agent policy with or without caller provenance.
+- CLI `stage action ls|run` takes `--connection ID`, `--task ID` or `--project ID --on-connection ID [--binding ID]`. For example, `stage action run --task 42 label --input - --json` reads the input JSON from stdin. Use `--confirm` for a user-only destructive action.
 - `read_ref {session}` and `stage show --target-connection ID --target-session ID` accept an opaque scoped ID. A scoped reference path is `/connections/:connectionId/sessions/:id`. `list_tasks {originSession}` uses REST query fields `originConnectionId` and `originSessionId`. A bare session id names no connection: pass the connection with it.
 - Journals: `read_journal {taskId?|treeId?, kind?, category?, q?, filterTaskId?, cursor?, limit?}` requires exactly one owner; `filterTaskId` is tree-only. `get_journal_entry {id}` retrieves full text. `append_note {taskId?|treeId?, text, requestId, category?, sourceTaskId?, callerSession?}` records caller session provenance. `get_context` includes `callerTaskId`, current `treeId` and `treeTitle`; refresh it or `get_task` before reading or contributing to a tree.
 - CLI: `stage task notes ID [list] [--kind notes|events|all --category C --q Q --limit N --cursor C]`; `stage tree notes ID` adds `--task ID` filtering. Append with `stage task notes ID add --text TEXT [--category C --request-id KEY]`, or `stage tree notes ID add --text TEXT --source-task ID`; `--text -` reads stdin. CLI generates a request key when omitted; supply `--request-id` to retry across invocations. `stage task notes ID get ENTRY_ID` and `stage tree notes ID get ENTRY_ID` retrieve full entries. Task creation/adoption use `--initial-note` / `initialNote`; task edit has no notes field. Schedule `--notes` remains a template.
 - Project: explicit `project` (id or unambiguous exact title) > the caller session's explicitly bound project. Cwd is context only; paths across machines are not verified identity.
-- Destination without `connectionId`: the default connection when the project is available there, else its only binding, else (with a default set) its first available binding; then the rules above.
+- CLI workspace commands: `stage projects workspaces [PROJECT] [--review]`, `stage projects merge FROM INTO [--yes]`, `stage projects split PROJECT --binding ID [--title T] --yes`. Task and schedule commands accept `--binding ID`.
+- Destination without `connectionId`: the default connection when its primary is available, else its only bound connection, else (with a default set) its first connection with an available primary; then the rules above.
 - Model: explicit `executionConfig` > the destination connection's pin (`newTaskConfig`) > harness default. The pin supplies model and options only; permission and mode are explicit or unset. The removed T3 model arguments (`provider`, `model`, `effort`, `options`, `runtimeMode`, `interactionMode`) fail schema validation.
 - `get_task` returns the current tree, session identity, cached `finalReply`, `usage` (when the harness reports one), available links and accepted snapshots.
 - `afterMe` submits the scoped caller as `needsSession`. Owner reuse, adoption, tree placement and the dependent task commit together.

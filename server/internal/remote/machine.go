@@ -205,24 +205,16 @@ func (m *Machine) implements(connection int64, trait string) bool {
 // ops runs machine.Ops on the worker.
 type ops struct{ m *Machine }
 
-func (o ops) Inventory(ctx context.Context, ws []execution.WorkspaceInfo, roots []machine.SharedRoot) ([]execution.WorkspaceInfo, error) {
-	var out []execution.WorkspaceInfo
-	err := o.call(ctx, KindInventory, InventoryRequest{Workspaces: ws, Roots: roots}, &out)
-	return out, err
-}
-
-func (o ops) Checkout(ctx context.Context, roots []machine.SharedRoot, dir string) (machine.CheckoutEvidence, error) {
-	var e machine.CheckoutEvidence
-	err := o.call(ctx, KindCheckout, CheckoutRequest{Roots: roots, Directory: dir}, &e)
-	return e, err
-}
-
-func (o ops) call(ctx context.Context, kind string, body, out any) error {
-	raw, err := o.m.hub.Call(ctx, o.m.id, kind, 0, body, CallTimeout)
+func (o ops) Inventory(ctx context.Context, ws []execution.WorkspaceInfo) ([]execution.WorkspaceInfo, error) {
+	raw, err := o.m.hub.Call(ctx, o.m.id, KindInventory, 0, InventoryRequest{Workspaces: ws}, CallTimeout)
 	if err = decodeError(err); err != nil {
-		return err
+		return nil, err
 	}
-	return jsonUnmarshal(raw, out)
+	var out []execution.WorkspaceInfo
+	if err := jsonUnmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // Hosts keeps a machine.Set's remote machines in step with the main

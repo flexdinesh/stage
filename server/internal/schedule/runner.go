@@ -105,7 +105,8 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 		_, err := r.launcher.LaunchScheduled(ctx, t.ID, detail)
 		var conflict *db.ConflictError
 		if errors.As(err, &conflict) {
-			if conflict.Code == "binding_required" || conflict.Code == "connection_unavailable" {
+			switch conflict.Code {
+			case "binding_required", "binding_unavailable", "connection_unavailable":
 				if holdErr := r.store.HoldScheduled(ctx, t.ID, conflict.Error()); holdErr != nil {
 					errs = append(errs, holdErr)
 				}

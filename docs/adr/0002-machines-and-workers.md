@@ -26,11 +26,10 @@
 
 ## Context
 
-Today one `stage serve` process owns everything: SQLite, harness connections,
+Before worker support, one `stage serve` process owned SQLite, harness connections,
 adapters, the coordinator, scheduling, acceptance, journals and MCP. Its
-adapters reach T3 and OpenCode from that process. Machine-local work
-(Git metadata, shared paths, `git rev-parse` matching, OpenCode's
-`service.json`, T3 auto-pair) runs on the server's host.
+adapters reached T3 and OpenCode from that process. Machine-local work
+ran on the server host.
 
 The goal is to run the main server on one host (a cloud VM, a cluster, a home
 server) while harnesses run on other machines (laptops, desktops). The web
@@ -75,7 +74,7 @@ remote machine is a second implementation of the same machine-runtime seam
 | The database (SQLite or Postgres, [ADR 0003](0003-storage-adapters.md)), migrations, the ownership lock | No database. A config file and its machine token (0600) in the worker data dir |
 | Coordinator, polling schedule, release and schedule runners | Real harness adapters (T3, OpenCode) for that machine's connections |
 | Acceptance, journals, handoff, notifications | Connectors (setup: pair, auto-pair, connect-local, disconnect) |
-| MCP and REST API, the UI | Machine-local fs and process work: gitmeta inventory, shared-path translation, `git rev-parse` matching, OpenCode `service.json`, T3 auto-pair |
+| MCP and REST API, the UI | Machine-local fs and process work: read-only workspace evidence, OpenCode `service.json`, T3 auto-pair |
 | Connection identity, status and non-secret settings | Harness secrets: T3 token, OpenCode password |
 | Launch checkpoints (durable) | Nothing durable about launches. `SaveCheckpoint` calls back to the main server before each external effect |
 
@@ -86,10 +85,9 @@ runners and the contract suite do not know whether a machine is local.
 
 ### 3. Machine-runtime seam
 
-The shared-path translation in decision 2 and the `shared` parameters
-in the historical sketch below are superseded by
 [ADR 0008 D3](0008-harness-foundation.md#d3) and [D9](0008-harness-foundation.md#d9)
-in layer 07. Evidence comes from the file host.
+supersede shared-path translation and the separate matching operation.
+Workspace evidence is read on its attested file host.
 
 There is one per-machine host for adapters, connectors and machine-local ops.
 Sync, the runners, the API and connection setup reach harness code only
@@ -107,8 +105,7 @@ type Machine interface {
 
 // MachineOps is the fs/process work that must run where the harness runs.
 type MachineOps interface {
-	Inventory(ctx context.Context, ws []execution.WorkspaceInfo, shared []string) ([]execution.WorkspaceInfo, error)
-	MatchWorkspace(ctx context.Context, path string, shared []string) (GitFamily, error)
+	Inventory(ctx context.Context, ws []execution.WorkspaceInfo) ([]execution.WorkspaceInfo, error)
 }
 ```
 
@@ -172,13 +169,12 @@ A result carries the request's `id` and either `body` or
   60s). When a stream ends, the main server resolves that session's in-flight
   calls as lost replies. Every operation is a read or reconcilable on replay
   (Launch replays from its checkpoint), so the caller's normal retry is safe.
-- **version check.** The worker sends `Stage-Api-Version` and its build version
-  when it connects. The worker and main server must speak the same API version
-  (`buildinfo.APIVersion`). If they differ, the connect is refused with 409
-  `api_version_mismatch`, and the machine shows "needs update" in the UI. The
-  worker reports it and backs off at the maximum interval instead of
-  retrying quickly. A different build version only shows in the UI, as it
-  does for the desktop app (ADR 0001).
+- **Protocol negotiation.** The worker sends its supported channel
+  protocol range and its build version. The handshake selects the highest
+  shared version. A disjoint range returns 409 `channel_protocol_mismatch`
+  and the machine shows **Needs update**. Layer 07 moves the channel
+  from 2 to 3 for the new inventory shape and removal of `ops.checkout`.
+  HTTP API versioning is independent. [ADR 0008 D12](0008-harness-foundation.md#d12).
 - **Ordering and size.** Separate requests have no ordering guarantee. Message
   bodies are bounded by the API's existing upload cap.
 
@@ -245,24 +241,15 @@ Browser and API access stays behind the authenticating proxy.
 
 ### 7. Projects across machines
 
-[ADR 0008 D9](0008-harness-foundation.md#d9) and [D10](0008-harness-foundation.md#d10)
-supersede the matching paragraph below in layer 07. The project and
-binding ownership rules still apply.
+Projects span machines through bindings. There is no `projects.machine_id`.
+Task and schedule destinations name a connection and can choose one of
+the project's workspace bindings there. The primary supplies the default.
 
-- Projects span machines through bindings. There is no `projects.machine_id`.
-- Task create, edit and schedule forms pick **Machine > Harness** from the
-  project's bindings. The UX matches today's harness pick, grouped by machine.
-  The machine level is hidden when only one machine exists.
-- Cross-machine matching uses the normalized Git remote
-  (`gitmeta.RemoteIdentity`) plus the subproject's path relative to the repo,
-  never the absolute path. Path rules stay within one machine. When several
-  projects match, the match is ambiguous and needs a manual bind. With no
-  remote, there is no cross-machine merge. #346 rewrote the architecture rule
-  that repository metadata is "never identity": the remote is a
-  cross-machine match key, and it is never proof within one machine
-  ([architecture.md](../architecture.md#project-import)). A matched project
-  already bound on the importing machine at another path is also left for a
-  manual bind.
+[ADR 0008 D9](0008-harness-foundation.md#d9) and [D10](0008-harness-foundation.md#d10)
+supersede the original matching rules. The normalized Git origin and known
+subpath can identify a project across machines and on the same machine.
+Directory and checkout evidence stay on their attested file host.
+See [workspace discovery](../discovery.md) for placement and review.
 
 ### 8. MCP and the agent gateway
 

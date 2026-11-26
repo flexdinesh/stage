@@ -79,23 +79,13 @@ not allow.
   connectors, and the Codex setup (`codexsetup`) when the profile allows it. Setup code installs adapters through `Local.Install(old, next,
   adapter)` (the install port; nil disconnects); its change hook moves the
   coordinator (`sync.Service.ConnectionsChanged`) and resyncs the runners.
-- **Ops.** `machine.Ops` is the harness-neutral fs and process work that
-  must run where the harness runs, and the only place Stage reads Git
-  evidence ([ADR 0007](adr/0007-harness-boundary.md) decision 11; adapters
-  report harness facts only, and a test keeps `gitmeta`'s readers inside
-  `machine`). Both read a workspace through `machine.RootsFor`: the
-  connection's shared roots, then, for a workspace the adapter marks
-  `Local` (a hosted harness's folders, a local OpenCode service's
-  projects), the path itself. `Inventory` fills `WorkspaceInfo.Repo` and
-  `RepoPath` without a git binary (`gitmeta.Checkout`, never walking above
-  a root; a Repo the harness reported stays) and decides `Importable` for
-  a harness that imports Git checkouts (`ImportIf`: `checkoutTop` for
-  Claude Code, `inCheckout` for Codex). `Checkout` returns
-  `machine.CheckoutEvidence` (the Git common directory as a device:inode
-  key, the subproject and its slash path, and the normalized remote) for
-  the match action. The main server loads shared paths and walks the
-  project identity ladder (`projectmatch`); only evidence from the same
-  machine proves a checkout. `machine.LocalOps` runs them here.
+- **Ops.** `machine.Ops.Inventory` enriches workspaces the adapter reports
+  as local to its filesystem. `machine.LocalOps` resolves absolute
+  directories and reads Git metadata directly, including the canonical
+  common directory for linked worktrees. It also evaluates checkout-based
+  import conditions (`checkoutTop` for Claude Code, `inCheckout` for Codex).
+  Adapters report harness facts. Stage stores evidence and resolves project
+  identity on the main server. See [workspace discovery](discovery.md).
 - **Setup ports.** Each `harness.Module` composes over machine-bound ports
   in `harness/module.go`. `Settings.Get` reads a public JSON object by kind
   and `Settings.Save` applies a partial update. Omitted fields retain their
@@ -151,10 +141,11 @@ suite cannot tell a remote machine from the local one.
   The stream renews at the end of the window and stops on cancellation.
 - **Health.** Offline, negotiating and incompatible channels answer at
   once with their reason. A ready snapshot scopes the 5s health cache.
-- **Ops.** `ops.inventory` and `ops.checkout` run `machine.LocalOps` on the
-  worker with the shared roots the main server loads (a `Local` workspace,
-  such as a worker's Claude Code folder, is read in place there); evidence
-  is still compared on the main server, within one machine.
+- **Ops.** `ops.inventory` sends `{workspaces}` to `machine.LocalOps` on
+  the worker and returns the inventory with optional filesystem evidence.
+  Protocol 3 changes that request and removes `ops.checkout` from the
+  advertised channel kinds. The product API remains v9. Upgrade server and
+  workers together.
 - **Errors.** `execution.ErrUnavailable`, `ErrNotFound`, `ErrNoReply`,
   `Rejected` and `Refused` keep their meaning (`unavailable`, `not_found`,
   `no_reply`, `rejected`, `refused`). Offline and `not_hosted` mean the
@@ -295,7 +286,10 @@ survive the settings migration.
 - A session is `{connectionId, externalSessionId}`. Neither a directory string
   nor an external session ID identifies another connection. Project bindings
   and launch destinations retain the verified connection, external project,
-  directory, binding ID and revision.
+  reported path, binding ID and revision. A task or schedule can choose a
+  binding on its connection, otherwise it uses the primary at launch.
+  Workspace-scoped catalogs and project actions accept the same binding ID.
+  The claimed attempt pins its destination for reconciliation.
 - `Config.model` is an opaque adapter key. Options are named string/boolean
   values; permission and interaction mode are opaque adapter selections.
   `Features` supplies models, options (launch options included),

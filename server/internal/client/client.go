@@ -157,11 +157,12 @@ func (t handlerTransport) RoundTrip(req *http.Request) (res *http.Response, err 
 	return rec.Result(), nil
 }
 
-// Error is a non-2xx API response ({"error": msg}, optionally with a code).
+// Error is a non-2xx API response. A stale confirmation can carry a fresh preview.
 type Error struct {
-	Status int
-	Msg    string
-	Code   string
+	Status  int
+	Msg     string
+	Code    string
+	Preview json.RawMessage
 }
 
 func (e *Error) Error() string { return fmt.Sprintf("stage API %d: %s", e.Status, e.Msg) }
@@ -225,6 +226,7 @@ type CreateTask struct {
 	OriginSession   *db.SessionRef    `json:"originSession,omitempty"`
 	ExecutionConfig *execution.Config `json:"executionConfig,omitempty"`
 	ProjectID       int64             `json:"projectId"`
+	BindingID       *int64            `json:"bindingId,omitempty"`
 	Title           string            `json:"title"`
 	Prompt          string            `json:"prompt"`
 	InitialNote     *string           `json:"initialNote,omitempty"`
@@ -244,6 +246,7 @@ type CreateSchedule struct {
 	OriginSession   *db.SessionRef    `json:"originSession,omitempty"`
 	ExecutionConfig *execution.Config `json:"executionConfig,omitempty"`
 	ProjectID       int64             `json:"projectId"`
+	BindingID       *int64            `json:"bindingId,omitempty"`
 	Title           string            `json:"title"`
 	Prompt          string            `json:"prompt"`
 	Notes           *string           `json:"notes,omitempty"`
@@ -312,13 +315,14 @@ func (c *Client) send(req *http.Request, out any) (int, error) {
 	}
 	if res.StatusCode >= 400 {
 		var eb struct {
-			Error string `json:"error"`
-			Code  string `json:"code"`
+			Error   string          `json:"error"`
+			Code    string          `json:"code"`
+			Preview json.RawMessage `json:"preview"`
 		}
 		if json.Unmarshal(data, &eb) != nil || eb.Error == "" {
 			eb.Error = strings.TrimSpace(string(data))
 		}
-		return 0, &Error{Status: res.StatusCode, Msg: eb.Error, Code: eb.Code}
+		return 0, &Error{Status: res.StatusCode, Msg: eb.Error, Code: eb.Code, Preview: eb.Preview}
 	}
 	if out == nil || len(data) == 0 {
 		return res.StatusCode, nil
@@ -404,10 +408,7 @@ func withQuery(path string, q url.Values) string {
 
 // Projects lists active projects.
 func (c *Client) Projects(ctx context.Context) ([]db.Project, error) {
-	var out struct {
-		Projects []db.Project `json:"projects"`
-	}
-	err := c.do(ctx, http.MethodGet, "/api/projects", nil, &out)
+	out, err := c.ListProjects(ctx)
 	return out.Projects, err
 }
 
@@ -748,11 +749,19 @@ func (c *Client) Capabilities(ctx context.Context, id int64) (execution.Capabili
 	return c.ProjectCapabilities(ctx, id, 0)
 }
 func (c *Client) ProjectCapabilities(ctx context.Context, id, projectID int64) (execution.Capabilities, error) {
+	return c.WorkspaceCapabilities(ctx, id, projectID, nil)
+}
+
+// WorkspaceCapabilities reads features for the selected binding, defaulting to
+// the project's primary workspace on the connection.
+func (c *Client) WorkspaceCapabilities(ctx context.Context, id, projectID int64, bindingID *int64) (execution.Capabilities, error) {
 	var out execution.Capabilities
-	path := fmt.Sprintf("/api/connections/%d/capabilities", id)
+	q := url.Values{}
 	if projectID != 0 {
-		path += fmt.Sprintf("?projectId=%d", projectID)
+		setID(q, "projectId", &projectID)
 	}
+	setID(q, "bindingId", bindingID)
+	path := withQuery(fmt.Sprintf("/api/connections/%d/capabilities", id), q)
 	err := c.do(ctx, http.MethodGet, path, nil, &out)
 	return out, err
 }
