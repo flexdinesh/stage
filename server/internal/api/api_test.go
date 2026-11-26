@@ -174,7 +174,6 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, log)
-	svc.OnConnectionSynced = t3setup.RecordFullSync(store)
 	svc.Harnesses = testHarnesses
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
@@ -188,20 +187,19 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 		opt(&deps)
 	}
 	if _, ok := deps.Connectors.Get(db.LocalMachine, t3.Kind); !ok {
-		withT3Setup(&deps, t3setup.New(t3setup.Options{Config: deps.Config, Settings: store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Fake: true, Logger: log}))
+		withT3Setup(&deps, t3setup.Options{Client: client, Fake: true})
 	}
 	h := api.NewRouter(deps)
 	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store}
 }
 
-// withT3Setup makes setup the local machine's T3 connector (its sync
-// progress read from d.Sync), keeping an OpenCode connector already set.
-func withT3Setup(d *api.Deps, setup *t3setup.Service) {
-	svc := d.Sync
-	connectors := map[string]harness.Connector{t3.Kind: t3setup.NewConnector(setup, func(connection int64) t3setup.SyncProgress {
-		p := svc.Progress(connection)
-		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Sessions}
-	})}
+// withT3Setup installs a T3 connector backed by the local machine, keeping
+// an OpenCode connector already set.
+func withT3Setup(d *api.Deps, opts t3setup.Options) {
+	ports := machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor))
+	opts.Settings, opts.Secrets, opts.Identity = ports.Settings(), ports.Secrets(), ports
+	opts.Logger = d.Logger
+	connectors := map[string]harness.Connector{t3.Kind: t3setup.NewConnector(t3setup.New(opts))}
 	if c, ok := d.Connectors.Get(db.LocalMachine, opencode.Kind); ok {
 		connectors[opencode.Kind] = c
 	}
@@ -966,16 +964,18 @@ func TestTargetedSyncProjectsAndTasks(t *testing.T) {
 	}
 	var reply struct {
 		Details struct {
-			LastFullSyncAt *string `json:"lastFullSyncAt"`
-			Connected      bool    `json:"connected"`
-			EnvironmentID  *string `json:"environmentId"`
-			PublicURL      string  `json:"publicUrl"`
+			Connected     bool    `json:"connected"`
+			EnvironmentID *string `json:"environmentId"`
+			PublicURL     string  `json:"publicUrl"`
 		} `json:"details"`
+		Sync struct {
+			LastFullSyncAt *string `json:"lastFullSyncAt"`
+		} `json:"sync"`
 	}
 	e.must("GET", "/api/harnesses/t3/status", nil, 200, &reply)
 	st := reply.Details
-	if st.LastFullSyncAt == nil || !st.Connected || st.EnvironmentID == nil || st.PublicURL != "http://127.0.0.1:3773" {
-		t.Fatalf("status %+v", st)
+	if reply.Sync.LastFullSyncAt == nil || !st.Connected || st.EnvironmentID == nil || st.PublicURL != "http://127.0.0.1:3773" {
+		t.Fatalf("status %+v", reply)
 	}
 	var projects struct {
 		Projects []project `json:"projects"`

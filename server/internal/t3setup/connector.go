@@ -11,14 +11,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-// SyncProgress is the full sync shown in the T3 setup panel.
-type SyncProgress struct {
-	Running   bool       `json:"running"`
-	StartedAt *time.Time `json:"startedAt"`
-	Projects  int        `json:"projects"`
-	Threads   int        `json:"threads"`
-}
-
 // Details is the T3 setup panel's state (harness.Status.Details; docs/api.md
 // "T3 connection").
 type Details struct {
@@ -31,14 +23,11 @@ type Details struct {
 	ClientID             *string      `json:"clientId"`
 	TokenExpiresAt       *time.Time   `json:"tokenExpiresAt"`
 	AdminTokenConfigured bool         `json:"adminTokenConfigured"`
-	LastError            *string      `json:"lastError"`
-	LastFullSyncAt       *time.Time   `json:"lastFullSyncAt"`
 	Reachable            bool         `json:"reachable"`
 	CheckedAt            *time.Time   `json:"checkedAt"`
 	ProbeError           *string      `json:"probeError"`
 	T3                   *IdentityRef `json:"t3"`
 	AutoPair             AutoPairRef  `json:"autoPair"`
-	Sync                 SyncProgress `json:"sync"`
 	ConnectionID         int64        `json:"connectionId"`
 }
 
@@ -58,13 +47,11 @@ type AutoPairRef struct {
 // Connector is the T3 harness.Connector over this Service.
 type Connector struct {
 	svc *Service
-	// Progress reports the server's full sync (nil: none).
-	progress func(connection int64) SyncProgress
 }
 
-// NewConnector wraps s; progress (the full sync of a connection) may be nil.
-func NewConnector(s *Service, progress func(connection int64) SyncProgress) *Connector {
-	return &Connector{svc: s, progress: progress}
+// NewConnector wraps s.
+func NewConnector(s *Service) *Connector {
+	return &Connector{svc: s}
 }
 
 var _ harness.Connector = (*Connector)(nil)
@@ -78,23 +65,24 @@ func strPtr(s string) *string {
 
 // configured: paired (a stored token, or an admin token that mints one).
 // An unpaired T3 is not a connection, whatever URL is saved.
-func (c *Connector) configured(st Status) bool {
-	return st.Conn.HasToken || st.Conn.Connected || c.svc.AdminTokenSet()
+func (c *Connector) summary(active int64, st t3.ConnectionStatus) harness.Summary {
+	return harness.Summary{
+		ConnectionID: active,
+		Configured:   st.HasToken || st.Connected || c.svc.AdminTokenSet(),
+		Connected:    st.Connected,
+		LastError:    st.LastError,
+	}
 }
 
 func (c *Connector) Summary(ctx context.Context) harness.Summary {
-	st := c.svc.Status(ctx, false)
-	conn, _ := c.svc.o.Settings.GetConnection(ctx)
-	out := harness.Summary{ConnectionID: conn.ConnectionID, Configured: c.configured(st), Connected: st.Conn.Connected, LastError: st.Conn.LastError}
-	if out.LastError == "" && conn.LastError != nil {
-		out.LastError = *conn.LastError
-	}
-	return out
+	st := c.svc.o.Client.Status(ctx)
+	active, _ := c.svc.o.Identity.Active(ctx, t3.Kind)
+	return c.summary(active, st)
 }
 
 func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, error) {
 	st := c.svc.Status(ctx, refresh)
-	conn, err := c.svc.o.Settings.GetConnection(ctx)
+	active, err := c.svc.o.Identity.Active(ctx, t3.Kind)
 	if err != nil {
 		return harness.Status{}, err
 	}
@@ -107,9 +95,7 @@ func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, e
 		EnvironmentID:        strPtr(st.Conn.EnvironmentID),
 		ClientID:             strPtr(st.Conn.ClientID),
 		AdminTokenConfigured: c.svc.AdminTokenSet(),
-		ConnectionID:         conn.ConnectionID,
-		LastError:            strPtr(st.Conn.LastError),
-		LastFullSyncAt:       conn.LastFullSyncAt,
+		ConnectionID:         active,
 		Reachable:            st.Conn.Probe.Reachable,
 		ProbeError:           strPtr(st.Conn.Probe.Err),
 		AutoPair:             AutoPairRef{Available: st.AutoPair.Available, Reason: strPtr(st.AutoPair.Reason)},
@@ -118,9 +104,6 @@ func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, e
 		exp := st.Conn.ExpiresAt.UTC()
 		d.TokenExpiresAt = &exp
 	}
-	if d.LastError == nil {
-		d.LastError = conn.LastError
-	}
 	if !st.Conn.Probe.CheckedAt.IsZero() {
 		at := st.Conn.Probe.CheckedAt.UTC()
 		d.CheckedAt = &at
@@ -128,11 +111,8 @@ func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, e
 	if id := st.Conn.Probe.Identity; id != nil {
 		d.T3 = &IdentityRef{EnvironmentID: id.EnvironmentID, Label: id.Label, ServerVersion: id.ServerVersion}
 	}
-	if c.progress != nil {
-		d.Sync = c.progress(conn.ConnectionID)
-	}
 	out := harness.Status{
-		Summary: harness.Summary{ConnectionID: conn.ConnectionID, Configured: c.configured(st), Connected: st.Conn.Connected},
+		Summary: c.summary(active, st.Conn),
 		State:   string(st.State),
 		Details: d,
 		Fields: []harness.FieldState{
@@ -144,9 +124,6 @@ func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, e
 			{ID: t3.ActionPair, Available: true},
 			{ID: t3.ActionAutoPair, Available: st.AutoPair.Available, Reason: st.AutoPair.Reason},
 		},
-	}
-	if d.LastError != nil {
-		out.LastError = *d.LastError
 	}
 	if st.State != t3.StateConnected {
 		out.Reason = out.LastError
@@ -244,23 +221,8 @@ func (c *Connector) Run(ctx context.Context, action string, input json.RawMessag
 	if err != nil {
 		return harness.Result{}, err
 	}
-	var out harness.Result
-	if paired.Replaced != nil {
-		out.Replaced = paired.Replaced.ID
-	}
-	return out, nil
+	return harness.Result{Replaced: paired.Replaced}, nil
 }
 
 // Disconnect forgets the token and the saved settings (Unpair).
 func (c *Connector) Disconnect(ctx context.Context) error { return c.svc.Unpair(ctx) }
-
-// RecordFullSync is the sync service's OnConnectionSynced hook: the T3
-// status reports its machine's last successful full sync.
-func RecordFullSync(store *db.Store) func(context.Context, int64, time.Time) error {
-	return func(ctx context.Context, connection int64, at time.Time) error {
-		if store.Harness(connection) != t3.Kind {
-			return nil
-		}
-		return store.SetLastFullSync(ctx, store.ConnectionMachine(connection), at)
-	}
-}

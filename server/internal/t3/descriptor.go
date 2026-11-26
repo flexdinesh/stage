@@ -27,6 +27,7 @@ const (
 // sessions it runs in other harnesses (Wraps).
 var Descriptor = harness.Descriptor{
 	Kind: Kind, Name: "T3", Hosting: harness.Connected, StableIdentity: true,
+	MovedRetire: func(old, next harness.Summary) bool { return !old.Configured && next.Configured },
 	LinkSchemes: []string{"t3code"},
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedSettled, Provenance: "harness_settled",

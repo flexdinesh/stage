@@ -19,16 +19,14 @@ import (
 // cutover"): *DB is the store.CopyTarget.
 var _ store.CopyTarget = (*DB)(nil)
 
-// baselineSeeds are the rows 0028_baseline.sql inserts, by table: the key
-// column, whose seeded value is 1. A target holding nothing else counts as
-// empty, and the copy replaces them with the source's rows.
+// baselineSeeds identifies default rows that do not occupy a copy target.
+// Populated harness settings or status, and any secret, occupy the target.
 var baselineSeeds = map[string]string{
-	"users":               "id",
-	"machines":            "id",
-	"harness_connections": "id",
-	"t3_connection":       "machine_id",
-	"opencode_settings":   "machine_id",
-	"preferences":         "id",
+	"users":               "id = 1",
+	"machines":            "id = 1",
+	"preferences":         "id = 1",
+	"harness_settings":    `machine_id = 1 AND settings = '{}'::jsonb`,
+	"harness_sync_status": `last_error IS NULL AND last_full_sync_at IS NULL`,
 }
 
 // State reads the version, counts the schema's tables, and (with a schema)
@@ -54,8 +52,8 @@ func (d *DB) State(ctx context.Context) (store.CopyTargetState, error) {
 	}
 	for _, name := range names {
 		q := `SELECT EXISTS (SELECT 1 FROM ` + pgx.Identifier{name}.Sanitize()
-		if key, ok := baselineSeeds[name]; ok {
-			q += ` WHERE ` + pgx.Identifier{key}.Sanitize() + ` <> 1`
+		if seed, ok := baselineSeeds[name]; ok {
+			q += ` WHERE NOT (` + seed + `)`
 		}
 		var occupied bool
 		if err := d.pool.QueryRow(ctx, q+`)`).Scan(&occupied); err != nil {

@@ -193,8 +193,8 @@ func TestWorkerChannelRangeRejection(t *testing.T) {
 		server                       workerchan.VersionRange
 	}{
 		{"legacy", "", "", "Update Stage on laptop", workerchan.CodeProtocolMismatch, 409, workerchan.CurrentRange()},
-		{"server older", "2", "3", "Update Stage on the main machine", workerchan.CodeProtocolMismatch, 409, workerchan.CurrentRange()},
-		{"worker older", "1", "2", "Update Stage on laptop", workerchan.CodeProtocolMismatch, 409, workerchan.VersionRange{Min: 3, Max: 4}},
+		{"server older", "3", "4", "Update Stage on the main machine", workerchan.CodeProtocolMismatch, 409, workerchan.CurrentRange()},
+		{"worker older", "1", "1", "Update Stage on laptop", workerchan.CodeProtocolMismatch, 409, workerchan.CurrentRange()},
 		{"non-integer", "a", "2", "", "invalid_channel_protocol", 400, workerchan.CurrentRange()},
 		{"zero", "0", "2", "", "invalid_channel_protocol", 400, workerchan.CurrentRange()},
 		{"inverted", "2", "1", "", "invalid_channel_protocol", 400, workerchan.CurrentRange()},

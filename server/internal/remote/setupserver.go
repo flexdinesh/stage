@@ -6,20 +6,24 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
-// ServeSetup answers the setup port calls of workers on hub: each reads or
-// writes the calling machine's record through ports(machineID), and never
-// another machine's connections. Credentials are never stored here: an
-// OpenCode save keeps only the setup. switched runs after an instance
-// switch moved or created a connection (may be nil).
-func ServeSetup(hub *workerchan.Hub, ports func(machineID int64) machine.StorePorts, switched func(machineID int64, sw db.Switch)) {
-	initializing := []string{KindT3Get, KindT3LastError, KindOpenCodeGet, KindClaudeGet, KindCodexGet,
-		KindIdentityActive, KindIdentitySet, KindIdentitySwitch}
+// ServeSetup answers worker setup calls through the authenticated machine's
+// ports. The modules define the allowed public settings. switched runs when
+// a connection is created or replaced and may be nil.
+func ServeSetup(hub *workerchan.Hub, ports func(machineID int64) machine.StorePorts, switched func(machineID int64, sw db.Switch), modules []harness.Module) {
+	validators := make(map[string]func(json.RawMessage) error, len(modules))
+	for _, mod := range modules {
+		validators[mod.Descriptor.Kind] = mod.ValidateSettings
+	}
+	initializing := []string{
+		KindSettingsGet, KindStatusError, KindIdentityActive, KindIdentityActiveIdentity,
+		KindIdentitySet, KindIdentitySwitch,
+	}
 	handle := func(kind string, fn func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error)) {
 		register := hub.Handle
 		if slices.Contains(initializing, kind) {
@@ -33,69 +37,63 @@ func ServeSetup(hub *workerchan.Hub, ports func(machineID int64) machine.StorePo
 			return out, nil
 		})
 	}
-	handle(KindT3Get, func(ctx context.Context, p machine.StorePorts, _ json.RawMessage) (any, error) {
-		c, err := p.GetConnection(ctx)
-		return T3SettingsOf(c), err
-	})
-	handle(KindT3SetURL, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
-		var r URLRequest
-		if err := decodeBody(body, &r); err != nil {
-			return nil, err
-		}
-		return Empty{}, p.SetT3URL(ctx, r.URL)
-	})
-	handle(KindT3SetPublicURL, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
-		var r URLRequest
-		if err := decodeBody(body, &r); err != nil {
-			return nil, err
-		}
-		return Empty{}, p.SetT3PublicURL(ctx, r.URL)
-	})
-	handle(KindT3LastError, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
-		var r MessageRequest
-		if err := decodeBody(body, &r); err != nil {
-			return nil, err
-		}
-		return Empty{}, p.SetLastError(ctx, r.Message)
-	})
-	handle(KindOpenCodeGet, func(ctx context.Context, p machine.StorePorts, _ json.RawMessage) (any, error) {
-		setup, _, verified, err := p.OpenCodeSettings(ctx)
-		return OpenCodeSettings{Setup: setup, Verified: verified}, err
-	})
-	handle(KindOpenCodeSave, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
-		var r OpenCodeSettings
-		if err := decodeBody(body, &r); err != nil {
-			return nil, err
-		}
-		// The credential stays on the worker.
-		return Empty{}, p.SaveOpenCodeSettings(ctx, r.Setup, config.OpenCodeCredential{})
-	})
-	handle(KindClaudeGet, func(ctx context.Context, p machine.StorePorts, _ json.RawMessage) (any, error) {
-		return p.ClaudeSettings(ctx)
-	})
-	handle(KindClaudeSave, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
-		var r config.ClaudeSettings
-		if err := decodeBody(body, &r); err != nil {
-			return nil, err
-		}
-		return Empty{}, p.SaveClaudeSettings(ctx, r)
-	})
-	handle(KindCodexGet, func(ctx context.Context, p machine.StorePorts, _ json.RawMessage) (any, error) {
-		return p.CodexSettings(ctx)
-	})
-	handle(KindCodexSave, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
-		var r config.CodexSettings
-		if err := decodeBody(body, &r); err != nil {
-			return nil, err
-		}
-		return Empty{}, p.SaveCodexSettings(ctx, r)
-	})
-	handle(KindIdentityActive, func(_ context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
+	handle(KindSettingsGet, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
 		var r KindRequest
 		if err := decodeBody(body, &r); err != nil {
 			return nil, err
 		}
-		return IDResult{ID: p.ActiveID(r.Kind)}, nil
+		validate := validators[r.Kind]
+		if validate == nil {
+			return nil, db.Invalid("unregistered harness %q", r.Kind)
+		}
+		public, err := p.Settings().Get(ctx, r.Kind)
+		if err != nil {
+			return nil, err
+		}
+		if err := validate(public); err != nil {
+			return nil, db.Invalid("saved settings for %s are invalid; update them in Settings > Connections", r.Kind)
+		}
+		return public, nil
+	})
+	handle(KindSettingsSave, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
+		var r SettingsRequest
+		if err := decodeBody(body, &r); err != nil {
+			return nil, err
+		}
+		validate := validators[r.Kind]
+		if validate == nil {
+			return nil, db.Invalid("no public settings schema for harness %q", r.Kind)
+		}
+		if err := validate(r.Patch); err != nil {
+			return nil, db.Invalid("invalid settings for %s: %s", r.Kind, err)
+		}
+		return Empty{}, p.Settings().Save(ctx, r.Kind, r.Patch)
+	})
+	handle(KindStatusError, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
+		var r StatusErrorRequest
+		if err := decodeBody(body, &r); err != nil {
+			return nil, err
+		}
+		if _, ok := validators[r.Kind]; !ok {
+			return nil, db.Invalid("unregistered harness %q", r.Kind)
+		}
+		return Empty{}, p.SetLastError(ctx, r.Kind, r.Message)
+	})
+	handle(KindIdentityActive, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
+		var r KindRequest
+		if err := decodeBody(body, &r); err != nil {
+			return nil, err
+		}
+		id, err := p.Active(ctx, r.Kind)
+		return IDResult{ID: id}, err
+	})
+	handle(KindIdentityActiveIdentity, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
+		var r KindRequest
+		if err := decodeBody(body, &r); err != nil {
+			return nil, err
+		}
+		id, identity, err := p.ActiveIdentity(ctx, r.Kind)
+		return ActiveIdentityResult{ID: id, Identity: identity}, err
 	})
 	handle(KindIdentitySwitch, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
 		var r SwitchRequest
@@ -103,7 +101,7 @@ func ServeSetup(hub *workerchan.Hub, ports func(machineID int64) machine.StorePo
 			return nil, err
 		}
 		if r.Revive != 0 {
-			if err := own(p, r.Revive); err != nil {
+			if err := own(ctx, p, r.Revive); err != nil {
 				return nil, err
 			}
 		}
@@ -116,22 +114,17 @@ func ServeSetup(hub *workerchan.Hub, ports func(machineID int64) machine.StorePo
 		}
 		return SwitchOf(sw), nil
 	})
-	handle(KindIdentityGet, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
+	handle(KindIdentityExists, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
 		var r ConnectionRequest
 		if err := decodeBody(body, &r); err != nil {
 			return nil, err
 		}
-		if err := own(p, r.ID); err != nil {
-			return nil, err
-		}
-		return p.GetHarnessConnection(ctx, r.ID)
+		exists, err := p.ConnectionExists(ctx, r.ID)
+		return ConnectionExistsResult{Exists: exists}, err
 	})
 	handle(KindIdentitySet, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
 		var r IdentityRequest
 		if err := decodeBody(body, &r); err != nil {
-			return nil, err
-		}
-		if err := own(p, r.ID); err != nil {
 			return nil, err
 		}
 		return Empty{}, p.SetConnectionIdentity(ctx, r.ID, r.Identity, r.Label)
@@ -152,20 +145,20 @@ func ServeSetup(hub *workerchan.Hub, ports func(machineID int64) machine.StorePo
 		if err := decodeBody(body, &r); err != nil {
 			return nil, err
 		}
-		if err := own(p, r.ID); err != nil {
-			return nil, err
-		}
 		bindings, observations, unknown, err := p.ConnectionEvidence(ctx, r.ID)
 		if bindings == nil {
-			bindings = []db.ProjectBinding{}
+			bindings = []harness.WorkspaceEvidence{}
 		}
 		return Evidence{Bindings: bindings, Observations: observations, Unknown: unknown}, err
 	})
 }
 
-// own refuses a connection of another machine (or none).
-func own(p machine.StorePorts, id int64) error {
-	if id <= 0 || p.ConnectionMachine(id) != p.Machine() {
+func own(ctx context.Context, p machine.StorePorts, id int64) error {
+	exists, err := p.ConnectionExists(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return fmt.Errorf("%w: connection %d is not on this machine", db.ErrNotFound, id)
 	}
 	return nil

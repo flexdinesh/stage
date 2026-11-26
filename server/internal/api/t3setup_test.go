@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -13,10 +11,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/api"
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/harness"
-	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
@@ -41,24 +36,29 @@ type t3Status struct {
 		Available bool    `json:"available"`
 		Reason    *string `json:"reason"`
 	} `json:"autoPair"`
-	Sync *struct {
-		Running   bool    `json:"running"`
-		StartedAt *string `json:"startedAt"`
-		Projects  int     `json:"projects"`
-		Threads   int     `json:"threads"`
-	} `json:"sync"`
+	Sync *syncStatus `json:"-"`
 }
 
-// UnmarshalJSON reads the details of GET /api/harnesses/t3/status.
+type syncStatus struct {
+	Running   bool    `json:"running"`
+	StartedAt *string `json:"startedAt"`
+	Projects  int     `json:"projects"`
+	Sessions  int     `json:"sessions"`
+}
+
+// UnmarshalJSON reads the details and sync status of GET /api/harnesses/t3/status.
 func (s *t3Status) UnmarshalJSON(b []byte) error {
+	type details t3Status
 	var w struct {
-		Details json.RawMessage `json:"details"`
+		Details details     `json:"details"`
+		Sync    *syncStatus `json:"sync"`
 	}
 	if err := json.Unmarshal(b, &w); err != nil {
 		return err
 	}
-	type plain t3Status
-	return json.Unmarshal(w.Details, (*plain)(s))
+	*s = t3Status(w.Details)
+	s.Sync = w.Sync
+	return nil
 }
 
 // setupT3 replaces the T3 setup with one whose CLI, PATH and candidate
@@ -71,36 +71,31 @@ type setupT3 struct {
 	envOther bool // candidate URLs serve another environment
 }
 
-func (s *setupT3) opt(cfg config.Config) func(*api.Deps) {
-	return func(d *api.Deps) {
-		d.Config = cfg
-		a, _ := d.Sync.Adapter(d.Store.ActiveID(db.LocalMachine, "t3"))
-		client := a.(*t3.Adapter).Client
-		withT3Setup(d, t3setup.New(t3setup.Options{
-			Config: cfg, Settings: d.Store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-			AdminTokens: d.Store.OnMachine(db.LocalMachine),
-			OnPaired:    func() { s.paired.Add(1) },
-			Local: &t3setup.LocalCLI{
-				Bin: cfg.T3Bin,
-				Exec: func(context.Context, string, []string) ([]byte, error) {
-					return []byte(s.runOut), s.runErr
-				},
-				LookPath: func(file string) (string, error) {
-					if s.cli {
-						return "/usr/bin/t3", nil
-					}
-					return "", errors.New("not found")
-				},
+func (s *setupT3) opt(d *api.Deps) {
+	a, _ := d.Sync.Adapter(d.Store.ActiveID(db.LocalMachine, "t3"))
+	client := a.(*t3.Adapter).Client
+	withT3Setup(d, t3setup.Options{
+		Client:   client,
+		OnPaired: func() { s.paired.Add(1) },
+		Local: &t3setup.LocalCLI{
+			Exec: func(context.Context, string, []string) ([]byte, error) {
+				return []byte(s.runOut), s.runErr
 			},
-			ProbeURL: func(context.Context, string) t3.Probe {
-				env := t3.FakeEnvironmentID
-				if s.envOther {
-					env = "other-env"
+			LookPath: func(file string) (string, error) {
+				if s.cli {
+					return "/usr/bin/t3", nil
 				}
-				return t3.Probe{Reachable: true, CheckedAt: time.Now(), Identity: &t3.Identity{EnvironmentID: env, Label: env}}
+				return "", errors.New("not found")
 			},
-		}))
-	}
+		},
+		ProbeURL: func(context.Context, string) t3.Probe {
+			env := t3.FakeEnvironmentID
+			if s.envOther {
+				env = "other-env"
+			}
+			return t3.Probe{Reachable: true, CheckedAt: time.Now(), Identity: &t3.Identity{EnvironmentID: env, Label: env}}
+		},
+	})
 }
 
 func TestT3StatusShape(t *testing.T) {
@@ -129,7 +124,7 @@ func TestT3StatusShape(t *testing.T) {
 
 func TestT3AutoPairEndpoint(t *testing.T) {
 	s := &setupT3{}
-	e := newEnv(t, s.opt(config.Config{}))
+	e := newEnv(t, s.opt)
 	var st t3Status
 	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
 	if st.AutoPair.Available || st.AutoPair.Reason == nil || *st.AutoPair.Reason != "cli_not_found" {
@@ -153,7 +148,7 @@ func TestT3AutoPairEndpoint(t *testing.T) {
 	}
 
 	remote := &setupT3{cli: true}
-	e = newEnv(t, remote.opt(config.Config{}))
+	e = newEnv(t, remote.opt)
 	e.must("PUT", "/api/harnesses/t3/settings", map[string]any{"url": "http://t3.lan:3773"}, 200, nil)
 	e.must("POST", "/api/harnesses/t3/actions/auto-pair", nil, http.StatusConflict, &eb)
 	if !strings.Contains(eb.Error, "not a loopback address") {
@@ -163,7 +158,7 @@ func TestT3AutoPairEndpoint(t *testing.T) {
 
 func TestT3PairKicksSync(t *testing.T) {
 	s := &setupT3{}
-	e := newEnv(t, s.opt(config.Config{}))
+	e := newEnv(t, s.opt)
 	e.must("POST", "/api/harnesses/t3/actions/pair", map[string]any{"code": " "}, 400, nil)
 	e.must("POST", "/api/harnesses/t3/actions/pair", map[string]any{"code": "ABCD-1234"}, 200, nil)
 	if s.paired.Load() != 1 {
@@ -173,7 +168,7 @@ func TestT3PairKicksSync(t *testing.T) {
 
 func TestT3UnpairEndpoint(t *testing.T) {
 	s := &setupT3{}
-	e := newEnv(t, s.opt(config.Config{}))
+	e := newEnv(t, s.opt)
 	var st t3Status
 	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st) // binds the connected fake
 	s.envOther = true
@@ -191,7 +186,7 @@ func TestT3UnpairEndpoint(t *testing.T) {
 	// Disconnect forgets it with the token and the saved URLs, and the T3
 	// connection is no longer configured.
 	admin := &setupT3{}
-	e = newEnv(t, admin.opt(config.Config{}))
+	e = newEnv(t, admin.opt)
 	e.must("DELETE", "/api/harnesses/t3/connection", nil, 200, &st)
 	if configured(t, e, "t3") {
 		t.Fatal("unpaired T3 is configured")
@@ -229,7 +224,7 @@ func configured(t *testing.T, e *env, kind string) bool {
 
 func TestT3URLEndpoint(t *testing.T) {
 	s := &setupT3{}
-	e := newEnv(t, s.opt(config.Config{}))
+	e := newEnv(t, s.opt)
 	var eb struct {
 		Error string `json:"error"`
 	}
@@ -278,7 +273,7 @@ func TestT3StatusReportsSyncProgress(t *testing.T) {
 	<-reached
 	var st t3Status
 	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
-	if st.Sync == nil || !st.Sync.Running || st.Sync.StartedAt == nil || st.Sync.Projects != 1 || st.Sync.Threads != 0 {
+	if st.Sync == nil || !st.Sync.Running || st.Sync.StartedAt == nil || st.Sync.Projects != 1 || st.Sync.Sessions != 0 {
 		t.Fatalf("running sync %+v", st.Sync)
 	}
 	close(gate)
@@ -286,7 +281,7 @@ func TestT3StatusReportsSyncProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)
-	if st.Sync.Running {
+	if st.Sync == nil || st.Sync.Running {
 		t.Fatalf("finished sync %+v", st.Sync)
 	}
 }

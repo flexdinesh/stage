@@ -204,3 +204,13 @@ func upsertInstructions(env Env, path string) error {
 	success(env.stdout(), "Wrote %s", path)
 	return nil
 }
+
+const setupUsage = `  stage setup [--claude] [--codex] [--opencode] [--mcp] [--check]
+                                      set up agents on this machine (default: those found): the
+                                      Stage skill and an instruction pointer (--mcp: also stdio MCP for
+                                      Claude Code and Codex), then check CLI, server and caller;
+                                      --check writes nothing (exit 1 on problems)
+  stage setup skill [--claude] [--codex] [--opencode]   the Stage skill only
+  stage setup mcp [--claude] [--codex] [--http]
+  stage setup instructions [--claude] [--codex] [--file PATH]
+`

@@ -216,10 +216,3 @@ func (w *where) sql() string {
 	}
 	return " WHERE " + strings.Join(w.conds, " AND ")
 }
-
-func nullIfEmpty(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}

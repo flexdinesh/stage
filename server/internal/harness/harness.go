@@ -82,8 +82,14 @@ type Descriptor struct {
 	// StableIdentity: an instance identity names one instance for good (a
 	// T3 environment id), so a retired connection with the same identity is
 	// revived. Otherwise the harness proves continuity itself.
-	StableIdentity bool      `json:"-"`
-	Closures       []Closure `json:"closures"`
+	StableIdentity bool `json:"-"`
+	// ContinuityProof allows the module to select a retired connection using
+	// its own evidence when an address is insufficient to identify an instance.
+	ContinuityProof bool `json:"-"`
+	// MovedRetire decides whether a reachable old machine's setup and the
+	// new setup confirm that a stable instance moved between machines.
+	MovedRetire func(old, next Summary) bool `json:"-"`
+	Closures    []Closure                    `json:"closures"`
 	// LinkSchemes are the URL schemes of the harness's own app links
 	// (Links.Native, links in replies), lower case, without ":".
 	LinkSchemes []string `json:"linkSchemes"`

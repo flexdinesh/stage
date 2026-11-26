@@ -269,7 +269,7 @@ func checkLaunchClaim(ctx context.Context, tx store.Tx, t Transition, attempt in
 		return err
 	}
 	if c.Adopted {
-		return Conflict("Adopted tasks continue in T3.")
+		return Conflict("Adopted tasks continue in their harness.")
 	}
 	if c.Accepted != nil {
 		return Conflict("Task is completed. Reopen it before starting work.")

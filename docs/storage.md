@@ -17,7 +17,7 @@ that disagrees with this file updates it in the same PR.
 | [Single owner](#single-owner) | as described on both engines (#403, in `serve` #405) | |
 | [Encodings](#encodings) and [errors](#errors) | as described on both engines (#403) | |
 | [Search](#search) | as described on both engines (#404): SQLite FTS5 trigram (0029), Postgres `pg_trgm` GIN (0029) | |
-| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 35; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 35 (0030 `claude_settings`, #372; 0031 `codex_settings`, #384; 0032 `no_default_harness`, #420; 0033 `launch_options` and 0034 `drop_workspaces`, #420; 0035 `drop_settled`); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
+| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 36; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 36 (0030 `claude_settings`, #372; 0031 `codex_settings`, #384; 0032 `no_default_harness`, #420; 0033 `launch_options` and 0034 `drop_workspaces`, #420; 0035 `drop_settled`; 0036 `harness_setup`); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
 | [Backups](#backups) | as described on both engines (#403) | |
 | [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) and `serve` on Postgres (#405) | |
 | [Data copy and cutover](#data-copy-and-cutover) | as described (#406): `stage db copy` (`internal/db/datacopy` over the copy ports), cutover and rollback runbook | |
@@ -123,8 +123,9 @@ rows and events), `Attempts` (launch attempts and checkpoints, claims, pinned
 destinations and inputs, handoffs), `Observations` (normalized
 execution observations), `Trees` (trees, membership, needs), `Journal`,
 `Acceptances`, `Schedules` (and runs), `Projects` (bindings, external
-projects, imports), `Connections` (harness connections, T3, OpenCode and
-Claude Code and Codex settings, shared paths), `Machines` (pairing codes, machine tokens),
+projects, imports), `Connections` (harness connections and shared paths),
+`HarnessSetup` (settings, secrets and sync status), `Machines` (pairing codes,
+machine tokens),
 `Notifications`, `Sessions` (session identities), `Attachments`,
 `Users`, `Preferences`, `Push` (VAPID keys, subscriptions) and `Snippets`.
 Repository methods are named queries: they hold no rules, return engine
@@ -190,6 +191,20 @@ migration 0026 (#399).
   back with its `Write`; `TestDerivedWritesBoundary` fails when `internal/db`
   calls a raw repository write outside its helper. They read SQL or call the
   helpers, so they stay in `internal/db`, not `storetest`.
+
+## Harness setup
+
+`harness_settings` stores one public JSON object per machine and harness kind.
+An absent settings row reads as `{}`. A save takes the machine lock and merges
+top-level keys in one transaction. Omitted keys retain their values and an
+explicit JSON null is persisted. Modules own defaults and validation.
+
+`harness_secrets` stores an opaque JSON value per machine, kind and key. Reads
+return an absent value separately from JSON null. The local store can merge a
+settings patch and update or delete one secret atomically. Worker secrets stay
+in the worker credential file. `harness_sync_status` stores nullable last
+error and last successful full sync per machine and kind, independently of a
+connection. Each status write updates only its own field.
 
 ## Transactions and locking
 
@@ -439,6 +454,14 @@ and paging. (Thread search was removed with API v3.)
   and check normalization, retained acceptance, preference ordering and
   identical evidence bytes. SQLite also checks title search, foreign keys and
   subsequent ID allocation.
+  0036 `harness_setup` moves public settings, opaque secrets and sync status
+  into generic machine-and-kind tables. Both engines copy and compare row counts
+  and values before dropping `t3_connection`, `opencode_settings`,
+  `claude_settings` and `codex_settings` in the same transaction. Settings data,
+  sync timestamps and partial credentials survive even without an active
+  connection. The unconfigured local baseline documents become empty objects,
+  with defaults supplied by their modules. Connection rows and references are
+  untouched.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -622,11 +645,10 @@ from the Docker image; any other binary exits 78 before touching anything.
   start this image once on the SQLite database (it migrates, with its
   [backup](#backups)), stop it, then copy; above it, use a newer image. The
   target must be either fresh (no tables: the copy migrates it to the head) or
-  at the head holding only the baseline's seeded rows (user 1, machine 1,
-  harness connection 1 (deleted by 0032 when unused), its `t3_connection` and `opencode_settings`, the
-  preferences row; `claude_settings` and `codex_settings` have no seeded row; for example after a server started on it once). Anything
-  else is refused: another version, other rows, or tables without a Stage
-  schema. Refusals write no rows; only a schema mismatch (below) is found
+  at the head holding only default rows (user 1, machine 1, the
+  preferences row, empty settings on machine 1 and status rows with both
+  fields unset). The copy refuses other versions, other rows, and tables
+  without a Stage schema. Refusals write no rows; only a schema mismatch (below) is found
   after a fresh target was migrated.
 - **Schemas:** both sides must hold the same tables and columns, apart from
   engine-internal tables (SQLite's `sqlite_*`, `goose_db_version`, the FTS5
@@ -783,7 +805,7 @@ MCP or CLI. Test-only callers are noted where they are the only ones.
 | `journal_entries.source_thread_id` | Old task events only (`task_event_journal` copied it until 0026; Go events write `source_session_id` only); the note input is unreachable; `COALESCE` puts it first for API `sourceThreadId` | Fallback-only: Dropped (0027, 0028) | Backfill `source_session_id`; derive `sourceThreadId`; note and event `text` unchanged |
 | `task_acceptances.source_session_id` | Set by Go on insert from the task's session (#399; `acceptance_session_insert` until 0026); read as a fallback when evidence has no `session` | Keep | None |
 | `question_responses` (table) | None (read once by 0008) | Dropped (0028) | None |
-| `t3_connection`, `opencode_settings`, `claude_settings`, `codex_settings` (all columns) | Live harness setup | Keep | None |
+| `t3_connection`, `opencode_settings`, `claude_settings`, `codex_settings` | Legacy harness setup | Dropped (0036) | Copy settings, secrets and sync status into the generic tables |
 
 ### Triggers
 
@@ -819,6 +841,7 @@ by Go decode) and is `jsonb`.
 | `acceptance_requests.result` | Queried: decoded for idempotent replay | `jsonb` |
 | `execution_observations.observation` | Queried: `json_extract` in execution, acceptance, notifications, push, tasks | `jsonb` |
 | `tasks`/`schedules.execution_config`, `harness_connections.new_task_config`, `preferences.notify_events` | Queried (decoded) | `jsonb` |
+| `harness_settings.settings`, `harness_secrets.value` | JSON objects and opaque values compared by value | `jsonb` |
 | `execution_attempts.intent`, `checkpoint`, `observed_session` | Queried (decoded; the checkpoint is opaque adapter state) | `jsonb` |
 | `tasks`/`schedules.model_options`, `threads.pull_requests`, `threads.recent_runs`, `question_responses.answers` | Dropped (see Columns) | none |
 | `tasks.workspace`, `schedules.workspace` | Dropped (0034, #420; moved into `execution_config` options by 0033) | none |

@@ -22,8 +22,8 @@ type rig struct {
 	srv    *codextest.Server
 	daemon *codextest.Daemon
 	local  *machine.Local
-	svc    *codexsetup.Service
-	conn   *codexsetup.Connector
+	close  func()
+	conn   harness.Connector
 }
 
 func newRig(t *testing.T) *rig {
@@ -40,15 +40,15 @@ func newRig(t *testing.T) *rig {
 // start composes the setup as serve does at boot.
 func (r *rig) start(t *testing.T) {
 	t.Helper()
-	svc, err := codexsetup.New(t.Context(), codexsetup.Options{
-		Ports:   codexsetup.Ports{Settings: r.ports, Identity: r.ports, Install: r.local.Install},
-		Version: "test", Daemon: func(string) codex.Daemon { return r.daemon },
+	composed, err := codexsetup.Module.Compose(t.Context(), harness.Ports{
+		Settings: r.ports.Settings(), Identity: r.ports, Install: r.local.Install,
+		Overrides: map[string]any{codex.Kind: &codexsetup.Options{Version: "test", Daemon: func(string) codex.Daemon { return r.daemon }}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(svc.Close)
-	r.svc, r.conn = svc, codexsetup.NewConnector(svc)
+	t.Cleanup(composed.Close)
+	r.close, r.conn = composed.Close, composed.Connector
 }
 
 func (r *rig) status(t *testing.T) harness.Status {
@@ -100,7 +100,7 @@ func TestConnectCreatesConnectionAndSurvivesRestart(t *testing.T) {
 	// Restart: the saved connection is installed again without a probe.
 	r.local = machine.NewLocal(db.LocalMachine, harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true}, nil)
 	r.start(t)
-	if _, ok := r.local.Adapter(id); !ok || !r.svc.Summary().Configured {
+	if _, ok := r.local.Adapter(id); !ok || !r.conn.Summary(ctx).Configured {
 		t.Fatal("restart lost the connection")
 	}
 
@@ -112,7 +112,7 @@ func TestConnectCreatesConnectionAndSurvivesRestart(t *testing.T) {
 	}
 	r.local = machine.NewLocal(db.LocalMachine, harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true}, nil)
 	r.start(t)
-	if _, ok := r.local.Adapter(id); ok || r.svc.Summary().Configured || r.svc.Summary().ConnectionID != id {
+	if _, ok := r.local.Adapter(id); ok || r.conn.Summary(ctx).Configured || r.conn.Summary(ctx).ConnectionID != id {
 		t.Fatal("disconnect did not survive a restart")
 	}
 	// Reconnecting keeps the same connection (same Codex home).
@@ -159,20 +159,19 @@ func TestStatusReportsAStoppedDaemonWithItsFix(t *testing.T) {
 	if _, err := r.conn.Run(ctx, codex.ActionConnect, nil); err != nil {
 		t.Fatal(err)
 	}
-	r.svc.Close()
+	r.close()
 	r.srv.Stop()
 	broken := failing{r.daemon}
-	r.svc.Close()
 	// Swap in a daemon that can't start, through the binary setting.
-	svc, err := codexsetup.New(ctx, codexsetup.Options{
-		Ports:   codexsetup.Ports{Settings: r.ports, Identity: r.ports, Install: r.local.Install},
-		Version: "test", Daemon: func(string) codex.Daemon { return broken },
+	composed, err := codexsetup.Module.Compose(ctx, harness.Ports{
+		Settings: r.ports.Settings(), Identity: r.ports, Install: r.local.Install,
+		Overrides: map[string]any{codex.Kind: codexsetup.Options{Daemon: func(string) codex.Daemon { return broken }}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(svc.Close)
-	st, _ := codexsetup.NewConnector(svc).Status(ctx, true)
+	t.Cleanup(composed.Close)
+	st, _ := composed.Connector.Status(ctx, true)
 	if st.State != codexsetup.StateUnreachable || st.Connected || details(t, st).Fix != "codex app-server daemon start" || details(t, st).Daemon != "stopped" {
 		t.Fatalf("%+v %+v", st, st.Details)
 	}
@@ -205,8 +204,12 @@ func TestBinarySettingPersistsAndSwitchesTheAdapter(t *testing.T) {
 	if o, err := after.Observe(ctx, ref); err != nil || o.Links.Command != "cd /w/app && /opt/codex/bin/codex resume "+ref.ExternalSessionID {
 		t.Fatal(o.Links, err)
 	}
-	saved, err := r.store.CodexSettings(ctx, db.LocalMachine)
-	if err != nil || saved.Binary != "/opt/codex/bin/codex" || !saved.Connected {
+	raw, err := r.ports.Settings().Get(ctx, codex.Kind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved codexsetup.SetupSettings
+	if err := json.Unmarshal(raw, &saved); err != nil || saved.Binary != "/opt/codex/bin/codex" || !saved.Connected {
 		t.Fatal(saved, err)
 	}
 	if st := r.status(t); st.Fields[0].Value != "/opt/codex/bin/codex" || st.Fields[0].Source != "saved" {
@@ -214,6 +217,9 @@ func TestBinarySettingPersistsAndSwitchesTheAdapter(t *testing.T) {
 	}
 	if _, err := r.conn.Configure(ctx, json.RawMessage(`{"binary":null}`)); err != nil {
 		t.Fatal(err)
+	}
+	if st := r.status(t); st.Fields[0].Source != "default" || st.Fields[0].Value != "" || !st.Connected {
+		t.Fatalf("reset status %+v", st)
 	}
 	if _, err := r.conn.Configure(ctx, json.RawMessage(`{"other":1}`)); err == nil {
 		t.Fatal("unknown setting accepted")

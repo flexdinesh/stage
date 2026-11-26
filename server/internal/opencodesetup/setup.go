@@ -7,15 +7,14 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 )
 
@@ -37,14 +36,14 @@ type Service struct {
 	ctx      context.Context // background refresh and renewal end with it
 	log      *slog.Logger
 	id       int64
-	settings Settings // the machine this OpenCode setup runs on
-	identity Identity
+	store    settingsStore
+	identity harness.Identity
 	local    Local
-	saved    config.OpenCodeSettings
+	saved    settings
 	verified string
 	problem  string
 	active   *opencode.Adapter
-	current  config.OpenCodeSettings // active's resolved settings
+	current  settings // active's resolved settings
 	// install moves the OpenCode adapter from connection old to next
 	// (equal unless the service was replaced); a nil adapter disconnects.
 	install func(old, next int64, a execution.Adapter)
@@ -53,41 +52,19 @@ type Service struct {
 	// (url, password) that failed continuity and is not retried.
 	renewFailed time.Time
 	skipLocal   string
-	// redeemed keeps a pairing link's token while the user confirms a
-	// changed service: the link works once.
+	// redeemed keeps a pairing link's token until setup succeeds.
+	// The link works once.
 	redeemed pairing
 	busy     atomic.Bool // one background refresh or renewal at a time
 
 	localMu    sync.Mutex
 	localAt    time.Time
-	localState config.OpenCodeLocal
+	localState LocalStatus
 }
 
 type pairing struct {
 	link, endpoint, token string
 	at                    time.Time
-}
-
-// Settings persists the machine's OpenCode setup and credential, saved
-// together in one call. On the local machine both live in the store; a
-// worker keeps the credential in its own file (ADR 0002).
-type Settings interface {
-	// OpenCodeSettings is the saved setup and credential, and the address
-	// the active connection's service was verified at ("" before the first).
-	OpenCodeSettings(ctx context.Context) (config.OpenCodeSetup, config.OpenCodeCredential, string, error)
-	SaveOpenCodeSettings(ctx context.Context, setup config.OpenCodeSetup, cred config.OpenCodeCredential) error
-}
-
-// Identity is the main server's record of the machine's OpenCode
-// connections: their identities, instance switches and the stored evidence
-// a service must prove it serves.
-type Identity interface {
-	// EnsureOpenCode is the machine's active OpenCode connection.
-	EnsureOpenCode(ctx context.Context) (int64, error)
-	SetConnectionIdentity(ctx context.Context, id int64, identity, label string) error
-	SwitchInstance(ctx context.Context, kind, identity, label string, revive int64) (db.Switch, error)
-	RetiredConnections(ctx context.Context, kind string) ([]int64, error)
-	ConnectionEvidence(ctx context.Context, id int64) ([]db.ProjectBinding, []execution.Observation, bool, error)
 }
 
 // Local is the machine-local work: the OpenCode service registered on the
@@ -105,84 +82,59 @@ func (LocalService) Probe(ctx context.Context, r opencode.Registration) (string,
 	return opencode.Probe(ctx, r)
 }
 
-// Ports are what the OpenCode setup needs from its machine and the main
-// server; never the store itself.
-type Ports struct {
-	Settings Settings
-	Identity Identity
-	// Install moves the OpenCode adapter from connection old to next (equal
-	// unless the service was replaced); a nil adapter disconnects.
-	Install func(old, next int64, a execution.Adapter)
-	// Local: nil is LocalService.
-	Local Local
-	// Active, when set, is the machine's active OpenCode connection (0:
-	// none) and replaces EnsureOpenCode: the connection is then created by
-	// the first service that connects (a remote machine has no OpenCode
-	// connection until then).
-	Active func(ctx context.Context) (int64, error)
-}
-
-func New(ctx context.Context, p Ports, log *slog.Logger) (*Service, error) {
-	if p.Local == nil {
-		p.Local = LocalService{}
+func newService(ctx context.Context, p harness.Ports, local Local) (*Service, error) {
+	if local == nil {
+		local = LocalService{}
 	}
-	var id int64
-	var err error
-	if p.Active != nil {
-		id, err = p.Active(ctx)
-	} else {
-		id, err = p.Identity.EnsureOpenCode(ctx)
-	}
+	id, verified, err := p.Identity.ActiveIdentity(ctx, opencode.Kind)
 	if err != nil {
 		return nil, err
 	}
-	setup, cred, verified, err := p.Settings.OpenCodeSettings(ctx)
+	store := settingsStore{public: p.Settings, secret: p.Secrets, atomic: p.SaveSettingsWithSecret}
+	saved, err := store.load(ctx)
 	if err != nil {
 		return nil, err
 	}
-	saved := config.JoinOpenCode(setup, cred)
+	log := p.Logger
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &Service{ctx: ctx, log: log, id: id, settings: p.Settings, identity: p.Identity, local: p.Local, saved: saved, verified: verified, install: p.Install, now: time.Now}
-	cfg, err := s.resolve(saved)
+	s := &Service{ctx: ctx, log: log, id: id, store: store, identity: p.Identity, local: local, saved: saved, verified: verified, install: p.Install, now: time.Now}
+	cfg := resolve(saved)
 	switch {
-	case err != nil:
-		s.problem = err.Error()
 	case cfg.Endpoint == "":
+	case id == 0:
+		s.problem = "Verify this OpenCode connection in Settings."
 	case verified != "" && verified != cfg.Endpoint:
 		s.problem = "Service address changed. Verify this connection in Settings."
+	case (cfg.Auth == AuthBasic || cfg.Auth == AuthPaired) && cfg.Credential == (Credential{}):
+		s.problem = "OpenCode credentials are missing. Verify this connection in Settings."
 	default:
 		// A moved local service is reconciled by the first health check.
-		if cfg.Auth == config.OpenCodeAuthLocal {
+		if cfg.Auth == AuthLocal {
 			if reg, err := s.local.Registration(); err == nil {
 				cfg.Username, cfg.Password = localCredentials(reg)
 			}
 		}
-		a, err := opencode.New(checking(id), cfg)
+		a, err := opencode.New(id, cfg.transport())
 		if err != nil {
 			s.problem = err.Error()
 			break
 		}
 		// Record the original address before any task can acquire its adapter.
 		if verified == "" {
-			if s.id, err = s.stamp(ctx, id, cfg.Endpoint); err != nil {
+			if err := p.Identity.SetConnectionIdentity(ctx, id, cfg.Endpoint, publicAddress(cfg.Endpoint)); err != nil {
 				return nil, err
 			}
 			s.verified = cfg.Endpoint
-			if s.id != id {
-				if a, err = opencode.New(s.id, cfg); err != nil {
-					return nil, err
-				}
-			}
 		}
-		s.activate(s.id, a, cfg)
+		s.activate(id, a, cfg)
 	}
 	return s, nil
 }
 
 // unstamped is the connection a machine's first service is checked as
-// before its connection exists (a remote machine); an adapter on it is
+// before its connection exists; an adapter on it is
 // never installed: stamp creates the connection and the adapter is rebuilt
 // on it.
 const unstamped int64 = math.MaxInt64
@@ -207,7 +159,7 @@ func (s *Service) stamp(ctx context.Context, id int64, endpoint string) (int64, 
 	return sw.New, err
 }
 
-// ID is the active OpenCode connection (0 before a remote machine's first
+// ID is the active OpenCode connection (0 before a machine's first
 // service connected); it changes when the service is replaced.
 func (s *Service) ID() int64 {
 	s.mu.Lock()
@@ -216,17 +168,11 @@ func (s *Service) ID() int64 {
 }
 
 // activate installs a on s.id, moving it from connection old (s.mu held, or
-// during New).
-func (s *Service) activate(old int64, a *opencode.Adapter, cfg config.OpenCodeSettings) {
+// during composition).
+func (s *Service) activate(old int64, a *opencode.Adapter, cfg settings) {
 	a.OnHealth(s.checked)
 	s.active, s.current = a, cfg
 	s.install(old, s.id, a)
-}
-
-// save persists next's setup and credential together.
-func (s *Service) save(ctx context.Context, next config.OpenCodeSettings) error {
-	setup, cred := next.Split()
-	return s.settings.SaveOpenCodeSettings(ctx, setup, cred)
 }
 
 func localCredentials(reg opencode.Registration) (string, string) {
@@ -255,7 +201,7 @@ func (s *Service) checked() {
 func (s *Service) refreshLocal(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.active == nil || s.current.Auth != config.OpenCodeAuthLocal {
+	if s.active == nil || s.current.Auth != AuthLocal {
 		return
 	}
 	reg, err := s.local.Registration()
@@ -269,12 +215,9 @@ func (s *Service) refreshLocal(ctx context.Context) {
 	}
 	next := s.saved
 	next.Endpoint = reg.URL
-	cfg, err := s.resolve(next)
-	if err != nil {
-		return
-	}
+	cfg := resolve(next)
 	cfg.Username, cfg.Password = user, password
-	a, err := opencode.New(s.id, cfg)
+	a, err := opencode.New(s.id, cfg.transport())
 	if err != nil {
 		s.skipLocal = key
 		return
@@ -301,19 +244,20 @@ func (s *Service) refreshLocal(ctx context.Context) {
 			s.log.Warn("opencode local service moved", "url", reg.URL, "err", err)
 			return
 		}
-		if err := s.identity.SetConnectionIdentity(ctx, s.id, cfg.Endpoint, publicAddress(cfg.Endpoint)); err != nil {
-			s.log.Warn("opencode local service moved", "url", reg.URL, "err", err)
-			return
-		}
-		s.verified = cfg.Endpoint
 	}
 	if next.Endpoint != s.saved.Endpoint {
-		if err := s.save(ctx, next); err != nil {
+		if err := s.store.save(ctx, s.saved, next); err != nil {
 			s.log.Warn("opencode local service moved", "url", reg.URL, "err", err)
 			return
 		}
-		s.saved = next
 	}
+	if cfg.Endpoint != s.verified {
+		if _, err := s.stamp(ctx, s.id, cfg.Endpoint); err != nil {
+			s.log.Warn("opencode local service moved", "url", reg.URL, "err", s.restoreSettings(ctx, next, err))
+			return
+		}
+	}
+	s.saved, s.verified = next, cfg.Endpoint
 	s.activate(s.id, a, cfg)
 }
 
@@ -322,7 +266,7 @@ func (s *Service) refreshLocal(ctx context.Context) {
 func (s *Service) renewIfDue(ctx context.Context) {
 	s.mu.Lock()
 	cfg, now := s.current, s.now()
-	due := s.active != nil && cfg.Auth == config.OpenCodeAuthPaired && cfg.TokenIssuedAt != nil &&
+	due := s.active != nil && cfg.Auth == AuthPaired && cfg.TokenIssuedAt != nil &&
 		now.Sub(*cfg.TokenIssuedAt) >= renewAfter && now.Sub(s.renewFailed) >= renewRetry
 	s.mu.Unlock()
 	if !due {
@@ -333,7 +277,7 @@ func (s *Service) renewIfDue(ctx context.Context) {
 	token, err := opencode.Renew(call, cfg.Endpoint, cfg.Password)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.current.Auth != config.OpenCodeAuthPaired || s.current.Endpoint != cfg.Endpoint || s.current.Password != cfg.Password {
+	if s.current.Auth != AuthPaired || s.current.Endpoint != cfg.Endpoint || s.current.Password != cfg.Password {
 		return // reconnected meanwhile
 	}
 	if err == nil {
@@ -349,15 +293,12 @@ func (s *Service) useToken(ctx context.Context, token string) error {
 	now := s.now().UTC()
 	next := s.saved
 	next.Password, next.TokenIssuedAt = token, &now
-	cfg, err := s.resolve(next)
+	cfg := resolve(next)
+	a, err := opencode.New(s.id, cfg.transport())
 	if err != nil {
 		return err
 	}
-	a, err := opencode.New(s.id, cfg)
-	if err != nil {
-		return err
-	}
-	if err := s.save(ctx, next); err != nil {
+	if err := s.store.save(ctx, s.saved, next); err != nil {
 		return err
 	}
 	s.saved = next
@@ -365,36 +306,35 @@ func (s *Service) useToken(ctx context.Context, token string) error {
 	return nil
 }
 
-func (s *Service) resolve(saved config.OpenCodeSettings) (config.OpenCodeSettings, error) {
+func resolve(saved settings) settings {
 	c := saved
 	c.Endpoint = strings.TrimRight(strings.TrimSpace(c.Endpoint), "/")
 	if c.Endpoint != saved.Endpoint {
 		c.Username, c.Password = "", ""
-		c.Auth, c.TokenIssuedAt = config.OpenCodeAuthNone, nil
+		c.Auth, c.TokenIssuedAt = AuthNone, nil
 	}
 	if c.Auth == "" {
-		c.Auth, c.TokenIssuedAt = config.OpenCodeAuthNone, nil
+		c.Auth, c.TokenIssuedAt = AuthNone, nil
 	}
-	return c, nil
+	return c
 }
 
 // A saved address may itself contain credentials. Status must never
 // echo a userinfo, query string or fragment, even when configuration failed.
 func publicAddress(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	if _, err := opencode.ValidateURL("OpenCode URL", raw); err != nil {
 		return ""
 	}
 	return raw
 }
-func (s *Service) Status(ctx context.Context) config.OpenCodeStatus {
+func (s *Service) Status(ctx context.Context) Status {
 	s.mu.Lock()
-	c, _ := s.resolve(s.saved)
+	c := resolve(s.saved)
 	a, problem := s.active, s.problem
 	id := s.id
 	s.mu.Unlock()
-	out := config.OpenCodeStatus{ConnectionID: id, Endpoint: publicAddress(c.Endpoint), BrowserEndpoint: publicAddress(c.BrowserEndpoint), WebClient: publicAddress(c.WebClient), HasCredentials: c.Password != "", State: "unconfigured", Auth: c.Auth}
-	if c.Auth == config.OpenCodeAuthPaired && c.TokenIssuedAt != nil {
+	out := Status{ConnectionID: id, Endpoint: publicAddress(c.Endpoint), BrowserEndpoint: publicAddress(c.BrowserEndpoint), WebClient: publicAddress(c.WebClient), HasCredentials: c.Password != "", State: "unconfigured", Auth: c.Auth}
+	if c.Auth == AuthPaired && c.TokenIssuedAt != nil {
 		at := c.TokenIssuedAt.Add(opencode.TokenTTL).UTC().Truncate(time.Second)
 		out.ExpiresAt = &at
 	}
@@ -420,13 +360,13 @@ func (s *Service) Status(ctx context.Context) config.OpenCodeStatus {
 }
 
 // localStatus describes the registration on this machine (cached briefly).
-func (s *Service) localStatus(ctx context.Context) config.OpenCodeLocal {
+func (s *Service) localStatus(ctx context.Context) LocalStatus {
 	s.localMu.Lock()
 	defer s.localMu.Unlock()
 	if !s.localAt.IsZero() && time.Since(s.localAt) < localCache {
 		return s.localState
 	}
-	out := config.OpenCodeLocal{}
+	out := LocalStatus{}
 	reg, err := s.local.Registration()
 	var unusable *opencode.RegistrationError
 	switch {
@@ -458,7 +398,7 @@ func (s *Service) forgetLocalStatus() {
 	s.localMu.Unlock()
 }
 
-func (s *Service) Save(ctx context.Context, in config.OpenCodeEdit) error {
+func (s *Service) Save(ctx context.Context, in Edit) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := s.saved
@@ -473,16 +413,16 @@ func (s *Service) Save(ctx context.Context, in config.OpenCodeEdit) error {
 	edit(in.WebClient, &next.WebClient)
 	if next.Endpoint != s.saved.Endpoint {
 		next.Username, next.Password = "", ""
-		next.Auth, next.TokenIssuedAt = config.OpenCodeAuthNone, nil
+		next.Auth, next.TokenIssuedAt = AuthNone, nil
 	}
 	if in.Password != nil || in.Username != nil {
 		if in.Username == nil || in.Password == nil {
 			return db.Invalid("Supply both username and password to replace or clear credentials.")
 		}
 		next.Username, next.Password = *in.Username, *in.Password
-		next.Auth, next.TokenIssuedAt = config.OpenCodeAuthBasic, nil
+		next.Auth, next.TokenIssuedAt = AuthBasic, nil
 		if next.Username == "" && next.Password == "" {
-			next.Auth = config.OpenCodeAuthNone
+			next.Auth = AuthNone
 		}
 	}
 	return s.commit(ctx, next, "", in.NewInstance)
@@ -497,14 +437,13 @@ func (s *Service) ConnectLocal(ctx context.Context, newInstance bool) error {
 	defer s.forgetLocalStatus()
 	next := s.saved
 	next.Username, next.Password = "", ""
-	next.Auth, next.TokenIssuedAt = config.OpenCodeAuthLocal, nil
+	next.Auth, next.TokenIssuedAt = AuthLocal, nil
 	return s.commit(ctx, next, CodeLocalUnavailable, newInstance)
 }
 
 // Pair redeems an `opencode pair` link and connects its service with the
-// session token. Neither the code nor the token is logged. A link whose
-// service needs confirmation (instance_changed) keeps its token for 10
-// minutes, so the confirming retry with newInstance reuses it.
+// session token. Neither the code nor the token is logged. If setup fails
+// after redemption, a retry can reuse the token for up to 10 minutes.
 func (s *Service) Pair(ctx context.Context, link string, newInstance bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -531,10 +470,9 @@ func (s *Service) Pair(ctx context.Context, link string, newInstance bool) error
 	now := s.now().UTC()
 	next := s.saved
 	next.Endpoint, next.Username, next.Password = endpoint, opencode.PairUser, token
-	next.Auth, next.TokenIssuedAt = config.OpenCodeAuthPaired, &now
+	next.Auth, next.TokenIssuedAt = AuthPaired, &now
 	err = s.commit(ctx, next, "", newInstance)
-	var conflict *db.ConflictError
-	if errors.As(err, &conflict) && (conflict.Code == "instance_changed" || conflict.Code == "instance_returned") {
+	if err != nil {
 		s.redeemed = pairing{link: link, endpoint: endpoint, token: token, at: s.now()}
 	}
 	return err
@@ -546,13 +484,13 @@ func (s *Service) Pair(ctx context.Context, link string, newInstance bool) error
 func (s *Service) Disconnect(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	next := config.OpenCodeSettings{Auth: config.OpenCodeAuthNone}
-	if err := s.save(ctx, next); err != nil {
+	next := settings{SetupSettings: SetupSettings{Auth: AuthNone}}
+	if err := s.store.save(ctx, s.saved, next); err != nil {
 		return err
 	}
 	s.saved, s.problem, s.skipLocal, s.renewFailed, s.redeemed = next, "", "", time.Time{}, pairing{}
 	if s.active != nil {
-		s.active, s.current = nil, config.OpenCodeSettings{}
+		s.active, s.current = nil, settings{}
 		s.install(s.id, s.id, nil)
 	}
 	return nil
@@ -561,12 +499,9 @@ func (s *Service) Disconnect(ctx context.Context) error {
 // commit tests next and makes it current (s.mu held). failCode is the
 // conflict code for a service that does not answer; newInstance confirms a
 // different or earlier service (instance_changed / instance_returned).
-func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, failCode string, newInstance bool) error {
-	cfg, err := s.resolve(next)
-	if err != nil {
-		return err
-	}
-	if cfg.Auth == config.OpenCodeAuthLocal {
+func (s *Service) commit(ctx context.Context, next settings, failCode string, newInstance bool) error {
+	cfg := resolve(next)
+	if cfg.Auth == AuthLocal {
 		reg, err := s.local.Registration()
 		if err != nil {
 			return &db.ConflictError{Code: CodeLocalUnavailable, Msg: err.Error()}
@@ -575,7 +510,7 @@ func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, fail
 		cfg.Username, cfg.Password = localCredentials(reg)
 		failCode = CodeLocalUnavailable
 	}
-	a, err := opencode.New(checking(s.id), cfg)
+	a, err := opencode.New(checking(s.id), cfg.transport())
 	if err != nil {
 		return db.Invalid("%s", err)
 	}
@@ -590,71 +525,78 @@ func (s *Service) commit(ctx context.Context, next config.OpenCodeSettings, fail
 		}
 		return db.Conflict("%s", h.Reason)
 	}
-	id, label := s.id, publicAddress(cfg.Endpoint)
-	switch {
-	case s.verified == "":
-		first, err := s.stamp(ctx, id, cfg.Endpoint)
+	id := s.id
+	var replace bool
+	var revive int64
+	if s.verified != "" && cfg.Endpoint != s.verified {
+		replace, revive, err = s.replacement(call, a, newInstance)
 		if err != nil {
 			return err
-		}
-		if first != id {
-			if a, err = opencode.New(first, cfg); err != nil {
-				return db.Invalid("%s", err)
-			}
-			id = first
-		}
-	case cfg.Endpoint != s.verified:
-		continuity := s.verifyContinuity(call, a, id)
-		held, err := s.holds(call, id)
-		if err != nil {
-			return err
-		}
-		if continuity == nil && held {
-			// The same service at a new address.
-			if err := s.identity.SetConnectionIdentity(ctx, id, cfg.Endpoint, label); err != nil {
-				return err
-			}
-			break
-		}
-		revive, err := s.previous(call, a)
-		if err != nil {
-			return err
-		}
-		if continuity == nil && revive == 0 {
-			// Nothing stored to prove either way, and no earlier service.
-			if err := s.identity.SetConnectionIdentity(ctx, id, cfg.Endpoint, label); err != nil {
-				return err
-			}
-			break
-		}
-		if !newInstance {
-			if revive != 0 {
-				return &db.ConflictError{Code: "instance_returned", Msg: "This address serves the OpenCode service Stage used before. Connect it again: its tasks and bindings come back, and the current connection becomes read-only."}
-			}
-			msg := "This address serves a different OpenCode service. Connect it as a new service: the current connection becomes read-only and keeps its tasks."
-			if continuity != nil {
-				msg = "This address serves a different OpenCode service (" + continuity.Error() + "). Connect it as a new service: the current connection becomes read-only and keeps its tasks."
-			}
-			return &db.ConflictError{Code: "instance_changed", Msg: msg}
-		}
-		sw, err := s.identity.SwitchInstance(ctx, opencode.Kind, cfg.Endpoint, label, revive)
-		if err != nil {
-			return err
-		}
-		if sw.New != id {
-			if a, err = opencode.New(sw.New, cfg); err != nil {
-				return db.Invalid("%s", err)
-			}
-			id = sw.New
 		}
 	}
-	if err := s.save(ctx, next); err != nil {
+	if err := s.store.save(ctx, s.saved, next); err != nil {
 		return err
+	}
+	if cfg.Endpoint != s.verified {
+		if replace {
+			var sw harness.Switch
+			sw, err = s.identity.SwitchInstance(ctx, opencode.Kind, cfg.Endpoint, publicAddress(cfg.Endpoint), revive)
+			id = sw.New
+		} else {
+			id, err = s.stamp(ctx, id, cfg.Endpoint)
+		}
+		if err != nil {
+			return s.restoreSettings(ctx, next, err)
+		}
+	}
+	if id != s.id {
+		if a, err = opencode.New(id, cfg.transport()); err != nil {
+			return err
+		}
 	}
 	old := s.id
 	s.saved, s.verified, s.problem, s.skipLocal, s.renewFailed, s.id = next, cfg.Endpoint, "", "", time.Time{}, id
 	s.activate(old, a, cfg)
 	return nil
+}
+
+// restoreSettings is best effort after an identity write fails. The saved
+// endpoint must still match the verified address before a restart can use it.
+func (s *Service) restoreSettings(ctx context.Context, next settings, cause error) error {
+	rollback, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return errors.Join(cause, s.store.save(rollback, next, s.saved))
+}
+
+// replacement identifies same-service moves, confirmed replacements, and
+// confirmed returns to retired connections. It does not mutate identity.
+func (s *Service) replacement(ctx context.Context, a *opencode.Adapter, confirm bool) (replace bool, revive int64, err error) {
+	continuity := s.verifyContinuity(ctx, a, s.id)
+	held, err := s.holds(ctx, s.id)
+	if err != nil {
+		return false, 0, err
+	}
+	if continuity == nil && held {
+		return false, 0, nil
+	}
+	revive, err = s.previous(ctx, a)
+	if err != nil {
+		return false, 0, err
+	}
+	if continuity == nil && revive == 0 {
+		return false, 0, nil
+	}
+	if confirm {
+		return true, revive, nil
+	}
+	if revive != 0 {
+		return false, 0, &db.ConflictError{Code: "instance_returned", Msg: "This address serves the OpenCode service Stage used before. Connect it again: its tasks and bindings come back, and the current connection becomes read-only."}
+	}
+	msg := "This address serves a different OpenCode service. Connect it as a new service: the current connection becomes read-only and keeps its tasks."
+	if continuity != nil {
+		msg = "This address serves a different OpenCode service (" + continuity.Error() + "). Connect it as a new service: the current connection becomes read-only and keeps its tasks."
+	}
+	return false, 0, &db.ConflictError{Code: "instance_changed", Msg: msg}
 }
 
 // holds reports whether a connection stores anything a service must prove

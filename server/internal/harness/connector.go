@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 )
 
 // FieldKind is how a setup field's value is entered and shown.
@@ -94,9 +95,20 @@ type Status struct {
 	Reason  string        `json:"reason,omitempty"`
 	Fields  []FieldState  `json:"fields"`
 	Actions []ActionState `json:"actions"`
+	Sync    *SyncStatus   `json:"sync,omitempty"`
 	// Details is the harness's own setup state for the host's panel for
 	// this kind. Generic code never reads it.
 	Details any `json:"details,omitempty"`
+}
+
+// SyncStatus is Stage's full-sync progress and persisted connection status.
+type SyncStatus struct {
+	LastError      *string    `json:"lastError"`
+	LastFullSyncAt *time.Time `json:"lastFullSyncAt"`
+	Running        bool       `json:"running"`
+	StartedAt      *time.Time `json:"startedAt"`
+	Projects       int        `json:"projects"`
+	Sessions       int        `json:"sessions"`
 }
 
 // Result is an action's or setting change's outcome.

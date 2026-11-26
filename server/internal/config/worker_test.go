@@ -8,39 +8,38 @@ import (
 )
 
 func TestParseWorkerEnv(t *testing.T) {
-	vals, err := ParseWorkerEnv(strings.NewReader(WorkerEnvTemplate + "STAGE_WORKER_CONFIG='/x/w.json'\n"))
+	vals, err := ParseWorkerEnv(strings.NewReader(WorkerEnvTemplate(testEnv)+"STAGE_WORKER_CONFIG='/x/w.json'\n"), testEnv)
 	if err != nil || vals[WorkerConfigEnv] != "/x/w.json" {
 		t.Fatalf("%v %v", vals, err)
 	}
 	for _, bad := range []string{"STAGE_LISTEN=unix\n", "STAGE_WORKER_CONFIG=rel/w.json\n", "STAGE_WORKER_CONFIG=/a\nSTAGE_WORKER_CONFIG=/b\n", "STAGE_DATA_DIR=/d\n"} {
-		if _, err := ParseWorkerEnv(strings.NewReader(bad)); err == nil || !strings.Contains(err.Error(), WorkerEnvFile) {
+		if _, err := ParseWorkerEnv(strings.NewReader(bad), testEnv); err == nil || !strings.Contains(err.Error(), WorkerEnvFile) {
 			t.Errorf("accepted %q (%v)", bad, err)
 		}
 	}
 }
 
 // worker.env may set this machine's harness options (never its connection
-// settings, which are set up in Settings); HarnessFrom reads them.
+// settings, which are set up in Settings).
 func TestWorkerEnvHarnessSettings(t *testing.T) {
-	vals, err := ParseWorkerEnv(strings.NewReader("T3_BIN=/opt/t3\n"))
+	vals, err := ParseWorkerEnv(strings.NewReader("HARNESS_BIN=/opt/tool\n"), testEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := HarnessFrom(func(k string) string { return vals[k] })
-	if cfg.T3Bin != "/opt/t3" || len(cfg.RemovedEnv) != 0 {
-		t.Fatalf("%+v", cfg)
+	if vals["HARNESS_BIN"] != "/opt/tool" {
+		t.Fatalf("%+v", vals)
 	}
-	for _, k := range RemovedHarnessEnvKeys {
-		_, err := ParseWorkerEnv(strings.NewReader(k + "=x\n"))
+	for _, k := range testEnv.Removed {
+		_, err := ParseWorkerEnv(strings.NewReader(k+"=x\n"), testEnv)
 		if err == nil || !strings.Contains(err.Error(), "no longer read") || !strings.Contains(err.Error(), "Settings > Connections") {
 			t.Errorf("%s: %v", k, err)
 		}
-		if strings.Contains(WorkerEnvTemplate, k) {
+		if strings.Contains(WorkerEnvTemplate(testEnv), k) {
 			t.Errorf("template still mentions %s", k)
 		}
 	}
-	for _, k := range HarnessEnvKeys {
-		if !strings.Contains(WorkerEnvTemplate, k) && k != "T3_FAKE" && k != "T3_FAKE_SEED" {
+	for _, k := range testEnv.Keys {
+		if !strings.Contains(WorkerEnvTemplate(testEnv), k) {
 			t.Errorf("template does not mention %s", k)
 		}
 	}
@@ -58,28 +57,28 @@ func TestWorkerListen(t *testing.T) {
 			t.Errorf("accepted %q", bad)
 		}
 	}
-	vals, err := ParseWorkerEnv(strings.NewReader("STAGE_WORKER_LISTEN=unix,127.0.0.1:7381\n"))
+	vals, err := ParseWorkerEnv(strings.NewReader("STAGE_WORKER_LISTEN=unix,127.0.0.1:7381\n"), testEnv)
 	if err != nil || vals[WorkerListenEnv] != "unix,127.0.0.1:7381" {
 		t.Fatalf("%v %v", vals, err)
 	}
-	if _, err := ParseWorkerEnv(strings.NewReader("STAGE_WORKER_LISTEN=127.0.0.1:7381\n")); err == nil || !strings.Contains(err.Error(), "must include unix") {
+	if _, err := ParseWorkerEnv(strings.NewReader("STAGE_WORKER_LISTEN=127.0.0.1:7381\n"), testEnv); err == nil || !strings.Contains(err.Error(), "must include unix") {
 		t.Fatalf("gateway without unix accepted: %v", err)
 	}
 }
 
 func TestReadWorkerEnv(t *testing.T) {
 	path := filepath.Join(t.TempDir(), WorkerEnvFile)
-	if vals, err := ReadWorkerEnv(path); err != nil || len(vals) != 0 {
+	if vals, err := ReadWorkerEnv(path, testEnv); err != nil || len(vals) != 0 {
 		t.Fatalf("missing: %v %v", vals, err)
 	}
 	if err := os.WriteFile(path, []byte("STAGE_WORKER_CONFIG=/w.json\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadWorkerEnv(path); err == nil || !strings.Contains(err.Error(), "0600") {
+	if _, err := ReadWorkerEnv(path, testEnv); err == nil || !strings.Contains(err.Error(), "0600") {
 		t.Fatalf("group-readable accepted: %v", err)
 	}
 	_ = os.Chmod(path, 0o600)
-	if vals, err := ReadWorkerEnv(path); err != nil || vals[WorkerConfigEnv] != "/w.json" {
+	if vals, err := ReadWorkerEnv(path, testEnv); err != nil || vals[WorkerConfigEnv] != "/w.json" {
 		t.Fatalf("%v %v", vals, err)
 	}
 	if p, _ := WorkerEnvPath(func(k string) string { return map[string]string{"HOME": "/h"}[k] }, "linux"); p != "/h/.config/stage/worker.env" {

@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"time"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
@@ -56,8 +54,7 @@ type SharedPath struct {
 	StageRoot    string `json:"stageRoot"`
 }
 
-// Connections is the harness connections repository, with each machine's
-// T3, OpenCode and Claude Code settings and shared paths.
+// Connections is the harness connections repository, including shared paths.
 type Connections interface {
 	// Lock locks the connection rows id until the unit of work ends, on engines
 	// with row locks (Postgres FOR NO KEY UPDATE, ascending id; a missing row
@@ -126,8 +123,6 @@ type Connections interface {
 	// Retired lists machine's retired, not forgotten connections of
 	// harness, newest first.
 	Retired(ctx context.Context, machine int64, harness string) ([]int64, error)
-	// EnsureOpenCode is machine's active OpenCode connection, inserted when none.
-	EnsureOpenCode(ctx context.Context, machine int64) (int64, error)
 	// Evidence: the connection's bindings (external project and workspace,
 	// retired included), its sessions' observations (nil: unobserved), and
 	// whether a task on it is launching.
@@ -137,47 +132,6 @@ type Connections interface {
 	SharedPaths(ctx context.Context, machine int64) ([]SharedPath, error)
 	DeleteSharedPath(ctx context.Context, connectionID int64, harnessRoot string) error
 	PutSharedPath(ctx context.Context, p SharedPath) error
-
-	// T3Credential is machine's T3 token (ErrNotFound when no row).
-	T3Credential(ctx context.Context, machine int64) (execution.Credential, error)
-	SaveT3Credential(ctx context.Context, machine int64, tok execution.Credential) error
-	SetT3LastError(ctx context.Context, machine int64, msg string) error
-	T3Settings(ctx context.Context, machine int64) (T3Connection, error)
-	SetT3URL(ctx context.Context, machine int64, u string) error
-	SetT3PublicURL(ctx context.Context, machine int64, u string) error
-	// T3AdminToken: "" when none.
-	T3AdminToken(ctx context.Context, machine int64) (string, error)
-	SaveT3AdminToken(ctx context.Context, machine int64, tok string) error
-	SetT3LastFullSync(ctx context.Context, machine int64, at time.Time) error
-
-	// OpenCodeSettings reads machine's row (found false: none).
-	OpenCodeSettings(ctx context.Context, machine int64) (c config.OpenCodeSettings, found bool, err error)
-	// OpenCodeIdentity is the identity of machine's active OpenCode connection ("" when none).
-	OpenCodeIdentity(ctx context.Context, machine int64) (string, error)
-	SaveOpenCodeSettings(ctx context.Context, machine int64, c config.OpenCodeSettings) error
-
-	// ClaudeSettings reads machine's claude_settings row (found false: none).
-	ClaudeSettings(ctx context.Context, machine int64) (c config.ClaudeSettings, found bool, err error)
-	// SaveClaudeSettings upserts machine's row and sets its updated_at.
-	SaveClaudeSettings(ctx context.Context, machine int64, c config.ClaudeSettings) error
-	// CodexSettings reads machine's codex_settings row (none: the zero value).
-	CodexSettings(ctx context.Context, machine int64) (config.CodexSettings, error)
-	SaveCodexSettings(ctx context.Context, machine int64, c config.CodexSettings) error
-}
-
-// T3Connection is the non-secret part of a machine's t3_connection row.
-type T3Connection struct {
-	LastError      *string
-	LastFullSyncAt *time.Time
-	// T3URL is the T3 URL saved in Settings (nil = default).
-	T3URL *string
-	// T3PublicURL is the browser URL saved in Settings (nil = the T3 URL).
-	T3PublicURL *string
-	// EnvironmentID is the identity of the machine's active T3 connection
-	// (nil until the first successful pairing).
-	EnvironmentID *string
-	// ConnectionID is the machine's active T3 connection.
-	ConnectionID int64
 }
 
 // ProjectBinding binds a Stage project to a harness project and workspace.

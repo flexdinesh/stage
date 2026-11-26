@@ -38,9 +38,6 @@ type SetupHooks struct {
 	Kinds []string
 	// Active is the machine's active connection of kind (0: none).
 	Active func(machineID int64, kind string) int64
-	// Decorate adds the main server's own state to a status (the T3 full
-	// sync). May be nil.
-	Decorate func(machineID int64, kind string, st *harness.Status)
 	// Changed runs after a setting change, action or disconnect succeeded
 	// (follow the connections; a pairing starts a full sync). May be nil.
 	Changed func(machineID int64, kind string, action string)
@@ -125,9 +122,6 @@ func (c *Connector) call(ctx context.Context, kind string, r ConnectorRequest) (
 		return ConnectorStatus{}, err
 	}
 	c.m.remember(session, c.kind, out.Status.Summary)
-	if h := c.m.hosts; h != nil && h.setup.Decorate != nil {
-		h.setup.Decorate(c.m.id, c.kind, &out.Status)
-	}
 	return out, nil
 }
 

@@ -4,12 +4,10 @@ import (
 	"errors"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 
-	"github.com/flexdinesh/stage/server/internal/config"
-	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -48,21 +46,22 @@ func TestMachineSettingsMigrationKeepsSingleMachineDataInPlace(t *testing.T) {
 	if s.ActiveID(LocalMachine, "t3") != 1 || s.ActiveID(LocalMachine, "opencode") != 7 {
 		t.Fatalf("connection ids t3=%d opencode=%d", s.ActiveID(LocalMachine, "t3"), s.ActiveID(LocalMachine, "opencode"))
 	}
-	tok, err := s.LoadToken(ctx, LocalMachine)
-	if err != nil || tok.ClientID != "c" || tok.Token != "keep" {
-		t.Fatalf("token %+v %v", tok, err)
-	}
-	c, err := s.GetConnection(ctx, LocalMachine)
-	if err != nil || c.T3URL == nil || *c.T3URL != "http://t3:3773" || c.LastFullSyncAt == nil || c.LastError == nil || *c.LastError != "boom" || c.EnvironmentID == nil || *c.EnvironmentID != "env-a" || c.ConnectionID != 1 {
-		t.Fatalf("t3 setup %+v %v", c, err)
-	}
-	oc, cred, verified, err := s.OpenCodeSettings(ctx, LocalMachine)
-	if err != nil || oc.Endpoint != "http://oc:4096" || cred.Username != "u" || cred.Password != "p" || oc.Auth != config.OpenCodeAuthBasic || verified != "http://oc:4096" {
-		t.Fatalf("opencode %+v %q %v", oc, verified, err)
+	wantRows(t, pool, `SELECT settings FROM harness_settings WHERE machine_id=1 AND kind='t3'`,
+		`{"url":"http://t3:3773","publicUrl":null}`)
+	wantRows(t, pool, `SELECT value FROM harness_secrets WHERE machine_id=1 AND kind='t3'`,
+		`{"clientId":"c","token":"keep","expiresAt":null}`)
+	wantRows(t, pool, `SELECT last_full_sync_at,last_error FROM harness_sync_status WHERE machine_id=1 AND kind='t3'`,
+		"2026-11-01T00:00:00Z|boom")
+	wantRows(t, pool, `SELECT settings FROM harness_settings WHERE machine_id=1 AND kind='opencode'`,
+		`{"endpoint":"http://oc:4096","browserEndpoint":"","webClient":"","auth":"basic"}`)
+	wantRows(t, pool, `SELECT value FROM harness_secrets WHERE machine_id=1 AND kind='opencode'`,
+		`{"username":"u","password":"p"}`)
+	if _, identity, err := s.ActiveConnectionIdentity(ctx, LocalMachine, "opencode"); err != nil || identity != "http://oc:4096" {
+		t.Fatalf("opencode identity %q %v", identity, err)
 	}
 }
 
-func TestTwoMachinesEachHaveTheirOwnActiveConnectionsAndSettings(t *testing.T) {
+func TestTwoMachinesEachHaveTheirOwnActiveConnections(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
 	mustExec(t, pool, `INSERT INTO machines(id,label) VALUES(2,'Laptop')`)
 	const laptop int64 = 2
@@ -102,9 +101,11 @@ func TestTwoMachinesEachHaveTheirOwnActiveConnectionsAndSettings(t *testing.T) {
 	if ids, err := s.RetiredConnections(ctx, LocalMachine, "t3"); err != nil || len(ids) != 0 {
 		t.Fatalf("local retired %v %v", ids, err)
 	}
-	// A connection of another machine is never revived.
+	// Even with continuity proof, a connection of another machine cannot be revived.
+	proof := t3.Descriptor
+	proof.ContinuityProof = true
 	var conflict *ConflictError
-	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "", "", remote); !errors.As(err, &conflict) {
+	if _, err := s.SwitchInstance(ctx, LocalMachine, proof, "", "", remote); !errors.As(err, &conflict) {
 		t.Fatalf("revived another machine's connection: %v", err)
 	}
 	// The same environment id on two machines is two connections (the
@@ -113,60 +114,24 @@ func TestTwoMachinesEachHaveTheirOwnActiveConnectionsAndSettings(t *testing.T) {
 		t.Fatalf("same identity on two machines %+v %v", sw, err)
 	}
 
-	// Settings are per machine.
-	if err := s.SetT3URL(ctx, laptop, "http://laptop:3773"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SaveToken(ctx, laptop, execution.Credential{ClientID: "lc", Token: "laptop-token"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetLastFullSync(ctx, laptop, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	if c, err := s.GetConnection(ctx, LocalMachine); err != nil || c.T3URL != nil || c.LastFullSyncAt != nil || c.ConnectionID != local {
-		t.Fatalf("local T3 setup %+v %v", c, err)
-	}
-	if tok, err := s.LoadToken(ctx, LocalMachine); err != nil || tok.Token != "" {
-		t.Fatalf("local token %+v %v", tok, err)
-	}
-	m := s.OnMachine(laptop)
-	if c, err := m.GetConnection(ctx); err != nil || c.T3URL == nil || *c.T3URL != "http://laptop:3773" || c.LastFullSyncAt == nil || c.ConnectionID != replacement || m.ActiveID("t3") != replacement || c.EnvironmentID == nil || *c.EnvironmentID != "env-a" {
-		t.Fatalf("laptop T3 setup %+v %v", c, err)
-	}
-	if tok, err := m.LoadToken(ctx); err != nil || tok.Token != "laptop-token" {
-		t.Fatalf("laptop token %+v %v", tok, err)
-	}
-
-	// OpenCode: one active connection and one settings row per machine.
-	ocLocal, err := s.EnsureOpenCode(ctx, LocalMachine)
+	oc := harness.Descriptor{Kind: "opencode"}
+	ocLocal, err := s.SwitchInstance(ctx, LocalMachine, oc, "local", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ocLaptop, err := m.EnsureOpenCode(ctx)
-	if err != nil || ocLaptop == ocLocal || s.ConnectionMachine(ocLaptop) != laptop {
-		t.Fatalf("laptop opencode %d (local %d) %v", ocLaptop, ocLocal, err)
-	}
-	if again, _ := m.EnsureOpenCode(ctx); again != ocLaptop {
-		t.Fatalf("second ensure %d", again)
-	}
-	if err := m.SaveOpenCodeSettings(ctx, config.OpenCodeSetup{Endpoint: "http://laptop:4096", Auth: config.OpenCodeAuthBasic}, config.OpenCodeCredential{Password: "secret"}); err != nil {
-		t.Fatal(err)
-	}
-	if c, cred, _, err := s.OpenCodeSettings(ctx, LocalMachine); err != nil || c.Endpoint != "" || cred.Password != "" || c.Auth != config.OpenCodeAuthNone {
-		t.Fatalf("local opencode %+v %v", c, err)
-	}
-	if c, cred, _, err := m.OpenCodeSettings(ctx); err != nil || c.Endpoint != "http://laptop:4096" || cred.Password != "secret" {
-		t.Fatalf("laptop opencode %+v %v", c, err)
+	ocLaptop, err := s.SwitchInstance(ctx, laptop, oc, "laptop", "", 0)
+	if err != nil || ocLaptop.New == ocLocal.New || s.ConnectionMachine(ocLaptop.New) != laptop {
+		t.Fatalf("laptop opencode %+v (local %+v) %v", ocLaptop, ocLocal, err)
 	}
 
 	// Shared paths translate within their machine only.
-	if err := s.SetSharedPath(ctx, SharedPath{ConnectionID: ocLaptop, HarnessRoot: "/srv", StageRoot: "/home"}); err != nil {
+	if err := s.SetSharedPath(ctx, SharedPath{ConnectionID: ocLaptop.New, HarnessRoot: "/srv", StageRoot: "/home"}); err != nil {
 		t.Fatal(err)
 	}
 	if paths, err := s.MachineSharedPaths(ctx, LocalMachine); err != nil || len(paths) != 0 {
 		t.Fatalf("local paths %+v %v", paths, err)
 	}
-	if paths, err := s.MachineSharedPaths(ctx, laptop); err != nil || len(paths) != 1 || paths[0].ConnectionID != ocLaptop {
+	if paths, err := s.MachineSharedPaths(ctx, laptop); err != nil || len(paths) != 1 || paths[0].ConnectionID != ocLaptop.New {
 		t.Fatalf("laptop paths %+v %v", paths, err)
 	}
 	if paths, err := s.SharedPaths(ctx); err != nil || len(paths) != 1 {

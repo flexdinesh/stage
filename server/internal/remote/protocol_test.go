@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -23,7 +22,6 @@ func TestRPCBodiesRoundTripJSON(t *testing.T) {
 	ref := execution.SessionRef{ConnectionID: 7, ExternalSessionID: "s"}
 	intent := execution.Intent{RequestID: "r", ConnectionID: 7, Project: "p", Directory: "/w", Title: "t", Prompt: "do", Config: execution.Config{Model: "m", Options: []execution.ModelOption{}, Permission: "x", Mode: "y"}, Images: []execution.Image{{Name: "a.png", MimeType: "image/png"}}, Marker: "stage-launch:r"}
 	roots := []machine.SharedRoot{{HarnessRoot: "/srv", StageRoot: "/home/u/srv"}}
-	str := "s"
 	samples := map[string]any{
 		"description": description{Profile: harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true},
 			Connectors: []ConnectorState{{Kind: "t3", Summary: harness.Summary{ConnectionID: 7, Configured: true, Connected: true, LastError: "e"}}}},
@@ -31,19 +29,18 @@ func TestRPCBodiesRoundTripJSON(t *testing.T) {
 		"ConnectorStatus": ConnectorStatus{Status: harness.Status{Summary: harness.Summary{ConnectionID: 7, Configured: true, Connected: true, LastError: "e"}, State: "connected", Reason: "r",
 			Fields: []harness.FieldState{{ID: "url", Value: "v", Set: true, Source: "saved"}}, Actions: []harness.ActionState{{ID: "pair", Available: true, Reason: "r"}},
 			Details: map[string]any{"t3Url": "http://x"}}, Result: harness.Result{Replaced: 3}},
-		"T3Settings":        T3Settings{LastError: &str, LastFullSyncAt: &at, T3URL: &str, T3PublicURL: &str, EnvironmentID: &str, ConnectionID: 7},
-		"URLRequest":        URLRequest{URL: "http://x"},
-		"MessageRequest":    MessageRequest{Message: "m"},
-		"OpenCodeSettings":  OpenCodeSettings{Setup: config.OpenCodeSetup{Endpoint: "e", BrowserEndpoint: "b", WebClient: "w", Auth: "paired"}, Verified: "e"},
-		"ClaudeSettings":    config.ClaudeSettings{Binary: "/usr/bin/claude", ConfigDir: "/home/u/.claude", Disconnected: true},
-		"KindRequest":       KindRequest{Kind: "t3"},
-		"IDResult":          IDResult{ID: 7},
-		"IDsResult":         IDsResult{IDs: []int64{1, 2}},
-		"ConnectionRequest": ConnectionRequest{ID: 7},
-		"SwitchRequest":     SwitchRequest{Kind: "t3", Identity: "env", Label: "l", Revive: 3},
-		"SwitchResult":      SwitchResult{Old: 1, New: 2, Changed: true, Revived: true},
-		"IdentityRequest":   IdentityRequest{ID: 7, Identity: "i", Label: "l"},
-		"Evidence": Evidence{Bindings: []db.ProjectBinding{{ID: 1, ProjectID: 2, ConnectionID: 7, Harness: "opencode", ExternalProjectID: "p", Workspace: "/w", Revision: 1, Status: "available", ObservedWorkspace: &str, ConnectionActive: true, ConnectionLabel: "l", Origin: db.BindingPath}},
+		"SettingsRequest":        SettingsRequest{Kind: "fixture", Patch: json.RawMessage(`{"example":"value","reset":null}`)},
+		"StatusErrorRequest":     StatusErrorRequest{Kind: "fixture", Message: "m"},
+		"KindRequest":            KindRequest{Kind: "fixture"},
+		"IDResult":               IDResult{ID: 7},
+		"ActiveIdentityResult":   ActiveIdentityResult{ID: 7, Identity: "instance"},
+		"ConnectionExistsResult": ConnectionExistsResult{Exists: true},
+		"IDsResult":              IDsResult{IDs: []int64{1, 2}},
+		"ConnectionRequest":      ConnectionRequest{ID: 7},
+		"SwitchRequest":          SwitchRequest{Kind: "t3", Identity: "env", Label: "l", Revive: 3},
+		"SwitchResult":           SwitchResult{Old: 1, New: 2, Changed: true, Revived: true},
+		"IdentityRequest":        IdentityRequest{ID: 7, Identity: "i", Label: "l"},
+		"Evidence": Evidence{Bindings: []harness.WorkspaceEvidence{{ExternalProjectID: "p", Workspace: "/w"}},
 			Observations: []execution.Observation{{Session: ref, Project: "p", State: "running", CreatedAt: at, UpdatedAt: at}}, Unknown: true},
 		"SessionRequest":   SessionRequest{Session: ref},
 		"WorkspaceRequest": WorkspaceRequest{Project: "p", Directory: "/w"},

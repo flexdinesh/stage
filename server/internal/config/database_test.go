@@ -41,12 +41,12 @@ func TestParseDatabaseUnset(t *testing.T) {
 func TestLoadDatabase(t *testing.T) {
 	env := map[string]string{"HOME": t.TempDir()}
 	getenv := func(k string) string { return env[k] }
-	cfg, err := LoadFrom(getenv, nil)
+	cfg, err := LoadFrom(getenv, nil, testEnv)
 	if err != nil || cfg.Database.Engine() != EngineSQLite {
 		t.Fatalf("unset: %v, %v", cfg.Database.Engine(), err)
 	}
 	env[DatabaseEnv] = "mysql://u:" + secret + "@h/db"
-	if _, err := LoadFrom(getenv, nil); err == nil || strings.Contains(err.Error(), secret) {
+	if _, err := LoadFrom(getenv, nil, testEnv); err == nil || strings.Contains(err.Error(), secret) {
 		t.Fatalf("invalid URL: %v", err)
 	}
 }

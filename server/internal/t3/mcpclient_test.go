@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
@@ -158,6 +160,24 @@ func TestMintFailureIsReportedAndRecorded(t *testing.T) {
 	}
 	if st := c.Status(ctx); st.Connected || st.LastError == "" {
 		t.Fatalf("status = %+v", st)
+	}
+}
+
+func TestOAuthErrorRedactsEchoedAdminToken(t *testing.T) {
+	const token = "admin-token-from-the-worker"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "rejected "+r.Header.Get("Authorization"), http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	flow := oauthFlow{http: server.Client()}
+	err = flow.do(request, "pairing-token", nil)
+	if err == nil || strings.Contains(err.Error(), token) || !strings.Contains(err.Error(), "[redacted]") {
+		t.Fatalf("expected redacted OAuth error, got %v", err)
 	}
 }
 

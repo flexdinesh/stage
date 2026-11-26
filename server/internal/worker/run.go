@@ -154,7 +154,9 @@ func Run(ctx context.Context, o RunOptions) error {
 		o.Ready()
 	}
 	log.Info("worker started", "server", cfg.URL, "machine", cfg.MachineID, "dir", dir)
-	err = w.loop(ctx)
+	life, cancel := context.WithCancel(ctx)
+	err = w.loop(life)
+	cancel()
 	_ = instance.Notify("STOPPING=1")
 	if errors.Is(err, ErrRevoked) {
 		w.set(State{State: StateRevoked, LastError: err.Error()})

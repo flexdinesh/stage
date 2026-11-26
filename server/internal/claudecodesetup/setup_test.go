@@ -2,6 +2,7 @@ package claudecodesetup_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -14,7 +15,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest"
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest/fakestate"
 	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -48,7 +48,7 @@ func newEnv(t *testing.T) *env {
 			return "", errors.New("not found")
 		}, CheckTimeout: 2 * time.Second},
 	}
-	if err := e.ports.SaveClaudeSettings(t.Context(), claudeSettings(f.Bin)); err != nil {
+	if err := e.saveBinary(t.Context(), f.Bin); err != nil {
 		t.Fatal(err)
 	}
 	return e
@@ -56,7 +56,7 @@ func newEnv(t *testing.T) *env {
 
 func (e *env) service(t *testing.T) *claudecodesetup.Service {
 	t.Helper()
-	s, err := claudecodesetup.New(t.Context(), claudecodesetup.Ports{Settings: e.ports, Identity: e.ports, Install: e.local.Install}, e.opts)
+	s, err := claudecodesetup.New(t.Context(), claudecodesetup.Ports{Settings: e.ports.Settings(), Identity: e.ports, Install: e.local.Install}, e.opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestConnectDisconnectAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	id, _ := e.ports.Active(ctx, claudecode.Kind)
-	c, err := e.ports.GetHarnessConnection(ctx, id)
+	c, err := e.store.GetHarnessConnection(ctx, id)
 	if err != nil || id == 0 || c.Label != "Claude Code (~/.claude)" {
 		t.Fatalf("connection %d %+v %v", id, c, err)
 	}
@@ -89,8 +89,13 @@ func TestConnectDisconnectAndRestart(t *testing.T) {
 	if st := s.Status(ctx, true); st.State != claudecodesetup.StateConnected || !st.Connected || st.ConnectionID != id {
 		t.Fatalf("connected %+v", st)
 	}
-	if saved, _ := e.ports.ClaudeSettings(ctx); saved.ConfigDir != e.f.ConfigDir() || saved.Disconnected {
-		t.Fatalf("settings %+v", saved)
+	raw, err := e.ports.Settings().Get(ctx, claudecode.Kind)
+	var saved claudecodesetup.SetupSettings
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &saved); err != nil || saved.ConfigDir != e.f.ConfigDir() || saved.Disconnected || saved.Binary != e.f.Bin {
+		t.Fatalf("settings %+v: %v", saved, err)
 	}
 
 	// A restart installs the connected adapter without probing.
@@ -126,7 +131,7 @@ func TestConnectFailures(t *testing.T) {
 	ctx := t.Context()
 	var conflict *db.ConflictError
 
-	if err := e.ports.SaveClaudeSettings(ctx, claudeSettings(filepath.Join(e.f.Home, "missing"))); err != nil {
+	if err := e.saveBinary(ctx, filepath.Join(e.f.Home, "missing")); err != nil {
 		t.Fatal(err)
 	}
 	s := e.service(t)
@@ -197,7 +202,21 @@ func TestConfigureRecoversAMissingCommand(t *testing.T) {
 // The connector speaks the generic setup contract.
 func TestConnector(t *testing.T) {
 	e := newEnv(t)
-	c := claudecodesetup.NewConnector(e.service(t))
+	dataDir := t.TempDir()
+	var hooks *claudecode.Hooks
+	e.opts.NewAdapter = func(o claudecode.Options) execution.Adapter {
+		hooks = o.Hooks
+		return claudecode.New(o)
+	}
+	composed, err := claudecodesetup.Module.Compose(t.Context(), harness.Ports{
+		Settings: e.ports.Settings(), Identity: e.ports, Install: e.local.Install,
+		DataDir: dataDir, Overrides: map[string]any{claudecode.Kind: &e.opts},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(composed.Close)
+	c := composed.Connector
 	if _, err := c.Run(t.Context(), "pair", nil); err == nil {
 		t.Fatal("unknown action ran")
 	}
@@ -207,9 +226,25 @@ func TestConnector(t *testing.T) {
 	if !c.Summary(t.Context()).Connected {
 		t.Fatal("not connected")
 	}
+	if hooks == nil || hooks.SettingsPath() != filepath.Join(dataDir, "claude", claudecode.HooksFile) {
+		t.Fatalf("hooks not configured under %s", dataDir)
+	}
+	sub := hooks.Subscribe()
+	composed.Close()
+	select {
+	case <-sub.Done():
+	default:
+		t.Fatal("the hook subscription survived module close")
+	}
 }
 
-func claudeSettings(bin string) config.ClaudeSettings { return config.ClaudeSettings{Binary: bin} }
+func (e *env) saveBinary(ctx context.Context, bin string) error {
+	patch, err := json.Marshal(map[string]string{"binary": bin})
+	if err != nil {
+		return err
+	}
+	return e.ports.Settings().Save(ctx, claudecode.Kind, patch)
+}
 
 func eventsOf(t *testing.T, st harness.Status) *claudecode.EventsStatus {
 	t.Helper()

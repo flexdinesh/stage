@@ -31,7 +31,7 @@ func codexEnv(t *testing.T) (*env, *codextest.Server) {
 		local.OnChange(svc.ConnectionsChanged)
 		ports := machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), codexHarnesses)
 		setup, err := codexsetup.New(t.Context(), codexsetup.Options{
-			Ports:   codexsetup.Ports{Settings: ports, Identity: ports, Install: local.Install},
+			Ports:   harness.Ports{Settings: ports.Settings(), Identity: ports, Install: local.Install},
 			Version: "test", Daemon: func(string) codex.Daemon { return daemon },
 		})
 		if err != nil {

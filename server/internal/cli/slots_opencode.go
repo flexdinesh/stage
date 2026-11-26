@@ -9,10 +9,30 @@ import (
 	"github.com/flexdinesh/stage/server/internal/client"
 )
 
+type openCodeStatus struct {
+	ConnectionID      int64      `json:"connectionId"`
+	State             string     `json:"state"` // unconfigured | connected | unavailable | rejected
+	Reason            string     `json:"reason,omitempty"`
+	CheckedAt         *time.Time `json:"checkedAt,omitempty"`
+	Endpoint          string     `json:"endpoint"`
+	BrowserEndpoint   string     `json:"browserEndpoint"`
+	WebClient         string     `json:"webClient"`
+	HasCredentials    bool       `json:"hasCredentials"`
+	EnvironmentFields []string   `json:"environmentFields"`
+	Auth              string     `json:"auth"` // none | local | paired | basic
+	ExpiresAt         *time.Time `json:"expiresAt,omitempty"`
+	Local             struct {
+		Available bool   `json:"available"`
+		URL       string `json:"url"`
+		Version   string `json:"version"`
+		Reason    string `json:"reason"` // "" | missing | invalid | unreachable | environment
+	} `json:"local"`
+}
+
 // The OpenCode status panel of `stage harness opencode`.
 func init() {
 	statusPrinters["opencode"] = func(w io.Writer, st client.HarnessStatus, cli string) error {
-		var s client.OpenCodeStatus
+		var s openCodeStatus
 		if err := json.Unmarshal(st.Details, &s); err != nil {
 			return err
 		}
@@ -21,7 +41,7 @@ func init() {
 	}
 }
 
-func printOpenCodeStatus(w io.Writer, s client.OpenCodeStatus, cli string) {
+func printOpenCodeStatus(w io.Writer, s openCodeStatus, cli string) {
 	if s.State == "unconfigured" {
 		line(w, toneWarn, "opencode %s", toneWarn.paint("not connected"))
 	} else {

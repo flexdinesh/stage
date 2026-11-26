@@ -4,11 +4,7 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
-	"errors"
-	"time"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
@@ -254,16 +250,6 @@ func (r connections) Retired(ctx context.Context, machine int64, harness string)
 	return collectRows(rows, rowTo[int64])
 }
 
-func (r connections) EnsureOpenCode(ctx context.Context, machine int64) (int64, error) {
-	if _, err := r.Exec(ctx, `INSERT INTO harness_connections(machine_id,harness) SELECT $1::bigint,'opencode' WHERE NOT EXISTS(SELECT 1 FROM harness_connections WHERE machine_id=$1::bigint AND harness='opencode' AND active)
- ON CONFLICT(machine_id,harness) WHERE active DO NOTHING`, machine); err != nil {
-		return 0, err
-	}
-	var id int64
-	err := r.QueryRow(ctx, `SELECT id FROM harness_connections WHERE machine_id=$1 AND harness='opencode' AND active`, machine).Scan(&id)
-	return id, err
-}
-
 func (r connections) Evidence(ctx context.Context, id int64) ([]store.ProjectBinding, []*execution.Observation, bool, error) {
 	rows, err := r.Query(ctx, `SELECT DISTINCT external_project_id,workspace FROM project_bindings WHERE connection_id=$1`, id)
 	if err != nil {
@@ -310,144 +296,5 @@ func (r connections) DeleteSharedPath(ctx context.Context, connectionID int64, h
 
 func (r connections) PutSharedPath(ctx context.Context, p store.SharedPath) error {
 	_, err := r.Exec(ctx, `INSERT INTO shared_paths(connection_id,harness_root,stage_root) VALUES($1,$2,$3) ON CONFLICT(connection_id,harness_root) DO UPDATE SET stage_root=excluded.stage_root`, p.ConnectionID, p.HarnessRoot, p.StageRoot)
-	return err
-}
-
-func (r connections) T3Credential(ctx context.Context, machine int64) (execution.Credential, error) {
-	var clientID, token *string
-	var expires *time.Time
-	err := r.QueryRow(ctx,
-		`SELECT client_id, token, expires_at FROM t3_connection WHERE machine_id = $1`, machine,
-	).Scan(&clientID, &token, &expires)
-	if err != nil {
-		return execution.Credential{}, notFound(err)
-	}
-	var out execution.Credential
-	if clientID != nil {
-		out.ClientID = *clientID
-	}
-	if token != nil {
-		out.Token = *token
-	}
-	if expires != nil {
-		out.ExpiresAt = *expires
-	}
-	return out, nil
-}
-
-func (r connections) SaveT3Credential(ctx context.Context, machine int64, tok execution.Credential) error {
-	var expires *time.Time
-	if !tok.ExpiresAt.IsZero() {
-		expires = &tok.ExpiresAt
-	}
-	_, err := r.Exec(ctx,
-		`INSERT INTO t3_connection(machine_id, client_id, token, expires_at) VALUES($1, $2, $3, $4)
- ON CONFLICT(machine_id) DO UPDATE SET client_id = excluded.client_id, token = excluded.token, expires_at = excluded.expires_at, updated_at = `+nowSQL,
-		machine, nullIfEmpty(tok.ClientID), nullIfEmpty(tok.Token), expires)
-	return err
-}
-
-func (r connections) SetT3LastError(ctx context.Context, machine int64, msg string) error {
-	_, err := r.Exec(ctx,
-		`INSERT INTO t3_connection(machine_id, last_error) VALUES($1, $2)
- ON CONFLICT(machine_id) DO UPDATE SET last_error = excluded.last_error, updated_at = `+nowSQL, machine, nullIfEmpty(msg))
-	return err
-}
-
-func (r connections) T3Settings(ctx context.Context, machine int64) (store.T3Connection, error) {
-	var c store.T3Connection
-	err := r.QueryRow(ctx,
-		`SELECT (SELECT last_error FROM t3_connection WHERE machine_id=$1), (SELECT last_full_sync_at FROM t3_connection WHERE machine_id=$1), (SELECT t3_url FROM t3_connection WHERE machine_id=$1), (SELECT public_url FROM t3_connection WHERE machine_id=$1),
- (SELECT NULLIF(identity,'') FROM harness_connections WHERE machine_id=$1 AND harness='t3' AND active),
- COALESCE((SELECT id FROM harness_connections WHERE machine_id=$1 AND harness='t3' AND active),0)`, machine,
-	).Scan(&c.LastError, &c.LastFullSyncAt, &c.T3URL, &c.T3PublicURL, &c.EnvironmentID, &c.ConnectionID)
-	return c, err
-}
-
-func (r connections) SetT3URL(ctx context.Context, machine int64, u string) error {
-	_, err := r.Exec(ctx,
-		`INSERT INTO t3_connection(machine_id, t3_url) VALUES($1, $2)
- ON CONFLICT(machine_id) DO UPDATE SET t3_url = excluded.t3_url, updated_at = `+nowSQL, machine, nullIfEmpty(u))
-	return err
-}
-
-func (r connections) SetT3PublicURL(ctx context.Context, machine int64, u string) error {
-	_, err := r.Exec(ctx,
-		`INSERT INTO t3_connection(machine_id, public_url) VALUES($1, $2)
- ON CONFLICT(machine_id) DO UPDATE SET public_url = excluded.public_url, updated_at = `+nowSQL, machine, nullIfEmpty(u))
-	return err
-}
-
-func (r connections) T3AdminToken(ctx context.Context, machine int64) (string, error) {
-	var tok *string
-	err := r.QueryRow(ctx, `SELECT admin_token FROM t3_connection WHERE machine_id = $1`, machine).Scan(&tok)
-	if errors.Is(err, sql.ErrNoRows) || tok == nil {
-		return "", nil
-	}
-	return *tok, err
-}
-
-func (r connections) SaveT3AdminToken(ctx context.Context, machine int64, tok string) error {
-	_, err := r.Exec(ctx,
-		`INSERT INTO t3_connection(machine_id, admin_token) VALUES($1, $2)
- ON CONFLICT(machine_id) DO UPDATE SET admin_token = excluded.admin_token, updated_at = `+nowSQL, machine, nullIfEmpty(tok))
-	return err
-}
-
-func (r connections) SetT3LastFullSync(ctx context.Context, machine int64, at time.Time) error {
-	_, err := r.Exec(ctx,
-		`INSERT INTO t3_connection(machine_id, last_full_sync_at) VALUES($1, $2)
- ON CONFLICT(machine_id) DO UPDATE SET last_full_sync_at = excluded.last_full_sync_at, updated_at = `+nowSQL, machine, at)
-	return err
-}
-
-func (r connections) OpenCodeSettings(ctx context.Context, machine int64) (config.OpenCodeSettings, bool, error) {
-	var c config.OpenCodeSettings
-	err := r.QueryRow(ctx, `SELECT endpoint,browser_endpoint,web_client,username,password,auth,token_issued_at FROM opencode_settings WHERE machine_id=$1`, machine).Scan(&c.Endpoint, &c.BrowserEndpoint, &c.WebClient, &c.Username, &c.Password, &c.Auth, &c.TokenIssuedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return config.OpenCodeSettings{}, false, nil
-	}
-	return c, err == nil, err
-}
-
-func (r connections) OpenCodeIdentity(ctx context.Context, machine int64) (string, error) {
-	var verified string
-	err := r.QueryRow(ctx, `SELECT COALESCE((SELECT identity FROM harness_connections WHERE machine_id=$1 AND harness='opencode' AND active),'')`, machine).Scan(&verified)
-	return verified, err
-}
-
-func (r connections) SaveOpenCodeSettings(ctx context.Context, machine int64, c config.OpenCodeSettings) error {
-	_, err := r.Exec(ctx, `INSERT INTO opencode_settings(machine_id,endpoint,browser_endpoint,web_client,username,password,auth,token_issued_at) VALUES($8,$1,$2,$3,$4,$5,$6,$7)
- ON CONFLICT(machine_id) DO UPDATE SET endpoint=excluded.endpoint,browser_endpoint=excluded.browser_endpoint,web_client=excluded.web_client,username=excluded.username,password=excluded.password,auth=excluded.auth,token_issued_at=excluded.token_issued_at`, c.Endpoint, c.BrowserEndpoint, c.WebClient, c.Username, c.Password, c.Auth, c.TokenIssuedAt, machine)
-	return err
-}
-
-func (r connections) ClaudeSettings(ctx context.Context, machine int64) (config.ClaudeSettings, bool, error) {
-	var c config.ClaudeSettings
-	err := r.QueryRow(ctx, `SELECT binary_path,config_dir,disconnected FROM claude_settings WHERE machine_id=$1`, machine).Scan(&c.Binary, &c.ConfigDir, &c.Disconnected)
-	if errors.Is(err, sql.ErrNoRows) {
-		return config.ClaudeSettings{}, false, nil
-	}
-	return c, err == nil, err
-}
-
-func (r connections) SaveClaudeSettings(ctx context.Context, machine int64, c config.ClaudeSettings) error {
-	_, err := r.Exec(ctx, `INSERT INTO claude_settings(machine_id,binary_path,config_dir,disconnected,updated_at) VALUES($1,$2,$3,$4,`+nowSQL+`)
- ON CONFLICT(machine_id) DO UPDATE SET binary_path=excluded.binary_path,config_dir=excluded.config_dir,disconnected=excluded.disconnected,updated_at=excluded.updated_at`, machine, c.Binary, c.ConfigDir, c.Disconnected)
-	return err
-}
-
-func (r connections) CodexSettings(ctx context.Context, machine int64) (config.CodexSettings, error) {
-	var c config.CodexSettings
-	err := r.QueryRow(ctx, `SELECT binary_path,connected FROM codex_settings WHERE machine_id=$1`, machine).Scan(&c.Binary, &c.Connected)
-	if errors.Is(err, sql.ErrNoRows) {
-		return config.CodexSettings{}, nil
-	}
-	return c, err
-}
-
-func (r connections) SaveCodexSettings(ctx context.Context, machine int64, c config.CodexSettings) error {
-	_, err := r.Exec(ctx, `INSERT INTO codex_settings(machine_id,binary_path,connected) VALUES($1,$2,$3)
- ON CONFLICT(machine_id) DO UPDATE SET binary_path=excluded.binary_path,connected=excluded.connected,updated_at=`+nowSQL, machine, c.Binary, c.Connected)
 	return err
 }

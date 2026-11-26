@@ -8,10 +8,21 @@ import (
 	"github.com/flexdinesh/stage/server/internal/client"
 )
 
+type claudeDetails struct {
+	// Binary is the resolved claude executable ("" when none was found).
+	Binary string `json:"binary,omitempty"`
+	// Version is claude --version ("" until the checks ran).
+	Version         string `json:"version,omitempty"`
+	ConfigDirectory string `json:"configDirectory,omitempty"`
+	LoggedIn        bool   `json:"loggedIn"`
+	// Scope: background launches run in their own systemd user scope.
+	Scope bool `json:"scope"`
+}
+
 // The Claude Code status panel of `stage harness claude`.
 func init() {
 	statusPrinters["claude"] = func(w io.Writer, st client.HarnessStatus, cli string) error {
-		var d client.ClaudeDetails
+		var d claudeDetails
 		if err := json.Unmarshal(st.Details, &d); err != nil {
 			return err
 		}
@@ -20,7 +31,7 @@ func init() {
 	}
 }
 
-func printClaudeStatus(w io.Writer, st client.HarnessStatus, d client.ClaudeDetails, cli string) {
+func printClaudeStatus(w io.Writer, st client.HarnessStatus, d claudeDetails, cli string) {
 	t := stateTone(st.State)
 	if st.State == "disconnected" {
 		// Not set up, or disconnected: ready to connect, not a fault.

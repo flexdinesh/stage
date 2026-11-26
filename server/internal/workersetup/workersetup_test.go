@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -15,20 +14,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
 	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/codexsetup"
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/harnesses"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/opencode/opencodetest"
+	"github.com/flexdinesh/stage/server/internal/opencodesetup"
 	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/t3"
+	"github.com/flexdinesh/stage/server/internal/t3setup"
 	"github.com/flexdinesh/stage/server/internal/worker"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 	"github.com/flexdinesh/stage/server/internal/workersetup"
@@ -56,17 +58,16 @@ type rig struct {
 
 // rigOptions shape the worker: its profile (default: a foreground worker
 // without local harnesses), Claude Code's machine-local environment,
-// Codex's options (its daemon), and an older main server that serves no
-// setup calls with these prefixes.
+// Codex's options (its daemon), and which harness kinds the server omits.
 type rigOptions struct {
-	profile  harness.Profile
-	claude   *claudecodesetup.Options
-	codex    *codexsetup.Options
-	unserved []string
+	profile      harness.Profile
+	claude       *claudecodesetup.Options
+	codex        *codexsetup.Options
+	omittedKinds []string
 }
 
 // registry is the main server's harnesses.
-var registry = harness.MustRegistry(t3.Descriptor, opencode.Descriptor, claudecode.Descriptor, codex.Descriptor)
+var registry = harnesses.Registry()
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
@@ -103,20 +104,16 @@ func newRigWith(t *testing.T, env map[string]string, o rigOptions) *rig {
 		return ids
 	}
 	r.hosts = remote.NewHosts(r.set, r.hub, conns, nil, quiet())
+	kinds := []string{t3.Kind, opencode.Kind, claudecode.Kind, codex.Kind}
 	r.hosts.SetSetup(remote.SetupHooks{
-		Kinds: []string{t3.Kind, opencode.Kind, claudecode.Kind, codex.Kind}, Active: store.ActiveID,
+		Kinds: kinds, Active: store.ActiveID,
 		Changed: func(int64, string, string) { r.changes++ },
 	})
-	remote.ServeSetup(r.hub, func(id int64) machine.StorePorts { return machine.NewStorePorts(store.OnMachine(id), reg) }, nil)
+	remote.ServeSetup(r.hub, func(id int64) machine.StorePorts { return machine.NewStorePorts(store.OnMachine(id), reg) }, nil, harnesses.Modules())
 	r.hosts.Join(r.id)
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/worker/channel", func(w http.ResponseWriter, req *http.Request) {
-		r.hub.ServeStream(w, req, r.id, "test", quiet())
-	})
-	mux.HandleFunc("POST /api/worker/channel", func(w http.ResponseWriter, req *http.Request) {
-		r.hub.ServePost(w, req, r.id)
-	})
-	r.srv = httptest.NewServer(mux)
+	handler := api.NewRouter(api.Deps{Store: store, Harnesses: reg, Channels: r.hub, Logger: quiet()})
+	r.hub.SetHarnessKinds(slices.DeleteFunc(slices.Clone(kinds), func(kind string) bool { return slices.Contains(o.omittedKinds, kind) }))
+	r.srv = httptest.NewServer(handler)
 	r.cfgPath = filepath.Join(t.TempDir(), "worker", worker.ConfigFile)
 	short, err := os.MkdirTemp("", "ws")
 	if err != nil {
@@ -126,7 +123,7 @@ func newRigWith(t *testing.T, env map[string]string, o rigOptions) *rig {
 	if r.listen, err = listen.ParseList("unix:" + filepath.Join(short, "gw.sock")); err != nil {
 		t.Fatal(err)
 	}
-	if err := worker.SaveConfig(r.cfgPath, worker.Config{Schema: worker.ConfigSchema, URL: r.srv.URL, MachineID: r.id, Label: "laptop", Token: "stage_mt_test", JoinedAt: time.Now().UTC()}); err != nil {
+	if err := worker.SaveConfig(r.cfgPath, worker.Config{Schema: worker.ConfigSchema, URL: r.srv.URL, MachineID: r.id, Label: "laptop", Token: grant.Token, JoinedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -144,19 +141,10 @@ func (r *rig) startWorker() {
 	r.stop, r.done = cancel, make(chan error, 1)
 	host := func(id int64, call workerchan.Upcall) worker.Host {
 		h := remote.NewHost(machine.NewLocal(id, r.opts.profile, machine.LocalOps{}))
-		if unserved := r.opts.unserved; len(unserved) > 0 {
-			// A main server from before these harnesses on workers.
-			up := call
-			call = func(ctx context.Context, kind string, body any) (json.RawMessage, error) {
-				if slices.ContainsFunc(unserved, func(p string) bool { return strings.HasPrefix(kind, p) }) {
-					return nil, &workerchan.RemoteError{Code: workerchan.CodeUnknownKind, Message: "unknown kind " + kind}
-				}
-				return up(ctx, kind, body)
-			}
-		}
 		workersetup.Attach(workersetup.Options{
-			Host: h, Ports: workersetup.Ports{Call: call, Creds: worker.NewCredentialStore(r.cfgPath)},
-			Config: config.HarnessFrom(func(k string) string { return r.env[k] }), T3: r.fake, Claude: r.opts.claude, Codex: r.opts.codex, Logger: quiet(),
+			Host: h, Ports: workersetup.Ports{Call: call, Creds: worker.NewCredentialStore(r.cfgPath, harnesses.LegacySecrets()...)},
+			Getenv: func(k string) string { return r.env[k] }, Logger: quiet(),
+			Overrides: map[string]any{t3.Kind: r.fake, claudecode.Kind: r.opts.claude, codex.Kind: r.opts.codex},
 		})
 		return h
 	}
@@ -219,11 +207,30 @@ func (r *rig) wait(what string, ok func() bool) {
 	}
 }
 
-func (r *rig) openCodeCred() config.OpenCodeCredential {
+func savedSettings[T any](r *rig, machineID int64, kind string) T {
 	r.t.Helper()
-	var c config.OpenCodeCredential
-	if err := worker.NewCredentialStore(r.cfgPath).Get(opencode.Kind, &c); err != nil {
+	var settings T
+	raw, err := r.store.HarnessSettings(r.t.Context(), machineID, kind)
+	if err != nil {
 		r.t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		r.t.Fatal(err)
+	}
+	return settings
+}
+
+func (r *rig) openCodeCred() opencodesetup.Credential {
+	r.t.Helper()
+	var c opencodesetup.Credential
+	raw, err := worker.NewCredentialStore(r.cfgPath).Get(r.t.Context(), opencode.Kind, "credential")
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	if raw != nil {
+		if err := json.Unmarshal(raw, &c); err != nil {
+			r.t.Fatal(err)
+		}
 	}
 	return c
 }
@@ -284,15 +291,15 @@ func TestRemoteT3SettingsStayWhereTheyBelong(t *testing.T) {
 	if _, err := c.Configure(ctx, json.RawMessage(`{"url":"http://t3.laptop:3773","publicUrl":"https://t3.example"}`)); err != nil {
 		t.Fatal(err)
 	}
-	conn, err := r.store.GetConnection(ctx, r.id)
-	if err != nil || conn.T3URL == nil || *conn.T3URL != "http://t3.laptop:3773" || conn.T3PublicURL == nil || *conn.T3PublicURL != "https://t3.example" {
-		t.Fatalf("main server record %+v %v", conn, err)
+	settings := savedSettings[t3setup.Settings](r, r.id, t3.Kind)
+	if settings.URL == nil || *settings.URL != "http://t3.laptop:3773" || settings.PublicURL == nil || *settings.PublicURL != "https://t3.example" {
+		t.Fatalf("main server record %+v", settings)
 	}
 	if _, err := c.Configure(ctx, json.RawMessage(`{"adminToken":"admin-secret"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if tok, _ := r.store.LoadT3AdminToken(ctx, r.id); tok != "" {
-		t.Fatalf("admin token reached the main server: %q", tok)
+	if tok, err := r.store.HarnessSecret(ctx, r.id, t3.Kind, "adminToken"); err != nil || tok != nil {
+		t.Fatalf("main server admin token %q %v", tok, err)
 	}
 	creds, err := os.ReadFile(worker.NewCredentialStore(r.cfgPath).Path())
 	if err != nil || !strings.Contains(string(creds), "admin-secret") {
@@ -307,10 +314,10 @@ func TestRemoteT3SettingsStayWhereTheyBelong(t *testing.T) {
 	if sum := c.Summary(ctx); sum.Configured {
 		t.Fatalf("disconnected T3 configured: %+v", sum)
 	}
-	conn, _ = r.store.GetConnection(ctx, r.id)
+	settings = savedSettings[t3setup.Settings](r, r.id, t3.Kind)
 	creds, _ = os.ReadFile(worker.NewCredentialStore(r.cfgPath).Path())
-	if conn.T3URL != nil || conn.T3PublicURL != nil || strings.Contains(string(creds), "admin-secret") {
-		t.Fatalf("disconnect kept settings: %+v %q", conn, creds)
+	if settings.URL != nil || settings.PublicURL != nil || strings.Contains(string(creds), "admin-secret") {
+		t.Fatalf("disconnect kept settings: %+v %q", settings, creds)
 	}
 }
 
@@ -329,12 +336,15 @@ func TestRemoteOpenCodeCredentialsStayOnTheWorker(t *testing.T) {
 	if id == 0 {
 		t.Fatal("connecting created no OpenCode connection on the machine")
 	}
-	setup, cred, verified, err := r.store.OpenCodeSettings(ctx, r.id)
-	if err != nil || setup.Endpoint != fake.URL || setup.Auth != config.OpenCodeAuthPaired || verified != fake.URL {
-		t.Fatalf("main record %+v %q %v", setup, verified, err)
+	setup := savedSettings[opencodesetup.SetupSettings](r, r.id, opencode.Kind)
+	if setup.Endpoint != fake.URL || setup.Auth != opencodesetup.AuthPaired {
+		t.Fatalf("main settings %+v", setup)
 	}
-	if cred != (config.OpenCodeCredential{}) {
-		t.Fatalf("the main server stored the credential: %+v", cred)
+	if got, verified, err := r.store.ActiveConnectionIdentity(ctx, r.id, opencode.Kind); err != nil || got != id || verified != fake.URL {
+		t.Fatalf("main identity %d %q %v", got, verified, err)
+	}
+	if cred, err := r.store.HarnessSecret(ctx, r.id, opencode.Kind, "credential"); err != nil || cred != nil {
+		t.Fatalf("main server credential %q %v", cred, err)
 	}
 	if got := r.openCodeCred(); got.Password == "" || !fake.Accepts(got.Password) {
 		t.Fatalf("worker credential %+v", got)
@@ -379,7 +389,6 @@ func TestSetupCallsStayOnTheCallersMachine(t *testing.T) {
 	}
 	// A worker-side port calling as the remote machine.
 	var p workersetup.Ports
-	p.Creds = worker.NewCredentialStore(filepath.Join(t.TempDir(), "w", worker.ConfigFile))
 	p.Call = func(ctx context.Context, kind string, body any) (json.RawMessage, error) {
 		raw, err := json.Marshal(body)
 		if err != nil {
@@ -394,8 +403,8 @@ func TestSetupCallsStayOnTheCallersMachine(t *testing.T) {
 		}
 		return env.Body, nil
 	}
-	if _, err := p.GetHarnessConnection(ctx, local); !errors.Is(err, db.ErrNotFound) {
-		t.Fatalf("read another machine's connection: %v", err)
+	if exists, err := p.ConnectionExists(ctx, local); err != nil || exists {
+		t.Fatalf("another machine's connection exists: %v %v", exists, err)
 	}
 	if err := p.SetConnectionIdentity(ctx, local, "x", "x"); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("stamped another machine's connection: %v", err)
@@ -403,14 +412,47 @@ func TestSetupCallsStayOnTheCallersMachine(t *testing.T) {
 	if _, _, _, err := p.ConnectionEvidence(ctx, local); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("read another machine's evidence: %v", err)
 	}
-	if err := p.SetT3URL(ctx, "http://laptop:3773"); err != nil {
+	if _, err := p.Call(ctx, remote.KindSettingsSave, json.RawMessage(`{"kind":"t3","machineId":1,"patch":{"url":"http://laptop:3773"}}`)); err != nil {
 		t.Fatal(err)
 	}
-	if c, _ := r.store.GetConnection(ctx, db.LocalMachine); c.T3URL != nil {
+	if settings := savedSettings[t3setup.Settings](r, db.LocalMachine, t3.Kind); settings.URL != nil {
 		t.Fatal("set the local machine's T3 URL")
 	}
-	if c, _ := r.store.GetConnection(ctx, r.id); c.T3URL == nil || *c.T3URL != "http://laptop:3773" {
-		t.Fatalf("remote T3 URL %+v", c.T3URL)
+	settings := savedSettings[t3setup.Settings](r, r.id, t3.Kind)
+	if settings.URL == nil || *settings.URL != "http://laptop:3773" {
+		t.Fatalf("remote T3 URL %+v", settings.URL)
+	}
+	for _, test := range []struct {
+		kind, patch string
+	}{
+		{t3.Kind, `{"adminToken":"secret"}`},
+		{opencode.Kind, `{"password":"secret"}`},
+		{t3.Kind, `{"url":false}`},
+		{"unknown", `{"url":"http://laptop:3773"}`},
+	} {
+		var invalid *db.InvalidError
+		if err := p.Save(ctx, test.kind, json.RawMessage(test.patch)); !errors.As(err, &invalid) {
+			t.Errorf("saved invalid %s settings: %v", test.kind, err)
+		}
+	}
+	if raw, err := p.Get(ctx, t3.Kind); err != nil || string(raw) != `{"url":"http://laptop:3773"}` {
+		t.Fatalf("remote settings %s %v", raw, err)
+	}
+
+	if err := p.SetLastError(ctx, opencode.Kind, "test error"); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := r.store.HarnessSyncStatus(ctx, r.id, opencode.Kind); err != nil || status.LastError == nil || *status.LastError != "test error" {
+		t.Fatalf("remote status %+v %v", status, err)
+	}
+	if status, err := r.store.HarnessSyncStatus(ctx, db.LocalMachine, opencode.Kind); err != nil || status.LastError != nil {
+		t.Fatalf("local status %+v %v", status, err)
+	}
+	if err := p.SetLastError(ctx, opencode.Kind, ""); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := r.store.HarnessSyncStatus(ctx, r.id, opencode.Kind); err != nil || status.LastError != nil {
+		t.Fatalf("remote status after clearing %+v %v", status, err)
 	}
 }
 

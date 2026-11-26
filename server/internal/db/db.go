@@ -53,11 +53,8 @@ func Invalid(format string, args ...any) error {
 // HarnessError wraps a failed adapter operation.
 type HarnessError struct{ Err error }
 
-// T3Error retains source compatibility for existing callers.
-type T3Error = HarnessError
-
 func (e *HarnessError) Error() string { return e.Err.Error() }
-func (e *T3Error) Unwrap() error      { return e.Err }
+func (e *HarnessError) Unwrap() error { return e.Err }
 
 func nullIfEmpty(s string) *string {
 	if s == "" {

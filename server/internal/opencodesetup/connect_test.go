@@ -1,6 +1,7 @@
 package opencodesetup
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -32,7 +32,9 @@ func newHarness(t *testing.T) *setupHarness {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	var temp dbtest.DB
 	h := &setupHarness{store: db.NewStore(temp.Reset(t))}
-	s, err := New(t.Context(), storePorts(h.store, func(_, _ int64, a execution.Adapter) { h.installed = a; h.installs++ }), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	p := storePorts(h.store, func(_, _ int64, a execution.Adapter) { h.installed = a; h.installs++ })
+	p.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	s, err := newService(t.Context(), p, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +54,7 @@ func register(t *testing.T, url, password string) {
 	}
 }
 
-func (h *setupHarness) saved(t *testing.T) (config.OpenCodeSettings, string) {
+func (h *setupHarness) saved(t *testing.T) (settings, string) {
 	t.Helper()
 	c, verified, err := savedSettings(h.store)
 	if err != nil {
@@ -61,7 +63,7 @@ func (h *setupHarness) saved(t *testing.T) (config.OpenCodeSettings, string) {
 	return c, verified
 }
 
-func (h *setupHarness) status(t *testing.T) config.OpenCodeStatus {
+func (h *setupHarness) status(t *testing.T) Status {
 	t.Helper()
 	h.s.forgetLocalStatus()
 	return h.s.Status(t.Context())
@@ -183,6 +185,23 @@ func TestPair(t *testing.T) {
 	}
 }
 
+func TestPairingCanRetryAfterSettingsWriteFails(t *testing.T) {
+	h := newHarness(t)
+	fake := opencodetest.New(t, "server-password")
+	link := fake.Link()
+	save := h.s.store.atomic
+	h.s.store.atomic = func(context.Context, string, json.RawMessage, string, json.RawMessage) error {
+		return errors.New("write failed")
+	}
+	if err := h.s.Pair(t.Context(), link, false); err == nil || h.s.ID() != 0 || h.installed != nil {
+		t.Fatalf("failed settings write changed the active connection: %v, connection %d", err, h.s.ID())
+	}
+	h.s.store.atomic = save
+	if err := h.s.Pair(t.Context(), link, false); err != nil || h.s.ID() == 0 || h.installed == nil {
+		t.Fatalf("retry did not activate the service: %v, connection %d", err, h.s.ID())
+	}
+}
+
 func TestRenewal(t *testing.T) {
 	h := newHarness(t)
 	fake := opencodetest.New(t, "server-password")
@@ -238,7 +257,7 @@ func TestSaveAuthModes(t *testing.T) {
 	}
 	paired, _ := h.saved(t)
 	browser := "https://browser.example"
-	if err := h.s.Save(t.Context(), config.OpenCodeEdit{BrowserEndpoint: &browser}); err != nil {
+	if err := h.s.Save(t.Context(), Edit{BrowserEndpoint: &browser}); err != nil {
 		t.Fatal(err)
 	}
 	if c, _ := h.saved(t); c.Auth != "paired" || c.Password != paired.Password || c.TokenIssuedAt == nil || c.BrowserEndpoint != browser {
@@ -246,11 +265,11 @@ func TestSaveAuthModes(t *testing.T) {
 	}
 
 	user, wrong := "opencode", "wrong"
-	if err := h.s.Save(t.Context(), config.OpenCodeEdit{Username: &user, Password: &wrong}); conflictCode(err) != CodeAuthRequired || err.Error() != "OpenCode refused access. Check the configured credentials." {
+	if err := h.s.Save(t.Context(), Edit{Username: &user, Password: &wrong}); conflictCode(err) != CodeAuthRequired || err.Error() != "OpenCode refused access. Check the configured credentials." {
 		t.Fatalf("rejected credentials: %v", err)
 	}
 	right := "server-password"
-	if err := h.s.Save(t.Context(), config.OpenCodeEdit{Username: &user, Password: &right}); err != nil {
+	if err := h.s.Save(t.Context(), Edit{Username: &user, Password: &right}); err != nil {
 		t.Fatal(err)
 	}
 	if c, _ := h.saved(t); c.Auth != "basic" || c.Password != right || c.TokenIssuedAt != nil {
@@ -258,7 +277,7 @@ func TestSaveAuthModes(t *testing.T) {
 	}
 
 	open := opencodetest.New(t, "")
-	if err := h.s.Save(t.Context(), config.OpenCodeEdit{Endpoint: &open.URL}); err != nil {
+	if err := h.s.Save(t.Context(), Edit{Endpoint: &open.URL}); err != nil {
 		t.Fatal(err)
 	}
 	if c, verified := h.saved(t); c.Auth != "none" || c.Password != "" || c.Endpoint != open.URL || verified != open.URL {
@@ -270,7 +289,7 @@ func TestSaveAuthModes(t *testing.T) {
 
 	bad := "http://127.0.0.1:49374\u200b"
 	var invalid *db.InvalidError
-	if err := h.s.Save(t.Context(), config.OpenCodeEdit{Endpoint: &bad}); !errors.As(err, &invalid) || invalid.Msg != "Service URL contains an invisible character (U+200B); retype it" {
+	if err := h.s.Save(t.Context(), Edit{Endpoint: &bad}); !errors.As(err, &invalid) || invalid.Msg != "Service URL contains an invisible character (U+200B); retype it" {
 		t.Fatalf("invisible character: %v", err)
 	}
 }
@@ -286,7 +305,7 @@ func TestDisconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, verified := h.saved(t)
-	if c != (config.OpenCodeSettings{Auth: "none"}) || verified != fake.URL || h.installed != nil || h.installs != installs+1 {
+	if c != (settings{SetupSettings: SetupSettings{Auth: AuthNone}}) || verified != fake.URL || h.installed != nil || h.installs != installs+1 {
 		t.Fatalf("disconnect: %+v %q %v", c, verified, h.installed)
 	}
 	if st := h.status(t); st.State != "unconfigured" || st.Auth != "none" || st.Endpoint != "" || st.HasCredentials {
@@ -294,7 +313,7 @@ func TestDisconnect(t *testing.T) {
 	}
 	// A later connection elsewhere still needs continuity with the old address.
 	other := opencodetest.New(t, "")
-	if err := h.s.Save(t.Context(), config.OpenCodeEdit{Endpoint: &other.URL}); err != nil {
+	if err := h.s.Save(t.Context(), Edit{Endpoint: &other.URL}); err != nil {
 		t.Fatal(err)
 	}
 }

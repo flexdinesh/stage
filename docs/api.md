@@ -186,7 +186,7 @@ The machine removes itself (`stage worker leave`): 204, with the effects of `DEL
 #### `GET /api/worker/channel`
 The worker channel's down half is a `text/event-stream` ([runtime.md](runtime.md#worker-channel)). Send inclusive integer bounds in `Stage-Channel-Protocol-Min` and `Stage-Channel-Protocol-Max`, with min at least 1 and max at least min. Invalid bounds return 400 `invalid_channel_protocol`. A disjoint range or a legacy worker with no range returns 409 `channel_protocol_mismatch` after token authentication. `Stage-Version` identifies the worker build. `Stage-Worker-Gateway` lists its agent gateway listener URLs, comma-separated.
 
-- `hello`: `{ "session": "...", "machineId": 2, "protocolRange": { "min": 1, "max": 1 }, "protocolVersion": 1, "kinds": [], "channelKinds": [], "heartbeatSec": 15, "timeoutSec": 45 }`. The version is the highest shared version.
+- `hello`: `{ "session": "...", "machineId": 2, "protocolRange": { "min": 2, "max": 2 }, "protocolVersion": 2, "kinds": [], "channelKinds": [], "heartbeatSec": 15, "timeoutSec": 45 }`. The version is the highest shared version.
 - `rpc`: an envelope `{ "id", "kind", "deadline"?, "connectionId"?, "call"?, "body"?, "error"? }`. Calls include `ping`, the worker's advertised `adapter.*`, `ops.*` and `connector.*`, and `cancel` for a caller that stopped waiting. [Request bodies and errors](execution.md#remote-machines).
 - `: keepalive` comments every 15s.
 
@@ -220,12 +220,14 @@ A connectable harness (a harness, `connected` or `hosted`, this server composes 
   "reason": "",
   "fields": [{ "id": "url", "value": "http://127.0.0.1:3773", "set": false, "source": "default" }],
   "actions": [{ "id": "pair", "available": true }, { "id": "auto-pair", "available": false, "reason": "not_local" }],
+  "sync": { "lastError": null, "lastFullSyncAt": "2026-11-08T10:00:00Z", "running": false, "startedAt": null, "projects": 0, "sessions": 0 },
   "details": { "...": "the harness's own setup state, below" }
 }
 ```
 - `connectionId`, `configured`, `connected`, `lastError`: as in health, from the same connector (`lastError` and `reason` are omitted when empty). `state` is a harness-defined word (T3: T3State; OpenCode: `unconfigured`, `connected`, `unavailable`, `rejected`; Codex: `connected`, `not_connected`, `signed_out`, `unreachable`, `not_installed`). `reason`: why it is not connected.
 - `fields`: each setting's current value (`source`: `saved` or `default`). No environment variable sets a field. A secret's `value` is always `""`; `set` says whether one is stored.
 - `actions`: whether each setup action can run now, with a `reason` when not.
+- `sync`: Stage’s last setup error, last successful full sync and current full sync progress. The error and timestamps can be null.
 - `details`: the harness's setup panel state (T3: the T3 details; OpenCode: the OpenCode details; Codex: the Codex details). Generic clients ignore it.
 - Refreshes a stale probe first (bounded, T3: 3s; OpenCode health check: 4s; Codex: the daemon CLI's 20s). Codex reuses a probe for 5s; `?refresh=1` forces one.
 
@@ -259,17 +261,14 @@ T3's setup: fields `url`, `publicUrl` and `adminToken` (secret), actions `pair` 
   "clientId": "mcp_client_abc",
   "tokenExpiresAt": "2026-12-08T10:00:00Z",
   "adminTokenConfigured": true,
-  "lastError": null,
-  "lastFullSyncAt": "2026-11-08T10:00:00Z",
   "reachable": true,
   "checkedAt": "2026-11-08T10:00:05Z",
   "probeError": null,
   "t3": { "environmentId": "env_123", "label": "controlbox", "serverVersion": "0.1.9" },
-  "autoPair": { "available": true, "reason": null },
-  "sync": { "running": false, "startedAt": null, "projects": 0, "threads": 0 }
+  "autoPair": { "available": true, "reason": null }
 }
 ```
-`environmentId`, `clientId`, `tokenExpiresAt`, `lastError`, `lastFullSyncAt`, `checkedAt`, `probeError`, `t3`, `autoPair.reason` and `sync.startedAt` are nullable.
+`environmentId`, `clientId`, `tokenExpiresAt`, `checkedAt`, `probeError`, `t3` and `autoPair.reason` are nullable.
 
 - `connected`: a valid token T3 has not rejected (same as the T3 entry of `/api/health` `harnesses`). T3 is configured only when paired: a stored token or a saved admin token. An unpaired T3 is never contacted in the background (no probes or sync until paired).
 - `state` (T3State), the first problem in this order: `unreachable` (nothing answered as T3 at `t3Url`), `unpaired` (no token), `expired` (token past expiry), `rejected` (T3 answered 401 to the token), else `connected`.

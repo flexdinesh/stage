@@ -1,8 +1,7 @@
 // Package codexsetup is the Codex connection setup on one machine: the
 // Codex CLI path, the connect action (start the daemon if needed, check
 // the login, record the Codex home as the connection's identity) and
-// disconnect. It reaches the store only through its ports, so a worker can
-// host it later (docs/execution.md "Machine-runtime seam").
+// disconnect. Both the server and worker compose it through the module.
 package codexsetup
 
 import (
@@ -14,26 +13,14 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/codex"
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 )
 
-// Settings is the machine's non-secret Codex setup (codex_settings).
-type Settings interface {
-	CodexSettings(ctx context.Context) (config.CodexSettings, error)
-	SaveCodexSettings(ctx context.Context, c config.CodexSettings) error
-}
-
-// Ports are the setup's narrow ports: settings, the harness-neutral
-// identity port and the install port.
-type Ports struct {
-	Settings Settings
-	Identity machine.Identity
-	Install  machine.Install
-}
+// Ports are the machine's setup dependencies.
+type Ports = harness.Ports
 
 // Options configure a Service.
 type Options struct {
@@ -83,7 +70,7 @@ type Service struct {
 	opts Options
 
 	mu      sync.Mutex
-	saved   config.CodexSettings
+	saved   SetupSettings
 	id      int64
 	client  *codex.Client
 	active  bool
@@ -102,7 +89,7 @@ func New(ctx context.Context, opts Options) (*Service, error) {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	saved, err := opts.Settings.CodexSettings(ctx)
+	saved, err := loadSettings(ctx, opts.Settings)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +153,7 @@ func (s *Service) Connect(ctx context.Context) (harness.Result, error) {
 	}
 	next := s.saved
 	next.Connected = true
-	if err := s.opts.Settings.SaveCodexSettings(ctx, next); err != nil {
+	if err := saveSettings(ctx, s.opts.Settings, map[string]bool{"connected": true}); err != nil {
 		return res, err
 	}
 	if s.client != nil && s.client != client {
@@ -193,7 +180,7 @@ func (s *Service) Disconnect(ctx context.Context) error {
 	defer s.mu.Unlock()
 	next := s.saved
 	next.Connected = false
-	if err := s.opts.Settings.SaveCodexSettings(ctx, next); err != nil {
+	if err := saveSettings(ctx, s.opts.Settings, map[string]bool{"connected": false}); err != nil {
 		return err
 	}
 	if s.active {
@@ -215,7 +202,11 @@ func (s *Service) SetBinary(ctx context.Context, binary string) error {
 	defer s.mu.Unlock()
 	next := s.saved
 	next.Binary = binary
-	if err := s.opts.Settings.SaveCodexSettings(ctx, next); err != nil {
+	var savedBinary *string
+	if binary != "" {
+		savedBinary = &binary
+	}
+	if err := saveSettings(ctx, s.opts.Settings, map[string]*string{"binary": savedBinary}); err != nil {
 		return err
 	}
 	s.saved, s.details.Binary = next, binary

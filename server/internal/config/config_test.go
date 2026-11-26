@@ -8,7 +8,15 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/harness"
 )
+
+var testEnv = harness.EnvOptions{
+	Keys:           []string{"HARNESS_BIN", "HARNESS_FAKE"},
+	Removed:        []string{"HARNESS_URL", "HARNESS_PASSWORD"},
+	WorkerTemplate: "# HARNESS_BIN=\n# HARNESS_FAKE=\n",
+}
 
 func TestDefaultDataDir(t *testing.T) {
 	xdg := t.TempDir()
@@ -33,13 +41,13 @@ func TestLoadDataDir(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", xdg)
 	t.Setenv("STAGE_ENV", "")
 	t.Setenv("STAGE_DATA_DIR", "")
-	cfg, err := Load(nil)
+	cfg, err := Load(nil, testEnv)
 	if err != nil || cfg.DataDir != filepath.Join(xdg, "stage") {
 		t.Fatalf("default data dir %+v, %v", cfg, err)
 	}
 	dir := t.TempDir()
 	t.Setenv("STAGE_DATA_DIR", dir)
-	if cfg, err := Load(nil); err != nil || cfg.DataDir != dir {
+	if cfg, err := Load(nil, testEnv); err != nil || cfg.DataDir != dir {
 		t.Fatalf("STAGE_DATA_DIR %+v, %v", cfg, err)
 	}
 }
@@ -49,22 +57,22 @@ func TestLoadDevRefusesProd(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", xdg)
 	t.Setenv("STAGE_ENV", "dev")
 	t.Setenv("STAGE_DATA_DIR", "")
-	if _, err := Load(nil); err == nil {
+	if _, err := Load(nil, testEnv); err == nil {
 		t.Fatal("dev config accepted the default (production) data dir")
 	}
 	// Spelled differently, same dir.
 	t.Setenv("STAGE_DATA_DIR", filepath.Join(xdg, "x", "..", "stage"))
-	if _, err := Load(nil); err == nil {
+	if _, err := Load(nil, testEnv); err == nil {
 		t.Fatal("dev config accepted the default data dir via STAGE_DATA_DIR")
 	}
 	t.Setenv("STAGE_DATA_DIR", t.TempDir())
-	cfg, err := Load(nil)
-	if err != nil || cfg.T3ClientName != "stage dev" {
+	cfg, err := Load(nil, testEnv)
+	if err != nil || cfg.Getenv("STAGE_ENV") != "dev" {
 		t.Fatalf("dev config %+v, %v", cfg, err)
 	}
 	t.Setenv("STAGE_ENV", "")
 	t.Setenv("STAGE_DATA_DIR", "")
-	if cfg, err := Load(nil); err != nil || cfg.T3ClientName != "stage" {
+	if cfg, err := Load(nil, testEnv); err != nil || cfg.Getenv("STAGE_ENV") != "" {
 		t.Fatalf("prod config %+v, %v", cfg, err)
 	}
 }
@@ -76,14 +84,14 @@ func TestLoadDataDirWithoutHome(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("STAGE_DATA_DIR", "")
 	t.Setenv("STAGE_ENV", "")
-	if _, err := Load(nil); err == nil {
+	if _, err := Load(nil, testEnv); err == nil {
 		t.Fatal("Load without HOME, XDG_DATA_HOME or STAGE_DATA_DIR succeeded")
 	}
 	dir := t.TempDir()
 	t.Setenv("STAGE_DATA_DIR", dir)
 	for _, env := range []string{"", "dev"} {
 		t.Setenv("STAGE_ENV", env)
-		if cfg, err := Load(nil); err != nil || cfg.DataDir != dir {
+		if cfg, err := Load(nil, testEnv); err != nil || cfg.DataDir != dir {
 			t.Fatalf("STAGE_ENV=%q: %+v, %v", env, cfg, err)
 		}
 	}
@@ -92,10 +100,10 @@ func TestLoadDataDirWithoutHome(t *testing.T) {
 // clearEnv unsets every variable Load reads besides the data dir ones.
 func clearEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"STAGE_ENV", "STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS", "T3_BIN"} {
+	for _, k := range []string{"STAGE_ENV", "STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS", DatabaseEnv} {
 		t.Setenv(k, "")
 	}
-	for _, k := range RemovedHarnessEnvKeys {
+	for _, k := range append(append([]string{}, testEnv.Keys...), testEnv.Removed...) {
 		t.Setenv(k, "")
 	}
 	t.Setenv("STAGE_DATA_DIR", t.TempDir())
@@ -103,50 +111,50 @@ func clearEnv(t *testing.T) {
 
 func TestLoadListen(t *testing.T) {
 	clearEnv(t)
-	cfg, err := Load(nil)
+	cfg, err := Load(nil, testEnv)
 	if err != nil || len(cfg.Listen) != 1 || cfg.Listen[0].Network != "tcp" || cfg.Listen[0].Address != "127.0.0.1:7380" {
 		t.Fatalf("default listen %+v, %v", cfg.Listen, err)
 	}
 	t.Setenv("STAGE_LISTEN", "unix:/run/stage/stage.sock")
-	if cfg, err := Load(nil); err != nil || len(cfg.Listen) != 1 || cfg.Listen[0].Network != "unix" || cfg.Listen[0].Address != "/run/stage/stage.sock" {
+	if cfg, err := Load(nil, testEnv); err != nil || len(cfg.Listen) != 1 || cfg.Listen[0].Network != "unix" || cfg.Listen[0].Address != "/run/stage/stage.sock" {
 		t.Fatalf("STAGE_LISTEN unix %+v, %v", cfg.Listen, err)
 	}
 	t.Setenv("STAGE_LISTEN", "unix, 127.0.0.1:7381")
-	if cfg, err := Load(nil); err != nil || len(cfg.Listen) != 2 || !cfg.Listen[0].Private || cfg.Listen[0].Address != "" || cfg.Listen[1].Address != "127.0.0.1:7381" {
+	if cfg, err := Load(nil, testEnv); err != nil || len(cfg.Listen) != 2 || !cfg.Listen[0].Private || cfg.Listen[0].Address != "" || cfg.Listen[1].Address != "127.0.0.1:7381" {
 		t.Fatalf("STAGE_LISTEN list %+v, %v", cfg.Listen, err)
 	}
 	// The flag wins, and an invalid STAGE_LISTEN does not matter then.
 	t.Setenv("STAGE_LISTEN", "nope")
-	if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "STAGE_LISTEN") {
+	if _, err := Load(nil, testEnv); err == nil || !strings.Contains(err.Error(), "STAGE_LISTEN") {
 		t.Fatalf("invalid STAGE_LISTEN: %v", err)
 	}
-	if cfg, err := Load([]string{"0.0.0.0:9000"}); err != nil || len(cfg.Listen) != 1 || cfg.Listen[0].Address != "0.0.0.0:9000" {
+	if cfg, err := Load([]string{"0.0.0.0:9000"}, testEnv); err != nil || len(cfg.Listen) != 1 || cfg.Listen[0].Address != "0.0.0.0:9000" {
 		t.Fatalf("--listen %+v, %v", cfg.Listen, err)
 	}
 	// Repeated flags and comma lists combine.
-	if cfg, err := Load([]string{"unix", "127.0.0.1:1,127.0.0.1:2"}); err != nil || len(cfg.Listen) != 3 {
+	if cfg, err := Load([]string{"unix", "127.0.0.1:1,127.0.0.1:2"}, testEnv); err != nil || len(cfg.Listen) != 3 {
 		t.Fatalf("repeated --listen %+v, %v", cfg.Listen, err)
 	}
-	if _, err := Load([]string{"unix:rel.sock"}); err == nil || !strings.Contains(err.Error(), "--listen") {
+	if _, err := Load([]string{"unix:rel.sock"}, testEnv); err == nil || !strings.Contains(err.Error(), "--listen") {
 		t.Fatalf("invalid --listen: %v", err)
 	}
-	if _, err := Load([]string{"unix", "unix"}); err == nil {
+	if _, err := Load([]string{"unix", "unix"}, testEnv); err == nil {
 		t.Fatal("duplicate --listen accepted")
 	}
 }
 
 func TestLoadURLDefaults(t *testing.T) {
 	clearEnv(t)
-	cfg, err := Load(nil)
+	cfg, err := Load(nil, testEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.PublicURL != "" || cfg.T3Bin != "" || len(cfg.RemovedEnv) != 0 || cfg.WarnRemovedEnv() != "" {
+	if cfg.PublicURL != "" || cfg.Getenv("HARNESS_BIN") != "" || len(cfg.RemovedEnv) != 0 || cfg.WarnRemovedEnv() != "" {
 		t.Fatalf("defaults %+v", cfg)
 	}
 	t.Setenv("STAGE_PUBLIC_URL", "https://stage.example")
-	t.Setenv("T3_BIN", "/opt/t3/bin/t3")
-	if cfg, _ := Load(nil); cfg.PublicURL != "https://stage.example" || cfg.T3Bin != "/opt/t3/bin/t3" {
+	t.Setenv("HARNESS_BIN", "/opt/harness/bin/tool")
+	if cfg, _ := Load(nil, testEnv); cfg.PublicURL != "https://stage.example" || cfg.Getenv("HARNESS_BIN") != "/opt/harness/bin/tool" {
 		t.Fatalf("explicit URLs %+v", cfg)
 	}
 }
@@ -155,29 +163,29 @@ func TestLoadURLDefaults(t *testing.T) {
 // leftover one is only named in the startup warning.
 func TestLoadRemovedHarnessEnv(t *testing.T) {
 	clearEnv(t)
-	t.Setenv("T3_URL", "http://host.docker.internal:3773")
-	t.Setenv("OPENCODE_PASSWORD", "secret")
-	cfg, err := Load(nil)
+	t.Setenv("HARNESS_URL", "http://harness.test")
+	t.Setenv("HARNESS_PASSWORD", "secret")
+	cfg, err := Load(nil, testEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.RemovedEnv) != 2 || cfg.RemovedEnv[0] != "T3_URL" || cfg.RemovedEnv[1] != "OPENCODE_PASSWORD" {
+	if len(cfg.RemovedEnv) != 2 || cfg.RemovedEnv[0] != "HARNESS_URL" || cfg.RemovedEnv[1] != "HARNESS_PASSWORD" {
 		t.Fatalf("removed %v", cfg.RemovedEnv)
 	}
 	w := cfg.WarnRemovedEnv()
-	if !strings.Contains(w, "T3_URL, OPENCODE_PASSWORD") || !strings.Contains(w, "Settings > Connections") || strings.Contains(w, "secret") {
+	if !strings.Contains(w, "HARNESS_URL, HARNESS_PASSWORD") || !strings.Contains(w, "Settings > Connections") || strings.Contains(w, "secret") {
 		t.Fatalf("warning %q", w)
 	}
 }
 
 func TestLoadAllowedOrigins(t *testing.T) {
 	clearEnv(t)
-	if cfg, err := Load(nil); err != nil || len(cfg.AllowedOrigins) != 0 {
+	if cfg, err := Load(nil, testEnv); err != nil || len(cfg.AllowedOrigins) != 0 {
 		t.Fatalf("default origins %+v, %v", cfg.AllowedOrigins, err)
 	}
 	t.Setenv("STAGE_PUBLIC_URL", "https://Stage.Example.com:443/app")
 	t.Setenv("STAGE_ALLOWED_ORIGINS", "https://m.tail.ts.net, http://stage.lan:7380,https://stage.example.com")
-	cfg, err := Load(nil)
+	cfg, err := Load(nil, testEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,12 +196,12 @@ func TestLoadAllowedOrigins(t *testing.T) {
 	// A non-http(s) public URL adds nothing and is not an error.
 	t.Setenv("STAGE_ALLOWED_ORIGINS", "")
 	t.Setenv("STAGE_PUBLIC_URL", "mailto:me@example.com")
-	if cfg, err := Load(nil); err != nil || len(cfg.AllowedOrigins) != 0 {
+	if cfg, err := Load(nil, testEnv); err != nil || len(cfg.AllowedOrigins) != 0 {
 		t.Fatalf("mailto public URL %+v, %v", cfg.AllowedOrigins, err)
 	}
 	for _, bad := range []string{"stage.lan", "https://x/path", "ftp://x", "https://u@x", "https://x?q", "https://", ","} {
 		t.Setenv("STAGE_ALLOWED_ORIGINS", bad)
-		if _, err := Load(nil); err == nil || !strings.Contains(err.Error(), "STAGE_ALLOWED_ORIGINS") {
+		if _, err := Load(nil, testEnv); err == nil || !strings.Contains(err.Error(), "STAGE_ALLOWED_ORIGINS") {
 			t.Errorf("STAGE_ALLOWED_ORIGINS=%q: %v", bad, err)
 		}
 	}
@@ -274,7 +282,7 @@ func TestResolveSockets(t *testing.T) {
 	run := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", run)
 	t.Setenv("STAGE_LISTEN", "unix,unix:/tmp/x.sock,127.0.0.1:7380")
-	cfg, err := Load(nil)
+	cfg, err := Load(nil, testEnv)
 	if err != nil {
 		t.Fatal(err)
 	}

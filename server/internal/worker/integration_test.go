@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -87,7 +88,6 @@ func newMain(t *testing.T, short string) *mainServer {
 	}
 	m := &mainServer{t: t, url: "http://" + addr, cfg: config.Config{
 		Listen: ls, DataDir: filepath.Join(t.TempDir(), "main"), PublicURL: "http://" + addr,
-		T3ClientName: "stage",
 	}}
 	m.start()
 	t.Cleanup(func() { m.stop() })
@@ -100,7 +100,7 @@ func (m *mainServer) start() {
 	ready := make(chan struct{})
 	m.cancel, m.done = cancel, make(chan error, 1)
 	go func() {
-		m.done <- serve.Run(ctx, serve.Options{Config: m.cfg, T3: t3.NewFake(), Logger: quiet(), ShutdownTimeout: 10 * time.Second,
+		m.done <- serve.Run(ctx, serve.Options{Config: m.cfg, HarnessOverrides: map[string]any{t3.Kind: t3.NewFake()}, Logger: quiet(), ShutdownTimeout: 10 * time.Second,
 			Ready: func(serve.Ready) { close(ready) }})
 	}()
 	select {
@@ -200,12 +200,27 @@ func TestMainAndWorker(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- worker.Run(runCtx, worker.RunOptions{ConfigPath: cfgPath, Logger: quiet(), MinBackoff: 20 * time.Millisecond, MaxBackoff: 200 * time.Millisecond,
-			HTTP: &http.Client{Transport: channelAPISkew{}}, ProtocolRange: workerchan.VersionRange{Min: 1, Max: 2},
+			HTTP: &http.Client{Transport: channelAPISkew{}},
 			Host: func(id int64, call workerchan.Upcall) worker.Host {
 				h := remote.NewHost(machine.NewLocal(id, harness.Profile{}, nil))
-				h.OnAttached(func(life context.Context, _ []string) error {
-					if _, err := call(life, remote.KindT3Get, nil); err != nil {
+				h.OnAttached(func(life context.Context, kinds []string) error {
+					if !slices.Contains(kinds, t3.Kind) {
+						return fmt.Errorf("T3 missing from advertised harnesses: %v", kinds)
+					}
+					if _, err := call(life, remote.KindSettingsGet, remote.KindRequest{Kind: t3.Kind}); err != nil {
 						return err
+					}
+					if _, err := call(life, remote.KindStatusError, remote.StatusErrorRequest{Kind: t3.Kind, Message: "initializing"}); err != nil {
+						return err
+					}
+					_, err := call(life, remote.KindSettingsSave, remote.SettingsRequest{Kind: t3.Kind, Patch: json.RawMessage(`{"url":"http://worker:3773"}`)})
+					var re *workerchan.RemoteError
+					if !errors.As(err, &re) || re.Code != workerchan.CodeOperationUnavailable || re.Message != workerchan.ErrNegotiating.Error() {
+						return fmt.Errorf("settings write during negotiation: %v", err)
+					}
+					_, err = call(life, "setup.t3.get", nil)
+					if !errors.As(err, &re) || re.Code != workerchan.CodeOperationUnavailable || re.Message == workerchan.ErrNegotiating.Error() {
+						return fmt.Errorf("obsolete setup call was advertised: %v", err)
 					}
 					select {
 					case composing <- struct{}{}:

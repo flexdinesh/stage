@@ -7,7 +7,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 // maxPushedObservations caps one POST /api/connections/{id}/observations.
@@ -160,9 +160,9 @@ func (s *server) pushObservation(r *http.Request, kind string, o execution.Obser
 	switch {
 	case err != nil:
 		return ObservationResult{}, err
-	case got == t3sync.Unowned:
+	case got == coordinator.Unowned:
 		return ObservationResult{Status: observationIgnored, Reason: "no task owns this session; discovery may track it"}, nil
-	case got == t3sync.Launching:
+	case got == coordinator.Launching:
 		return ObservationResult{Status: observationIgnored, Reason: "the task is launching; its launch reconciles the session"}, nil
 	}
 	return ObservationResult{Status: observationIngested}, nil

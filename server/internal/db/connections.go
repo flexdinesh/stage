@@ -87,15 +87,7 @@ func (s *Store) ConnectionActive(id int64) bool {
 	return false
 }
 
-// Switch is the outcome of SwitchInstance.
-type Switch struct {
-	// Old and New are the previous and current active connection.
-	Old, New int64
-	// Changed: New replaced Old (Old retired, or deleted when it held nothing).
-	Changed bool
-	// Revived: New is a retired connection made active again.
-	Revived bool
-}
+type Switch = harness.Switch
 
 // SwitchInstance makes the instance with identity the active connection of
 // harness on machine. The same identity keeps the connection. A connection with no
@@ -112,6 +104,9 @@ func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Des
 	if identity == "" && revive == 0 {
 		return Switch{}, Invalid("an instance identity is required")
 	}
+	if revive != 0 && !d.ContinuityProof {
+		return Switch{}, Invalid("this harness does not accept a connection selected by continuity proof")
+	}
 	if label == "" {
 		label = identity
 	}
@@ -126,11 +121,7 @@ func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Des
 		}
 		c := tx.Connections()
 		cur, err := c.Active(ctx, machine, kind)
-		if errors.Is(err, ErrNotFound) {
-			out.New, err = c.Insert(ctx, machine, kind, identity, label, d.StableIdentity)
-			return err
-		}
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrNotFound) {
 			return err
 		}
 		out.Old, out.New = cur.ID, cur.ID
@@ -144,7 +135,7 @@ func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Des
 				return Conflict("That %s connection can no longer be restored.", d.Name)
 			}
 		} else {
-			if cur.Identity == identity {
+			if cur.ID != 0 && cur.Identity == identity {
 				return c.SetLabel(ctx, cur.ID, label)
 			}
 			if d.StableIdentity {
@@ -154,6 +145,14 @@ func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Des
 				}
 				target = id
 			}
+		}
+		if cur.ID == 0 {
+			if target != 0 {
+				out.New, out.Revived = target, true
+				return c.Revive(ctx, target, label, identity)
+			}
+			out.New, err = c.Insert(ctx, machine, kind, identity, label, d.StableIdentity)
+			return err
 		}
 		related, err := c.HasRelations(ctx, cur.ID)
 		if err != nil {
@@ -257,8 +256,8 @@ func retireTx(ctx context.Context, tx store.Tx, id, replacement int64) error {
 	return nil
 }
 
-// SetConnectionIdentity records a new address of the same instance (an
-// OpenCode service that proved continuity).
+// SetConnectionIdentity records the identity of the same instance after
+// the module proves continuity.
 func (s *Store) SetConnectionIdentity(ctx context.Context, id int64, identity, label string) error {
 	if label == "" {
 		label = identity

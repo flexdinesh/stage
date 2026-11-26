@@ -18,23 +18,24 @@ Stage how to attribute agent calls to a session.
 Its features report available operations and concrete reasons for
 unavailability. See [execution](execution.md) for the shipped contract.
 
-Layer 04 gives each harness one module that supplies its descriptor and
-composes its adapter and setup package over narrow ports. Register the
-module once in the list used by both serve and the worker. Keep typed
-settings in the setup package. The common storage layer holds settings
-JSON by machine and kind and secrets by kind and key. The module declares
-the identity policy for instance switching. One connection per kind per
-machine can be active. A replacement retires the previous connection;
-the same instance can revive it. Historical sessions are scoped to
-their original connection. [ADR 0008 D5–D6](adr/0008-harness-foundation.md#d5)
-records the rules.
+Each harness supplies a [module](../server/internal/harness/module.go)
+with its descriptor and `Compose` function. The
+[registry](../server/internal/harnesses/modules.go) names each module once
+for serve and the worker. Keep typed settings, validation, client
+construction and secret keys in the setup package. The shared store
+persists public JSON and opaque secrets by machine and kind. Workers
+keep their secrets in their own credential file. A module declares stable
+identity, continuity proof or moved-retire policy as applicable. See
+[ADR 0008 D5–D6](adr/0008-harness-foundation.md#d5) and
+[worker setup](execution.md#remote-machines).
 
-Layer 03 negotiates the worker protocol and supported kinds and traits.
+The worker handshake advertises protocol 2, supported kinds and traits,
+and generic settings and status calls.
 Layer 05 declares process requirements separately from machine or cloud
 session locality, and supplies status phase, reason and fix. Layers 09
 and 10 separate command, observation and discovery roles, then move
 observation beside the adapter. Serve hosts the local observer and the
-worker hosts its own observer. The worker uses cached settings. The
+worker hosts its own observer. Layer 10 adds cached public settings to the worker. The
 main server owns task state, acceptance and the database in both cases.
 
 When the harness wraps another harness, declare its origin markers and
@@ -71,9 +72,9 @@ action wire shape belongs to layer 05.
    The connector's status supplies current availability and a reason.
 2. The [connector](../server/internal/opencodesetup/connector.go) decodes
    the input, then the setup service reads the local OpenCode service
-   registration on the selected machine. Serve currently composes the
-   local connector. On a remote placement the worker hosts it and the
-   request goes through the worker proxy.
+   registration on the selected machine. Its [module](../server/internal/opencodesetup/module.go)
+   composes that connector in both placements. The request goes through
+   the worker proxy when the connector runs on a worker.
 3. [The handler](../server/internal/api/handlers_harnesses.go) validates
    that the descriptor declares the action, resolves that machine's
    connector and returns refreshed status. The shipped route is
@@ -118,9 +119,15 @@ descriptor and declared capabilities.
 - Declare the module's identity and placement, durable launch policy,
   destinations, caller attribution and any wrapper markers. Verify that
   replacing and reviving instances preserves connection history.
-- Register the module in the shared list (layer 04). Exercise the same
-  composition through serve and the worker. Test supported and unsupported
-  optional traits through the worker channel (layer 03).
+- Add the adapter under `server/internal/<harness>/` and its module, typed
+  settings and connector under `server/internal/<harness>setup/`.
+  Register the module in [modules.go](../server/internal/harnesses/modules.go).
+  Exercise first setup and reconnect through serve and the authenticated
+  [worker setup rig](../server/internal/workersetup/workersetup_test.go).
+  Test supported and unsupported channel traits.
+- If the harness has a custom UI or CLI panel, add the slot under
+  `packages/app/src/harnesses/<kind>/` or
+  `server/internal/cli/slots_<kind>.go`.
 - Report complete inventory and provenance for [read-only discovery](discovery.md).
   Verify incomplete reads and unavailable operations. Exercise launch
   recovery, session observation and attribution with contract tests.

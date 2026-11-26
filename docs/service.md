@@ -141,9 +141,9 @@ The service's only configuration: a `0600` `KEY=VALUE` file (comments with
 template (`STAGE_LISTEN=unix`) and never overwrites it. Apply edits with
 `stage service restart`.
 
-- Allowed keys: `STAGE_LISTEN`, `STAGE_PUBLIC_URL`, `STAGE_ALLOWED_ORIGINS`,
-  `T3_FAKE`, `T3_FAKE_SEED`, `T3_BIN` (the t3 CLI auto-pair runs, when it
-  is not in a usual install dir). Unknown keys, `STAGE_DATA_DIR`,
+- `service.env` accepts `STAGE_LISTEN`, `STAGE_PUBLIC_URL`, `STAGE_ALLOWED_ORIGINS`
+  and options declared by the built-in harnesses (`T3_FAKE`, `T3_FAKE_SEED`,
+  `T3_BIN`). `T3_BIN` sets the CLI that auto-pair runs. Unknown keys, `STAGE_DATA_DIR`,
   `STAGE_ENV` and `STAGE_DATABASE_URL` are errors (the service is SQLite
   only, in its data dir: [storage.md](storage.md#engines-and-selection)). So are the removed harness keys (`T3_URL`,
   `T3_PUBLIC_URL`, `T3_ADMIN_TOKEN`, `OPENCODE_URL`, `OPENCODE_PUBLIC_URL`,
@@ -334,7 +334,8 @@ The unit adds `[X-Stage] Role=worker`. Golden copies:
   gateway's listeners, default `unix`, which is required; add a loopback
   `host:port` for HTTP MCP clients;
   [runtime.md](runtime.md#agent-gateway)), plus the harness options the
-  server's `service.env` takes (`T3_FAKE`, `T3_FAKE_SEED`, `T3_BIN`). The
+  server's `service.env` takes (`T3_FAKE`, `T3_FAKE_SEED`, `T3_BIN`). Harnesses
+  can add comments for their options to the generated worker template. The
   removed harness keys are errors, as in `service.env`; connections are set
   up in Settings > Connections ([execution.md](execution.md#remote-machines)).
   `--managed` ignores `STAGE_DATA_DIR`, `STAGE_WORKER_CONFIG`,

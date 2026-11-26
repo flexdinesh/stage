@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/opencode"
@@ -63,9 +62,9 @@ func (c *Connector) Status(ctx context.Context, _ bool) (harness.Status, error) 
 	}, nil
 }
 
-// Configure takes config.OpenCodeEdit.
+// Configure takes Edit.
 func (c *Connector) Configure(ctx context.Context, settings json.RawMessage) (harness.Result, error) {
-	var in config.OpenCodeEdit
+	var in Edit
 	if err := db.DecodeStrict(settings, &in); err != nil {
 		return harness.Result{}, err
 	}

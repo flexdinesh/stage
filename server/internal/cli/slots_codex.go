@@ -3,14 +3,30 @@ package cli
 import (
 	"encoding/json"
 	"io"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/client"
 )
 
+type codexStatus struct {
+	Binary           string `json:"binary"`
+	CLIVersion       string `json:"cliVersion"`
+	AppServerVersion string `json:"appServerVersion"`
+	CodexHome        string `json:"codexHome"`
+	Daemon           string `json:"daemon"` // running | stopped | unknown
+	Account          *struct {
+		Type  string `json:"type"`
+		Email string `json:"email"`
+		Plan  string `json:"plan"`
+	} `json:"account"`
+	Fix       string     `json:"fix"`
+	CheckedAt *time.Time `json:"checkedAt"`
+}
+
 // The Codex status panel of `stage harness codex`.
 func init() {
 	statusPrinters["codex"] = func(w io.Writer, st client.HarnessStatus, cli string) error {
-		var s client.CodexStatus
+		var s codexStatus
 		if err := json.Unmarshal(st.Details, &s); err != nil {
 			return err
 		}
@@ -19,7 +35,7 @@ func init() {
 	}
 }
 
-func printCodexStatus(w io.Writer, state, reason string, s client.CodexStatus, cli string) {
+func printCodexStatus(w io.Writer, state, reason string, s codexStatus, cli string) {
 	t := stateTone(state)
 	line(w, t, "codex %s", t.paint(codexState(state)))
 	binary := s.Binary

@@ -20,6 +20,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/serve"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // pgConfig is cfg on the Postgres database rawURL names.
@@ -113,7 +114,7 @@ func TestPostgresUnreachable(t *testing.T) {
 	logger, logs := bufLogger()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	err := serve.Run(ctx, serve.Options{Config: pgConfig(t, filepath.Join(short, "d"), rawURL, "unix:"+filepath.Join(short, "s.sock")), T3: newT3(), Logger: logger})
+	err := serve.Run(ctx, serve.Options{Config: pgConfig(t, filepath.Join(short, "d"), rawURL, "unix:"+filepath.Join(short, "s.sock")), HarnessOverrides: map[string]any{t3.Kind: newT3()}, Logger: logger})
 	var ie *config.InvalidError
 	var oe *store.OwnedError
 	if err == nil || ctx.Err() != nil || errors.As(err, &ie) || errors.As(err, &oe) {

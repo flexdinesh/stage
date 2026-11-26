@@ -15,6 +15,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/harnesses"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/logfile"
 	"github.com/flexdinesh/stage/server/internal/machine"
@@ -53,7 +54,7 @@ func runWorker(ctx context.Context, env Env, args []string) error {
 	case "run":
 		fs.BoolVar(&managed, "managed", false, "run as the worker service (`stage worker service`): config path and gateway listeners from worker.env only")
 		fs.Var(&listenFlags, "listen", "agent gateway listen address (repeatable or a comma list; env "+config.WorkerListenEnv+"; default and required: unix)")
-		fs.BoolVar(&localHarnesses, "local-harnesses", false, "let harnesses that run as local processes (Claude Code) run on this machine (the worker service always may; a container never); also "+harness.LocalHarnessesEnv+"=1")
+		fs.BoolVar(&localHarnesses, "local-harnesses", false, "let harnesses that run as local processes run on this machine (the worker service always may; a container never); also "+harness.LocalHarnessesEnv+"=1")
 	case "leave":
 		fs.BoolVar(&local, "local", false, "only delete the local worker config (the server is unreachable or already removed the machine)")
 	}
@@ -153,19 +154,17 @@ func workerServiceInstalled(ctx context.Context, env Env) bool {
 }
 
 // workerHost is what `stage worker run` serves: this machine's connection
-// setup (T3, OpenCode, and Claude Code when profile allows local
-// harnesses; composed once the main server is reachable), the adapters it
-// installs, and its fs and process work (machine.LocalOps), over the
-// worker channel. harnessEnv is the machine's harness settings
-// (config.HarnessEnvKeys); credentials stay in the worker dir of
-// configPath.
+// setup and adapters once the main server is reachable, and its fs and
+// process work (machine.LocalOps), over the worker channel. harnessEnv is
+// the machine's harness environment; credentials stay in the worker dir
+// of configPath.
 func workerHost(profile harness.Profile, harnessEnv func(string) string, configPath string, logger *slog.Logger) func(int64, workerchan.Upcall) worker.Host {
 	return func(machineID int64, call workerchan.Upcall) worker.Host {
 		h := remote.NewHost(machine.NewLocal(machineID, profile, machine.LocalOps{}))
 		workersetup.Attach(workersetup.Options{
 			Host:   h,
-			Ports:  workersetup.Ports{Call: call, Creds: worker.NewCredentialStore(configPath)},
-			Config: config.HarnessFrom(harnessEnv),
+			Ports:  workersetup.Ports{Call: call, Creds: worker.NewCredentialStore(configPath, harnesses.LegacySecrets()...)},
+			Getenv: harnessEnv,
 			// The worker dir of configPath (beside its credentials).
 			StateDir: worker.Dir(configPath),
 			Logger:   logger,
@@ -266,7 +265,7 @@ func managedWorkerConfig(getenv func(string) string, goos string) (string, map[s
 	if err != nil {
 		return "", nil, config.Invalid(err)
 	}
-	vals, err := config.ReadWorkerEnv(envPath)
+	vals, err := config.ReadWorkerEnv(envPath, harnesses.Env())
 	if err != nil {
 		return "", nil, config.Invalid(err)
 	}

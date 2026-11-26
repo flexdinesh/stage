@@ -10,8 +10,8 @@ import (
 )
 
 // movedRetirer retires a connection whose instance moved to another machine:
-// an active, disconnected connection whose stable identity (a T3 environment)
-// is held by an active, connected connection on another machine. It retires
+// an active connection whose stable identity is held by another machine
+// and whose setup confirms the move according to its module policy. It retires
 // onto that one, so pickers stop offering it and its default, backlog and
 // schedules follow (db.Store.RetireConnection). It runs at startup, every
 // sync interval and when kicked (a pairing, a worker joining, a manual sync).
@@ -67,24 +67,17 @@ func (m *movedRetirer) Once(ctx context.Context) error {
 		return err
 	}
 	cs := m.connectors()
-	// configured reports a connection's setup state; ok is false when no
-	// connector owns it (its state is unknown).
-	configured := func(id int64) (set, ok bool) {
-		_, k, ok := cs.Owner(ctx, id)
-		if !ok {
-			return false, false
-		}
-		return k.Summary(ctx).Configured, true
-	}
 	retired := map[int64]bool{}
 	for _, mv := range moves {
 		if retired[mv.Old] || retired[mv.New] || !m.reachable(m.store.ConnectionMachine(mv.Old)) {
 			continue
 		}
-		if set, ok := configured(mv.Old); !ok || set {
+		d, old, ok := cs.Owner(ctx, mv.Old)
+		if !ok || d.MovedRetire == nil {
 			continue
 		}
-		if set, ok := configured(mv.New); !ok || !set {
+		_, next, ok := cs.Owner(ctx, mv.New)
+		if !ok || !d.MovedRetire(old.Summary(ctx), next.Summary(ctx)) {
 			continue
 		}
 		machine := m.store.ConnectionMachine(mv.Old)

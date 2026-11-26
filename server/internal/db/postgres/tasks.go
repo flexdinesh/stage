@@ -37,7 +37,7 @@ const (
 const closedSQL = `(t.archived_at IS NOT NULL OR COALESCE(tr.status, 'open') <> 'open')`
 
 const taskSelect = `
-SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM task_launch_destinations d WHERE d.task_id=t.id AND d.attempt=t.launch_attempt),(SELECT external_project_id FROM project_bindings b WHERE b.project_id=t.project_id AND b.connection_id=t.connection_id AND b.active),''), t.title, t.prompt,
+SELECT t.id, t.project_id, p.title, t.title, t.prompt,
   t.state, t.tree_id, tr.title, tr.start_mode, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
   COALESCE((SELECT jsonb_agg(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'::jsonb),
   COALESCE((SELECT jsonb_agg(n.task_id ORDER BY n.task_id) FROM task_needs n WHERE n.need_id = t.id), '[]'::jsonb),
@@ -62,7 +62,7 @@ LEFT JOIN schedules sc ON sc.id = t.schedule_id`
 
 func scanTask(row rowScanner) (store.Task, error) {
 	var t store.Task
-	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.T3ProjectID, &t.Title, &t.Prompt,
+	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.Title, &t.Prompt,
 		&t.State, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
 		&t.StartMode, &t.EffectiveStartMode, &t.Readiness, &t.Needs, &t.Dependents, &t.Adopted, &t.ReadyAt,
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.RunStartedAt, &t.RunEndedAt,

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/machine"
 )
@@ -66,10 +65,7 @@ func TestWorkspacesImportableAndRepo(t *testing.T) {
 		{"id": "global", "canonical": "/", "vcs": "git", "time": times(0)},
 	})
 	for _, local := range []bool{true, false} {
-		cfg := Settings{Endpoint: url, Auth: config.OpenCodeAuthNone}
-		if local {
-			cfg.Auth = config.OpenCodeAuthLocal
-		}
+		cfg := Settings{Endpoint: url, Local: local}
 		a, err := New(2, cfg)
 		if err != nil {
 			t.Fatal(err)

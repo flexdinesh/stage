@@ -12,8 +12,6 @@ import (
 )
 
 func init() {
-	register("TokenStoreRoundTrip", caseTokenStoreRoundTrip)
-	register("T3SettingsRoundTrip", caseT3SettingsRoundTrip)
 	register("TransitionTask", caseTransitionTask)
 	register("UpdateTaskRestrictions", caseUpdateTaskRestrictions)
 	register("TransitionLaunchGuards", caseTransitionLaunchGuards)
@@ -44,66 +42,6 @@ func mustTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64, t
 		t.Fatal(err)
 	}
 	return task
-}
-
-func caseTokenStoreRoundTrip(t *testing.T, open Factory) {
-	s, ctx := setup(t, open)
-	tok, err := s.LoadToken(ctx, db.LocalMachine)
-	if err != nil || tok != (t3.StoredToken{}) {
-		t.Fatalf("empty token: %+v %v", tok, err)
-	}
-	exp := time.Date(2026, 12, 8, 10, 0, 0, 0, time.UTC)
-	if err := s.SaveToken(ctx, db.LocalMachine, t3.StoredToken{ClientID: "c1", Token: "secret", ExpiresAt: exp}); err != nil {
-		t.Fatal(err)
-	}
-	tok, err = s.LoadToken(ctx, db.LocalMachine)
-	if err != nil || tok.ClientID != "c1" || tok.Token != "secret" || !tok.ExpiresAt.Equal(exp) {
-		t.Fatalf("got %+v %v", tok, err)
-	}
-	if tok.ExpiresAt.Location() != time.UTC {
-		t.Fatalf("timestamps must scan as UTC, got %v", tok.ExpiresAt.Location())
-	}
-	if err := s.SetLastError(ctx, db.LocalMachine, "boom"); err != nil {
-		t.Fatal(err)
-	}
-	c, _ := s.GetConnection(ctx, db.LocalMachine)
-	if c.LastError == nil || *c.LastError != "boom" {
-		t.Fatalf("last error %v", c.LastError)
-	}
-	_ = s.SetLastError(ctx, db.LocalMachine, "")
-	c, _ = s.GetConnection(ctx, db.LocalMachine)
-	if c.LastError != nil {
-		t.Fatalf("last error not cleared: %v", *c.LastError)
-	}
-}
-
-func caseT3SettingsRoundTrip(t *testing.T, open Factory) {
-	s, ctx := setup(t, open)
-	c, err := s.GetConnection(ctx, db.LocalMachine)
-	if err != nil || c.T3URL != nil || c.EnvironmentID != nil {
-		t.Fatalf("fresh connection %+v %v", c, err)
-	}
-	if err := s.SetT3URL(ctx, db.LocalMachine, "http://127.0.0.1:4000"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.SwitchInstance(ctx, db.LocalMachine, t3.Descriptor, "env-1", "box", 0); err != nil {
-		t.Fatal(err)
-	}
-	c, _ = s.GetConnection(ctx, db.LocalMachine)
-	if c.T3URL == nil || *c.T3URL != "http://127.0.0.1:4000" || c.EnvironmentID == nil || *c.EnvironmentID != "env-1" || c.ConnectionID != s.ActiveID(db.LocalMachine, "t3") {
-		t.Fatalf("saved %+v", c)
-	}
-	// Saving a token leaves the settings alone.
-	if err := s.SaveToken(ctx, db.LocalMachine, t3.StoredToken{ClientID: "c", Token: "t", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetT3URL(ctx, db.LocalMachine, ""); err != nil {
-		t.Fatal(err)
-	}
-	c, _ = s.GetConnection(ctx, db.LocalMachine)
-	if c.T3URL != nil || c.EnvironmentID == nil {
-		t.Fatalf("cleared %+v", c)
-	}
 }
 
 func caseTransitionTask(t *testing.T, open Factory) {

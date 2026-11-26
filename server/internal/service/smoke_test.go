@@ -228,8 +228,8 @@ func TestSmoke(t *testing.T) {
 	if !r.OK || r.Status == nil || !r.Status.Ready || r.Status.Worker == nil || !r.Status.Worker.OwnedByService {
 		t.Fatalf("worker start: %+v", r)
 	}
-	if _, err := os.Stat(filepath.Join(cfg, "worker.env")); err != nil {
-		t.Fatalf("worker.env: %v", err)
+	if template, err := os.ReadFile(filepath.Join(cfg, "worker.env")); err != nil || !strings.Contains(string(template), "# T3_BIN=\n") {
+		t.Fatalf("worker.env template missing T3_BIN (%v)", err)
 	}
 	if r := s.report("start", "--json"); r.OK || r.Code != service.CodeInvalid {
 		t.Fatalf("server start beside the worker service: %+v", r)
