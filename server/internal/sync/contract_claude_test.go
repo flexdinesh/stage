@@ -49,8 +49,7 @@ func claudeSetupWith(t *testing.T, p placement, f *claudetest.Fake, a *claudecod
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := p.coordinator(t, store, map[int64]execution.Adapter{claudeConn: a}, nil)
-	svc.Harnesses = harness.MustRegistry(t3.Descriptor, claudecode.Descriptor)
+	svc := p.coordinator(t, store, harness.MustRegistry(t3.Descriptor, claudecode.Descriptor), map[int64]execution.Adapter{claudeConn: a}, nil)
 	return store, svc, task, a
 }
 
@@ -409,8 +408,7 @@ func TestRemoteClaudeConnectionOnAWorkerWithoutLocalHarnesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	rig := newContractWorker(t, store, map[int64]execution.Adapter{claudeConn: f.Adapter(claudeConn)})
-	svc := coordinator.NewForMachines(store, rig.Set(), nil)
-	svc.Harnesses = harness.MustRegistry(claudecode.Descriptor)
+	svc := coordinator.NewForMachines(store, harness.MustRegistry(claudecode.Descriptor), rig.Set(), nil)
 	if _, err := svc.Adapter(claudeConn); err != nil {
 		t.Fatalf("hosted: %v", err)
 	}

@@ -192,8 +192,7 @@ func Run(ctx context.Context, o Options) error {
 	// machine per joined worker (below, ADR 0002).
 	local = &localMachine{Local: machine.NewLocal(db.LocalMachine, profile, machine.LocalOps{})}
 	machines := machine.MustSet(local)
-	syncSvc := coordinator.NewForMachines(store, machines, logger)
-	syncSvc.Harnesses = registry
+	syncSvc := coordinator.NewForMachines(store, registry, machines, logger)
 	syncSvc.PublicURL = cfg.PublicURL
 	syncSvc.CLI = cliName
 	// Retires connections whose instance moved to another machine (moved.go).

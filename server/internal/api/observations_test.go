@@ -197,8 +197,7 @@ func TestPushObservationsForAnOfflineMachine(t *testing.T) {
 			}
 			return ids
 		}, nil, nil)
-		svc := t3sync.NewForMachines(store, set, nil)
-		svc.Harnesses = testHarnesses
+		svc := t3sync.NewForMachines(store, testHarnesses, set, nil)
 		d.Sync, d.Channels, d.Machines = svc, hub, hosts
 	})
 	j := e.join("laptop")

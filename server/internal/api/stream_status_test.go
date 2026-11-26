@@ -95,8 +95,7 @@ func TestStreamStatusParity(t *testing.T) {
 					local.SetConnector(t3.Kind, connector)
 					set = machine.MustSet(local)
 				}
-				svc = coordinator.NewForMachines(d.Store, set, slog.New(slog.NewTextHandler(&logs, nil)))
-				svc.Harnesses = testHarnesses
+				svc = coordinator.NewForMachines(d.Store, testHarnesses, set, slog.New(slog.NewTextHandler(&logs, nil)))
 				svc.PublicURL = publicURL
 				d.Sync = svc
 				connectors, err := set.Connectors(testHarnesses)

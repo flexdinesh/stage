@@ -123,7 +123,7 @@ func TestLiveMixedManualTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := coordinator.NewWithAdapters(store, map[int64]execution.Adapter{1: first, 2: f.a}, nil)
+	service := coordinator.NewWithAdapters(store, nil, map[int64]execution.Adapter{1: first, 2: f.a}, nil)
 	var tasks []db.Task
 	for _, harness := range []int64{1, 2, 1} {
 		model := t3.ModelKey("evalbot", "eval/scripted")

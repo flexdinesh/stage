@@ -64,8 +64,7 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 		}
 		adapters[7] = other
 	}
-	svc := t3sync.NewWithAdapters(store, adapters, log)
-	svc.Harnesses = harness.MustRegistry(t3.Descriptor, opencode.Descriptor)
+	svc := t3sync.NewWithAdapters(store, harness.MustRegistry(t3.Descriptor, opencode.Descriptor), adapters, log)
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	h := api.NewRouter(api.Deps{

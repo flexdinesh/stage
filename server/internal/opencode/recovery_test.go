@@ -40,7 +40,7 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 		t.Fatal(e)
 	}
 	compose := func() *coordinator.Service {
-		return coordinator.NewWithAdapters(store, map[int64]execution.Adapter{2: a}, nil)
+		return coordinator.NewWithAdapters(store, nil, map[int64]execution.Adapter{2: a}, nil)
 	}
 	for _, step := range []string{"worktree", "session", "prompt"} {
 		t.Run(step, func(t *testing.T) {

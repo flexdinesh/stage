@@ -97,8 +97,7 @@ func TestWatchAttention(t *testing.T) {
 	old(oldIdle)
 	setStatus(oldIdle, t3.StatusCompleted)
 
-	svc := t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	svc.Harnesses = t3Harnesses
+	svc := t3sync.NewWithAdapters(store, t3Harnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	var got []change
 	svc.OnSessionChange = func(_ context.Context, c t3sync.SessionChange) {
 		from := ""

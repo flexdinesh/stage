@@ -93,8 +93,7 @@ func TestRemoteClaudeConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := coordinator.NewForMachines(r.store, r.set, quiet())
-	svc.Harnesses = registry
+	svc := coordinator.NewForMachines(r.store, registry, r.set, quiet())
 	got, err := svc.StartTask(ctx, task.ID)
 	if err != nil || got.State != db.StateRunning || got.Session == nil {
 		t.Fatalf("start %+v %v", got, err)

@@ -48,13 +48,13 @@ func (p placement) machine(t *testing.T, pool *sqlite.DB) int64 {
 
 // coordinator drives adapters: hosted in process, or proxied to a worker
 // that serves them (a new main server and worker per call).
-func (p placement) coordinator(t *testing.T, store *db.Store, adapters map[int64]execution.Adapter, log *slog.Logger) *coordinator.Service {
+func (p placement) coordinator(t *testing.T, store *db.Store, reg *harness.Registry, adapters map[int64]execution.Adapter, log *slog.Logger) *coordinator.Service {
 	t.Helper()
 	if !p.remote {
-		return coordinator.NewWithAdapters(store, adapters, log)
+		return coordinator.NewWithAdapters(store, reg, adapters, log)
 	}
 	rig := newContractWorker(t, store, adapters)
-	return coordinator.NewForMachines(store, rig.Set(), log)
+	return coordinator.NewForMachines(store, reg, rig.Set(), log)
 }
 
 type contractConnector struct{ harness.Connector }

@@ -37,8 +37,7 @@ func codexSetup(t *testing.T, p placement, codexDir string) (*db.Store, *codexte
 	srv.Trust(codexDir, "trusted")
 	client := codex.NewClient(&codextest.Daemon{Srv: srv, T: t}, "test")
 	t.Cleanup(client.Close)
-	svc := p.coordinator(t, store, map[int64]execution.Adapter{3: codex.New(client, 3, "")}, nil)
-	svc.Harnesses = harness.MustRegistry(t3.Descriptor, codex.Descriptor)
+	svc := p.coordinator(t, store, harness.MustRegistry(t3.Descriptor, codex.Descriptor), map[int64]execution.Adapter{3: codex.New(client, 3, "")}, nil)
 	return store, srv, svc, task
 }
 

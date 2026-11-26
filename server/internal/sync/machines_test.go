@@ -49,8 +49,7 @@ func twoMachineSetup(t *testing.T) (*db.Store, *coordinator.Service, map[int64]*
 		}
 		tasks[id] = task
 	}
-	svc := coordinator.NewWithAdapters(store, map[int64]execution.Adapter{2: fakes[2], 3: fakes[3]}, nil)
-	svc.Harnesses = documentHarnesses
+	svc := coordinator.NewWithAdapters(store, documentHarnesses, map[int64]execution.Adapter{2: fakes[2], 3: fakes[3]}, nil)
 	return store, svc, fakes, tasks
 }
 
@@ -141,7 +140,7 @@ func TestTwoMachinesT3FullSyncsRunTogether(t *testing.T) {
 	}
 	var arrived gosync.WaitGroup
 	arrived.Add(2)
-	svc := coordinator.NewWithAdapters(store, map[int64]execution.Adapter{
+	svc := coordinator.NewWithAdapters(store, nil, map[int64]execution.Adapter{
 		local:  barrierAdapter{t3.NewConnectionAdapter(t3.NewFake(), local), &arrived},
 		sw.New: barrierAdapter{t3.NewConnectionAdapter(t3.NewFake(), sw.New), &arrived},
 	}, nil)

@@ -21,8 +21,7 @@ func TestHarnessCommandPrintsWhyAHostedHarnessIsUnavailable(t *testing.T) {
 	server := stageharness.Profile{Kind: stageharness.ProfileServer}
 	h := newHarness(t, func(d *api.Deps) {
 		d.Harnesses = stageharness.MustRegistry(t3.Descriptor, opencode.Descriptor, kit)
-		svc := t3sync.NewForMachines(d.Store, machine.MustSet(machine.NewLocal(db.LocalMachine, server, nil)), nil)
-		svc.Harnesses = d.Harnesses
+		svc := t3sync.NewForMachines(d.Store, d.Harnesses, machine.MustSet(machine.NewLocal(db.LocalMachine, server, nil)), nil)
 		d.Sync = svc
 	})
 	reason := server.Allows(kit).Reason

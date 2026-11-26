@@ -47,7 +47,7 @@ func TestInventoryCallsOpsForHostedLocalWorkspaces(t *testing.T) {
 	host.Install(dbtest.T3Connection, dbtest.T3Connection, a)
 	const unplaced = 999
 	host.Install(unplaced, unplaced, a)
-	svc := coordinator.NewForMachines(store, machine.MustSet(host), nil)
+	svc := coordinator.NewForMachines(store, nil, machine.MustSet(host), nil)
 
 	got, err := svc.Inventory(t.Context(), dbtest.T3Connection)
 	if err != nil || !reflect.DeepEqual(got, rows) || calls != 0 {
@@ -76,8 +76,7 @@ func TestFullSyncPollsLinkedTasksAfterInventoryFailure(t *testing.T) {
 		}
 		return fake.Workspaces(ctx)
 	}}
-	svc := coordinator.NewWithAdapters(store, map[int64]execution.Adapter{task.ConnectionID: a}, nil)
-	svc.Harnesses = documentHarnesses
+	svc := coordinator.NewWithAdapters(store, documentHarnesses, map[int64]execution.Adapter{task.ConnectionID: a}, nil)
 
 	started, err := svc.StartTask(ctx, task.ID)
 	if err != nil || started.State != db.StateRunning {

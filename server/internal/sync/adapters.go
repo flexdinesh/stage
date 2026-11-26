@@ -11,7 +11,7 @@ import (
 
 // NewWithAdapters hosts adapters in process, each on its connection's
 // machine (tests and fixed compositions).
-func NewWithAdapters(store *db.Store, adapters map[int64]execution.Adapter, log *slog.Logger) *Service {
+func NewWithAdapters(store *db.Store, reg *harness.Registry, adapters map[int64]execution.Adapter, log *slog.Logger) *Service {
 	profile := harness.Profile{Kind: harness.ProfileServer, LocalProcesses: true}
 	local := machine.NewLocal(db.LocalMachine, profile, nil)
 	locals := map[int64]*machine.Local{local.ID(): local}
@@ -27,7 +27,7 @@ func NewWithAdapters(store *db.Store, adapters map[int64]execution.Adapter, log 
 		}
 		locals[m].Install(id, id, a)
 	}
-	s := NewForMachines(store, machine.MustSet(local, others...), log)
+	s := NewForMachines(store, reg, machine.MustSet(local, others...), log)
 	for _, l := range locals {
 		l.OnChange(s.ConnectionsChanged)
 	}

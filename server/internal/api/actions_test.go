@@ -153,8 +153,7 @@ func TestDeclaredActionsLocalAndWorker(t *testing.T) {
 					}
 					set = machine.MustSet(local)
 				}
-				svc = coordinator.NewForMachines(d.Store, set, slog.Default())
-				svc.Harnesses = reg
+				svc = coordinator.NewForMachines(d.Store, reg, set, slog.Default())
 				d.Sync, d.Harnesses = svc, reg
 				d.LiveConnectors = func() harness.Connectors {
 					out, err := set.Connectors(reg)

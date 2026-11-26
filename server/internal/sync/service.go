@@ -30,7 +30,7 @@ var ErrSyncRunning error = &db.ConflictError{Msg: "sync already running"}
 
 type Service struct {
 	store           *db.Store
-	machines        *machine.Set // every machine's adapters, connectors and ops
+	conns           *machine.Connections
 	log             *slog.Logger
 	OnTransition    func(context.Context, Change)
 	OnSessionChange func(context.Context, SessionChange)
@@ -38,10 +38,10 @@ type Service struct {
 	OnFullSync      func() // a full sync (Sync now) finished
 	// OnConnectionSynced runs after a connection's full sync succeeded
 	// (the composition records it where a harness's setup shows it).
-	OnConnectionSynced                                             func(ctx context.Context, connection int64, at time.Time) error
-	Harnesses                                                      *harness.Registry // descriptors by kind; completion is inferred only from a declared closure
-	PublicURL                                                      string            // STAGE_PUBLIC_URL, named in launch journal instructions when set
-	CLI                                                            string            // installed CLI name (install.CLIName), named in launch journal instructions
+	OnConnectionSynced func(ctx context.Context, connection int64, at time.Time) error
+
+	PublicURL                                                      string // STAGE_PUBLIC_URL, named in launch journal instructions when set
+	CLI                                                            string // installed CLI name (install.CLIName), named in launch journal instructions
 	FullSyncEvery, PollEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
 	syncs                                                          gosync.Map // connection ID to *syncState (full syncs)
 	streamErrors                                                   gosync.Map // connection ID to *atomic.Pointer[string]
@@ -54,48 +54,20 @@ type Service struct {
 
 // NewForMachines coordinates the harnesses machines host. Each in-process
 // machine's change hook must call ConnectionsChanged.
-func NewForMachines(store *db.Store, machines *machine.Set, log *slog.Logger) *Service {
+func NewForMachines(store *db.Store, reg *harness.Registry, machines *machine.Set, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{store: store, machines: machines, log: log, FullSyncEvery: 5 * time.Minute, PollEvery: 5 * time.Second, StalePollEvery: time.Minute, LaunchAttemptTimeout: 40 * time.Second, kickSync: make(chan struct{}, 1), started: time.Now()}
+	return &Service{store: store, conns: machine.NewConnections(store, machines, reg), log: log, FullSyncEvery: 5 * time.Minute, PollEvery: 5 * time.Second, StalePollEvery: time.Minute, LaunchAttemptTimeout: 40 * time.Second, kickSync: make(chan struct{}, 1), started: time.Now()}
 }
 
 // Machines are the machines this coordinator drives.
-func (s *Service) Machines() *machine.Set { return s.machines }
+func (s *Service) Machines() *machine.Set { return s.conns.Machines() }
 
-// Ops is the fs and process work of machine id (false when no host serves
-// it).
-func (s *Service) Ops(id int64) (machine.Ops, bool) {
-	m, ok := s.machines.Get(id)
-	if !ok {
-		return nil, false
-	}
-	return m.Ops(), true
-}
+func (s *Service) Ops(id int64) (machine.Ops, bool) { return s.conns.Ops(id) }
 
 func (s *Service) Adapter(id int64) (execution.Adapter, error) {
-	a, ok := s.machines.Adapter(id)
-	kind := s.store.Harness(id)
-	// A replaced instance keeps its history but is never reached again.
-	if !ok && kind != "" && !s.store.ConnectionActive(id) {
-		return nil, db.ConnectionRetired()
-	}
-	// Its machine does not allow the kind (a hosted harness on a profile
-	// without local processes): say why. Checked before an installed
-	// adapter too, so a worker restarted without local harnesses names the
-	// fix instead of answering that it hosts no adapter.
-	if d, found := s.descriptor(kind); found {
-		if m, found := s.machines.Get(s.store.ConnectionMachine(id)); found {
-			if av := m.Allows(d); !av.Available {
-				return nil, &db.ConflictError{Code: "connection_unavailable", Msg: av.Reason}
-			}
-		}
-	}
-	if !ok {
-		return nil, &db.ConflictError{Code: "connection_unavailable", Msg: "This harness is unavailable. Select a supported connection."}
-	}
-	return a, nil
+	return s.conns.Adapter(id)
 }
 
 // ConnectionsChanged follows a machine's adapters after its harness moved
@@ -109,7 +81,7 @@ func (s *Service) ConnectionsChanged(old, next int64) {
 	s.Kick()
 }
 func (s *Service) connections() map[int64]execution.Adapter {
-	return s.machines.Adapters()
+	return s.conns.All()
 }
 func (s *Service) lock(id int64) func() {
 	value, _ := s.locks.LoadOrStore(id, &gosync.Mutex{})
@@ -436,10 +408,10 @@ func (s *Service) apply(ctx context.Context, task db.Task, o execution.Observati
 // wraps (its origin among that harness's Wraps): the wrapper tracks it.
 // Nil: Stage may track it.
 func (s *Service) refusal(kind string, o execution.Observation) error {
-	if s.Harnesses == nil {
+	if s.conns.Harnesses() == nil {
 		return nil
 	}
-	if r := s.Harnesses.Refusal(kind, o.Origin); r != nil {
+	if r := s.conns.Harnesses().Refusal(kind, o.Origin); r != nil {
 		return harnessErr(r)
 	}
 	return nil
@@ -458,12 +430,8 @@ func (s *Service) CheckObservation(kind string, o execution.Observation) error {
 	return s.refusal(kind, o)
 }
 
-// descriptor is kind's registered descriptor.
 func (s *Service) descriptor(kind string) (harness.Descriptor, bool) {
-	if s.Harnesses == nil {
-		return harness.Descriptor{}, false
-	}
-	return s.Harnesses.Lookup(kind)
+	return s.conns.Descriptor(kind)
 }
 
 // Stream ingests connection id's pushed observations while its adapter
@@ -478,7 +446,7 @@ func (s *Service) Stream(ctx context.Context, id int64) error {
 	if !ok {
 		// An offline worker cannot advertise traits. Keep the last failure
 		// until that machine can answer or the connection changes.
-		if m, found := s.machines.Get(s.store.ConnectionMachine(id)); found && m.Online() {
+		if m, found := s.conns.Machines().Get(s.store.ConnectionMachine(id)); found && m.Online() {
 			s.streamErrors.Delete(id)
 		}
 		return nil
@@ -560,7 +528,7 @@ func (s *Service) closure(kind string, o execution.Observation) (harness.Closure
 // httpAPI names the HTTP API for a session on connection's machine: the
 // public URL locally, the worker's agent gateway on a remote machine.
 func (s *Service) httpAPI(connection int64) string {
-	remote, gateways := s.machines.AgentGateways(s.store.ConnectionMachine(connection))
+	remote, gateways := s.conns.Machines().AgentGateways(s.store.ConnectionMachine(connection))
 	return httpAPI(s.PublicURL, remote, gateways)
 }
 

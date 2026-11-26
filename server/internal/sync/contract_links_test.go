@@ -38,11 +38,10 @@ func TestContractTaskLinksAndAcceptedHandoff(t *testing.T) {
 			rig := remotetest.NewWithConnectors(t, remoteMachine, adapters, map[string]harness.Connector{
 				task.Harness: documentLinkConnector{connectionID: task.ConnectionID},
 			})
-			svc = coordinator.NewForMachines(store, rig.Set(), nil)
+			svc = coordinator.NewForMachines(store, documentHarnesses, rig.Set(), nil)
 		} else {
-			svc = coordinator.NewWithAdapters(store, adapters, nil)
+			svc = coordinator.NewWithAdapters(store, documentHarnesses, adapters, nil)
 		}
-		svc.Harnesses = documentHarnesses
 		ctx := t.Context()
 		srv := httptest.NewServer(api.NewRouter(api.Deps{Store: store, Sync: svc, Harnesses: documentHarnesses}))
 		t.Cleanup(srv.Close)

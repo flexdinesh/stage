@@ -173,8 +173,7 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	fake := t3.NewFake()
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, log)
-	svc.Harnesses = testHarnesses
+	svc := t3sync.NewWithAdapters(store, testHarnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, log)
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
 	push := notify.New(store, "https://stage.test", log)

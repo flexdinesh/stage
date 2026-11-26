@@ -20,8 +20,7 @@ func TestCodexCommands(t *testing.T) {
 	h := newHarness(t, func(d *api.Deps) {
 		reg := stageharness.MustRegistry(codex.Descriptor)
 		local := machine.NewLocal(db.LocalMachine, stageharness.Profile{Kind: stageharness.ProfileDesktop, LocalProcesses: true}, nil)
-		svc := t3sync.NewForMachines(d.Store, machine.MustSet(local), nil)
-		svc.Harnesses = reg
+		svc := t3sync.NewForMachines(d.Store, reg, machine.MustSet(local), nil)
 		local.OnChange(svc.ConnectionsChanged)
 		ports := machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), reg)
 		setup, err := codexsetup.New(t.Context(), codexsetup.Options{

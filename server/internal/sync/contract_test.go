@@ -126,8 +126,7 @@ func contractSetup(t *testing.T, p placement) (*db.Store, *documentHarness, *coo
 	t.Helper()
 	store, task := contractTask(t, p)
 	fake := &documentHarness{}
-	svc := p.coordinator(t, store, map[int64]execution.Adapter{2: fake}, nil)
-	svc.Harnesses = documentHarnesses
+	svc := p.coordinator(t, store, documentHarnesses, map[int64]execution.Adapter{2: fake}, nil)
 	return store, fake, svc, task
 }
 
@@ -167,8 +166,7 @@ func TestContractRestartReconcilesFrozenTwoStepIntent(t *testing.T) {
 			t.Fatalf("missing durable launch %+v %v", attempt, err)
 		}
 		fake.loseReply = false
-		restarted := p.coordinator(t, store, map[int64]execution.Adapter{2: fake}, nil)
-		restarted.Harnesses = documentHarnesses
+		restarted := p.coordinator(t, store, documentHarnesses, map[int64]execution.Adapter{2: fake}, nil)
 		restarted.RecoverLaunching(ctx)
 		// The periodic recovery path, without a second Start action.
 		if _, err := testDB.Pool.ExecContext(ctx, "UPDATE execution_attempts SET retry_at=NULL"); err != nil {

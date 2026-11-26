@@ -197,8 +197,7 @@ func v2Setup(t *testing.T, p placement, kind string, a execution.Adapter) (*db.S
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := p.coordinator(t, store, map[int64]execution.Adapter{3: a}, nil)
-	svc.Harnesses = v2Harnesses
+	svc := p.coordinator(t, store, v2Harnesses, map[int64]execution.Adapter{3: a}, nil)
 	return store, svc, task
 }
 
@@ -258,10 +257,10 @@ func TestContractCorrelatedLaunchNotFoundStaysUnconfirmed(t *testing.T) {
 
 func TestContractCorrelatedLaunchNeedsCorrelator(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
-		store, _, svc, task := contractSetup(t, p)
+		store, task := contractTask(t, p)
 		d := documentHarnesses.All()[0]
 		d.Launch = harness.LaunchCorrelated
-		svc.Harnesses = harness.MustRegistry(d)
+		svc := p.coordinator(t, store, harness.MustRegistry(d), map[int64]execution.Adapter{2: &documentHarness{}}, nil)
 		if _, err := svc.StartTask(t.Context(), task.ID); err == nil || !strings.Contains(err.Error(), "cannot reconcile") {
 			t.Fatal("correlated launch without a correlator", err)
 		}
@@ -340,8 +339,7 @@ func TestContractObservationStateReasons(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dsvc2 := p.coordinator(t, dstore, map[int64]execution.Adapter{2: lostOwner{doc}}, nil)
-		dsvc2.Harnesses = documentHarnesses
+		dsvc2 := p.coordinator(t, dstore, documentHarnesses, map[int64]execution.Adapter{2: lostOwner{doc}}, nil)
 		if err := dsvc2.PollTask(ctx, running); err == nil || !strings.Contains(err.Error(), execution.ReasonOwnerExited) {
 			t.Fatal("undeclared owner_exited was accepted", err)
 		}

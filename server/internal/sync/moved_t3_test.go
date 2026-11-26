@@ -62,8 +62,7 @@ func movedT3Setup(t *testing.T, p placement, a execution.Adapter) (*db.Store, *c
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := p.coordinator(t, store, map[int64]execution.Adapter{3: a}, nil)
-	svc.Harnesses = harness.MustRegistry(t3.Descriptor)
+	svc := p.coordinator(t, store, harness.MustRegistry(t3.Descriptor), map[int64]execution.Adapter{3: a}, nil)
 	return store, svc, task
 }
 
