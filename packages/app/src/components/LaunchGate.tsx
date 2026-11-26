@@ -7,7 +7,7 @@ import { useApi } from "../platform/context.tsx";
 import { useConnectionStatuses } from "../harnesses/index.ts";
 import type { StartTreeResponse, Task } from "../api/types.ts";
 import { statusTargets, type HarnessSummary } from "../lib/connections.ts";
-import { connectionBlock, launchBlock, operationReason, readyTreeStarts, type LaunchBlock, type SessionOperation } from "../lib/launch.ts";
+import { connectionBlock, launchBlock, operationReason, readyTreeStarts, type LaunchBlock, type LaunchTarget, type SessionOperation } from "../lib/launch.ts";
 import { canStart, canStop } from "../lib/tasks.ts";
 import { retiredHint } from "../lib/harnesses.ts";
 import { machineSetupState, machineTag, withMachine } from "../lib/machines.ts";
@@ -16,7 +16,7 @@ import { SETTINGS_PATH } from "../lib/settings.ts";
 import { Alert, Hint, TextLink, cx, errorText } from "./ui.tsx";
 
 /** The block on launching a task on a connection, or null; `connectionId` and the project name where. */
-export type LaunchGate = (t: Pick<Task, "connectionId" | "projectId" | "projectTitle">) => LaunchBlock | null;
+export type LaunchGate = (t: LaunchTarget) => LaunchBlock | null;
 
 type OperationGate = (connectionId: number, operation: SessionOperation) => LaunchBlock | null;
 const CHECKING: LaunchBlock = { kind: "operation", reason: "Checking harness capabilities.", fix: null };

@@ -1,4 +1,4 @@
-import type { Harness, ImportSummary, Project } from "../api/types.ts";
+import type { Harness, ImportSummary, Project, ProjectBinding } from "../api/types.ts";
 import { relativeTime } from "./format.ts";
 
 /**
@@ -106,5 +106,12 @@ export function projectsForConnection(projects: readonly Project[], connectionId
 }
 
 export function projectWorkspace(project: Project): string {
- return project.bindings.map((binding) => binding.workspace).join(" · ") || "Workspace not bound";
+  return project.bindings.map((binding) => binding.workspace || binding.title || binding.externalProjectId).join(" · ") || "Workspace not bound";
+}
+
+/** The explicit choice or the primary on this connection, including when unavailable. */
+export function workspaceBinding(bindings: readonly ProjectBinding[], connectionId: number, bindingId: number | null = null): ProjectBinding | undefined {
+  return bindings.find((b) =>
+    b.connectionActive && b.connectionId === connectionId && (bindingId === null ? b.primary : b.id === bindingId),
+  );
 }

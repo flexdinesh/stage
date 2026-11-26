@@ -31,7 +31,7 @@ func (s *server) listTrees(w http.ResponseWriter, r *http.Request) error {
 	if f.CompletedFrom, err = queryCompletedFrom(q); err != nil {
 		return err
 	}
-	if f.ProjectID, err = queryInt64(q, "project"); err != nil {
+	if f.ProjectID, err = s.projectFilter(r, "project"); err != nil {
 		return err
 	}
 	trees, err := s.Store.ListTrees(r.Context(), f)

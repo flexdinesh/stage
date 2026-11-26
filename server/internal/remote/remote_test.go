@@ -287,13 +287,17 @@ func TestOpsRunOnTheWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	rig := remotetest.New(t, 2, map[int64]execution.Adapter{5: &probe{}})
-	ws, err := rig.Machine().Ops().Inventory(t.Context(), []execution.WorkspaceInfo{{ID: "w", WorkspaceRoot: "/srv/repo/app"}}, []machine.SharedRoot{{HarnessRoot: "/srv", StageRoot: root}})
-	if err != nil || len(ws) != 1 || ws[0].Repo != "github.com/acme/widgets" || ws[0].RepoPath != "app" {
-		t.Fatal(ws, err)
+	in := []execution.WorkspaceInfo{
+		{ID: "local", WorkspaceRoot: filepath.Join(root, "repo", "app"), Local: true, ImportIf: execution.ImportInCheckout},
+		{ID: "remote", WorkspaceRoot: filepath.Join(root, "repo", "app")},
+		{ID: "missing", WorkspaceRoot: filepath.Join(root, "repo", "gone"), Local: true},
 	}
-	want, _ := machine.LocalOps{}.Checkout(t.Context(), []machine.SharedRoot{{HarnessRoot: "/srv", StageRoot: root}}, "/srv/repo/app")
-	got, err := rig.Machine().Ops().Checkout(t.Context(), []machine.SharedRoot{{HarnessRoot: "/srv", StageRoot: root}}, "/srv/repo/app")
-	if err != nil || got != want {
-		t.Fatal(got, want, err)
+	got, err := rig.Machine().Ops().Inventory(t.Context(), in)
+	want, localErr := machine.LocalOps{}.Inventory(t.Context(), in)
+	if err != nil || localErr != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("worker inventory %+v, want %+v: %v %v", got, want, err, localErr)
+	}
+	if e := got[0].Evidence; e == nil || e.Remote != "github.com/acme/widgets" || e.Subpath != "app" || !got[0].Importable {
+		t.Fatalf("worker did not supply checkout evidence: %+v", e)
 	}
 }

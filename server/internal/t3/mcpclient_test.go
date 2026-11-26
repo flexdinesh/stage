@@ -567,6 +567,11 @@ func TestListProjectsPagesToCompletion(t *testing.T) {
 	if len(ps) != 2 || ps[0].ID != "a" || ps[1].ArchivedAt == nil || len(cursors) != 2 {
 		t.Fatalf("projects = %+v cursors = %v", ps, cursors)
 	}
+	for _, p := range ps {
+		if p.Local || p.Evidence != nil {
+			t.Fatalf("T3 project over a loopback connection claimed local filesystem evidence: %+v", p)
+		}
+	}
 }
 
 func (c *MCPClient) currentSession() *mcp.ClientSession {

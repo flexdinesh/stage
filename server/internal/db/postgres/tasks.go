@@ -36,7 +36,7 @@ const (
 // closedSQL: task t is archived or its tree tr is not open.
 const closedSQL = `(t.archived_at IS NOT NULL OR COALESCE(tr.status, 'open') <> 'open')`
 
-const taskSelect = `
+var taskSelect = `
 SELECT t.id, t.project_id, p.title, t.title, t.prompt,
   t.state, t.tree_id, tr.title, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
   COALESCE((SELECT jsonb_agg(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'::jsonb),
@@ -52,13 +52,18 @@ SELECT t.id, t.project_id, p.title, t.title, t.prompt,
   t.connection_id,t.session_id,t.origin_session_id,
  (SELECT jsonb_build_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.session_id),
  (SELECT jsonb_build_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),(SELECT provenance FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config,
- hc.harness,hc.active,hc.label,t.created_by_user_id,t.source_machine_id
+ hc.harness,hc.active,hc.label,t.created_by_user_id,t.source_machine_id,t.binding_id,
+ CASE WHEN d.binding_id IS NOT NULL THEN jsonb_build_object('bindingId',d.binding_id,'path',d.workspace,'source','pinned')
+      WHEN b.id IS NOT NULL THEN jsonb_build_object('bindingId',b.id,'path',b.workspace,'source',CASE WHEN t.binding_id IS NULL THEN 'primary' ELSE 'chosen' END)
+ END
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 JOIN harness_connections hc ON hc.id = t.connection_id
 LEFT JOIN task_trees tr ON tr.id = t.tree_id
 LEFT JOIN execution_observations obs ON obs.session_id=t.session_id
-LEFT JOIN schedules sc ON sc.id = t.schedule_id`
+LEFT JOIN schedules sc ON sc.id = t.schedule_id
+LEFT JOIN task_launch_destinations d ON d.task_id=t.id AND d.attempt=t.launch_attempt
+LEFT JOIN project_bindings b ON ` + effectiveBindingSQL("t")
 
 func scanTask(row rowScanner) (store.Task, error) {
 	var t store.Task
@@ -70,7 +75,7 @@ func scanTask(row rowScanner) (store.Task, error) {
 		&t.UpdatedAt, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginSessionTitle, &t.Handoff, &t.Attachments,
 		&t.StateSince, &t.SessionUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
-		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID)
+		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID, &t.BindingID, &t.Workspace)
 	if err != nil {
 		return store.Task{}, notFound(err)
 	}
@@ -229,10 +234,10 @@ func (r tasks) Insert(ctx context.Context, in store.TaskInsert) (int64, error) {
 	var id int64
 	err := r.QueryRow(ctx, `
 INSERT INTO tasks (project_id, title, prompt, start_at, start_tz, schedule_id, handoff, start_mode,
-  connection_id, origin_session_id, execution_config, created_by_user_id, source_machine_id)
-VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::boolean, true),$8,$9,$10,$11,$12,$13) RETURNING id`,
+  connection_id, origin_session_id, execution_config, created_by_user_id, source_machine_id, binding_id)
+VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7::boolean, true),$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
 		in.ProjectID, in.Title, in.Prompt, in.StartAt, in.StartTz, in.ScheduleID, in.Handoff, in.StartMode,
-		in.ConnectionID, in.OriginSessionID, in.ExecutionConfig, in.CreatedBy, in.SourceMachineID,
+		in.ConnectionID, in.OriginSessionID, in.ExecutionConfig, in.CreatedBy, in.SourceMachineID, in.BindingID,
 	).Scan(&id)
 	return id, err
 }
@@ -247,9 +252,9 @@ func (r tasks) InsertAdopted(ctx context.Context, in store.AdoptedInsert) (int64
 
 func (r tasks) EditState(ctx context.Context, id int64) (store.TaskEditState, error) {
 	var e store.TaskEditState
-	err := r.QueryRow(ctx, `SELECT state, execution_config, adopted, connection_id, project_id,
+	err := r.QueryRow(ctx, `SELECT state, execution_config, adopted, connection_id, project_id, binding_id,
   (SELECT count(*) FROM task_needs WHERE task_id = tasks.id) FROM tasks WHERE id = $1`, id).
-		Scan(&e.State, &e.ExecutionConfig, &e.Adopted, &e.ConnectionID, &e.ProjectID, &e.Needs)
+		Scan(&e.State, &e.ExecutionConfig, &e.Adopted, &e.ConnectionID, &e.ProjectID, &e.BindingID, &e.Needs)
 	return e, notFound(err)
 }
 
@@ -271,6 +276,9 @@ func (r tasks) Update(ctx context.Context, id int64, u store.TaskUpdate) error {
 	}
 	if u.ProjectID.Set {
 		set("project_id", u.ProjectID.V)
+	}
+	if u.BindingID.Set {
+		set("binding_id", u.BindingID.Ptr())
 	}
 	if u.Title.Set {
 		set("title", u.Title.V)

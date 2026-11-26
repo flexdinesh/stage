@@ -300,7 +300,7 @@ func TestProjectImportabilityAndRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	live, archived, deleted := w.Projects[0].toProject(), w.Projects[1].toProject(), w.Projects[2].toProject()
-	if !live.Importable || live.Repo != "github.com/o/r" || live.RepoPath != "." || archived.Importable || deleted.Importable || archived.Repo != "" || archived.RepoPath != "" {
+	if live.Local || live.Evidence != nil || !live.Importable || live.Repo != "github.com/o/r" || live.RepoPath != "." || archived.Importable || deleted.Importable || archived.Repo != "" || archived.RepoPath != "" {
 		t.Fatalf("projects %+v %+v %+v", live, archived, deleted)
 	}
 }

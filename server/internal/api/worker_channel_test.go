@@ -187,13 +187,14 @@ func TestWorkerChannelRoundTrip(t *testing.T) {
 }
 
 func TestWorkerChannelRangeRejection(t *testing.T) {
+	server := workerchan.CurrentRange()
 	for _, tc := range []struct {
 		name, min, max, reason, code string
 		want                         int
 		server                       workerchan.VersionRange
 	}{
 		{"legacy", "", "", "Update Stage on laptop", workerchan.CodeProtocolMismatch, 409, workerchan.CurrentRange()},
-		{"server older", "3", "4", "Update Stage on the main machine", workerchan.CodeProtocolMismatch, 409, workerchan.CurrentRange()},
+		{"server older", fmt.Sprint(server.Max + 1), fmt.Sprint(server.Max + 2), "Update Stage on the main machine", workerchan.CodeProtocolMismatch, 409, server},
 		{"worker older", "1", "1", "Update Stage on laptop", workerchan.CodeProtocolMismatch, 409, workerchan.CurrentRange()},
 		{"non-integer", "a", "2", "", "invalid_channel_protocol", 400, workerchan.CurrentRange()},
 		{"zero", "0", "2", "", "invalid_channel_protocol", 400, workerchan.CurrentRange()},

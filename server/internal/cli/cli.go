@@ -183,10 +183,13 @@ Usage:
   stage show REF                      the task, tree or session a stage link, harness session
                                       link or #TASK_ID names (with its session/task)
   stage projects ls
-  stage models ls --connection ID [--project ID]
+  stage projects workspaces [PROJECT] [--review]
+  stage projects merge FROM INTO [--yes]
+  stage projects split PROJECT --binding ID [--title T] --yes
+  stage models ls --connection ID [--project ID [--binding ID]]
   stage action ls TARGET
   stage action run ACTION_ID TARGET [--input JSON|-] [--confirm]
-                                      TARGET is --connection ID, --task ID, or --project ID --on-connection ID
+                                      TARGET is --connection ID, --task ID, or --project ID --on-connection ID [--binding ID]
   stage task ls [--project P] [--state S,..] [-q TEXT] [--closed true|all] [--limit N]
   stage task show ID
   stage task add --title T --prompt TEXT|- [config] [--needs ID,..] [--after-me] [--tree ID]
@@ -222,7 +225,8 @@ Usage:
   stage mcp                           the agent tools over stdio MCP
 ` + setupUsage + `  stage guide                         agent workflow guide
 
-Config: --project P --connection ID --execution-config JSON (models ls shows the choices,
+Config: --project P --connection ID --binding ID (--binding "" restores the primary on edit)
+        --execution-config JSON (models ls shows the choices,
         including launch options such as a worktree, its base ref or branch)
         --prompt-file PATH --image PATH...
 Notes: task add and sessions adopt accept --initial-note TEXT; schedules accept --notes TEXT.
@@ -437,27 +441,6 @@ func runShow(ctx context.Context, env Env, args []string) error {
 	return c.out(res, func(w io.Writer) { printRef(w, res) })
 }
 
-func runProjects(ctx context.Context, env Env, args []string) error {
-	v, rest := verb(args, "ls")
-	if v != "ls" {
-		return usagef("projects %s: unknown", v)
-	}
-	c := newCmd(env, "projects ls")
-	if err := c.parse(rest); err != nil {
-		return err
-	}
-	res, err := c.ops().ListProjects(ctx, struct{}{})
-	if err != nil {
-		return err
-	}
-	return c.out(res, func(w io.Writer) {
-		printProjects(w, res.Projects)
-		for _, v := range res.Connections {
-			fmt.Fprintf(w, "connection %d  %s\n", v.ID, v.Harness)
-		}
-	})
-}
-
 func runModels(ctx context.Context, env Env, args []string) error {
 	v, rest := verb(args, "ls")
 	if v != "ls" {
@@ -465,11 +448,14 @@ func runModels(ctx context.Context, env Env, args []string) error {
 	}
 	c := newCmd(env, "models ls")
 	var a agenttools.ModelsArgs
+	var binding int64
 	c.fs.Int64Var(&a.ProjectID, "project", 0, "Stage project ID for workspace-specific capabilities")
 	c.fs.Int64Var(&a.ConnectionID, "connection", 0, "show this connection’s capabilities")
+	c.fs.Int64Var(&binding, "binding", 0, "workspace binding ID")
 	if err := c.parse(rest); err != nil {
 		return err
 	}
+	a.BindingID = int64Flag(c, "binding", binding)
 	res, err := c.ops().ListModels(ctx, a)
 	if err != nil {
 		return err

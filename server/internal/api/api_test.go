@@ -258,12 +258,13 @@ func (e *env) reconcile() {
 }
 
 type project struct {
-	ID            int64   `json:"id"`
-	T3ProjectID   string  `json:"externalProjectId"`
-	Title         string  `json:"title"`
-	WorkspaceRoot string  `json:"workspaceRoot"`
-	Source        string  `json:"source"`
-	ArchivedAt    *string `json:"archivedAt"`
+	ID            int64               `json:"id"`
+	T3ProjectID   string              `json:"externalProjectId"`
+	Title         string              `json:"title"`
+	WorkspaceRoot string              `json:"workspaceRoot"`
+	Source        string              `json:"source"`
+	ArchivedAt    *string             `json:"archivedAt"`
+	Bindings      []db.ProjectBinding `json:"bindings"`
 }
 
 type task struct {
@@ -275,23 +276,28 @@ type task struct {
 	Config            *execConfig `json:"executionConfig"`
 	State             string      `json:"state"`
 	ExternalSessionID *string     `json:"externalSessionId"`
-	TreeID            *int64      `json:"treeId"`
-	Needs             []int64     `json:"needs"`
-	Dependents        []int64     `json:"dependents"`
-	Readiness         *string     `json:"readiness"`
-	StartMode         *string     `json:"startMode"`
-	EffStartMode      *string     `json:"effectiveStartMode"`
-	Adopted           bool        `json:"adopted"`
-	LaunchAttempt     int         `json:"launchAttempt"`
-	LastError         *string     `json:"lastError"`
-	Links             links       `json:"links"`
-	LaunchedAt        *string     `json:"launchedAt"`
-	FinishedAt        *string     `json:"finishedAt"`
-	CompletedAt       *string     `json:"completedAt"`
-	RunStartedAt      *string     `json:"runStartedAt"`
-	RunEndedAt        *string     `json:"runEndedAt"`
-	CreatedAt         string      `json:"createdAt"`
-	Events            []struct {
+	Workspace         *struct {
+		BindingID int64  `json:"bindingId"`
+		Path      string `json:"path"`
+		Source    string `json:"source"`
+	} `json:"workspace"`
+	TreeID        *int64  `json:"treeId"`
+	Needs         []int64 `json:"needs"`
+	Dependents    []int64 `json:"dependents"`
+	Readiness     *string `json:"readiness"`
+	StartMode     *string `json:"startMode"`
+	EffStartMode  *string `json:"effectiveStartMode"`
+	Adopted       bool    `json:"adopted"`
+	LaunchAttempt int     `json:"launchAttempt"`
+	LastError     *string `json:"lastError"`
+	Links         links   `json:"links"`
+	LaunchedAt    *string `json:"launchedAt"`
+	FinishedAt    *string `json:"finishedAt"`
+	CompletedAt   *string `json:"completedAt"`
+	RunStartedAt  *string `json:"runStartedAt"`
+	RunEndedAt    *string `json:"runEndedAt"`
+	CreatedAt     string  `json:"createdAt"`
+	Events        []struct {
 		FromState *string `json:"fromState"`
 		ToState   string  `json:"toState"`
 		Detail    string  `json:"detail"`
@@ -403,7 +409,7 @@ func TestTaskLifecycle(t *testing.T) {
 	}
 	var raw map[string]any
 	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &raw)
-	for _, k := range []string{"t3WebUrl", "t3AppUrl", "t3DeepLink", "providerInstanceId", "model", "modelOptions", "runtimeMode", "interactionMode", "originThreadId", "originThreadTitle", "workspace", "currentLaunchBase"} {
+	for _, k := range []string{"t3WebUrl", "t3AppUrl", "t3DeepLink", "providerInstanceId", "model", "modelOptions", "runtimeMode", "interactionMode", "originThreadId", "originThreadTitle", "currentLaunchBase"} {
 		if _, ok := raw[k]; ok {
 			t.Fatalf("task JSON still has legacy field %q", k)
 		}
@@ -411,11 +417,17 @@ func TestTaskLifecycle(t *testing.T) {
 	if _, ok := raw["originSessionTitle"]; !ok {
 		t.Fatal("task JSON lacks originSessionTitle")
 	}
+	if workspace := tk.Workspace; workspace == nil || workspace.BindingID != p.Bindings[0].ID || workspace.Path != p.WorkspaceRoot || workspace.Source != "primary" {
+		t.Fatalf("planned workspace: %+v", workspace)
+	}
 
 	var started task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
 	if started.State != "running" || started.ExternalSessionID == nil || started.LaunchAttempt != 1 || started.LaunchedAt == nil {
 		t.Fatalf("started %+v", started)
+	}
+	if workspace := started.Workspace; workspace == nil || workspace.BindingID != p.Bindings[0].ID || workspace.Path != p.WorkspaceRoot || workspace.Source != "pinned" {
+		t.Fatalf("launched workspace: %+v", workspace)
 	}
 	threadID := *started.ExternalSessionID
 	if started.Links.Web != publicURL+"/fake-env/"+url.PathEscape(threadID) {
@@ -680,7 +692,7 @@ func TestBindingChangeDoesNotRedirectUncertainLaunch(t *testing.T) {
 	endpoint := fmt.Sprintf("/api/tasks/%d/start", pending.ID)
 	e.must("POST", endpoint, nil, 502, nil)
 	replacement := e.fake.AddProject("Replacement", "/w/replacement")
-	e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", p.ID), map[string]any{"connectionId": 1, "externalProjectId": replacement.ID, "workspace": replacement.WorkspaceRoot}, 200, nil)
+	e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", p.ID), map[string]any{"connectionId": 1, "externalProjectId": replacement.ID, "workspace": replacement.WorkspaceRoot, "primary": true}, 200, nil)
 	// A moved original path is unsafe even with a valid replacement binding.
 	if err := e.fake.SetProject(p.T3ProjectID, func(p *t3.Project) { p.WorkspaceRoot = "/w/moved" }); err != nil {
 		t.Fatal(err)
@@ -795,7 +807,7 @@ func TestProjects(t *testing.T) {
 		t.Fatalf("import: %+v %v", ps, err)
 	}
 	imported, err := e.store.BoundProject(context.Background(), db.ProjectBinding{ConnectionID: 1, ExternalProjectID: ext.ID, Workspace: ext.WorkspaceRoot})
-	if err != nil || imported.Title != "Discovered" || imported.Origin == nil || imported.Bindings[0].Origin != db.BindingImported {
+	if err != nil || imported.Title != "Discovered" || imported.Origin == nil || len(imported.Bindings) != 1 || imported.Bindings[0].Rule != "new" {
 		t.Fatalf("imported %+v %v", imported, err)
 	}
 	var listed struct {
@@ -813,10 +825,13 @@ func TestProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := e.store.GetProject(context.Background(), p.ID)
-	if err != nil || got.Title != p.Title || got.ArchivedAt != nil || got.Bindings[0].Status != "changed" {
-		t.Fatalf("metadata overwritten: %+v %v", got, err)
+	if err != nil || got.Title != p.Title || got.ArchivedAt != nil || len(got.Bindings) != 1 {
+		t.Fatalf("Stage metadata changed after sync: %+v %v", got, err)
 	}
-	e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", p.ID), map[string]any{"connectionId": 1, "externalProjectId": p.T3ProjectID, "workspace": "/moved"}, 200, nil)
+	moved := got.Bindings[0]
+	if moved.Workspace != "/moved" || moved.Status != "available" || !moved.Primary || moved.Rule != "moved" {
+		t.Fatalf("binding did not follow the workspace move: %+v", moved)
+	}
 	e.must("PATCH", fmt.Sprintf("/api/projects/%d", p.ID), map[string]any{"title": "Stage title", "archived": true}, 200, nil)
 	if err := e.fake.SetProject(ext.ID, func(x *t3.Project) { x.DeletedAt = &at }); err != nil {
 		t.Fatal(err)
@@ -828,9 +843,8 @@ func TestProjects(t *testing.T) {
 	if got.Title != "Stage title" || got.ArchivedAt == nil {
 		t.Fatalf("Stage metadata lost: %+v", got)
 	}
-	// The discovered project follows its deleted T3 project into archive.
-	if got, _ = e.store.GetProject(context.Background(), imported.ID); got.ArchivedAt == nil {
-		t.Fatalf("discovered project not archived: %+v", got)
+	if got, err = e.store.GetProject(context.Background(), imported.ID); err != nil || got.ArchivedAt != nil || got.Bindings[0].Status != "missing" {
+		t.Fatalf("deletion changed Stage project metadata: %+v %v", got, err)
 	}
 	e.must("POST", "/api/projects", map[string]any{"title": ""}, 400, nil)
 	e.must("GET", "/api/projects?archived=maybe", nil, 400, nil)

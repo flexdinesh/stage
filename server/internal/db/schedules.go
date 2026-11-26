@@ -48,6 +48,7 @@ type NewSchedule struct {
 	ExecutionConfig *execution.Config
 	OriginSession   *SessionRef
 	ProjectID       int64
+	BindingID       *int64
 	Title           string
 	Prompt          string
 	Notes           string
@@ -82,7 +83,14 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 		return Schedule{}, err
 	}
 	id, err := write(ctx, s, func(tx store.Tx) (int64, error) {
-		if err := requireProject(ctx, tx, in.ProjectID); err != nil {
+		if err := tx.Projects().LockIdentity(ctx); err != nil {
+			return 0, err
+		}
+		project, err := projectID(ctx, tx, in.ProjectID)
+		if err != nil {
+			return 0, err
+		}
+		if err := validateBinding(ctx, tx, project, in.ConnectionID, in.BindingID); err != nil {
 			return 0, err
 		}
 		connection := in.ConnectionID
@@ -105,7 +113,7 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 			originID = &value
 		}
 		id, err := tx.Schedules().Insert(ctx, store.ScheduleInsert{
-			ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt,
+			ProjectID: project, BindingID: in.BindingID, Title: in.Title, Prompt: in.Prompt,
 			Notes: in.Notes, Cron: strings.TrimSpace(in.Cron), Tz: in.Tz, Paused: in.Paused, NextRunAt: next,
 			OriginSessionID: originID, ExecutionConfig: config,
 			ConnectionID: connection, CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx),
@@ -129,9 +137,11 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 type SchedulePatch struct {
 	ValidatedConnection int64                      `json:"-"`
 	ValidatedProject    int64                      `json:"-"`
+	ValidatedBinding    *int64                     `json:"-"`
 	ConnectionID        Optional[int64]            `json:"connectionId"`
 	ExecutionConfig     Optional[execution.Config] `json:"executionConfig"`
 	ProjectID           Optional[int64]            `json:"projectId"`
+	BindingID           Optional[int64]            `json:"bindingId"`
 	Title               Optional[string]           `json:"title"`
 	Prompt              Optional[string]           `json:"prompt"`
 	Notes               Optional[string]           `json:"notes"`
@@ -150,12 +160,18 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 		}
 	}
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		if err := tx.Projects().LockIdentity(ctx); err != nil {
+			return err
+		}
+		if err := tx.Schedules().Lock(ctx, id); err != nil {
+			return err
+		}
 		e, err := tx.Schedules().EditState(ctx, id)
 		if err != nil {
 			return err
 		}
 		cron, tz, paused := e.Cron, e.Tz, e.Paused
-		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject) {
+		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject || !equalPtr(e.BindingID, p.ValidatedBinding)) {
 			return Conflict("The destination changed during editing. Refresh and choose the task settings again.")
 		}
 		if p.AttachmentIDs.Set {
@@ -170,10 +186,15 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 				return err
 			}
 		}
-		if p.ProjectID.Set {
-			if err := requireProject(ctx, tx, p.ProjectID.V); err != nil {
+		if u.ProjectID.Set {
+			u.ProjectID.V, err = projectID(ctx, tx, u.ProjectID.V)
+			if err != nil {
 				return err
 			}
+		}
+		u.BindingID, err = bindingPatch(ctx, tx, e.ProjectID, e.ConnectionID, u.ProjectID, p.ConnectionID, p.BindingID)
+		if err != nil {
+			return err
 		}
 		if p.Cron.Set || p.Tz.Set || p.Paused.Set {
 			if p.Cron.Set {
@@ -197,7 +218,7 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 				u.NextRunAt.V = *next
 			}
 		}
-		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !p.Title.Set && !p.Prompt.Set &&
+		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !u.BindingID.Set && !p.Title.Set && !p.Prompt.Set &&
 			!p.Notes.Set && !u.NextRunAt.Set && !p.AttachmentIDs.Set {
 			return nil
 		}
@@ -296,7 +317,7 @@ func (s *Store) spawnTask(ctx context.Context, tx store.Tx, id int64, startAt *t
 	if err != nil {
 		return 0, err
 	}
-	in := NewTask{ProjectID: tpl.ProjectID, Title: tpl.Title, Prompt: tpl.Prompt,
+	in := NewTask{ProjectID: tpl.ProjectID, BindingID: tpl.BindingID, Title: tpl.Title, Prompt: tpl.Prompt,
 		ConnectionID: tpl.ConnectionID, OriginSession: tpl.OriginSession, ExecutionConfig: tpl.ExecutionConfig}
 	tz, notes := tpl.Tz, tpl.Notes
 	// The schedule spawns the task, not the request that ran it: no source
@@ -354,6 +375,9 @@ func (s *Store) FireSchedule(ctx context.Context, id int64, now time.Time, grace
 	err := s.e.Write(ctx, func(tx store.Tx) error {
 		// Write may rerun fn (Postgres retry): start each run from scratch.
 		res = FireResult{}
+		if err := tx.Projects().LockIdentity(ctx); err != nil {
+			return err
+		}
 		sc := tx.Schedules()
 		// One spawn per fire time: the next fire advances under the lock.
 		if err := sc.Lock(ctx, id); err != nil {
@@ -430,6 +454,12 @@ func stateWords(s TaskState) string {
 func (s *Store) RunScheduleNow(ctx context.Context, id int64) (Task, error) {
 	var task int64
 	err := s.e.Write(ctx, func(tx store.Tx) error {
+		if err := tx.Projects().LockIdentity(ctx); err != nil {
+			return err
+		}
+		if err := tx.Schedules().Lock(ctx, id); err != nil {
+			return err
+		}
 		exists, err := tx.Schedules().Exists(ctx, id)
 		if err != nil {
 			return err

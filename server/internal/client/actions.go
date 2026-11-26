@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -21,6 +20,7 @@ type ActionScope struct {
 	TaskID         *int64 `json:"taskId,omitempty" jsonschema:"target task ID"`
 	ProjectID      *int64 `json:"projectId,omitempty" jsonschema:"target project ID"`
 	OnConnectionID *int64 `json:"onConnectionId,omitempty" jsonschema:"required for projectId; connection on which to target the project"`
+	BindingID      *int64 `json:"bindingId,omitempty" jsonschema:"workspace binding for a project action; defaults to the primary on the selected connection"`
 }
 
 func (s ActionScope) Validate() error {
@@ -43,6 +43,9 @@ func (s ActionScope) Validate() error {
 	} else if s.OnConnectionID != nil {
 		return errors.New("on-connection is only for project actions")
 	}
+	if s.BindingID != nil && (s.ProjectID == nil || *s.BindingID <= 0) {
+		return errors.New("bindingId requires a project action and a positive binding ID")
+	}
 	return nil
 }
 
@@ -59,10 +62,10 @@ func (s ActionScope) endpoint(action string) string {
 	if action != "" {
 		path += "/" + url.PathEscape(action)
 	}
-	if s.OnConnectionID != nil {
-		path += "?connectionId=" + strconv.FormatInt(*s.OnConnectionID, 10)
-	}
-	return path
+	q := url.Values{}
+	setID(q, "connectionId", s.OnConnectionID)
+	setID(q, "bindingId", s.BindingID)
+	return withQuery(path, q)
 }
 
 // ActionCaller carries transport context; the server makes authorization decisions.

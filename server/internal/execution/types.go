@@ -58,26 +58,35 @@ type WorkspaceInfo struct {
 	// ActiveAt: last harness activity, when reported; picks among IDs
 	// sharing one workspace.
 	ActiveAt *time.Time `json:"activeAt,omitempty"`
-	// Repo: normalized origin remote (host/owner/name), "" when unknown.
-	// With RepoPath it is the cross-machine match key for project import;
-	// never proof within one machine (docs/architecture.md).
+	// Repo: the normalized origin remote reported by the harness, when known.
 	Repo string `json:"repo,omitempty"`
-	// RepoPath: slash-separated path from the checkout top to WorkspaceRoot
-	// ("." at the top), "" when unknown. Set only with Repo. Repo and
-	// RepoPath are harness facts only when the harness reports them (T3);
-	// otherwise machine.Ops reads them where the files live. Adapters never
-	// read Git (ADR 0007 decision 11).
+	// RepoPath: the harness-reported slash path from the checkout top to
+	// WorkspaceRoot ("." at the top), "" when unknown. Set only with Repo.
 	RepoPath string `json:"repoPath,omitempty"`
 	// Local: WorkspaceRoot is a path on the filesystem of the machine that
 	// hosts the adapter (a hosted harness, or a service sharing that
-	// filesystem), so the machine's ops read it without a declared shared
-	// path.
+	// filesystem), so that machine's ops can read filesystem evidence.
 	Local bool `json:"local,omitempty"`
 	// ImportIf: the harness keeps no project list of its own and treats a
 	// workspace as a deliberate project when it is a Git checkout; the
 	// machine's ops read the files and set Importable. "": Importable is
 	// the harness's own judgment.
 	ImportIf ImportRule `json:"importIf,omitempty"`
+	// Evidence comes from machine.Ops on the workspace's file host.
+	Evidence *WorkspaceEvidence `json:"evidence,omitempty"`
+}
+
+// WorkspaceEvidence is read-only filesystem evidence for a local workspace.
+type WorkspaceEvidence struct {
+	CanonicalPath string `json:"canonicalPath,omitempty"`
+	// CheckoutKey is the canonical Git common directory on the file host.
+	CheckoutKey string `json:"checkoutKey,omitempty"`
+	Subpath     string `json:"subpath,omitempty"`
+	Remote      string `json:"remote,omitempty"`
+	// InodeHint is the directory's device and inode on the file host.
+	InodeHint string `json:"inodeHint,omitempty"`
+	// Gone marks a directory confirmed missing on the file host.
+	Gone bool `json:"gone,omitempty"`
 }
 
 // ImportRule is which Git checkouts a harness without a project list

@@ -32,6 +32,7 @@ export function ProjectDetailPage() {
 
 function ProjectDetail({ id }: { id: number }) {
   const project = useProject(id);
+  const projectId = project.data?.id ?? id;
   // In the address, so Back from a task keeps the list as it was.
   const [stateFilter, setStateFilter] = useSearchParam("state", ["", ...TASK_STATES], "");
   const [scope, setScope] = useSearchParam("scope", SCOPE_VALUES, "open");
@@ -67,9 +68,9 @@ function ProjectDetail({ id }: { id: number }) {
               <>
                 <TrackSessionButton />
                 {scheduleList.length === 0 ? (
-                  <Button onClick={() => newTask(id, "repeat")}>New schedule</Button>
+                  <Button onClick={() => newTask(projectId, "repeat")}>New schedule</Button>
                 ) : null}
-                <Button variant="primary" onClick={() => newTask(id)}>
+                <Button variant="primary" onClick={() => newTask(projectId)}>
                   <IconPlus /> New task
                 </Button>
               </>
@@ -83,7 +84,7 @@ function ProjectDetail({ id }: { id: number }) {
                 title="Schedules"
                 meta={<span className="tabular">{scheduleList.length}</span>}
                 actions={
-                  <Button small variant="ghost" onClick={() => newTask(id, "repeat")}>
+                  <Button small variant="ghost" onClick={() => newTask(projectId, "repeat")}>
                     <IconPlus size={12} /> New schedule
                   </Button>
                 }

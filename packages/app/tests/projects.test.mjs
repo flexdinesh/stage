@@ -3,18 +3,50 @@ import { test } from "node:test";
 import { importNotice, matchProjects, projectDetail, projectsForConnection, repoLabel } from "../src/lib/projects.ts";
 import { fakeApi } from "./fake-transport.mjs";
 
-test("project edits and bindings send JSON objects through the shared transport", async () => {
+test("workspace inventory, pathless binding repair and specific unbind use the scoped routes", async () => {
   const received = [];
   const { api } = fakeApi(async (path, init) => {
-    received.push({ path, method: init.method, body: JSON.parse(init.body) });
+    received.push({ path, method: init.method, body: init.body === undefined ? null : JSON.parse(init.body) });
+    if (path.endsWith("/workspaces")) return Response.json({ workspaces: [] });
     return Response.json({ id: 7, title: "Plan", bindings: [] });
   });
   await api.updateProject(7, {title: "Plan", archived: false});
-  await api.bindProject(7, {connectionId: 1, externalId: "remote", workspace: "/work", title: "External", projectId: null});
+  assert.deepEqual(await api.workspaces(1), { workspaces: [] });
+  await api.bindProject(7, {connectionId: 1, externalProjectId: "remote", workspace: "", replaces: 42});
+  await api.unbindProject(7, 42);
   assert.deepEqual(received, [
     {path: "/projects/7", method: "PATCH", body: {title: "Plan", archived: false}},
-    {path: "/projects/7/binding", method: "PUT", body: {connectionId: 1, externalProjectId: "remote", workspace: "/work"}},
+    {path: "/connections/1/workspaces", method: "GET", body: null},
+    {path: "/projects/7/binding", method: "PUT", body: {connectionId: 1, externalProjectId: "remote", workspace: "", replaces: 42}},
+    {path: "/projects/7/bindings/42", method: "DELETE", body: null},
   ]);
+});
+
+test("capabilities and project actions can address a non-primary binding", async () => {
+  const requested = [];
+  const { api } = fakeApi(async (path) => {
+    requested.push(path);
+    return Response.json([]);
+  });
+  await api.capabilities(1, { projectId: 7, bindingId: 42 });
+  await api.projectActions(7, { connectionId: 1, bindingId: 42 });
+  assert.deepEqual(requested, [
+    "/connections/1/capabilities?projectId=7&bindingId=42",
+    "/projects/7/actions?connectionId=1&bindingId=42",
+  ]);
+});
+
+test("a stale workspace confirmation carries the fresh preview", async () => {
+  const preview = { applied: false, previewToken: "fresh", placements: [], created: 0, joined: 0, moved: 0, review: 0 };
+  const { api } = fakeApi(async () => Response.json(
+    { error: "The preview changed. Review it again.", code: "preview_changed", preview },
+    { status: 409 },
+  ));
+  await assert.rejects(api.resolveWorkspaces(1, { apply: true, previewToken: "stale" }), (error) => {
+    assert.equal(error.code, "preview_changed");
+    assert.deepEqual(error.preview, preview);
+    return true;
+  });
 });
 
 const project = (id, title, workspaceRoot, lastActivityAt, repos = []) => ({

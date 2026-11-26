@@ -20,8 +20,8 @@ import type {
   Attachment,
   SessionRef, SessionPreview,
   Badge,
+  BindWorkspaceRequest,
   CreateProjectRequest,
-  ExternalProject,
   CreateTaskRequest,
   CreateSnippetRequest,
   CreateScheduleRequest,
@@ -38,7 +38,9 @@ import type {
   NotificationPage,
   Preferences,
   Project,
+  ProjectEvent,
   ProjectList,
+  ProjectMergeResult,
   PushConfig,
   PushEndpointBody,
   PushSubscriptionBody,
@@ -58,6 +60,10 @@ import type {
   UpdateTaskRequest,
   UpdateSnippetRequest,
   User,
+  Workspace,
+  WorkspaceRef,
+  WorkspaceResolveResult,
+  WorkspaceReview,
 } from "./types.ts";
 import type { Transport } from "../platform/index.ts";
 
@@ -65,12 +71,14 @@ import type { Transport } from "../platform/index.ts";
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string | null;
+  readonly preview: unknown;
 
-  constructor(status: number, message: string, code: string | null = null) {
+  constructor(status: number, message: string, code: string | null = null, preview?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.preview = preview;
   }
 }
 
@@ -154,7 +162,9 @@ export function createApi(transport: Transport) {
     const res = await transport.request(path, req);
     if (!res.ok) {
       const body: unknown = await res.json().catch(() => null);
-      throw new ApiError(res.status, errorMessage(body, `${res.status} ${res.statusText}`), errorCode(body));
+      const code = errorCode(body);
+      const preview = code === "preview_changed" && typeof body === "object" && body !== null && "preview" in body ? body.preview : undefined;
+      throw new ApiError(res.status, errorMessage(body, `${res.status} ${res.statusText}`), code, preview);
     }
     return res;
   }
@@ -195,19 +205,37 @@ export function createApi(transport: Transport) {
     connectionFacts: (id: number) => apiFetch<{ facts: HarnessFact[] }>(`/connections/${id}/facts`),
     runConnectionAction: (id: number, action: string, input: Record<string, unknown>, confirmed: boolean) =>
       apiFetch<ActionResult>(`/connections/${id}/actions/${encodeURIComponent(action)}`, actionPost(input, confirmed)),
-    capabilities: (id: number, projectId?: number) => apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({projectId})}`),
+    capabilities: (id: number, scope?: { projectId: number; bindingId?: number }) => apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({ ...scope })}`),
     sync: () => apiFetch<SyncResult>("/sync", post()),
 
     projects: (archived: ArchivedFilter = "false") => apiFetch<ProjectList>(`/projects${toQuery({ archived })}`),
     project: (id: number) => apiFetch<Project>(`/projects/${id}`),
     createProject: (body: CreateProjectRequest) => apiFetch<Project>("/projects", post(body)),
     updateProject: (id: number, body: {title: string; archived: boolean}) => apiFetch<Project>(`/projects/${id}`, patch(body)),
-    matchWorkspace: (project: number, connection: number) => apiFetch<{bound: Project | null; projects: ExternalProject[]; suggestions: Record<string,string>}>(`/projects/${project}/bindings/${connection}/match`, post()),
-    sharedPaths: () => apiFetch<{paths:{connectionId:number;harnessRoot:string;stageRoot:string}[]}>("/shared-paths"),
-    setSharedPath: (connectionId:number,harnessRoot:string,stageRoot:string) => apiFetch("/shared-paths",put({connectionId,harnessRoot,stageRoot})),
-    externalProjects: (connectionId: number) => apiFetch<{projects: ExternalProject[]}>(`/connections/${connectionId}/projects`),
-    bindProject: (id: number, project: ExternalProject) => apiFetch<Project>(`/projects/${id}/binding`, put({connectionId: project.connectionId, externalProjectId: project.externalId, workspace: project.workspace})),
-    unbindProject: (id: number, connectionId: number) => apiFetch<Project>(`/projects/${id}/bindings/${connectionId}`, {method: "DELETE"}),
+    workspaces: (connectionId: number) => apiFetch<{ workspaces: Workspace[] }>(`/connections/${connectionId}/workspaces`),
+    resolveWorkspaces: (connectionId: number, body: { apply: boolean; previewToken?: string }) =>
+      apiFetch<WorkspaceResolveResult>(`/connections/${connectionId}/resolve`, post(body)),
+    workspaceReview: () => apiFetch<WorkspaceReview>("/workspaces/review"),
+    bindProject: (id: number, body: BindWorkspaceRequest) =>
+      apiFetch<Project>(`/projects/${id}/binding`, put(body)),
+    unbindProject: (id: number, bindingId: number) =>
+      apiFetch<Project>(`/projects/${id}/bindings/${bindingId}`, del),
+    setPrimaryBinding: (id: number, bindingId: number) =>
+      apiFetch<Project>(`/projects/${id}/bindings/${bindingId}/primary`, { method: "PUT" }),
+    declineWorkspace: (connectionId: number, body: WorkspaceRef) =>
+      apiSend(`/connections/${connectionId}/workspaces/decline`, post(body)),
+    undeclineWorkspace: (connectionId: number, body: WorkspaceRef) =>
+      apiSend(`/connections/${connectionId}/workspaces/undecline`, post(body)),
+    mergeProject: (id: number, body: { from: number; confirm?: boolean; previewToken?: string }) =>
+      apiFetch<ProjectMergeResult>(`/projects/${id}/merge`, post(body)),
+    dismissProjectMerge: (id: number, otherId: number) => apiSend(`/projects/${id}/merge-dismissals`, post({ otherId })),
+    splitProject: (id: number, body: { bindingId: number; title?: string }) =>
+      apiFetch<{ project: Project; source: Project }>(`/projects/${id}/split`, post(body)),
+    projectEvents: (id: number) => apiFetch<{ events: ProjectEvent[] }>(`/projects/${id}/events`),
+    projectActions: (id: number, scope: { connectionId: number; bindingId?: number }) =>
+      apiFetch<HarnessAction[]>(`/projects/${id}/actions${toQuery(scope)}`),
+    runProjectAction: (id: number, scope: { connectionId: number; bindingId?: number }, action: string, input: Record<string, unknown>, confirmed: boolean) =>
+      apiFetch<ActionResult>(`/projects/${id}/actions/${encodeURIComponent(action)}${toQuery(scope)}`, actionPost(input, confirmed)),
 
     tasks: (q: TaskListQuery = {}) =>
       apiFetch<TaskList>(

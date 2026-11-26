@@ -25,114 +25,125 @@ const config = `[core]
 	url = "git@github.com:Flex/Stage.git"
 `
 
-func TestOriginRepoPlainCheckout(t *testing.T) {
-	dir := t.TempDir()
-	write(t, filepath.Join(dir, ".git", "config"), config)
-	if got := OriginRepo(dir); got != "github.com/Flex/Stage" {
-		t.Fatalf("got %q", got)
+func TestInspectCheckoutFamily(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestOriginRepoLinkedWorktree(t *testing.T) {
-	root := t.TempDir()
 	main := filepath.Join(root, "repo")
-	write(t, filepath.Join(main, ".git", "config"), config)
-	write(t, filepath.Join(main, ".git", "worktrees", "wt", "commondir"), "../..\n")
+	common := filepath.Join(main, ".git")
+	write(t, filepath.Join(common, "config"), config)
+	write(t, filepath.Join(common, "worktrees", "wt", "commondir"), "../..\n")
 	wt := filepath.Join(root, "wt")
 	write(t, filepath.Join(wt, ".git"), "gitdir: ../repo/.git/worktrees/wt\n")
-	if got := OriginRepo(wt); got != "github.com/Flex/Stage" {
-		t.Fatalf("got %q", got)
+	sub := filepath.Join(wt, "packages", "web")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	const remote = "github.com/Flex/Stage"
+	for _, tc := range []struct {
+		dir  string
+		want Info
+	}{
+		{main, Info{Top: main, CommonDir: common, Remote: remote, Subpath: "."}},
+		{wt, Info{Top: wt, CommonDir: common, Remote: remote, Subpath: "."}},
+		{sub, Info{Top: wt, CommonDir: common, Remote: remote, Subpath: "packages/web"}},
+		{root, Info{}},
+	} {
+		if got := Inspect(tc.dir); got != tc.want {
+			t.Errorf("Inspect(%s) = %+v, want %+v", tc.dir, got, tc.want)
+		}
 	}
 }
 
-func TestOriginRepoAbsentOrUnusable(t *testing.T) {
-	none := t.TempDir()
-	noOrigin := t.TempDir()
-	write(t, filepath.Join(noOrigin, ".git", "config"), "[remote \"upstream\"]\n\turl = https://h/o/r\n")
-	local := t.TempDir()
-	write(t, filepath.Join(local, ".git", "config"), "[remote \"origin\"]\n\turl = /srv/git/repo.git\n")
-	file := t.TempDir()
-	write(t, filepath.Join(file, ".git", "config"), "[remote \"origin\"]\n\turl = file:///srv/git/repo.git\n")
-	for _, dir := range []string{none, noOrigin, local, file, filepath.Join(none, "missing")} {
-		if got := OriginRepo(dir); got != "" {
-			t.Errorf("%s: got %q", dir, got)
-		}
+func TestInspectNearestCheckout(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, ".git", "config"), config)
+	nested := filepath.Join(root, "vendor", "lib")
+	modulesDir := filepath.Join(root, ".git", "modules", "lib")
+	write(t, filepath.Join(nested, ".git"), "gitdir: ../../.git/modules/lib\n")
+	write(t, filepath.Join(modulesDir, "config"), "[remote \"origin\"]\n\turl = https://github.com/o/lib.git\n")
+	if got, want := Inspect(nested), (Info{Top: nested, CommonDir: modulesDir, Remote: "github.com/o/lib", Subpath: "."}); got != want {
+		t.Fatalf("submodule %+v, want %+v", got, want)
+	}
+	inner := filepath.Join(root, "inner")
+	write(t, filepath.Join(inner, ".git", "config"), "[remote \"upstream\"]\n\turl = https://github.com/o/lib.git\n")
+	if got, want := Inspect(inner), (Info{Top: inner, CommonDir: filepath.Join(inner, ".git"), Subpath: "."}); got != want {
+		t.Fatalf("checkout with no origin %+v, want %+v", got, want)
+	}
+	broken := filepath.Join(root, "broken")
+	write(t, filepath.Join(broken, ".git"), "gitdir: missing\n")
+	if got := Inspect(broken); got != (Info{}) {
+		t.Fatalf("invalid nearest checkout borrowed evidence: %+v", got)
+	}
+}
+
+func TestInspectCanonicalCommonDirectory(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkout := filepath.Join(root, "repo")
+	common := filepath.Join(root, "metadata")
+	write(t, filepath.Join(common, "config"), config)
+	if err := os.Mkdir(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(common, filepath.Join(checkout, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	if got := Inspect(checkout); got.CommonDir != common || got.Top != checkout || got.Remote != "github.com/Flex/Stage" {
+		t.Fatalf("symlinked common dir: %+v", got)
 	}
 }
 
 func TestRemoteIdentity(t *testing.T) {
 	for raw, want := range map[string]string{
-		"git@host:owner/repo.git":               "host/owner/repo",
-		"https://user:secret@Host.com/o/r.git/": "host.com/o/r",
-		"ssh://git@host:22/o/r":                 "host:22/o/r",
-		"/abs/path":                             "",
-		"file:///abs/path":                      "",
-		"":                                      "",
+		" git@Host.:/Owner/Repo.git ":                       "host/Owner/Repo",
+		"git.example:Org/Repo.git":                          "git.example/Org/Repo",
+		"https://user:secret@Host.com.:443//o/R.git/?q=s#f": "host.com/o/R",
+		"ssh://git@host:22/o/r":                             "host/o/r",
+		"git+ssh://git@host:3022/o/r":                       "host:3022/o/r",
+		"ssh+git://git@host:22/o/r":                         "host/o/r",
+		"http://host:80/o/r":                                "host/o/r",
+		"git://host:9418/o/r":                               "host/o/r",
+		"https://[2001:DB8::1]:443/o/r":                     "[2001:db8::1]/o/r",
+		"ssh://git@[2001:db8::1]:2222/o/r":                  "[2001:db8::1]:2222/o/r",
+		"git@[2001:db8::1]:o/r":                             "[2001:db8::1]/o/r",
+		"https://host/Owner//Repo":                          "host/Owner//Repo",
+		"https://host/Owner/Repo%20Name.git":                "host/Owner/Repo Name",
+		"https://host/o/%2e%2e/r":                           "",
+		"git@host:o/r%20x":                                  "",
+		"ssh://2001:db8::1/o/r":                             "",
+		"https://host/o/Repo%2FName":                        "",
+		"https://host/o/Repo%5cName":                        "",
+		"https://host/o/Repo%252FName":                      "",
+		"https://host/o/Repo%3fName":                        "",
+		"https://host/o/Repo%23Name":                        "",
+		"https://host/o/Repo%ffName":                        "",
+		"https://host/o/Repo%00Name":                        "",
+		"https://host/o/Repo%xx":                            "",
+		"https://host/":                                     "",
+		"https://host/.git":                                 "",
+		"https://host:o/o/r":                                "",
+		"https:///o/r":                                      "",
+		"http://./o/r":                                      "",
+		"host:":                                             "",
+		"git@h:r":                                           "",
+		"/abs/path":                                         "",
+		"./host:path":                                       "",
+		"C:/abs/path":                                       "",
+		"c:\\abs\\path":                                     "",
+		"file:///abs/path":                                  "",
+		"ftp://host/o/r":                                    "",
+		"":                                                  "",
 	} {
 		if got := RemoteIdentity(raw); got != want {
-			t.Errorf("%q: got %q want %q", raw, got, want)
+			t.Errorf("%q: got %q, want %q", raw, got, want)
 		}
-	}
-	if RemoteIdentity("git@host:owner/repo.git") != RemoteIdentity("https://host/owner/repo") {
-		t.Fatal("ssh and https forms differ")
-	}
-}
-
-func TestCheckoutFindsTopAndSubproject(t *testing.T) {
-	root := t.TempDir()
-	repo := filepath.Join(root, "repo")
-	write(t, filepath.Join(repo, ".git", "config"), config)
-	app := filepath.Join(repo, "packages", "app")
-	if err := os.MkdirAll(app, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cases := []struct{ dir, stop, repo, sub string }{
-		{repo, repo, "github.com/Flex/Stage", "."},
-		{app, repo, "github.com/Flex/Stage", "packages/app"},
-		{app, root, "github.com/Flex/Stage", "packages/app"},
-		// The walk never climbs above stop.
-		{app, app, "", ""},
-		{app, filepath.Join(repo, "packages"), "", ""},
-		// stop must contain dir.
-		{repo, app, "", ""},
-	}
-	for _, c := range cases {
-		repo, sub := Checkout(c.dir, c.stop)
-		if repo != c.repo || sub != c.sub {
-			t.Errorf("Checkout(%s, %s) = %q %q, want %q %q", c.dir, c.stop, repo, sub, c.repo, c.sub)
-		}
-	}
-}
-
-func TestCheckoutNearestGitWins(t *testing.T) {
-	root := t.TempDir()
-	write(t, filepath.Join(root, ".git", "config"), config)
-	// A submodule or nested checkout without an origin hides the outer one.
-	nested := filepath.Join(root, "vendor", "lib")
-	write(t, filepath.Join(nested, ".git"), "gitdir: ../../.git/modules/lib\n")
-	write(t, filepath.Join(root, ".git", "modules", "lib", "config"), "[remote \"origin\"]\n\turl = https://github.com/o/lib.git\n")
-	if repo, sub := Checkout(filepath.Join(nested), root); repo != "github.com/o/lib" || sub != "." {
-		t.Fatalf("submodule: %q %q", repo, sub)
-	}
-	bare := filepath.Join(root, "other")
-	write(t, filepath.Join(bare, ".git", "config"), "[core]\n")
-	if repo, sub := Checkout(bare, root); repo != "" || sub != "" {
-		t.Fatalf("no origin: %q %q", repo, sub)
-	}
-}
-
-func TestCheckoutLinkedWorktreeSubdir(t *testing.T) {
-	root := t.TempDir()
-	main := filepath.Join(root, "repo")
-	write(t, filepath.Join(main, ".git", "config"), config)
-	write(t, filepath.Join(main, ".git", "worktrees", "wt", "commondir"), "../..\n")
-	wt := filepath.Join(root, "wt")
-	write(t, filepath.Join(wt, ".git"), "gitdir: ../repo/.git/worktrees/wt\n")
-	sub := filepath.Join(wt, "svc")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if repo, rel := Checkout(sub, root); repo != "github.com/Flex/Stage" || rel != "svc" {
-		t.Fatalf("got %q %q", repo, rel)
 	}
 }

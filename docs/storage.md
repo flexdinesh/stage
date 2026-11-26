@@ -123,7 +123,7 @@ rows and events), `Attempts` (launch attempts and checkpoints, claims, pinned
 destinations and inputs, handoffs), `Observations` (normalized
 execution observations), `Trees` (trees, membership, needs), `Journal`,
 `Acceptances`, `Schedules` (and runs), `Projects` (bindings, external
-projects, imports), `Connections` (harness connections and shared paths),
+workspaces, identity and imports), `Connections` (harness connections),
 `HarnessSetup` (settings, secrets and sync status), `Machines` (pairing codes,
 machine tokens),
 `Notifications`, `Sessions` (session identities), `Attachments`,
@@ -261,7 +261,7 @@ connection. Each status write updates only its own field.
 | Journal append | `AppendNote` | `requestId` idempotent per owner; same key with other content is 409 | the owner's row lock (task or tree), then read, compare, insert; unique `(owner, request_id)` as a backstop | `JournalConcurrentRetryAndPagination`, `ConcurrentNoteRequestIDConflict` |
 | Pairing redeem | `RedeemPairing` | a code redeems once, before expiry | expiry read, then one `UPDATE ... WHERE redeemed_at IS NULL`: the loser updates no row | `RedeemPairingConcurrentSingleWinner` |
 | Launch checkpoint | `SaveCheckpoint` | checkpoints of one attempt apply in order | one `UPDATE ... WHERE revision = $expected`: a stale writer updates no row (409) | none yet |
-| Project import | `ImportWorkspaces` | one project per workspace path per machine | connection row lock; unique binding indexes | none yet |
+| Project identity | inventory refresh, resolve/apply, bind/unbind, primary, decline, adoption, merge, split and dismissals | placement sees all connections and serializes with evidence and binding changes | `Projects().LockIdentity` first. SQLite single writer, Postgres transaction advisory lock | `ConcurrentImportAcrossConnections` |
 
 Each row's lock was checked to matter: with it removed, its `storetest`
 case fails on Postgres. On SQLite the single writer keeps every invariant,
@@ -413,7 +413,7 @@ and paging. (Thread search was removed with API v3.)
   preview and tree activity derive from it) and deletes the seeded T3
   connection 1 when it was never configured (no identity, no T3 token,
   default settings, not the default connection) and no row references it
-  (tasks, schedules, session identities, shared paths, bindings, external
+  (tasks, schedules, session identities, bindings, external
   projects, imports, launch destinations). A fresh install therefore has no
   connection: the first pairing or connect creates one. A paired or used
   connection 1 stays. Its `t3_connection` row (keyed by machine) stays for
@@ -470,6 +470,9 @@ and paging. (Thread search was removed with API v3.)
   facts from a connected status response and can read them without contacting
   the worker. Older connections begin without a snapshot. A replacement starts
   its own snapshot, and a forgotten connection's snapshot is excluded from reads.
+  Paired migration 0038 `project_identity` backfills the new shape before
+  dropping the superseded columns and table in the coordinated layer 07
+  upgrade. See [Project identity](#project-identity).
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -725,6 +728,52 @@ on the SQLite `stage.db` in the data dir, which the copy never wrote. Writes
 made on Postgres after the cutover are not copied back (there is no reverse
 copy); to retry the cutover later, drop and recreate the Postgres database
 first, since a copy refuses a target holding data.
+
+## Project identity
+
+Migration 0038 is paired for SQLite and Postgres. It adds attested file host,
+canonical path, Git common directory, inode hint, evidence time and source
+to `external_projects`, alongside the remote and subpath. Evidence source
+is empty, `harness` or `machine`. Existing rows keep legacy evidence until
+refreshed. The migration lowercases the legacy remote and marks workspace
+rows with active bindings as bound. It backfills active bindings as primary
+and maps the former binding origin to `rule` (`imported` becomes `new`,
+`path` becomes `local`). It preserves project IDs and archive state.
+
+`workspace_binding_active` keeps one active owner for an exact workspace
+tuple (connection, external ID, reported path). `project_binding_primary`
+permits several active bindings on a project/connection and enforces at
+most one active primary. The store assigns or promotes a primary when
+there are active bindings. Tasks and schedule templates store a nullable
+`binding_id`. A launch attempt stores its own pinned destination.
+
+| Stored field | Values and use |
+| --- | --- |
+| `project_bindings.status` | `available`, `missing` or `changed`. An available binding matches a current workspace row. A changed binding has a different observed path for its external ID. A missing binding has no available workspace at the recorded path or a replacement path for that ID. |
+| `project_bindings.rule` | `manual`, `new`, `remote`, `local`, `moved`. Records how the binding was made. |
+| `external_projects.resolution` | Empty for unresolved legacy or unavailable unbound rows, otherwise `bound`, `join`, `new` or `review`. Derived from workspace evidence, bindings and declines. |
+| `external_projects.resolution_reason` | Empty or `ambiguous`, `declined`, `moved`, `suggested`. The resolution also stores the resolver rule and candidate project IDs. |
+
+`workspace_declines` stores both the identity and external keys per
+connection. The migration backfills older declines from external IDs and,
+for rows with a path, any known remote and subpath. `project_aliases`
+retains merged IDs and titles, `project_merge_dismissals` stores unordered
+pairs by ascending project ID, and `project_events` records moves, merges
+and splits. Data copy includes these four tables. Migration 0038 drops
+`shared_paths`, `projects.archive_owner`, `project_bindings.origin` and
+`external_projects.declined_at`.
+
+The identity transaction lock is taken before row locks. On PostgreSQL it
+is `pg_advisory_xact_lock`, scoped to one transaction and shared by identity
+writes across all connections. SQLite relies on its single writer.
+Automatic import reads the evidence, plans, applies and updates derived
+resolutions in one write transaction. Confirmation recomputes the plan
+under that lock. Task and schedule creation, edits, duplication and spawning
+use the same lock to serialize the selected workspace with identity changes.
+Launch claims take it before the task lock and pin the active, available
+chosen binding or primary. Each attempt keeps its pinned path and binding
+revision. See [workspace discovery](discovery.md) for rule priority
+and [the API](api.md#workspace-discovery-and-project-identity) for previews.
 
 ## Legacy columns and compatibility triggers
 

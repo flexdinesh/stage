@@ -31,6 +31,7 @@ Coding agents with a shell use the CLI by default: it costs no context until use
 |---|---|
 | `--project P` | project id or title |
 | `--connection ID` | the execution harness connection (required unless the project's bindings or the default connection choose one) |
+| `--binding ID` | select a workspace binding for a task or schedule. Defaults to the project's primary on the chosen connection |
 | `--execution-config JSON` | harness options advertised by `stage models ls`, launch options included (a worktree, and on T3 its `baseRef` and `branch`). `--workspace`, `--base-ref`, `--branch`, `--base` and `--base-task` were removed |
 | `--prompt-file PATH`, `--prompt -` | read the prompt from a file or stdin |
 | `--image PATH...` | attach local images (PNG, JPEG, GIF, WebP, up to 8) |
@@ -88,7 +89,10 @@ Categories are optional: `finding`, `decision`, `blocker`, `outcome`. The CLI ge
 | `stage show REF` | what a Stage link, a harness session link, `#ID` or a scoped session path names; `--target-connection ID --target-session ID` names a session by id |
 | `stage context` | your session, cwd, resolved project, owning task and tree |
 | `stage projects ls` | projects with their bindings and connections |
-| `stage models ls --connection ID [--project ID]` | a connection's models, agents and options |
+| `stage projects workspaces [PROJECT] [--review]` | list workspaces and primary bindings, or list workspaces awaiting review |
+| `stage projects merge FROM INTO [--yes]` | preview a merge into the surviving project. Add `--yes` to confirm |
+| `stage projects split PROJECT --binding ID [--title T] --yes` | move a workspace to a new project |
+| `stage models ls --connection ID [--project ID [--binding ID]]` | a connection's models, agents and options |
 | `stage guide` | the agent workflow guide |
 
 ## Tools

@@ -101,9 +101,19 @@ func (r attempts) HasDestination(ctx context.Context, taskID int64, n int) (bool
 	return exists, err
 }
 
+// effectiveBindingSQL selects the chosen binding or, when unset, the active
+// primary. The chosen binding must still belong to this project and connection.
+func effectiveBindingSQL(owner string) string {
+	return `b.project_id=` + owner + `.project_id AND b.connection_id=` + owner + `.connection_id
+ AND b.active AND b.status='available'
+ AND b.id=COALESCE(` + owner + `.binding_id, (SELECT pb.id FROM project_bindings pb
+ WHERE pb.project_id=` + owner + `.project_id AND pb.connection_id=` + owner + `.connection_id
+ AND pb.active AND pb.is_primary))`
+}
+
 func (r attempts) BoundDestination(ctx context.Context, taskID int64) (store.LaunchDestination, error) {
 	var b store.LaunchDestination
-	err := r.QueryRow(ctx, `SELECT b.connection_id,b.external_project_id,b.workspace,b.id,b.revision FROM tasks t JOIN project_bindings b ON b.project_id=t.project_id AND b.connection_id=t.connection_id AND b.active AND b.status='available' WHERE t.id=$1`, taskID).Scan(&b.ConnectionID, &b.ExternalProjectID, &b.Workspace, &b.BindingID, &b.BindingRevision)
+	err := r.QueryRow(ctx, `SELECT b.connection_id,b.external_project_id,b.workspace,b.id,b.revision FROM tasks t JOIN project_bindings b ON `+effectiveBindingSQL("t")+` WHERE t.id=$1`, taskID).Scan(&b.ConnectionID, &b.ExternalProjectID, &b.Workspace, &b.BindingID, &b.BindingRevision)
 	return b, notFound(err)
 }
 

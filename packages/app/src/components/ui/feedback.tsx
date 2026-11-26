@@ -15,11 +15,13 @@ export function errorText(error: unknown): string | null {
 export function Alert({
   tone = "need",
   actions,
+  stackActionsOnPhone = false,
   className,
   children,
 }: {
   tone?: "need" | "bad" | "plain";
   actions?: ReactNode;
+  stackActionsOnPhone?: boolean;
   /** Outer spacing only (margins). */
   className?: string;
   children: ReactNode;
@@ -35,7 +37,9 @@ export function Alert({
     >
       <span aria-hidden className="size-[7px] shrink-0 bg-(--c)" />
       <div className="min-w-0 flex-1">{children}</div>
-      {actions === undefined ? null : <div className="flex flex-wrap gap-2">{actions}</div>}
+      {actions === undefined ? null : (
+        <div className={cx("flex flex-wrap gap-2", stackActionsOnPhone && "w-full md:w-auto")}>{actions}</div>
+      )}
     </div>
   );
 }
@@ -102,6 +106,7 @@ export function ConfirmInline({
   busy = false,
   disabled = false,
   alternative,
+  stackActionsOnPhone = false,
   error,
   children,
 }: {
@@ -112,6 +117,7 @@ export function ConfirmInline({
   busy?: boolean;
   disabled?: boolean;
   alternative?: ReactNode;
+  stackActionsOnPhone?: boolean;
   error?: unknown;
   children: ReactNode;
 }) {
@@ -119,6 +125,7 @@ export function ConfirmInline({
     <div className="flex flex-col gap-2">
       <Alert
         tone="need"
+        stackActionsOnPhone={stackActionsOnPhone}
         actions={
           <>
             <Button small variant={danger ? "danger" : "primary"} busy={busy} disabled={disabled} onClick={onConfirm}>

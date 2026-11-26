@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -34,11 +35,19 @@ func (s *server) adoptSession(w http.ResponseWriter, r *http.Request) error {
 	if req.ProjectID != nil && strings.TrimSpace(req.NewProjectTitle) != "" {
 		return db.Invalid("choose an existing project or a new project title")
 	}
+	ctx := r.Context()
+	if req.ProjectID != nil {
+		id, err := s.projectID(ctx, *req.ProjectID)
+		if err != nil {
+			return err
+		}
+		req.ProjectID = &id
+	}
 	binding, err := s.prepareAdoption(r, ref)
 	if err != nil {
 		return err
 	}
-	task, created, err := s.Store.AdoptSession(r.Context(), db.AdoptInput{
+	task, created, err := s.Store.AdoptSession(ctx, db.AdoptInput{
 		ProjectID: req.ProjectID, NewProjectTitle: req.NewProjectTitle, Binding: binding,
 		Session: ref, CallerSession: req.CallerSession, Title: req.Title, InitialNote: req.InitialNote, TreeID: req.TreeID,
 	})
@@ -144,6 +153,7 @@ func (s *server) sessionContext(w http.ResponseWriter, r *http.Request) error {
 		}
 		shaped := s.task(t)
 		out.Task = &shaped
+		p = s.projectView(p)
 		out.Project = &p
 		out.Title = t.Title
 		o, e := s.Store.Observation(ctx, ref)
@@ -204,6 +214,21 @@ func validateSnippet(p *db.SnippetPatch, create bool) error {
 	return nil
 }
 
+func (s *server) resolveSnippetProject(ctx context.Context, p *db.SnippetPatch) error {
+	if !p.ProjectID.Set || p.ProjectID.Null {
+		return nil
+	}
+	id, err := s.projectID(ctx, p.ProjectID.V)
+	if errors.Is(err, db.ErrNotFound) {
+		return db.Invalid("unknown projectId")
+	}
+	if err != nil {
+		return err
+	}
+	p.ProjectID.V = id
+	return nil
+}
+
 func (s *server) listSnippets(w http.ResponseWriter, r *http.Request) error {
 	sns, err := s.Store.ListSnippets(r.Context())
 	if err != nil {
@@ -219,6 +244,9 @@ func (s *server) createSnippet(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if err := validateSnippet(&p, true); err != nil {
+		return err
+	}
+	if err := s.resolveSnippetProject(r.Context(), &p); err != nil {
 		return err
 	}
 	sn, err := s.Store.CreateSnippet(r.Context(), p)
@@ -252,6 +280,9 @@ func (s *server) updateSnippet(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if err := validateSnippet(&p, false); err != nil {
+		return err
+	}
+	if err := s.resolveSnippetProject(r.Context(), &p); err != nil {
 		return err
 	}
 	sn, err := s.Store.UpdateSnippet(r.Context(), id, p)

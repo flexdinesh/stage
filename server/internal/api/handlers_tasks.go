@@ -16,7 +16,7 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	var f db.TaskFilter
 	var err error
-	if f.ProjectID, err = queryInt64(q, "project"); err != nil {
+	if f.ProjectID, err = s.projectFilter(r, "project"); err != nil {
 		return err
 	}
 	f.States = multi(q, "state")
@@ -73,6 +73,7 @@ type createTaskReq struct {
 
 type taskConfigReq struct {
 	ConnectionID    *int64            `json:"connectionId"`
+	BindingID       *int64            `json:"bindingId"`
 	NeedsSession    *db.SessionRef    `json:"needsSession"`
 	ExecutionConfig *execution.Config `json:"executionConfig"`
 	OriginSession   *db.SessionRef    `json:"originSession"`
@@ -89,20 +90,36 @@ type taskConfigReq struct {
 	Start           bool              `json:"start"`
 }
 
-// A request without a connection starts on the default connection when the
-// project is available there, else on the project's only binding, else (with
-// a default set) its first available binding (db.NewTaskDestination). With
-// none of those it is invalid: there is no default harness.
+// chooseConnection resolves the project alias and uses an explicit binding's
+// connection when the caller leaves connectionId unset.
 func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
+	ctx := r.Context()
 	if req.ConnectionID != nil {
-		return s.plannedConnection(r.Context(), *req.ConnectionID)
+		if req.ProjectID != nil {
+			id, err := s.projectID(ctx, *req.ProjectID)
+			if err != nil {
+				return err
+			}
+			req.ProjectID = &id
+		}
+		return s.plannedConnection(ctx, *req.ConnectionID)
 	}
 	if req.ProjectID == nil {
 		return nil
 	}
-	project, err := s.Store.GetProject(r.Context(), *req.ProjectID)
+	project, err := s.Store.GetProject(ctx, *req.ProjectID)
 	if err != nil {
 		return err
+	}
+	req.ProjectID = &project.ID
+	if req.BindingID != nil {
+		for _, b := range project.Bindings {
+			if b.ID == *req.BindingID {
+				req.ConnectionID = &b.ConnectionID
+				return s.plannedConnection(ctx, b.ConnectionID)
+			}
+		}
+		return db.ErrInvalidBinding
 	}
 	prefs, err := s.Store.GetPreferences(r.Context())
 	if err != nil {
@@ -132,6 +149,7 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 // on the harness defaults (its adapter validates it: validateSelection).
 func (req taskConfigReq) validate() (db.NewTask, error) {
 	in := db.NewTask{
+		BindingID:       req.BindingID,
 		NeedsSession:    req.NeedsSession,
 		ExecutionConfig: req.ExecutionConfig,
 		OriginSession:   req.OriginSession,
@@ -228,13 +246,8 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if err := s.validateSelection(r.Context(), in.ConnectionID, in.ProjectID, in.ExecutionConfig); err != nil {
+	if err := s.validateTaskDestination(r.Context(), in); err != nil {
 		return err
-	}
-	if len(in.AttachmentIDs) > 0 {
-		if err := s.requireImages(r.Context(), in.ConnectionID, in.ProjectID); err != nil {
-			return err
-		}
 	}
 	if in.NeedsSession != nil {
 		in.NeedsBinding, err = s.prepareAdoption(r, *in.NeedsSession)
@@ -325,30 +338,16 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	p.ValidatedConnection, p.ValidatedProject = current.ConnectionID, current.ProjectID
-	connection := current.ConnectionID
-	if p.ConnectionID.Set {
-		connection = p.ConnectionID.V
-		if err := s.plannedConnection(r.Context(), connection); err != nil {
-			return err
-		}
-	}
-	projectID := current.ProjectID
-	if p.ProjectID.Set {
-		projectID = p.ProjectID.V
-	}
-	if err := s.requirePatchImages(r.Context(), connection, projectID, connection != current.ConnectionID, current.Attachments, p.AttachmentIDs); err != nil {
-		return err
-	}
-	if p.ExecutionConfig.Set && (connection != current.ConnectionID || projectID != current.ProjectID || !sameSelection(current.ExecutionConfig, p.ExecutionConfig.Ptr())) {
-		if err := s.validateSelection(r.Context(), connection, projectID, p.ExecutionConfig.Ptr()); err != nil {
-			return err
-		}
-	}
+	p.ValidatedConnection, p.ValidatedProject, p.ValidatedBinding = current.ConnectionID, current.ProjectID, current.BindingID
 	if err := validateConfigPatch(configPatch{
-		ConnectionID: connection, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt,
+		ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt,
 		AttachmentIDs: &p.AttachmentIDs,
 	}); err != nil {
+		return err
+	}
+	original := taskDestination{current.ConnectionID, current.ProjectID, current.BindingID}
+	if err := s.validateDestinationPatch(r.Context(), original, p.ConnectionID, &p.ProjectID, p.BindingID,
+		current.ExecutionConfig, p.ExecutionConfig, current.Attachments, p.AttachmentIDs); err != nil {
 		return err
 	}
 	if p.StartMode.Set && !p.StartMode.Null && !p.StartMode.V.Valid() {
@@ -384,7 +383,6 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 // configPatch points at the task-config fields shared by task and schedule
 // patches.
 type configPatch struct {
-	ConnectionID  int64
 	ProjectID     *db.Optional[int64]
 	Title         *db.Optional[string]
 	Prompt        *db.Optional[string]

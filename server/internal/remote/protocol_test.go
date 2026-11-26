@@ -11,7 +11,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
-	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
@@ -21,7 +20,6 @@ func TestRPCBodiesRoundTripJSON(t *testing.T) {
 	at := time.Date(2026, 11, 22, 10, 0, 5, 0, time.UTC)
 	ref := execution.SessionRef{ConnectionID: 7, ExternalSessionID: "s"}
 	intent := execution.Intent{RequestID: "r", ConnectionID: 7, Project: "p", Directory: "/w", Title: "t", Prompt: "do", Config: execution.Config{Model: "m", Options: []execution.ModelOption{}, Permission: "x", Mode: "y"}, Images: []execution.Image{{Name: "a.png", MimeType: "image/png"}}, Marker: "stage-launch:r"}
-	roots := []machine.SharedRoot{{HarnessRoot: "/srv", StageRoot: "/home/u/srv"}}
 	samples := map[string]any{
 		"description": description{Profile: harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true},
 			Connectors: []ConnectorState{{Kind: "t3", Summary: harness.Summary{ConnectionID: 7, Configured: true, Connected: true, LastError: "e"}}}},
@@ -51,8 +49,7 @@ func TestRPCBodiesRoundTripJSON(t *testing.T) {
 		"CorrelateRequest": CorrelateRequest{Intent: intent},
 		"RespondRequest":   RespondRequest{Session: ref, RequestID: "q", Response: execution.Response{Option: "o", Text: "t"}},
 		"SendRequest":      SendRequest{Session: ref, Message: execution.Message{Text: "hi"}},
-		"InventoryRequest": InventoryRequest{Workspaces: []execution.WorkspaceInfo{{ID: "p", WorkspaceRoot: "/w", CreatedAt: at, UpdatedAt: at, Repo: "r", RepoPath: "."}}, Roots: roots},
-		"CheckoutRequest":  CheckoutRequest{Roots: roots, Directory: "/srv/x"},
+		"InventoryRequest": InventoryRequest{Workspaces: []execution.WorkspaceInfo{{ID: "p", WorkspaceRoot: "/w", CreatedAt: at, UpdatedAt: at, Repo: "r", RepoPath: "."}}},
 	}
 	for name, v := range samples {
 		raw, err := json.Marshal(v)

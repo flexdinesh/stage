@@ -18,18 +18,20 @@ const projectCols = `id,title,archived_at,created_at,updated_at,
  SELECT max(updated_at) a FROM tasks WHERE project_id=projects.id
  UNION ALL SELECT max(created_at) FROM journal_entries WHERE task_id IN (SELECT id FROM tasks WHERE project_id=projects.id)
  OR tree_id IN (SELECT tree_id FROM tasks WHERE project_id=projects.id))),
- COALESCE((SELECT json_group_array(json_object('id',b.id,'projectId',b.project_id,'connectionId',b.connection_id,'harness',c.harness,
- 'externalProjectId',b.external_project_id,'workspace',b.workspace,'revision',b.revision,'status',b.status,'observedWorkspace',b.observed_workspace,'connectionActive',json(CASE WHEN c.active=1 THEN 'true' ELSE 'false' END),'connectionLabel',c.label,'origin',b.origin))
- FROM project_bindings b JOIN harness_connections c ON c.id=b.connection_id WHERE b.project_id=projects.id AND b.active=1),'[]'),
+ COALESCE((SELECT json_group_array(` + projectBindingJSON + ` ORDER BY b.id)
+ ` + bindingWorkspaceJoin + ` WHERE b.project_id=projects.id AND b.active=1),'[]'),
  origin,imported_at,
  COALESCE((SELECT json_group_array(repo) FROM (SELECT DISTINCT e.repo FROM project_bindings b JOIN external_projects e
  ON e.connection_id=b.connection_id AND e.external_id=b.external_project_id AND e.workspace=b.workspace
  WHERE b.project_id=projects.id AND b.active=1 AND e.repo<>'' ORDER BY e.repo)),'[]'),
- created_by_user_id,source_machine_id`
+ created_by_user_id,source_machine_id,
+ COALESCE((SELECT json_group_array(json_object('id',a.alias_id,'title',a.title,
+ 'mergedAt',a.merged_at) ORDER BY a.alias_id)
+ FROM project_aliases a WHERE a.project_id=projects.id),'[]')`
 
 func scanProject(row rowScanner) (store.Project, error) {
 	var p store.Project
-	err := row.Scan(&p.ID, &p.Title, &p.ArchivedAt, &p.CreatedAt, &p.UpdatedAt, &p.LastActivityAt, &p.Bindings, &p.Origin, &p.ImportedAt, &p.Repos, &p.CreatedBy, &p.SourceMachineID)
+	err := row.Scan(&p.ID, &p.Title, &p.ArchivedAt, &p.CreatedAt, &p.UpdatedAt, &p.LastActivityAt, &p.Bindings, &p.Origin, &p.ImportedAt, &p.Repos, &p.CreatedBy, &p.SourceMachineID, &p.Aliases)
 	return p, notFound(err)
 }
 
@@ -96,139 +98,21 @@ func (r projects) InsertDiscovered(ctx context.Context, title string, connection
 
 func (r projects) Update(ctx context.Context, id int64, title string, archived bool) error {
 	_, err := r.Exec(ctx, `UPDATE projects SET title=$2,archived_at=CASE WHEN $3 THEN COALESCE(archived_at,stage_now()) ELSE NULL END,
- archive_owner=CASE WHEN (archived_at IS NOT NULL)<>$3 THEN 'user' ELSE archive_owner END,updated_at=stage_now() WHERE id=$1`, id, title, archived)
-	return err
-}
-
-func (r projects) DeclineRebound(ctx context.Context, b store.ProjectBinding) error {
-	_, err := r.Exec(ctx, `UPDATE external_projects SET declined_at=stage_now() WHERE EXISTS(SELECT 1 FROM project_bindings p
- WHERE p.project_id=$1 AND p.connection_id=$2 AND p.active=1 AND p.connection_id=external_projects.connection_id
- AND p.external_project_id=external_projects.external_id AND p.workspace=external_projects.workspace)
- AND NOT (external_id=$3 AND workspace=$4)`, b.ProjectID, b.ConnectionID, b.ExternalProjectID, b.Workspace)
-	return err
-}
-
-func (r projects) DeclineBound(ctx context.Context, projectID, connectionID int64) error {
-	_, err := r.Exec(ctx, `UPDATE external_projects SET declined_at=stage_now() WHERE EXISTS(SELECT 1 FROM project_bindings b
- WHERE b.project_id=$1 AND b.connection_id=$2 AND b.active=1 AND b.connection_id=external_projects.connection_id
- AND b.external_project_id=external_projects.external_id AND b.workspace=external_projects.workspace)`, projectID, connectionID)
-	return err
-}
-
-func (r projects) DeactivateBindings(ctx context.Context, projectID, connectionID int64) error {
-	_, err := r.Exec(ctx, `UPDATE project_bindings SET active=0 WHERE project_id=$1 AND connection_id=$2`, projectID, connectionID)
+ updated_at=stage_now() WHERE id=$1`, id, title, archived)
 	return err
 }
 
 func (r projects) InsertBinding(ctx context.Context, b store.ProjectBinding) (int64, error) {
 	var id int64
-	err := r.QueryRow(ctx, `INSERT INTO project_bindings(project_id,connection_id,external_project_id,workspace,revision,origin)
- VALUES($1,$2,$3,$4,COALESCE((SELECT max(revision)+1 FROM project_bindings WHERE project_id=$1 AND connection_id=$2),1),$5) RETURNING id`, b.ProjectID, b.ConnectionID, b.ExternalProjectID, b.Workspace, b.Origin).Scan(&id)
+	err := r.QueryRow(ctx, `INSERT INTO project_bindings(project_id,connection_id,external_project_id,workspace,revision,rule,is_primary)
+ VALUES($1,$2,$3,$4,COALESCE((SELECT max(revision)+1 FROM project_bindings WHERE project_id=$1 AND connection_id=$2),1),$5,$6) RETURNING id`, b.ProjectID, b.ConnectionID, b.ExternalProjectID, b.Workspace, b.Rule, b.Primary).Scan(&id)
 	return id, err
-}
-
-func (r projects) Undecline(ctx context.Context, connectionID int64, externalID, workspace string) error {
-	_, err := r.Exec(ctx, `UPDATE external_projects SET declined_at=NULL WHERE connection_id=$1 AND external_id=$2 AND workspace=$3`, connectionID, externalID, workspace)
-	return err
 }
 
 func (r projects) BoundOn(ctx context.Context, projectID, connectionID int64) (bool, error) {
 	var here bool
 	err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_bindings WHERE project_id=$1 AND connection_id=$2 AND active=1)`, projectID, connectionID).Scan(&here)
 	return here, err
-}
-
-func (r projects) AutoBindEligible(ctx context.Context, source int64, b store.ProjectBinding) (bool, error) {
-	var eligible bool
-	err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_bindings WHERE id=$1 AND project_id=$2 AND active=1 AND status='available') AND NOT EXISTS(SELECT 1 FROM project_bindings WHERE project_id=$2 AND connection_id=$3 AND active=1)
- AND EXISTS(SELECT 1 FROM external_projects WHERE connection_id=$3 AND external_id=$4 AND workspace=$5 AND available=1)`, source, b.ProjectID, b.ConnectionID, b.ExternalProjectID, b.Workspace).Scan(&eligible)
-	return eligible, err
-}
-
-func (r projects) ExternalProjects(ctx context.Context, connectionID int64) ([]store.ExternalProject, error) {
-	rows, err := r.Query(ctx, `SELECT e.connection_id,e.external_id,e.title,e.workspace,b.project_id,e.repo FROM external_projects e
- LEFT JOIN project_bindings b ON b.connection_id=e.connection_id AND b.external_project_id=e.external_id AND b.workspace=e.workspace AND b.active=1
- WHERE e.connection_id=$1 AND e.available=1 ORDER BY lower(e.title),e.workspace`, connectionID)
-	if err != nil {
-		return nil, err
-	}
-	return collectRows(rows, func(r rowScanner) (store.ExternalProject, error) {
-		var p store.ExternalProject
-		err := r.Scan(&p.ConnectionID, &p.ExternalID, &p.Title, &p.Workspace, &p.ProjectID, &p.Repo)
-		return p, err
-	})
-}
-
-func (r projects) MarkUnavailable(ctx context.Context, connectionID int64) error {
-	_, err := r.Exec(ctx, `UPDATE external_projects SET available=0 WHERE connection_id=$1`, connectionID)
-	return err
-}
-
-func (r projects) UpsertDiscovered(ctx context.Context, connectionID int64, w store.DiscoveredWorkspace) error {
-	_, err := r.Exec(ctx, `INSERT INTO external_projects(connection_id,external_id,title,workspace,available,importable,archived,active_at,repo,repo_path) VALUES($5,$1,$2,$3,$4,$6,$7,$8,$9,$10)
- ON CONFLICT(connection_id,external_id,workspace) DO UPDATE SET title=excluded.title,available=excluded.available,
- importable=excluded.importable,archived=excluded.archived,active_at=excluded.active_at,repo=excluded.repo,repo_path=excluded.repo_path`,
-		w.ExternalID, w.Title, w.Workspace, w.Available, connectionID, w.Importable, w.Archived, w.ActiveAt, w.Repo, w.RepoPath)
-	return err
-}
-
-func (r projects) RefreshBindingStatus(ctx context.Context, connectionID int64) error {
-	_, err := r.Exec(ctx, `UPDATE project_bindings SET
- status=CASE WHEN EXISTS(SELECT 1 FROM external_projects e WHERE e.connection_id=$1 AND e.external_id=project_bindings.external_project_id AND e.workspace=project_bindings.workspace AND e.available=1) THEN 'available'
- WHEN EXISTS(SELECT 1 FROM external_projects e WHERE e.connection_id=$1 AND e.external_id=project_bindings.external_project_id AND e.available=1) THEN 'changed' ELSE 'missing' END,
- observed_workspace=(SELECT workspace FROM external_projects e WHERE e.connection_id=$1 AND e.external_id=project_bindings.external_project_id AND e.available=1 LIMIT 1)
- WHERE connection_id=$1 AND active=1`, connectionID)
-	return err
-}
-
-func (r projects) ImportCandidates(ctx context.Context, connectionID int64) ([]store.ImportCandidate, error) {
-	rows, err := r.Query(ctx, `SELECT e.external_id,e.title,e.workspace,e.repo,e.repo_path FROM external_projects e
- WHERE e.connection_id=$1 AND e.available=1 AND e.importable=1 AND e.archived=0 AND e.declined_at IS NULL AND e.workspace<>''
- AND NOT EXISTS(SELECT 1 FROM project_bindings b WHERE b.connection_id=e.connection_id AND b.workspace=e.workspace AND b.active=1)
- ORDER BY e.workspace,e.active_at IS NULL,e.active_at DESC,e.external_id`, connectionID)
-	if err != nil {
-		return nil, err
-	}
-	return collectRows(rows, func(row rowScanner) (store.ImportCandidate, error) {
-		var c store.ImportCandidate
-		err := row.Scan(&c.ExternalID, &c.Title, &c.Workspace, &c.Repo, &c.RepoPath)
-		return c, err
-	})
-}
-
-func (r projects) Claims(ctx context.Context) ([]store.Claim, error) {
-	rows, err := r.Query(ctx, `SELECT b.id,b.project_id,b.connection_id,c.machine_id,b.workspace,COALESCE(e.repo,''),COALESCE(e.repo_path,'') FROM project_bindings b
- JOIN harness_connections c ON c.id=b.connection_id
- LEFT JOIN external_projects e ON e.connection_id=b.connection_id AND e.external_id=b.external_project_id AND e.workspace=b.workspace
- WHERE b.active=1 ORDER BY b.project_id,b.id`)
-	if err != nil {
-		return nil, err
-	}
-	return collectRows(rows, func(row rowScanner) (store.Claim, error) {
-		var c store.Claim
-		err := row.Scan(&c.BindingID, &c.ProjectID, &c.ConnectionID, &c.MachineID, &c.Workspace, &c.Repo, &c.RepoPath)
-		return c, err
-	})
-}
-
-func (r projects) FollowArchive(ctx context.Context) (archived, unarchived int, err error) {
-	const dead = `EXISTS(SELECT 1 FROM project_bindings b WHERE b.project_id=projects.id AND b.active=1)
- AND NOT EXISTS(SELECT 1 FROM project_bindings b JOIN external_projects e ON e.connection_id=b.connection_id
- AND e.external_id=b.external_project_id AND e.workspace=b.workspace
- WHERE b.project_id=projects.id AND b.active=1 AND e.available=1 AND e.archived=0)`
-	tag, err := r.Exec(ctx, `UPDATE projects SET archived_at=stage_now(),archive_owner='harness',updated_at=stage_now()
- WHERE origin='discovered' AND archived_at IS NULL AND archive_owner IS NULL
- AND NOT EXISTS(SELECT 1 FROM tasks WHERE project_id=projects.id) AND `+dead)
-	if err != nil {
-		return 0, 0, err
-	}
-	archived = int(tag.RowsAffected())
-	tag, err = r.Exec(ctx, `UPDATE projects SET archived_at=NULL,archive_owner=NULL,updated_at=stage_now()
- WHERE origin='discovered' AND archived_at IS NOT NULL AND archive_owner='harness' AND NOT (`+dead+`)`)
-	if err != nil {
-		return 0, 0, err
-	}
-	return archived, int(tag.RowsAffected()), nil
 }
 
 func (r projects) ImportSummaries(ctx context.Context, since time.Time) ([]store.ImportSummary, error) {

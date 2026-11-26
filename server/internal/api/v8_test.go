@@ -145,7 +145,7 @@ func TestT3RoutesRemoved(t *testing.T) {
 	e := newEnv(t)
 	e.must("GET", "/api/catalog", nil, 404, nil)
 	// "t3" is no connection id: the generic connection route refuses it.
-	if msg := e.refused("GET", "/api/connections/t3/projects", nil, 400); !strings.Contains(msg, "connection") {
-		t.Fatalf("t3 projects %q", msg)
+	if msg := e.refused("GET", "/api/connections/t3/workspaces", nil, 400); !strings.Contains(msg, "connection") {
+		t.Fatalf("t3 workspaces %q", msg)
 	}
 }

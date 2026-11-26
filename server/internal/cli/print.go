@@ -50,6 +50,9 @@ func printContext(w io.Writer, c agenttools.ContextOut) {
 	} else {
 		fmt.Fprintf(w, "project  - (%s)\n", c.ProjectError)
 	}
+	if c.BindingID != nil {
+		fmt.Fprintf(w, "binding  %d\n", *c.BindingID)
+	}
 	if c.TreeID != nil {
 		fmt.Fprintf(w, "tree     %d %s\n", *c.TreeID, orDash(c.TreeTitle))
 	}
@@ -434,12 +437,14 @@ func compactCount(n int64) string {
 }
 
 func projectWorkspace(p db.Project) string {
-	if len(p.Bindings) == 0 {
-		return "workspace not bound"
-	}
 	var bindings []string
 	for _, b := range p.Bindings {
-		bindings = append(bindings, fmt.Sprintf("%s %d: %s", b.Harness, b.ConnectionID, b.Workspace))
+		if b.Primary {
+			bindings = append(bindings, fmt.Sprintf("%s %d: %s", b.Harness, b.ConnectionID, dash(orFirst(b.Workspace, b.ExternalProjectID))))
+		}
+	}
+	if len(bindings) == 0 {
+		return "workspace not bound"
 	}
 	return strings.Join(bindings, ", ")
 }

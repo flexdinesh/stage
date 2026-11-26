@@ -10,9 +10,6 @@ import (
 	"testing"
 )
 
-// reads are the functions that read a checkout's files.
-var reads = map[string]bool{"Checkout": true, "Top": true, "OriginRepo": true, "Translate": true}
-
 // Git evidence is read only by machine.Ops, on the machine where the files
 // live, never by an adapter (ADR 0007 decision 11). Normalizing a remote a
 // harness reports (RemoteIdentity) is allowed anywhere.
@@ -38,7 +35,7 @@ func TestOnlyMachineOpsReadCheckouts(t *testing.T) {
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
 			if sel, ok := n.(*ast.SelectorExpr); ok {
-				if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "gitmeta" && reads[sel.Sel.Name] {
+				if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "gitmeta" && sel.Sel.Name == "Inspect" {
 					rel, _ := filepath.Rel(root, path)
 					offenders = append(offenders, rel+": gitmeta."+sel.Sel.Name)
 				}
@@ -51,6 +48,6 @@ func TestOnlyMachineOpsReadCheckouts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(offenders) > 0 {
-		t.Fatalf("Git evidence read outside machine.Ops (fill it in machine.Ops.Inventory or Checkout): %v", offenders)
+		t.Fatalf("Git evidence read outside machine.Ops (fill it in machine.Ops.Inventory): %v", offenders)
 	}
 }

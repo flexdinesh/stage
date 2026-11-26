@@ -18,9 +18,7 @@ import (
 // The real Codex adapter against a fake daemon, driven by the coordinator
 // in process and behind a worker channel.
 
-const codexDir = "/w/app"
-
-func codexSetup(t *testing.T, p placement) (*db.Store, *codextest.Server, *coordinator.Service, db.Task) {
+func codexSetup(t *testing.T, p placement, codexDir string) (*db.Store, *codextest.Server, *coordinator.Service, db.Task) {
 	t.Helper()
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
@@ -49,7 +47,8 @@ func codexSetup(t *testing.T, p placement) (*db.Store, *codextest.Server, *coord
 // operation through the coordinator, in process and behind a worker.
 func TestContractCodexWrappedThreadRefusedAndOperationsDeclared(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
-		_, srv, svc, _ := codexSetup(t, p)
+		codexDir := t.TempDir()
+		_, srv, svc, _ := codexSetup(t, p, codexDir)
 		ctx := t.Context()
 		a, err := svc.Adapter(3)
 		if err != nil {
@@ -73,7 +72,8 @@ func TestContractCodexWrappedThreadRefusedAndOperationsDeclared(t *testing.T) {
 
 func TestContractCodexLaunchToDoneWithReplyAndResumeCommand(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
-		store, srv, svc, task := codexSetup(t, p)
+		codexDir := t.TempDir()
+		store, srv, svc, task := codexSetup(t, p, codexDir)
 		ctx := t.Context()
 		got, err := svc.StartTask(ctx, task.ID)
 		if err != nil || got.State != db.StateRunning || got.Session == nil {
@@ -106,7 +106,7 @@ func TestContractCodexLaunchToDoneWithReplyAndResumeCommand(t *testing.T) {
 // reconciles the same thread and turn, never a second one.
 func TestContractCodexLostTurnReplyReconcilesOnce(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
-		store, srv, svc, task := codexSetup(t, p)
+		store, srv, svc, task := codexSetup(t, p, t.TempDir())
 		ctx := t.Context()
 		srv.DropReply("turn/start", 1)
 		short, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
@@ -128,7 +128,7 @@ func TestContractCodexLostTurnReplyReconcilesOnce(t *testing.T) {
 
 func TestContractCodexArchiveInfersCompletion(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
-		store, srv, svc, task := codexSetup(t, p)
+		store, srv, svc, task := codexSetup(t, p, t.TempDir())
 		ctx := t.Context()
 		got, err := svc.StartTask(ctx, task.ID)
 		if err != nil {
@@ -153,7 +153,7 @@ func TestContractCodexArchiveInfersCompletion(t *testing.T) {
 // no polling.
 func TestContractCodexPushIngest(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
-		store, srv, svc, task := codexSetup(t, p)
+		store, srv, svc, task := codexSetup(t, p, t.TempDir())
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		got, err := svc.StartTask(ctx, task.ID)
@@ -177,7 +177,7 @@ func TestContractCodexPushIngest(t *testing.T) {
 
 func TestContractCodexStop(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
-		store, _, svc, task := codexSetup(t, p)
+		store, _, svc, task := codexSetup(t, p, t.TempDir())
 		ctx := t.Context()
 		got, err := svc.StartTask(ctx, task.ID)
 		if err != nil {

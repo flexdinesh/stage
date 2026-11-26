@@ -2,7 +2,7 @@
 // branch by `harness`, never by id. Names, closure copy and availability come from the server's harness descriptors
 // (GET /harnesses), never from a list here. Retired connections keep their tasks and bindings as read-only history.
 import type { ExecutionLinks } from "../platform/index.ts";
-import type { ExternalProject, Harness, HarnessConnection, HarnessDescriptor, Project, ProjectBinding, Task } from "../api/types.ts";
+import type { Harness, HarnessConnection, HarnessDescriptor, Project, ProjectBinding, Task, Workspace } from "../api/types.ts";
 
 /** Lookups over GET /connections (every row, active first) and GET /harnesses (descriptors). */
 export interface Harnesses {
@@ -164,7 +164,7 @@ export function bindingsSummary(bindings: readonly ProjectBinding[], kindName: (
   const current = bindings.filter((b) => b.connectionActive);
   if (current.length === 0) return "not bound";
   if (current.some((b) => b.status !== "available")) return "check workspace";
-  return current.map((b) => kindName(b.harness)).join(" · ");
+  return [...new Set(current.map((b) => kindName(b.harness)))].join(" · ");
 }
 
 /** The project's bindings on replaced connections of a harness. */
@@ -182,10 +182,10 @@ export const replacedPaths = (project: Pick<Project, "bindings">, h: Harness): S
 export function rebindCandidate(
   project: Pick<Project, "id" | "bindings">,
   connection: Pick<HarnessConnection, "id" | "harness">,
-  external: readonly ExternalProject[],
-): ExternalProject | null {
+  external: readonly Workspace[],
+): Workspace | null {
   if (project.bindings.some((b) => b.connectionId === connection.id)) return null;
   const paths = replacedPaths(project, connection.harness);
   if (paths.size === 0) return null;
-  return external.find((e) => paths.has(e.workspace) && (e.projectId === null || e.projectId === project.id)) ?? null;
+  return external.find((e) => e.available && e.workspace !== "" && paths.has(e.workspace) && e.projectId === null) ?? null;
 }

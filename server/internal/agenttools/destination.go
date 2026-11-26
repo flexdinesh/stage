@@ -58,6 +58,13 @@ func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c age
 		}
 	}
 	id := a.ConnectionID
+	if a.BindingID != nil {
+		i := slices.IndexFunc(bindings, func(b db.ProjectBinding) bool { return b.ID == *a.BindingID })
+		if i < 0 || (id != 0 && id != bindings[i].ConnectionID) {
+			return 0, db.ErrInvalidBinding
+		}
+		id = bindings[i].ConnectionID
+	}
 	if id == 0 {
 		prefs, err := o.Client.Preferences(ctx)
 		if err != nil {

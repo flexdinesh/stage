@@ -16,7 +16,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
-	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
@@ -40,7 +39,6 @@ const (
 	KindSend                 = "adapter.send"
 	KindAct                  = "adapter.act"
 	KindInventory            = "ops.inventory"
-	KindCheckout             = "ops.checkout"
 )
 
 // Worker-initiated calls. The callbacks name the pending request they
@@ -142,13 +140,6 @@ type SendRequest struct {
 // InventoryRequest is ops.inventory.
 type InventoryRequest struct {
 	Workspaces []execution.WorkspaceInfo `json:"workspaces"`
-	Roots      []machine.SharedRoot      `json:"roots"`
-}
-
-// CheckoutRequest is ops.checkout.
-type CheckoutRequest struct {
-	Roots     []machine.SharedRoot `json:"roots"`
-	Directory string               `json:"directory"`
 }
 
 // Empty is a result with no body.

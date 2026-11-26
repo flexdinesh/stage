@@ -19,7 +19,7 @@ A one-shot start is not a schedule: it is a start time on an ordinary backlog ta
 
 ## Repeat
 
-A schedule holds a task's config (project, connection, prompt, options, workspace and images), a note template and a timing rule:
+A schedule holds a task's config (project, connection, prompt, options, optional workspace binding and images), a note template and a timing rule:
 
 - a preset: Hourly, Daily, Weekdays or Weekly, or
 - a raw 5-field cron expression.
@@ -32,7 +32,7 @@ Times are evaluated in the schedule's IANA zone, so daylight saving follows the 
 
 - A fire is **skipped** while the previous spawned task is still pending, running or needs input. A previous task that is done but not yet completed does not block.
 - Fires missed while the server was down are **skipped**, recorded once as missed. Nothing runs late.
-- If a fire cannot launch because the project is not bound on the connection, or the connection is unavailable, it becomes one backlog task with the error to repair. Later fires are held back while it waits. Start it by hand once fixed.
+- If a fire cannot launch because its workspace binding or connection is unavailable, it becomes one backlog task with the error to repair. Later fires are held back while it waits. Start it by hand once fixed.
 
 Scheduled starts and skips do not notify. A failed launch notifies as usual.
 

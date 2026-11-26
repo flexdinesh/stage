@@ -36,12 +36,13 @@ test("launchNotice names an untitled session by its id", () => {
   assert.equal(launchNotice({ launch: launch({ session }), stateSince: null }, "T3", NOW).session, "thread-1 · running");
 });
 
-const subject = { connectionId: 4, projectId: 7, projectTitle: "stage" };
+const subject = { connectionId: 4, projectId: 7, projectTitle: "stage", bindingId: null };
+const binding = (status, extra = {}) => ({ id: 42, connectionId: 4, connectionActive: true, primary: true, status, ...extra });
 const ctx = (over = {}) => ({
   connection: { active: true, configured: true },
   machine: { kind: "remote", status: "online", label: "desk" },
   live: { tone: "ok", label: "T3 connected" },
-  bindings: [{ connectionId: 4, status: "available" }],
+  bindings: [binding("available")],
   name: "T3 · desk",
   where: "on desk",
   settings: "/settings/connections",
@@ -84,14 +85,22 @@ test("launchBlock refuses a harness whose live status is a problem, never one st
 });
 
 test("launchBlock refuses a project without an available workspace on the connection", () => {
-  for (const bindings of [[], [{ connectionId: 4, status: "missing" }], [{ connectionId: 9, status: "available" }]]) {
+  for (const bindings of [[], [binding("missing")], [binding("available", { connectionId: 9 })]]) {
     const b = launchBlock(subject, ctx({ bindings }));
     assert.equal(b?.kind, "unbound");
-    assert.equal(b?.reason, "stage has no workspace on T3 · desk. Bind one to start this task.");
+    assert.equal(b?.reason, "stage has no available primary workspace on T3 · desk.");
     assert.deepEqual(b?.fix, { label: "Bind workspace", to: "/projects/7" });
   }
   // Projects not loaded yet block nothing.
   assert.equal(launchBlock(subject, ctx({ bindings: undefined })), null);
+});
+
+test("launchBlock checks the primary by default and never substitutes for an explicit binding", () => {
+  const bindings = [binding("missing"), binding("available", { id: 53, primary: false })];
+  assert.equal(launchBlock(subject, ctx({ bindings }))?.kind, "unbound");
+  assert.equal(launchBlock({ ...subject, bindingId: 53 }, ctx({ bindings })), null);
+  assert.equal(launchBlock({ ...subject, bindingId: 42 }, ctx({ bindings }))?.kind, "unbound");
+  assert.equal(launchBlock({ ...subject, bindingId: 999 }, ctx())?.kind, "unbound");
 });
 
 test("launchBlock checks in order: disconnected, machine, live status, workspace", () => {

@@ -124,19 +124,6 @@ func TestTwoMachinesEachHaveTheirOwnActiveConnections(t *testing.T) {
 		t.Fatalf("laptop opencode %+v (local %+v) %v", ocLaptop, ocLocal, err)
 	}
 
-	// Shared paths translate within their machine only.
-	if err := s.SetSharedPath(ctx, SharedPath{ConnectionID: ocLaptop.New, HarnessRoot: "/srv", StageRoot: "/home"}); err != nil {
-		t.Fatal(err)
-	}
-	if paths, err := s.MachineSharedPaths(ctx, LocalMachine); err != nil || len(paths) != 0 {
-		t.Fatalf("local paths %+v %v", paths, err)
-	}
-	if paths, err := s.MachineSharedPaths(ctx, laptop); err != nil || len(paths) != 1 || paths[0].ConnectionID != ocLaptop.New {
-		t.Fatalf("laptop paths %+v %v", paths, err)
-	}
-	if paths, err := s.SharedPaths(ctx); err != nil || len(paths) != 1 {
-		t.Fatalf("all paths %+v %v", paths, err)
-	}
 	if n := foreignKeyViolations(t, pool); n != 0 {
 		t.Fatalf("%d foreign key violations", n)
 	}

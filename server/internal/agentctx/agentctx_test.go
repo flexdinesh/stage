@@ -79,3 +79,21 @@ func TestFromEnv(t *testing.T) {
 		t.Fatalf("explicit caller should bypass a malformed environment: %+v %v", c, err)
 	}
 }
+
+func TestMatchProjectAliases(t *testing.T) {
+	projects := []db.Project{
+		{ID: 1, Title: "Current", Aliases: []db.ProjectAlias{
+			{ID: 10, Title: "Former"}, {ID: 11, Title: "former"},
+			{ID: 12, Title: "Taken"}, {ID: 13, Title: "Shared"}, {ID: 14, Title: "Duplicate"},
+		}},
+		{ID: 2, Title: "Taken", Aliases: []db.ProjectAlias{{ID: 20, Title: "Shared"}}},
+		{ID: 3, Title: "Duplicate"},
+		{ID: 4, Title: "duplicate"},
+	}
+	for input, want := range map[string]int64{"10": 1, "fOrMeR": 1, "taken": 2, "shared": 0, "Duplicate": 0, "disappeared": 0} {
+		got, ok := matchProject(projects, input)
+		if got.ID != want || ok != (want != 0) {
+			t.Errorf("matchProject(%q) = %d, %t; want %d", input, got.ID, ok, want)
+		}
+	}
+}

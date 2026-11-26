@@ -141,7 +141,7 @@ func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Des
 		label = identity
 	}
 	var out Switch
-	err := s.e.Write(ctx, func(tx store.Tx) error {
+	err := s.writeConnectionIdentity(ctx, func(tx store.Tx) error {
 		// Write may rerun fn (Postgres retry): start each run from scratch.
 		out = Switch{}
 		// One active connection per machine and kind: switches on a machine
@@ -239,7 +239,7 @@ func (s *Store) MovedConnections(ctx context.Context) ([]Move, error) {
 // tasks keep their history, read-only. 404 unknown, 409 already retired or an
 // unusable replacement.
 func (s *Store) RetireConnection(ctx context.Context, id, replacement int64) error {
-	err := s.e.Write(ctx, func(tx store.Tx) error {
+	err := s.writeConnectionIdentity(ctx, func(tx store.Tx) error {
 		if err := lockMachineOf(ctx, tx, id); err != nil {
 			return err
 		}
@@ -305,10 +305,10 @@ func (s *Store) RetiredConnections(ctx context.Context, machine int64, harness s
 
 // ForgetConnection lets go of a retired connection. Its history stays: tasks
 // keep it and its label. It can no longer be restored, its project bindings
-// no longer ask for repair, and its discovery and shared paths are dropped.
+// no longer ask for repair, and its discovery and declines are dropped.
 // A connection nothing references is deleted outright.
 func (s *Store) ForgetConnection(ctx context.Context, id int64) error {
-	err := s.e.Write(ctx, func(tx store.Tx) error {
+	err := s.writeConnectionIdentity(ctx, func(tx store.Tx) error {
 		if err := lockMachineOf(ctx, tx, id); err != nil {
 			return err
 		}
@@ -322,7 +322,7 @@ func (s *Store) ForgetConnection(ctx context.Context, id int64) error {
 // disconnected: it retires (RetireConnection without a replacement) and is
 // forgotten (ForgetConnection) at once.
 func (s *Store) RetireAndForget(ctx context.Context, id int64) error {
-	err := s.e.Write(ctx, func(tx store.Tx) error {
+	err := s.writeConnectionIdentity(ctx, func(tx store.Tx) error {
 		if err := lockMachineOf(ctx, tx, id); err != nil {
 			return err
 		}
@@ -333,6 +333,20 @@ func (s *Store) RetireAndForget(ctx context.Context, id int64) error {
 	})
 	s.dropConnections()
 	return err
+}
+
+// Connection changes can remove evidence or disable automatic moves. Keep
+// the affected stored resolutions consistent with the connection change.
+func (s *Store) writeConnectionIdentity(ctx context.Context, fn func(store.Tx) error) error {
+	return s.e.Write(ctx, func(tx store.Tx) error {
+		if err := tx.Projects().LockIdentity(ctx); err != nil {
+			return err
+		}
+		if err := fn(tx); err != nil {
+			return err
+		}
+		return resolveAll(ctx, tx)
+	})
 }
 
 func forgetTx(ctx context.Context, tx store.Tx, id int64) error {

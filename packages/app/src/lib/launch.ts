@@ -2,6 +2,7 @@ import type { Capabilities, HarnessConnection, Machine, ProjectBinding, Task } f
 import type { HarnessSummary } from "./connections.ts";
 import { relativeTime } from "./format.ts";
 import { machineSetupState } from "./machines.ts";
+import { workspaceBinding } from "./projects.ts";
 import { canStart } from "./tasks.ts";
 
 /** Copy for the task detail banner of a launch Stage has not confirmed; `name` is the harness's name. */
@@ -72,7 +73,7 @@ export interface LaunchContext {
   /** Its live status on its machine; undefined until read (checking blocks nothing). */
   live: Pick<HarnessSummary, "tone" | "label"> | undefined;
   /** The task's project bindings; undefined until projects load. */
-  bindings: readonly Pick<ProjectBinding, "connectionId" | "status">[] | undefined;
+  bindings: readonly ProjectBinding[] | undefined;
   /** The connection's display name ("T3", or "T3 · desk" with two or more machines). */
   name: string;
   /** "on desk" with two or more machines, else "". */
@@ -115,15 +116,19 @@ export function connectionBlock(c: Omit<LaunchContext, "bindings">, op: SessionO
   return null;
 }
 
-export function launchBlock(t: Pick<Task, "connectionId" | "projectId" | "projectTitle">, c: LaunchContext): LaunchBlock | null {
+export type LaunchTarget = Pick<Task, "connectionId" | "projectId" | "projectTitle" | "bindingId">;
+
+export function launchBlock(t: LaunchTarget, c: LaunchContext): LaunchBlock | null {
   const block = connectionBlock(c, "launch");
   if (block !== null) return block;
   const { connection, bindings, name } = c;
   if (connection === undefined || !connection.active) return null;
-  if (bindings !== undefined && !bindings.some((b) => b.connectionId === t.connectionId && b.status === "available")) {
+  if (bindings !== undefined && workspaceBinding(bindings, t.connectionId, t.bindingId)?.status !== "available") {
     return {
       kind: "unbound",
-      reason: `${t.projectTitle} has no workspace on ${name}. Bind one to start this task.`,
+      reason: t.bindingId === null
+        ? `${t.projectTitle} has no available primary workspace on ${name}.`
+        : `This task's selected workspace on ${name} is unavailable.`,
       fix: { label: "Bind workspace", to: `/projects/${t.projectId}` },
     };
   }

@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -20,7 +22,7 @@ const guide = `Stage owns projects, tasks, trees, accepted results and journals.
 - Call get_context to see your scoped session, project, owning task and current tree. Before work, read the task journal and the current tree journal. Refresh membership before contributing a tree note.
 - Use whichever Stage interface you have: the {cli} CLI ({cli} help; {cli} call TOOL JSON runs any tool named here, {cli} tools NAME shows its input), Stage MCP tools (names here), or the Stage server's HTTP API (/api). If none is reachable, say so and continue; never install one.
 - Caller session: {connectionId, externalSessionId}, your harness connection in Stage and your session there. The {cli} CLI and stdio MCP detect it from your harness's session variable ({cli} context shows it). Harness integrations may also send it per call. Otherwise pass callerSession, or over HTTP MCP send the header Stage-Caller-Session: <connectionId>:<externalSessionId>. CLI: export STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>, or pass --caller-connection and --caller-session. HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption; GET /api/connections/{connectionId}/sessions/{externalSessionId}/context returns your context.
-- Create work with create_task. Supply a self-contained prompt. The default is backlog. Specify project by ID or exact title when context is missing. list_projects shows bindings and configured connections. Set connectionId to choose the execution harness independently of the creator. list_models with connectionId and projectId shows workspace-specific executionConfig choices.
+- Create work with create_task. Supply a self-contained prompt. The default is backlog. Specify project by ID or exact title when context is missing. list_projects shows bindings and configured connections. Set connectionId to choose the execution harness independently of the creator. Set bindingId to choose a workspace on that connection. list_models with connectionId, projectId, and optional bindingId shows workspace-specific executionConfig choices.
 - In Stage, trees are the only way to express dependencies. Set needs to task IDs, use create_tree to group tasks, or afterMe to depend on your own session's task. adopt_session explicitly tracks a top-level session. Existing owners can be reused offline. Trees default to auto start and tasks inherit the tree mode: omit startMode unless the user asks for manual. Auto is safe for planned work: roots never start on their own, and other members launch only once the user completes their needs in Stage (a task added after its needs are completed launches at once; that is expected). Do not pick manual to avoid launches; ask the user if unsure. Only user completion in Stage releases dependencies. start_tree starts ready members.
 - A dependent launch receives Stage's stored accepted reply and references unless handoff is disabled. Stage does not start a dependent from its predecessor's branch: the handoff carries the branch the harness reported. A worktree, its base ref or branch are launch options in executionConfig where the harness declares them (list_models).
 - Append findings and outcomes with append_note. Provide taskId for a task note, or treeId and the current sourceTaskId for a tree conclusion. Reuse requestId only for identical retries. Agents can report outcomes. Acceptance belongs to the user.
@@ -67,10 +69,10 @@ func NewServer(o *Ops) *mcp.Server {
 	destructive := true
 	del := &mcp.ToolAnnotations{DestructiveHint: &destructive}
 
-	add(s, o, "get_context", "Your session id, cwd, resolved stage project, owning task and current treeId/treeTitle.", ro, o.Context)
+	add(s, o, "get_context", "Your session id, cwd, resolved Stage project, owning task, chosen bindingId and current treeId/treeTitle.", ro, o.Context)
 	add(s, o, "list_projects", "List Stage projects with workspace bindings and configured harness connections.", ro, o.ListProjects)
 	add(s, o, "list_models", "List execution capabilities for connectionId. Supply projectId for workspace-specific models and agents.", ro, o.ListModels)
-	add(s, o, "list_actions", "List harness actions for exactly one connectionId, taskId, or projectId. For a project, also supply onConnectionId.", ro, o.ListActions)
+	add(s, o, "list_actions", "List harness actions for exactly one connectionId, taskId, or projectId. For a project, also supply onConnectionId and optionally bindingId.", ro, o.ListActions)
 	add(s, o, "run_action", "Run a harness action by actionId from list_actions. Use the same target and pass its declared input fields. A journalError in the result means the action succeeded and Stage could not record it.", nil, o.RunAction)
 
 	add(s, o, "read_journal", "Read task or tree journal previews (600 runes), notes by default; events or all are opt-in. Exactly one taskId/treeId; filterTaskId filters tree reads. Follow nextCursor; a stale tree cursor requires restarting pagination.", ro, o.ReadJournal)
@@ -114,7 +116,14 @@ func NewServer(o *Ops) *mcp.Server {
 // add registers op as a tool with an inferred input schema. Output has no
 // schema (Out = any): results are the REST shapes as JSON.
 func add[In, Out any](s *mcp.Server, o *Ops, name, desc string, ann *mcp.ToolAnnotations, op func(context.Context, In) (Out, error)) {
-	mcp.AddTool(s, &mcp.Tool{Name: name, Description: desc, Annotations: ann},
+	// PATCH needs to distinguish an omitted bindingId from an explicit null.
+	input, err := jsonschema.For[In](&jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+		reflect.TypeFor[db.Optional[int64]](): {Types: []string{"integer", "null"}},
+	}})
+	if err != nil {
+		panic(fmt.Sprintf("MCP tool %s input schema: %v", name, err))
+	}
+	mcp.AddTool(s, &mcp.Tool{Name: name, Description: desc, Annotations: ann, InputSchema: input},
 		func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, any, error) {
 			claim, err := o.metaClaim(ctx, req.Params.GetMeta())
 			if err != nil {

@@ -33,7 +33,7 @@ import {
 import { handoffHint } from "../lib/handoff.ts";
 import { isFullyEditable } from "../lib/tasks.ts";
 import { blockedStartModes, scheduleBody, taskCreateBody, taskUpdateBody, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
-import { projectsForConnection } from "../lib/projects.ts";
+import { projectsForConnection, workspaceBinding } from "../lib/projects.ts";
 import { HandoffToggle } from "./Handoff.tsx";
 import { LaunchBlockAlert, useLaunchGate } from "./LaunchGate.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
@@ -244,6 +244,7 @@ function TaskFormDrawer({
     bindings,
     chosen,
     connection,
+    bindingId,
     pickable,
     bound,
     caps,
@@ -268,7 +269,7 @@ function TaskFormDrawer({
   const modes: readonly StartMode[] = isNew ? newModes(defaultTree) : task !== undefined && full && needs.length === 0 ? ["backlog", "at"] : [];
   // A harness that cannot launch now leaves Backlog (and an edited task's own timing); the choice returns with it.
   const launchGate = useLaunchGate();
-  const block = selectedProject === undefined || connection === 0 ? null : launchGate({ connectionId: connection, projectId: selectedProject.id, projectTitle: selectedProject.title });
+  const block = selectedProject === undefined || connection === 0 ? null : launchGate({ connectionId: connection, projectId: selectedProject.id, projectTitle: selectedProject.title, bindingId });
   const offModes = blockedStartModes(modes, block !== null, opened === null ? null : opened.state.mode);
   const mode: StartMode = offModes.includes(s.mode) ? "backlog" : s.mode;
   const snippetProject = s.projectId === "" ? null : Number(s.projectId);
@@ -555,7 +556,7 @@ function TaskFormDrawer({
 }
 
 /**
- * The harness a form launches on and its execution config: the chosen harness (or the project's only binding),
+ * The harness a form launches on and its execution config: the chosen harness (or the project's default),
  * what it can do there, the config draft, and what blocks saving it.
  */
 function useHarnessConfig(
@@ -576,16 +577,18 @@ function useHarnessConfig(
   const fallbackDefault = defaultConnection !== null && harnesses.active(defaultConnection) && !harnesses.unconfigured(defaultConnection) ? defaultConnection : null;
   // When no connection was chosen, follow the project's bindings or the new-task default.
   const implicit = (project: Project | undefined, projectBindings: Project["bindings"]) => {
-    if (existing !== undefined) return projectBindings.length === 1 ? projectBindings[0]?.connectionId ?? 0 : 0;
-    if (project === undefined) return fallbackDefault ?? 0;
-    return newTaskConnection(projectBindings, fallbackDefault, (id) => harnesses.connection(id)?.machineId ?? Number.MAX_SAFE_INTEGER);
+    const preferred = existing === undefined ? fallbackDefault : null;
+    if (project === undefined) return preferred ?? 0;
+    return newTaskConnection(projectBindings, preferred, (id) => harnesses.connection(id)?.machineId ?? Number.MAX_SAFE_INTEGER);
   };
   const connection = chosen || implicit(selectedProject, bindings);
   const fellBack = chosen === 0 && fallbackDefault !== null && selectedProject !== undefined && connection !== fallbackDefault ? fallbackDefault : null;
   // An explicitly chosen harness narrows the picker; the current Stage project stays selected.
   const pickable = useMemo(() => projectsForConnection(projects.data?.projects ?? [], chosen, projectId), [projects.data, chosen, projectId]);
-  const binding = bindings.find((b) => b.connectionId === connection && b.status === "available");
-  const caps = useConnectionCapabilities(connection, true, binding);
+  const bindingId = existing?.connectionId === connection && existing.projectId === selectedProject?.id ? existing.bindingId : null;
+  const binding = workspaceBinding(bindings, connection, bindingId);
+  const availableBinding = binding?.status === "available" ? binding : undefined;
+  const caps = useConnectionCapabilities(connection, true, availableBinding);
   const acceptsImages = caps.data === undefined || caps.data.operations.images?.available === true;
   // The first connection uses its pin. Switching connections starts with the harness defaults.
   const prefilled = existing === undefined && draftConfig === null ? prefillConfig(harnesses.connection(connection)) : undefined;
@@ -613,8 +616,9 @@ function useHarnessConfig(
     bindings,
     chosen,
     connection,
+    bindingId,
     pickable,
-    bound: binding !== undefined,
+    bound: availableBinding !== undefined,
     caps,
     acceptsImages,
     prefilled,

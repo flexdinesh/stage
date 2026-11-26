@@ -1,12 +1,12 @@
 ---
 title: Projects
-description: A Stage project is a title you own, bound to a workspace on each connection that runs its tasks.
+description: A Stage project is a title you own, with workspace bindings on the connections that run its tasks.
 showAskAi: false
 ---
 
 # Projects
 
-A project groups tasks, trees and schedules under one title. Stage owns the project: its id, title and archive state. Where the code lives is a separate thing, a **binding** to a workspace on each [connection](/docs/concepts/connections).
+A project groups tasks, trees and schedules under one title. Stage owns its ID, title and archive state. Each **binding** points to a workspace on a [connection](/docs/concepts/connections).
 
 ## Stage owns the project
 
@@ -16,27 +16,40 @@ A project groups tasks, trees and schedules under one title. Stage owns the proj
 
 ## Bindings
 
-A binding ties a project to one workspace on one connection. A project has at most one binding per connection, and each workspace belongs to at most one project.
+A workspace has one Stage owner. A project can have several workspaces
+on a connection, with one primary. Tasks and schedules use that primary
+by default. A task or schedule can use a specific binding through the CLI.
 
-- **Bind workspace**: pick an existing workspace the harness reports. To bind a directory the harness does not list yet, add it in the harness, then refresh workspaces. Stage never creates harness projects, and never creates, clones or provisions directories.
-- **Match**: Stage binds for you when the workspace is the project's only match: the same path on that machine, a checkout it can prove two harnesses share (through the shared path mappings you declare, or directly for Claude Code, Codex and a local OpenCode service), or the same Git remote and subproject on another machine. Other workspaces with the same Git remote only produce a suggestion you confirm.
-- **Import**: each sync binds deliberate harness projects (live T3 projects, OpenCode Git or Mercurial checkouts it has not archived, Git checkouts Codex trusts, and Claude Code folders at a checkout's top). A workspace at a path a project already uses on that machine joins that project; a new path creates a project. The Projects page notes recent imports for 7 days.
-- **Unbind**: unbinding declines that workspace for good. Discovery never binds it again until you bind it by hand.
+- **Bind workspace.** Pick an existing workspace the harness reports. To bind a directory the harness has yet to list, add it in the harness, then refresh workspaces.
+- **Import.** Sync imports eligible workspaces. These include live T3 projects, unarchived OpenCode Git or Mercurial checkouts, Git checkouts Codex trusts, and Claude Code folders at a Git checkout's top.
+- **Unbind.** Discovery records a decline for that workspace on its connection. Binding it manually clears the decline.
 
-When a project is bound on more than one connection, you pick the destination on each new task. The harness picker lists the project's bound connections first.
+When a project has bindings on several connections, pick the connection for the new task.
 
 ## Paths change, history stays
 
-- If a bound workspace's path changes, Stage asks you to confirm it before launching there.
-- Rebinding affects future launches only. Launches already started, and their history, stay attached to the workspace they used.
+Stage can carry a binding to a uniquely identified replacement workspace
+on the same connection. When several replacements or source bindings
+could match, the workspace waits for review. A chosen workspace that
+becomes unavailable blocks launch. A claimed attempt keeps the destination
+it used.
 
 ## Projects across machines
 
-With [workers](/docs/concepts/machines), the same repository can be checked out on several machines. Each machine reads its own checkouts. A workspace on another machine joins the one project bound to the same Git origin remote and subproject. If more than one project could match, or the project already has another checkout on that machine, Stage waits for you to bind it by hand. A workspace with no remote never merges across machines.
+With [workers](/docs/concepts/machines), the same repository can be checked
+out on several machines. A normalized Git origin and a known path within
+the repository can join the same project across clones, worktrees and
+machines. Each machine reads its own files. Directory and checkout keys
+stay local to the file host. Pathless workspaces use their connection and
+external ID. Several candidate projects require manual placement.
+
+The CLI can merge projects and split a workspace into its own project.
+A merged project's old ID still opens the surviving project.
 
 ## Archive
 
-Your archive or unarchive decision sticks. A project discovery created, with no tasks, follows its workspace: it archives when the harness archives the workspace, until you decide yourself.
+Archive and unarchive projects in Stage. A harness archive is stored as
+workspace information. External removal preserves Stage tasks and history.
 
 ## Project scope
 

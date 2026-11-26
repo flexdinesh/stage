@@ -28,6 +28,9 @@ func (s *Store) AdoptSession(ctx context.Context, in AdoptInput) (Task, bool, er
 	err := s.e.Write(ctx, func(tx store.Tx) error {
 		// Write may rerun fn (Postgres retry): start each run from scratch.
 		id, created = 0, false
+		if err := tx.Projects().LockIdentity(ctx); err != nil {
+			return err
+		}
 		var err error
 		id, created, err = s.adoptSession(ctx, tx, in)
 		if err == nil && in.TreeID != nil {
@@ -119,6 +122,13 @@ func (s *Store) adoptSession(ctx context.Context, tx store.Tx, in AdoptInput) (i
 }
 
 func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput, o execution.Observation) (int64, error) {
+	if in.ProjectID != nil {
+		id, err := projectID(ctx, tx, *in.ProjectID)
+		if err != nil {
+			return 0, err
+		}
+		in.ProjectID = &id
+	}
 	var workspace *string
 	if in.Binding != nil {
 		if in.Binding.ExternalProjectID != o.Project || in.Binding.ConnectionID != o.Session.ConnectionID {
@@ -149,13 +159,8 @@ func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput,
 	}
 	b := *in.Binding
 	b.ProjectID = id
-	active, err := tx.Projects().BoundOn(ctx, id, b.ConnectionID)
-	if err != nil {
+	if _, err := s.bind(ctx, tx, b); err != nil {
 		return 0, err
 	}
-	if active {
-		return 0, Conflict("project already has a binding; confirm the workspace in project settings")
-	}
-	_, err = s.bind(ctx, tx, b)
-	return id, err
+	return id, resolveAll(ctx, tx)
 }

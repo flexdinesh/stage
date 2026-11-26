@@ -237,7 +237,7 @@ func TestForgetConnection(t *testing.T) {
 	}
 	project := projectWithBinding(t, s, first, "/w/a")
 	ranTask(t, pool, project, first, "done", "thread-a")
-	mustExec(t, pool, `INSERT INTO shared_paths(connection_id,harness_root,stage_root) VALUES($1,'/srv','/home')`, first)
+	mustExec(t, pool, `INSERT INTO workspace_declines(connection_id,identity_key) VALUES($1,'external:old')`, first)
 	var conflict *ConflictError
 	if err := s.ForgetConnection(ctx, first); !errors.As(err, &conflict) {
 		t.Fatalf("forgot the active connection: %v", err)
@@ -258,9 +258,9 @@ func TestForgetConnection(t *testing.T) {
 	if err != nil || task.ConnectionLabel != "box a" || task.ConnectionActive {
 		t.Fatalf("task %+v %v", task, err)
 	}
-	var paths int
-	if err := pool.QueryRow(`SELECT count(*) FROM shared_paths WHERE connection_id=$1`, first).Scan(&paths); err != nil || paths != 0 {
-		t.Fatalf("shared paths %d %v", paths, err)
+	var declines int
+	if err := pool.QueryRow(`SELECT count(*) FROM workspace_declines WHERE connection_id=$1`, first).Scan(&declines); err != nil || declines != 0 {
+		t.Fatalf("workspace declines %d %v", declines, err)
 	}
 	if err := s.ForgetConnection(ctx, first); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("forgot twice: %v", err)

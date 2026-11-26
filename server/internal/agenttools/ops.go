@@ -215,6 +215,7 @@ type ContextOut struct {
 	ProjectError  string         `json:"projectError,omitempty"`
 	// CallerTaskID: the stage task that owns the caller's session.
 	CallerTaskID *int64  `json:"callerTaskId"`
+	BindingID    *int64  `json:"bindingId"`
 	TreeID       *int64  `json:"treeId"`
 	TreeTitle    *string `json:"treeTitle"`
 	APIURL       string  `json:"apiUrl"`
@@ -257,6 +258,10 @@ func (o *Ops) Context(ctx context.Context, a CallerArgs) (ContextOut, error) {
 	}
 	if d.Task != nil {
 		out.CallerTaskID = &d.Task.ID
+		out.BindingID = d.Task.BindingID
+		if w := d.Task.Workspace; w != nil && w.Source == "pinned" {
+			out.BindingID = &w.BindingID
+		}
 		out.TreeID = d.Task.TreeID
 		out.TreeTitle = d.Task.TreeTitle
 	}
@@ -279,8 +284,9 @@ func (o *Ops) ListProjects(ctx context.Context, _ struct{}) (ProjectsOut, error)
 }
 
 type ModelsArgs struct {
-	ProjectID    int64 `json:"projectId,omitempty" jsonschema:"Stage project for workspace-specific models and modes"`
-	ConnectionID int64 `json:"connectionId" jsonschema:"harness connection from list_projects"`
+	ProjectID    int64  `json:"projectId,omitempty" jsonschema:"Stage project for workspace-specific models and modes"`
+	ConnectionID int64  `json:"connectionId" jsonschema:"harness connection from list_projects"`
+	BindingID    *int64 `json:"bindingId,omitempty" jsonschema:"workspace binding on the selected connection; defaults to the primary"`
 }
 type ModelsOut struct {
 	Capabilities *execution.Capabilities `json:"capabilities,omitempty"`
@@ -290,7 +296,7 @@ func (o *Ops) ListModels(ctx context.Context, a ModelsArgs) (ModelsOut, error) {
 	if a.ConnectionID <= 0 {
 		return ModelsOut{}, errors.New("connectionId is required: choose a harness connection from list_projects")
 	}
-	c, err := o.Client.ProjectCapabilities(ctx, a.ConnectionID, a.ProjectID)
+	c, err := o.Client.WorkspaceCapabilities(ctx, a.ConnectionID, a.ProjectID, a.BindingID)
 	c.Actions = slices.DeleteFunc(c.Actions, func(a execution.Action) bool { return !a.Allows(execution.CallerAgent) })
 	return ModelsOut{Capabilities: &c}, err
 }
@@ -300,6 +306,7 @@ func (o *Ops) ListModels(ctx context.Context, a ModelsArgs) (ModelsOut, error) {
 // ConfigArgs is the task configuration (create_task, create_schedule).
 type ConfigArgs struct {
 	ConnectionID    int64        `json:"connectionId,omitempty" jsonschema:"execution destination from list_projects"`
+	BindingID       *int64       `json:"bindingId,omitempty" jsonschema:"workspace of the project from list_projects; omitted or null uses the primary workspace on the connection"`
 	ExecutionConfig *ConfigInput `json:"executionConfig,omitempty" jsonschema:"the selected connection's model, options, permission and mode from list_models; options include the harness's launch options (a worktree, its base ref or branch where the harness declares them); omitted = the connection's pinned model, else the harness defaults"`
 	Project         string       `json:"project,omitempty" jsonschema:"project id or unambiguous exact title; default: your session's explicitly bound project"`
 	Title           string       `json:"title" jsonschema:"short task title"`
@@ -402,7 +409,7 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 	}
 	rc.config = &config
 	if config.Model != "" || config.Mode != "" || config.Permission != "" || len(config.Options) > 0 || len(a.ImagePaths) > 0 {
-		f, err := o.Client.ProjectCapabilities(ctx, rc.connectionID, p.ID)
+		f, err := o.Client.WorkspaceCapabilities(ctx, rc.connectionID, p.ID, a.BindingID)
 		if err != nil {
 			return rc, err
 		}
@@ -564,7 +571,7 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 		return client.Task{}, err
 	}
 	return o.Client.CreateTask(ctx, client.CreateTask{
-		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
+		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, BindingID: a.BindingID, Title: a.Title, Prompt: a.Prompt,
 		InitialNote: strPtr(a.InitialNote), AttachmentIDs: rc.attachmentIDs,
 		TreeID: a.TreeID, Needs: a.Needs, NeedsSession: session, StartMode: mode.mode, OriginSession: c.Session,
 		StartLocal: strPtr(a.StartLocal), StartTz: strPtr(a.StartTz), Start: a.Start, Handoff: a.Handoff,
@@ -574,12 +581,13 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 // UpdateArgs are editable config fields (nil = unchanged). Outside backlog
 // only the title changes.
 type UpdateArgs struct {
-	ConnectionID    int64        `json:"connectionId,omitempty"`
-	ExecutionConfig *ConfigInput `json:"executionConfig,omitempty"`
-	ID              int64        `json:"id"`
-	Project         *string      `json:"project,omitempty" jsonschema:"move to project (id or title)"`
-	Title           *string      `json:"title,omitempty"`
-	Prompt          *string      `json:"prompt,omitempty"`
+	ConnectionID    int64              `json:"connectionId,omitempty"`
+	BindingID       db.Optional[int64] `json:"bindingId,omitzero" jsonschema:"workspace of the project from list_projects; null restores the primary workspace on the connection"`
+	ExecutionConfig *ConfigInput       `json:"executionConfig,omitempty"`
+	ID              int64              `json:"id"`
+	Project         *string            `json:"project,omitempty" jsonschema:"move to project (id or title)"`
+	Title           *string            `json:"title,omitempty"`
+	Prompt          *string            `json:"prompt,omitempty"`
 }
 
 func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (client.Patch, error) {
@@ -587,37 +595,49 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (cli
 	if a.ConnectionID != 0 {
 		p["connectionId"] = a.ConnectionID
 	}
+	if a.BindingID.Set {
+		p["bindingId"] = a.BindingID.Ptr()
+	}
+	var targetProjectID int64
+	if a.Project != nil {
+		pr, _, err := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, *a.Project)
+		if err != nil {
+			return nil, err
+		}
+		targetProjectID = pr.ID
+		p["projectId"] = targetProjectID
+	}
 	if a.ExecutionConfig != nil {
 		var id, projectID int64
+		var bindingID *int64
 		if schedule {
 			v, err := o.Client.Schedule(ctx, a.ID)
 			if err != nil {
 				return nil, err
 			}
-			id, projectID = v.ConnectionID, v.ProjectID
+			id, projectID, bindingID = v.ConnectionID, v.ProjectID, v.BindingID
 		} else {
 			v, err := o.Client.Task(ctx, a.ID)
 			if err != nil {
 				return nil, err
 			}
-			id, projectID = v.ConnectionID, v.ProjectID
+			id, projectID, bindingID = v.ConnectionID, v.ProjectID, v.BindingID
 		}
-		if a.ConnectionID != 0 {
-			id = a.ConnectionID
+		if a.ConnectionID != 0 && a.ConnectionID != id {
+			id, bindingID = a.ConnectionID, nil
 		}
-		if a.Project != nil {
-			pr, _, e := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, *a.Project)
-			if e != nil {
-				return nil, e
-			}
-			projectID = pr.ID
+		if targetProjectID != 0 && targetProjectID != projectID {
+			projectID, bindingID = targetProjectID, nil
+		}
+		if a.BindingID.Set {
+			bindingID = a.BindingID.Ptr()
 		}
 		cfg, err := a.ExecutionConfig.config()
 		if err != nil {
 			return nil, err
 		}
 		if cfg.Model != "" || cfg.Permission != "" || cfg.Mode != "" || len(cfg.Options) > 0 {
-			f, err := o.Client.ProjectCapabilities(ctx, id, projectID)
+			f, err := o.Client.WorkspaceCapabilities(ctx, id, projectID, bindingID)
 			if err != nil {
 				return nil, err
 			}
@@ -626,13 +646,6 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (cli
 			}
 		}
 		p["executionConfig"] = cfg
-	}
-	if a.Project != nil {
-		pr, _, err := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, *a.Project)
-		if err != nil {
-			return nil, err
-		}
-		p["projectId"] = pr.ID
 	}
 	if a.Title != nil {
 		p["title"] = *a.Title
@@ -825,7 +838,7 @@ func (o *Ops) CreateSchedule(ctx context.Context, a CreateScheduleArgs) (db.Sche
 		return db.Schedule{}, err
 	}
 	return o.Client.CreateSchedule(ctx, client.CreateSchedule{
-		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
+		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, BindingID: a.BindingID, Title: a.Title, Prompt: a.Prompt,
 		Notes: strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs, OriginSession: c.Session,
 		Cron: a.Cron, Tz: a.Tz, Paused: a.Paused,
 	})

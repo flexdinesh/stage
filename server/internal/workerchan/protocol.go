@@ -108,7 +108,7 @@ const (
 )
 
 // ProtocolVersion is the current worker channel contract, independent of the API.
-const ProtocolVersion = 2
+const ProtocolVersion = 3
 
 type VersionRange struct {
 	Min int `json:"min"`

@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -27,6 +30,34 @@ func init() {
 	register("ConcurrentScheduleFire", caseConcurrentScheduleFire)
 	register("ConcurrentConnectionSwitch", caseConcurrentConnectionSwitch)
 	register("ConcurrentNoteRequestIDConflict", caseConcurrentNoteRequestIDConflict)
+	register("ConcurrentImportAcrossConnections", caseConcurrentImportAcrossConnections)
+}
+
+func caseConcurrentImportAcrossConnections(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
+	other, err := s.SwitchInstance(ctx, db.LocalMachine, harness.Descriptor{Kind: "opencode"}, "other", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connections := []int64{dbtest.T3Connection, other.New}
+	for i, connection := range connections {
+		row := identityWorkspace(fmt.Sprintf("app-%d", i), fmt.Sprintf("/w/app-%d", i), nil)
+		if _, err := s.RefreshWorkspaces(ctx, connection, []execution.WorkspaceInfo{row}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, err := range race(len(connections), func(i int) error {
+		_, err := s.ImportWorkspaces(ctx, connections[i])
+		return err
+	}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	projects, err := s.ListProjects(ctx, "all")
+	if err != nil || len(projects) != 1 || len(projects[0].Bindings) != 2 {
+		t.Fatalf("projects %+v: %v", projects, err)
+	}
 }
 
 // racers is how many goroutines each case releases at once.

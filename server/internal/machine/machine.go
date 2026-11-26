@@ -294,45 +294,7 @@ func (s *Set) Connectors(reg *harness.Registry) (harness.Connectors, error) {
 // Every argument and result is JSON-serializable, so a remote machine can
 // carry the calls over its worker channel.
 type Ops interface {
-	// Inventory reads each workspace's Git evidence (Repo, RepoPath, and
-	// Importable under ImportIf) from the checkout the machine sees through
-	// roots (one connection's shared paths; RootsFor adds a local path).
-	Inventory(ctx context.Context, ws []execution.WorkspaceInfo, roots []SharedRoot) ([]execution.WorkspaceInfo, error)
-	// Checkout is the Git evidence for a harness-side directory under
-	// roots (zero when it is under none, or unreadable).
-	Checkout(ctx context.Context, roots []SharedRoot, dir string) (CheckoutEvidence, error)
-}
-
-// SharedRoot is one declared shared path: a harness-side root and the same
-// directory as Stage sees it on the machine.
-type SharedRoot struct {
-	HarnessRoot string `json:"harnessRoot"`
-	StageRoot   string `json:"stageRoot"`
-}
-
-// CheckoutEvidence proves which Git checkout a directory belongs to.
-type CheckoutEvidence struct {
-	// Common identifies the checkout's Git common directory on its machine
-	// (a device:inode key); "" when unproven. Comparable only within one
-	// machine.
-	Common string `json:"common,omitempty"`
-	// Subproject is the directory relative to the checkout's top level.
-	Subproject string `json:"subproject,omitempty"`
-	// Remote is the normalized origin remote (gitmeta.RemoteIdentity).
-	Remote string `json:"remote,omitempty"`
-	// RepoPath is the slash path from the checkout top ("." at the top), ""
-	// when unknown. A remote suggestion needs equal RepoPaths when both
-	// sides know theirs.
-	RepoPath string `json:"repoPath,omitempty"`
-}
-
-// SameRemote: equal remotes and, when both are known, equal subprojects.
-func (e CheckoutEvidence) SameRemote(o CheckoutEvidence) bool {
-	return e.Remote != "" && e.Remote == o.Remote && (e.RepoPath == "" || o.RepoPath == "" || e.RepoPath == o.RepoPath)
-}
-
-// SameCheckout: both are proven, the same Git common directory and the
-// same subproject.
-func (e CheckoutEvidence) SameCheckout(o CheckoutEvidence) bool {
-	return e.Common != "" && o.Common != "" && e.Common == o.Common && e.Subproject == o.Subproject
+	// Inventory reads filesystem evidence for local workspaces and applies
+	// their ImportIf rules.
+	Inventory(ctx context.Context, ws []execution.WorkspaceInfo) ([]execution.WorkspaceInfo, error)
 }

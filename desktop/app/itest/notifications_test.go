@@ -287,19 +287,19 @@ func t3Connection(t *testing.T, request func(string, string, any, int, any)) int
 // and socket.
 func bindDemoProject(t *testing.T, request func(string, string, any, int, any)) (int64, string) {
 	t.Helper()
-	discovery := fmt.Sprintf("/api/connections/%d/projects", t3Connection(t, request))
+	discovery := fmt.Sprintf("/api/connections/%d/workspaces", t3Connection(t, request))
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		var discovered struct {
-			Projects []struct {
+			Workspaces []struct {
 				ProjectID *int64 `json:"projectId"`
-			} `json:"projects"`
+			} `json:"workspaces"`
 		}
 		request("GET", discovery, nil, 200, &discovered)
-		if len(discovered.Projects) == 0 {
+		if len(discovered.Workspaces) == 0 {
 			t.Fatal("fake has no workspace")
 		}
-		if id := discovered.Projects[0].ProjectID; id != nil {
+		if id := discovered.Workspaces[0].ProjectID; id != nil {
 			var project struct {
 				ID    int64  `json:"id"`
 				Title string `json:"title"`

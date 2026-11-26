@@ -15,7 +15,8 @@ import (
 func TestActionTransportPreservesInputAndErrorCode(t *testing.T) {
 	const input = `{"text":"<raw>", "replace":true}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.RequestURI() != "/api/projects/4/actions/pin.workspace?connectionId=7" {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/projects/4/actions/pin.workspace" ||
+			r.URL.Query().Get("connectionId") != "7" || r.URL.Query().Get("bindingId") != "9" {
 			t.Errorf("request %s %s", r.Method, r.URL)
 		}
 		if r.Header.Get("Content-Type") != "application/json" || r.Header.Get("Stage-Caller-Session") != "2:session:1" ||
@@ -31,8 +32,8 @@ func TestActionTransportPreservesInputAndErrorCode(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	project, onConnection := int64(4), int64(7)
-	_, err := client.New(srv.URL).RunAction(t.Context(), client.ActionScope{ProjectID: &project, OnConnectionID: &onConnection},
+	project, onConnection, binding := int64(4), int64(7), int64(9)
+	_, err := client.New(srv.URL).RunAction(t.Context(), client.ActionScope{ProjectID: &project, OnConnectionID: &onConnection, BindingID: &binding},
 		"pin.workspace", json.RawMessage(input), client.ActionCaller{
 			Session: &db.SessionRef{ConnectionID: 2, ExternalSessionID: "session:1"}, Confirmed: true,
 		})

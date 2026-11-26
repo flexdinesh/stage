@@ -1,10 +1,11 @@
 package api
 
 import (
+	"context"
 	"net/http"
-	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
@@ -32,56 +33,109 @@ func (s *server) runSync(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// ---- projects ----
+// refreshWorkspaces persists a complete live inventory without applying the resolver.
+func (s *server) refreshWorkspaces(ctx context.Context, connection int64) ([]execution.WorkspaceInfo, error) {
+	ws, err := s.Sync.Inventory(ctx, connection)
+	if err != nil {
+		return nil, &db.HarnessError{Err: err}
+	}
+	if _, err := s.Store.RefreshWorkspaces(ctx, connection, ws); err != nil {
+		return nil, err
+	}
+	return ws, nil
+}
 
-func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
-	archived := r.URL.Query().Get("archived")
-	if archived != "" {
-		if err := validEnum("archived", archived, []string{"true", "false", "all"}); err != nil {
+func (s *server) workspaces(w http.ResponseWriter, r *http.Request) error {
+	id, err := s.connectionPath(r)
+	if err != nil {
+		return err
+	}
+	ctx := r.Context()
+	if _, err := s.refreshWorkspaces(ctx, id); err != nil {
+		return err
+	}
+	ws, err := s.Store.Workspaces(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		ws = []db.Workspace{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"workspaces": ws})
+	return nil
+}
+
+func (s *server) resolveWorkspaces(w http.ResponseWriter, r *http.Request) error {
+	id, err := s.connectionPath(r)
+	if err != nil {
+		return err
+	}
+	var in struct {
+		Apply        *bool  `json:"apply"`
+		PreviewToken string `json:"previewToken"`
+	}
+	if err := decodeStrict(r, &in); err != nil {
+		return err
+	}
+	if in.Apply == nil {
+		return db.Invalid("apply is required")
+	}
+	if *in.Apply && in.PreviewToken == "" {
+		return db.Invalid("previewToken is required to apply workspace resolution")
+	}
+	ctx := r.Context()
+	if *in.Apply {
+		ws, err := s.Sync.Inventory(ctx, id)
+		if err != nil {
+			return &db.HarnessError{Err: err}
+		}
+		result, err := s.Store.ConfirmWorkspaceResolution(ctx, id, ws, in.PreviewToken)
+		if err != nil {
 			return err
 		}
+		writeJSON(w, http.StatusOK, result)
+		return nil
 	}
-	ps, err := s.Store.ListProjects(r.Context(), archived)
+	if _, err := s.refreshWorkspaces(ctx, id); err != nil {
+		return err
+	}
+	result, err := s.Store.ResolveWorkspaces(ctx, id, false)
 	if err != nil {
 		return err
 	}
-	imports, err := s.Store.ImportSummaries(r.Context())
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"projects": ps, "imports": imports})
+	writeJSON(w, http.StatusOK, result)
 	return nil
 }
 
-// createProject saves Stage metadata without contacting a harness.
-func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
-	var body struct {
-		Title string `json:"title"`
-	}
-	if err := decodeStrict(r, &body); err != nil {
-		return err
-	}
-	body.Title = strings.TrimSpace(body.Title)
-	if body.Title == "" {
-		return db.Invalid("title is required")
-	}
-	p, err := s.Store.InsertProject(r.Context(), db.Project{Title: body.Title})
+func (s *server) reviewWorkspaces(w http.ResponseWriter, r *http.Request) error {
+	out, err := s.Store.ReviewWorkspaces(r.Context())
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusCreated, p)
+	writeJSON(w, http.StatusOK, out)
 	return nil
 }
 
-func (s *server) getProject(w http.ResponseWriter, r *http.Request) error {
-	id, err := pathID(r)
-	if err != nil {
-		return err
+func (s *server) setWorkspaceDeclined(declined bool) func(http.ResponseWriter, *http.Request) error {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		id, err := s.connectionPath(r)
+		if err != nil {
+			return err
+		}
+		var in struct {
+			ExternalID string  `json:"externalId"`
+			Workspace  *string `json:"workspace"`
+		}
+		if err := decodeStrict(r, &in); err != nil {
+			return err
+		}
+		if in.ExternalID == "" || in.Workspace == nil {
+			return db.Invalid("externalId and workspace are required")
+		}
+		if err := s.Store.SetWorkspaceDeclined(r.Context(), id, in.ExternalID, *in.Workspace, declined); err != nil {
+			return err
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return nil
 	}
-	p, err := s.Store.GetProject(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, p)
-	return nil
 }

@@ -86,18 +86,22 @@ func TestWorkspacesImportableAndRepo(t *testing.T) {
 		}
 		// Harness facts only: a local service's paths are the machine's,
 		// whose ops read the Git evidence.
-		if ws[0].Local != local || ws[0].Repo != "" || ws[0].ImportIf != "" {
+		if ws[0].Local != local || ws[0].Repo != "" || ws[0].ImportIf != "" || ws[0].Evidence != nil {
 			t.Fatalf("local=%v workspace %+v", local, ws[0])
 		}
-		if ws, err = (machine.LocalOps{}).Inventory(t.Context(), ws, nil); err != nil {
+		if ws, err = (machine.LocalOps{}).Inventory(t.Context(), ws); err != nil {
 			t.Fatal(err)
 		}
-		want, wantPath := "", ""
-		if local {
-			want, wantPath = "github.com/o/r", "."
+		w := ws[0]
+		if !w.Importable || w.Repo != "" || w.RepoPath != "" {
+			t.Fatalf("local=%v changed harness facts: %+v", local, w)
 		}
-		if ws[0].Repo != want || ws[0].RepoPath != wantPath || !ws[0].Importable {
-			t.Fatalf("local=%v repo %q path %q", local, ws[0].Repo, ws[0].RepoPath)
+		evidence := w.Evidence
+		if local && (evidence == nil || evidence.Remote != "github.com/o/r" || evidence.Subpath != ".") {
+			t.Fatalf("local checkout evidence %+v", evidence)
+		}
+		if !local && evidence != nil {
+			t.Fatalf("network service checkout evidence %+v", evidence)
 		}
 	}
 }

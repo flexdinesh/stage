@@ -3,9 +3,11 @@ package db
 import (
 	"context"
 	"errors"
-	"github.com/flexdinesh/stage/server/internal/db/store"
+	"fmt"
 
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/projectmatch"
 )
 
 func checkDestinationChange(ctx context.Context, tx store.Tx, old, next int64, c Optional[execution.Config]) error {
@@ -28,16 +30,6 @@ type SessionRef = execution.SessionRef
 type HarnessConnection = store.HarnessConnection
 
 type ProjectBinding = store.ProjectBinding
-
-// Binding origins (project_bindings.origin).
-const (
-	BindingManual   = "manual"
-	BindingImported = "imported"
-	BindingPath     = "path"
-	BindingRemote   = "remote"
-)
-
-type ExternalProject = store.ExternalProject
 
 func (s *Store) Connections(ctx context.Context) ([]HarnessConnection, error) {
 	return read(ctx, s, func(tx store.Tx) ([]HarnessConnection, error) { return tx.Connections().List(ctx) })
@@ -76,14 +68,18 @@ func (s *Store) SetNewTaskConfig(ctx context.Context, id int64, c *execution.Con
 	})
 }
 
-func (s *Store) ExternalProjects(ctx context.Context, connectionID int64) ([]ExternalProject, error) {
-	return read(ctx, s, func(tx store.Tx) ([]ExternalProject, error) { return tx.Projects().ExternalProjects(ctx, connectionID) })
+func workspaceBound(ctx context.Context, pr store.Projects, id int64) error {
+	p, err := pr.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	return &ConflictError{Code: "workspace_bound", Msg: fmt.Sprintf("This workspace is already bound to project #%d %q.", p.ID, p.Title)}
 }
 
-// bind makes b the project's active binding on its connection.
+// bind adds a manual binding. The caller holds the identity lock.
 func (s *Store) bind(ctx context.Context, tx store.Tx, b ProjectBinding) (int64, error) {
-	if b.ConnectionID <= 0 || b.ExternalProjectID == "" || b.Workspace == "" {
-		return 0, Invalid("connection, external project and workspace are required")
+	if b.ConnectionID <= 0 || b.ExternalProjectID == "" {
+		return 0, Invalid("connection and external project are required")
 	}
 	if err := requireProject(ctx, tx, b.ProjectID); err != nil {
 		return 0, err
@@ -92,47 +88,175 @@ func (s *Store) bind(ctx context.Context, tx store.Tx, b ProjectBinding) (int64,
 		return 0, err
 	}
 	pr := tx.Projects()
-	// A workspace the user rebinds away from is declined like an unbind.
-	if err := pr.DeclineRebound(ctx, b); err != nil {
+	current, err := pr.ActiveWorkspaceBinding(ctx, b.ConnectionID, b.ExternalProjectID, b.Workspace)
+	switch {
+	case err == nil && current.ProjectID == b.ProjectID:
+		return current.ID, nil
+	case err == nil:
+		return 0, workspaceBound(ctx, pr, current.ProjectID)
+	case !errors.Is(err, ErrNotFound):
 		return 0, err
 	}
-	if err := pr.DeactivateBindings(ctx, b.ProjectID, b.ConnectionID); err != nil {
+	state, err := loadIdentity(ctx, pr)
+	if err != nil {
 		return 0, err
 	}
-	if b.Origin == "" {
-		b.Origin = BindingManual
+	w := projectmatch.Workspace{Connection: b.ConnectionID, ExternalID: b.ExternalProjectID, Path: b.Workspace}
+	if i, ok := state.byRef[refOf(w)]; ok {
+		w = state.input.Workspaces[i].Workspace
+		if !w.Available {
+			return 0, Conflict("The workspace changed. Refresh and choose it again.")
+		}
+	} else {
+		for _, r := range state.rows {
+			if r.ConnectionID == b.ConnectionID && r.ExternalID == b.ExternalProjectID {
+				return 0, Conflict("The workspace changed. Refresh and choose it again.")
+			}
+		}
 	}
-	id, err := pr.InsertBinding(ctx, b)
-	if s.e.Errors().IsUniqueViolation(err) {
-		return 0, Conflict("workspace is already bound to another Stage project; unbind it there first")
+	var id int64
+	if b.Replaces != 0 {
+		old, err := pr.Binding(ctx, b.Replaces)
+		if err != nil {
+			return 0, err
+		}
+		if !old.Active || old.ProjectID != b.ProjectID || old.ConnectionID != b.ConnectionID {
+			return 0, Conflict("The binding changed. Refresh and choose the workspace again.")
+		}
+		id, err = s.moveBinding(ctx, tx, b, old.ProjectBinding)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		hasBinding, err := pr.BoundOn(ctx, b.ProjectID, b.ConnectionID)
+		if err != nil {
+			return 0, err
+		}
+		requestPrimary := b.Primary
+		b.Rule, b.Primary = "manual", !hasBinding
+		id, err = pr.InsertBinding(ctx, b)
+		if err != nil {
+			return 0, err
+		}
+		if hasBinding && requestPrimary {
+			if err := pr.PromoteBinding(ctx, b.ProjectID, b.ConnectionID, id); err != nil {
+				return 0, err
+			}
+		}
 	}
-	if err != nil || b.Origin != BindingManual {
-		return id, err
+	return id, setWorkspaceDecline(ctx, pr, w, false)
+}
+
+func (s *Store) moveBinding(ctx context.Context, tx store.Tx, next, old ProjectBinding) (int64, error) {
+	pr := tx.Projects()
+	conn, err := tx.Connections().Get(ctx, next.ConnectionID)
+	if err != nil {
+		return 0, err
 	}
-	// A manual bind withdraws an earlier decline of this workspace.
-	return id, pr.Undecline(ctx, b.ConnectionID, b.ExternalProjectID, b.Workspace)
+	if err := pr.DeactivateBinding(ctx, old.ID); err != nil {
+		return 0, err
+	}
+	next.Rule, next.Primary = "moved", old.Primary
+	id, err := pr.InsertBinding(ctx, next)
+	if err != nil {
+		return 0, err
+	}
+	if err := pr.RepointBindingChoices(ctx, old.ID, id); err != nil {
+		return 0, err
+	}
+	label := conn.Label
+	if label == "" {
+		label = conn.Harness
+	}
+	text := fmt.Sprintf("Workspace moved from %s to %s on %s.", old.Workspace, next.Workspace, label)
+	return id, pr.AddProjectEvent(ctx, next.ProjectID, "workspace_moved", text, ActingUser(ctx))
 }
 
 func (s *Store) BindProject(ctx context.Context, b ProjectBinding) (Project, error) {
 	return write(ctx, s, func(tx store.Tx) (Project, error) {
-		if _, err := s.bind(ctx, tx, b); err != nil {
+		pr := tx.Projects()
+		if err := pr.LockIdentity(ctx); err != nil {
 			return Project{}, err
 		}
-		return tx.Projects().Get(ctx, b.ProjectID)
+		bound := b
+		id, err := projectID(ctx, tx, b.ProjectID)
+		if err != nil {
+			return Project{}, err
+		}
+		bound.ProjectID = id
+		if _, err := s.bind(ctx, tx, bound); err != nil {
+			return Project{}, err
+		}
+		if err := resolveAll(ctx, tx); err != nil {
+			return Project{}, err
+		}
+		return pr.Get(ctx, id)
 	})
 }
 
-// UnbindProject deactivates the binding and declines its workspace, so
-// discovery never binds it again until a user binds it manually.
-func (s *Store) UnbindProject(ctx context.Context, projectID, connectionID int64) (Project, error) {
+// UnbindProject removes one binding, preserving launch history.
+func (s *Store) UnbindProject(ctx context.Context, project, binding int64) (Project, error) {
+	return s.editBinding(ctx, project, binding, func(ctx context.Context, pr store.Projects, b store.BindingState) error {
+		if !b.Active {
+			return ErrNotFound
+		}
+		state, err := loadIdentity(ctx, pr)
+		if err != nil {
+			return err
+		}
+		w := projectmatch.Workspace{Connection: b.ConnectionID, ExternalID: b.ExternalProjectID, Path: b.Workspace}
+		if i, ok := state.byRef[refOf(w)]; ok {
+			w = state.input.Workspaces[i].Workspace
+		}
+		if err := pr.DeactivateBinding(ctx, b.ID); err != nil {
+			return err
+		}
+		if err := setWorkspaceDecline(ctx, pr, w, true); err != nil {
+			return err
+		}
+		if b.Primary {
+			return pr.PromoteBinding(ctx, b.ProjectID, b.ConnectionID, 0)
+		}
+		return nil
+	})
+}
+
+func (s *Store) SetPrimaryBinding(ctx context.Context, project, binding int64) (Project, error) {
+	return s.editBinding(ctx, project, binding, func(ctx context.Context, pr store.Projects, b store.BindingState) error {
+		if !b.Active {
+			return Conflict("This workspace binding is inactive.")
+		}
+		if b.Primary {
+			return nil
+		}
+		return pr.PromoteBinding(ctx, b.ProjectID, b.ConnectionID, b.ID)
+	})
+}
+
+func (s *Store) editBinding(ctx context.Context, project, binding int64, edit func(context.Context, store.Projects, store.BindingState) error) (Project, error) {
 	return write(ctx, s, func(tx store.Tx) (Project, error) {
-		if err := tx.Projects().DeclineBound(ctx, projectID, connectionID); err != nil {
+		pr := tx.Projects()
+		if err := pr.LockIdentity(ctx); err != nil {
 			return Project{}, err
 		}
-		if err := tx.Projects().DeactivateBindings(ctx, projectID, connectionID); err != nil {
+		id, err := projectID(ctx, tx, project)
+		if err != nil {
 			return Project{}, err
 		}
-		return tx.Projects().Get(ctx, projectID)
+		b, err := pr.Binding(ctx, binding)
+		if err != nil {
+			return Project{}, err
+		}
+		if b.ProjectID != id {
+			return Project{}, ErrNotFound
+		}
+		if err := edit(ctx, pr, b); err != nil {
+			return Project{}, err
+		}
+		if err := resolveAll(ctx, tx); err != nil {
+			return Project{}, err
+		}
+		return pr.Get(ctx, id)
 	})
 }
 
@@ -188,12 +312,23 @@ func pinDestination(ctx context.Context, tx store.Tx, taskID int64, attempt int)
 	}
 	b, err := tx.Attempts().BoundDestination(ctx, taskID)
 	if errors.Is(err, ErrNotFound) {
+		task, err := tx.Tasks().Get(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		if task.BindingID != nil {
+			return BindingUnavailable()
+		}
 		return &ConflictError{Code: "binding_required", Msg: "Bind or confirm this project's workspace before launching."}
 	}
 	if err != nil {
 		return err
 	}
 	return tx.Attempts().PinDestination(ctx, taskID, attempt, b)
+}
+
+func BindingUnavailable() error {
+	return &ConflictError{Code: "binding_unavailable", Msg: "The workspace chosen for this task is no longer available in its project. Choose a workspace."}
 }
 func (s *Store) LaunchDestination(ctx context.Context, taskID int64, attempt int) (LaunchDestination, error) {
 	return read(ctx, s, func(tx store.Tx) (LaunchDestination, error) { return tx.Attempts().Destination(ctx, taskID, attempt) })

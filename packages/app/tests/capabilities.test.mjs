@@ -20,17 +20,19 @@ test("prefill is the connection's pin: model and options, never mode or permissi
 
 // Connections 1 and 2 on the main machine (1), 3 and 4 on machine 2.
 const machineOf = (id) => (id >= 3 ? 2 : 1);
-const b = (connectionId, status = "available", connectionActive = true) => ({ connectionId, status, connectionActive });
+const b = (connectionId, status = "available", connectionActive = true, primary = true) => ({ connectionId, status, connectionActive, primary });
 
 test("new-task connection: default, else the only binding, else the first available", () => {
   const cases = [
     ["no default, one binding", [b(3)], null, 3],
+    ["no default, several workspaces on one connection", [b(3), b(3, "available", true, false)], null, 3],
     ["no default, one missing binding", [b(3, "missing")], null, 3],
     ["no default, two bindings", [b(1), b(3)], null, 0],
     ["replaced binding only", [b(1, "available", false)], null, 0],
     ["no bindings", [], 1, 0],
     ["default bound", [b(1), b(3)], 3, 3],
     ["default bound but missing", [b(1), b(3, "missing")], 3, 1],
+    ["default's secondary can't replace its missing primary", [b(1), b(3, "missing"), b(3, "available", true, false)], 3, 1],
     ["default unbound, one binding", [b(4, "missing")], 1, 4],
     ["default unbound, main machine first", [b(3), b(2), b(4)], 1, 2],
     ["default unbound, then by machine and id", [b(4), b(3)], 1, 3],

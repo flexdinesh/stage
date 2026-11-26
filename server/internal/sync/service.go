@@ -280,23 +280,21 @@ func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
-	inventory, err := s.inventory(ctx, id, a)
-	if err != nil {
-		return Result{}, err
-	}
-	n, err := s.store.RefreshWorkspaces(ctx, id, inventory)
-	if err != nil {
-		return Result{}, err
-	}
-	r := Result{Projects: n}
-	st.progress.Store(&Progress{Running: true, StartedAt: &now, Projects: n})
+	r := Result{}
 	var errs []error
-	// Import only after a complete, successful inventory refresh. A failed
-	// import never blocks session polling.
-	if imported, err := s.store.ImportWorkspaces(ctx, id); err != nil {
+	inventory, err := s.inventory(ctx, id, a)
+	if err == nil {
+		r.Projects, err = s.store.RefreshWorkspaces(ctx, id, inventory)
+	}
+	if err != nil {
 		errs = append(errs, err)
-	} else if imported != (db.ImportResult{}) {
-		s.log.Info("project import", "connection", id, "created", imported.Created, "bound", imported.Bound, "archived", imported.Archived, "unarchived", imported.Unarchived)
+	} else {
+		st.progress.Store(&Progress{Running: true, StartedAt: &now, Projects: r.Projects})
+		if imported, err := s.store.ImportWorkspaces(ctx, id); err != nil {
+			errs = append(errs, err)
+		} else if imported != (db.ImportResult{}) {
+			s.log.Info("project import", "connection", id, "created", imported.Created, "bound", imported.Bound, "moved", imported.Moved)
+		}
 	}
 	tasks, err := s.store.ListTasks(ctx, db.TaskFilter{Closed: "all"})
 	if err != nil {

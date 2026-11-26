@@ -95,7 +95,7 @@ func TestFullSyncDoesNotEnumerateHistory(t *testing.T) {
 	}
 	// The sync pass imports the discovered project once.
 	ps, err := store.ListProjects(t.Context(), "all")
-	if err != nil || len(ps) != 1 || ps[0].Title != "app" || len(ps[0].Bindings) != 1 || ps[0].Bindings[0].Origin != db.BindingImported {
+	if err != nil || len(ps) != 1 || ps[0].Title != "app" || len(ps[0].Bindings) != 1 || ps[0].Bindings[0].Rule != "new" {
 		t.Fatalf("projects %+v %v", ps, err)
 	}
 	if _, err = svc.FullSync(t.Context()); err != nil {

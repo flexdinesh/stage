@@ -179,18 +179,19 @@ Read filesystem evidence where the files live, without a git binary or
 writes to the repository. A remote plus subpath identifies one project
 across machines, across clones and across worktrees. A fork has its own
 remote. With no remote, a file host, checkout and subpath make a
-machine-scoped key. A pathless workspace binds by connection and external
-ID, even when it carries remote metadata. Explicit file ownership keeps
-unrelated equal paths from being combined.
+machine-scoped key. A plain directory can use its file host and canonical
+path. A pathless workspace binds by connection and external ID, even
+when it carries remote metadata. Explicit file ownership keeps unrelated
+equal paths from being combined.
 
 ### D10
 
 **Use one resolver for import, Resolve now and bind preview** (layer 07
 backend, layer 08 UI). Outcomes are `bound`, `join`, `new` and `review`.
 A project can bind several workspaces on one connection, with one
-primary and a per-task choice. Rebind a move automatically only when
-exactly one candidate matches. Send ambiguity to review and preserve the
-user's declines. Support manual merge and split. The merged ID resolves
+primary and a per-task or per-schedule choice. Rebind a move automatically
+only when exactly one unavailable source and one eligible replacement
+match. Send ambiguity to review and preserve the user's declines. Support manual merge and split. The merged ID resolves
 as an alias of the survivor. A migration may suggest merges; the user
 decides whether to combine existing projects. This keeps project identity
 stable and gives users a way to correct the evidence.
@@ -213,7 +214,9 @@ settings cache). Exchange protocol range, harness kinds, channel kinds and
 traits independently of the product API version. Workers compose from
 locally cached settings. Negotiation distinguishes unsupported capabilities
 from a lost connection, and cached setup lets the worker compose while
-the main server is unavailable.
+the main server is unavailable. Layer 07 bumps the worker protocol from
+2 to 3 for the inventory evidence contract and removal of `ops.checkout`.
+The API remains v9.
 
 ### D13
 

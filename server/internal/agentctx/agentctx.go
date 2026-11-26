@@ -103,9 +103,9 @@ func (c Caller) Resolve(explicit *db.SessionRef, cwd string, claim *db.SessionRe
 // ErrNoProject: no project could be resolved.
 var ErrNoProject = errors.New("no project")
 
-// ResolveProject picks the project: explicit (id or exact title,
-// case-insensitive, unambiguous) > the caller session's project. Paths are
-// not evidence of shared filesystem identity. Source: explicit | session.
+// ResolveProject picks the explicit project by ID or unambiguous exact title,
+// including merge aliases, or falls back to the caller session's project.
+// Source: explicit | session.
 func ResolveProject(ctx context.Context, c *client.Client, caller Caller, explicit string) (db.Project, string, error) {
 	if s := strings.TrimSpace(explicit); s != "" {
 		projects, err := c.Projects(ctx)
@@ -136,6 +136,13 @@ func matchProject(projects []db.Project, s string) (db.Project, bool) {
 				return p, true
 			}
 		}
+		for _, p := range projects {
+			for _, a := range p.Aliases {
+				if a.ID == id {
+					return p, true
+				}
+			}
+		}
 	}
 	var match db.Project
 	found := false
@@ -146,6 +153,20 @@ func matchProject(projects []db.Project, s string) (db.Project, bool) {
 			}
 			match = p
 			found = true
+		}
+	}
+	if found {
+		return match, true
+	}
+	for _, p := range projects {
+		for _, a := range p.Aliases {
+			if strings.EqualFold(a.Title, s) {
+				if found {
+					return db.Project{}, false
+				}
+				match, found = p, true
+				break
+			}
 		}
 	}
 	return match, found
