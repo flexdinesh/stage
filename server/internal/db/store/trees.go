@@ -142,9 +142,6 @@ type Trees interface {
 	// DropNeeds removes every need edge of the task, both ways, and returns
 	// them, by task then need.
 	DropNeeds(ctx context.Context, taskID int64) ([]TreeEdge, error)
-	// ClearStaleBases drops workspace.baseTaskId where it no longer names a
-	// need.
-	ClearStaleBases(ctx context.Context) error
 	NeedsState(ctx context.Context, taskID int64) (NeedsState, error)
 	// Needs are the task's needs, by id.
 	Needs(ctx context.Context, taskID int64) ([]int64, error)

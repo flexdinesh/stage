@@ -3,7 +3,7 @@
 Stage owns task identity, dependencies, acceptance, journals and durable handoff.
 `internal/execution` describes the operations Stage retains. `internal/sync`
 coordinates those operations; `internal/t3.Adapter` translates T3 protocol,
-authentication, models, permission modes, workspace strategies and states.
+authentication, models, permission modes, launch options and states.
 Composition is a fixed connection-to-adapter map in the server. There is no
 plugin registration or service installation framework.
 
@@ -300,30 +300,45 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   directory, binding ID and revision.
 - `Config.model` is an opaque adapter key. Options are named string/boolean
   values; permission and interaction mode are opaque adapter selections.
-  `Features` supplies models, options, permissions, modes, workspaces and
-  operation availability with reasons. Operations are typed (`execution.Op`,
-  UI `OperationId`): `launch`, `stop`, `adopt`, `reply`, `opening`,
-  `attention`, `images`, `predecessorBase`, `worktreeBase`, `respond`,
-  `send`. Every adapter declares each one, with a reason when unavailable
+  `Features` supplies models, options (launch options included),
+  permissions, modes and operation availability with reasons. Operations
+  are typed (`execution.Op`, UI `OperationId`): `launch`, `stop`, `adopt`,
+  `reply`, `opening`, `attention`, `images`, `respond`, `send`. Every adapter declares each one, with a reason when unavailable
   (`Capabilities.DeclaresOperations`, its contract tests); the remote proxy
   passes them through. Unsupported operations return actionable
   errors. Adapters must validate the requested semantics before dispatch.
-  Product code reads policy from these, never a harness name: `images`,
-  `predecessorBase` and `worktreeBase` (unavailable when the harness picks the
-  worktree base and branch itself) gate form fields (`images` also gates the
-  API and MCP: images on a connection without it are refused with its
-  reason), and `ModeLabel` names the
-  mode choice in the harness's words. The descriptor's static `worktree`
-  policy is what the API validates a saved workspace against (it holds
-  without the harness reachable): `baseRef` (Stage passes a base ref and
-  branch: T3) and `predecessor` (a worktree may start from a need's branch:
-  T3, Claude Code). Without `baseRef`, a worktree carries no ref or branch
-  and the harness picks them. Tasks and schedules store only an
-  execution config (migration 0027 backfilled T3 rows saved before
-  configs); API v8 removed the legacy T3 model inputs (400 naming
-  `executionConfig` with `connectionId`).
+  Product code reads policy from these, never a harness name: `images`
+  gates the image field, the API and MCP (images on a connection without
+  it are refused with its reason), and `ModeLabel` names the mode choice
+  in the harness's words. Tasks and schedules store only an execution
+  config (migration 0027 backfilled T3 rows saved before configs); API v8
+  removed the legacy T3 model inputs (400 naming `executionConfig` with
+  `connectionId`) and `workspace` (400 naming `executionConfig.options`).
+- **Launch options** (#420). Where and how a session starts (a new
+  worktree, its base ref, its branch) is a harness-wide option the adapter
+  declares and translates; Stage keeps no workspace of its own and makes
+  no worktree. An `Option` has an `id`, a `kind` (`choice`, `boolean` or
+  `text`; omitted in older declarations: `boolean` when every value is a
+  boolean, else `choice`), a `label`, its `values` (none for `text`), a
+  `default` and an optional `dependsOn` (`{option, value}`: it applies only
+  when that option, set or by default, has that value). `Capabilities.Valid`
+  rejects malformed declarations; `ValidateConfig` checks a selection:
+  a boolean takes `true` or `false`, a text a non-empty trimmed string
+  (leave it out for the harness default), a choice one of its values, and
+  a dependent option only when its dependency holds. Per harness: T3
+  `worktree` (boolean), `baseRef` and `branch` (text, with `worktree`
+  `true`), translated to `workspaceStrategy` (`root`, or `worktree` with
+  `baseRef`, `branch` and `startFromOrigin` when the ref starts with
+  `origin/` or `upstream/`; T3 requires a base ref, so a worktree without
+  one is `Rejected` with the reason); Claude Code `worktree`
+  (`claude --bg -w stage-<requestId>`); OpenCode `worktree` (its
+  `POST /api/worktree` flow); Codex none. A dependent no longer starts
+  from its predecessor's branch: the handoff names the branch the
+  predecessor reported (migration 0033 moved stored workspaces into
+  options, a T3 predecessor's stored fallback base ref and branch
+  included, and journaled where each predecessor-based task now starts).
 - `Observation` is a validated snapshot: session/project, normalized state,
-  activity, top-level/archive eligibility, workspace, links, bounded reply and
+  activity, top-level/archive eligibility, directory and branch, links, bounded reply and
   available artifact links. States are running, needs_input, done, failed,
   interrupted, cancelled or idle. Idle does not overwrite a known task state.
   Unknown/malformed snapshots and missing/offline sessions never imply execution
@@ -466,10 +481,6 @@ may still be read in the same verified environment after re-pairing. A conflicti
 launch reply is held for explicit linking. Uploaded images stay with uncertain
 attempts; only certified rejection permits discarding them.
 
-Predecessor bases require an available branch in the same harness/project.
-Unavailable, ambiguous, merged or deleted predecessors block launch. Choosing
-the configured base is an explicit edit. Historical fallback records remain.
-
 ## Compatibility and verification
 
 There is no default harness (ADR 0007 decision 12, API v8): no connection is
@@ -512,16 +523,17 @@ binary digest. Repeat the live suite when a release changes behavior Stage relie
 OpenCode owns project inventory, workspace strategy, model selection and agent policy.
 An empty selection uses its defaults. A bound directory provides the model catalog,
 variants and visible primary agents. The capabilities endpoint accepts an optional
-Stage `projectId` to resolve that binding. A worktree launch asks OpenCode for its
-selected strategy and default base. Stage verifies the resulting inventory entry,
-project and directory. Explicit Git refs, branch creation, predecessor bases,
-permission overrides and image delivery currently report an actionable reason.
+Stage `projectId` to resolve that binding. Its launch option `worktree`
+(boolean, default off) asks OpenCode for its selected strategy and default
+base. Stage verifies the resulting inventory entry, project and directory.
+OpenCode declares no base ref or branch option; permission overrides and
+image delivery report an actionable reason.
 
 ### Launch and recovery
 
 Stage saves the frozen intent, reserved IDs and an attempt marker before dispatch.
 The three external effects are worktree creation, session creation and prompt admission.
-The adapter performs only the steps needed for the chosen workspace.
+The adapter performs only the steps the launch options need.
 
 | Lost response | Recovery |
 | --- | --- |
@@ -595,22 +607,19 @@ to run on that machine.
   `systemd-run --user --scope` works (probed once), a launch runs in its own
   transient scope, so the daemon it may start is not in Stage's service
   cgroup and outlives a Stage restart.
-- **Launch.** In the workspace folder: `claude --bg -n <title> [--model M]
+- **Launch.** In the project folder: `claude --bg -n <title> [--model M]
   [--effort E] [--permission-mode P] [-w stage-<requestId>] [--settings
   <file|json>] -- <prompt>` (the prompt carries the launch
   marker; `--` keeps a prompt starting with `-` from reading as a flag).
-  Claude takes one `--settings`: the hooks file, or for a predecessor base
-  its variant with `worktree.baseRef` `head` (`hooks-settings-head.json`);
-  both carry the image root's read rule (Images). Without hooks it is
-  inline JSON with what the launch needs: `{"worktree":{"baseRef":"head"}}`
-  for a predecessor base, the read rule for images, else none. A
-  predecessor base (`Workspace.Base`, a worktree only) launches from the
-  checkout that has that branch checked out (`git worktree list
-  --porcelain` of the project), so Claude branches the new worktree from
-  the predecessor's commit; no such checkout is `Rejected`
-  ([ADR 0005 E10](adr/0005-claude-code-harness.md#e10-predecessor-base)).
-  A branch, a base with the project folder, a workspace other than the
-  project folder or a Claude worktree, a config the features do not offer,
+  `-w` follows the launch option `worktree` (boolean, default off); Claude
+  makes the worktree from its own default base, and the per-attempt name
+  keeps a retry from reusing an earlier attempt's worktree. Claude takes
+  one `--settings`: the hooks file, which carries the image root's read
+  rule (Images). Without hooks it is inline JSON with the read rule for
+  images, else none. `hooks-settings-head.json`, the predecessor-base
+  variant earlier versions wrote, is rewritten with the hooks file's
+  content when it exists (sessions launched with it read it again when
+  they wake) and never created. A config the features do not offer,
   an image type other than PNG, JPEG, GIF or WebP, a missing folder or
   executable, images without an image root, and Claude's `Workspace not
   trusted` refusal are `Rejected` (the task returns to backlog with the
@@ -649,11 +658,7 @@ to run on that machine.
   running, `blocked` needs_input, `done` done, `failed` failed, `stopped`
   interrupted; a terminal, IDE or SDK session by `status`. Not listed:
   idle with its reply when the transcript exists, else not found. An
-  unreadable list is an error, never a state. `Base` (whether a dependent
-  can start from the session's branch) reads the worktree's Git files:
-  unavailable with a reason for a session in the project folder, without
-  a branch, whose worktree was removed, or whose worktree is now on
-  another branch.
+  unreadable list is an error, never a state.
 - **Removal closure.** `claude rm` drops a session from the list and keeps
   its transcript; the hourly idle reap keeps the entry and its state. A
   session not listed whose transcript's last turn ran in the background
@@ -729,12 +734,13 @@ to run on that machine.
   discovery keeps the last one. Run Claude in a folder once to list it.
 - **Features.** Models: Claude's default, `opus`, `sonnet`, `haiku`,
   `fable` (aliases for the latest). Harness-wide option `effort` (`low` to
-  `max`). Permissions: `manual`, `acceptEdits`, `auto`, `plan`, `dontAsk`,
-  `bypassPermissions`. Workspaces: the project folder or a Claude worktree.
-  Images, `predecessorBase` and send are available. Unavailable with
-  reasons: worktree bases (Claude starts worktrees from origin's default
-  branch and names the branch), registering a folder, and respond without
-  the hook receiver (no state folder, or it could not open).
+  `max`) and launch option `worktree` (boolean, default off; Claude
+  starts the worktree from origin's default branch and names the branch,
+  so there is no base ref or branch option). Permissions: `manual`,
+  `acceptEdits`, `auto`, `plan`, `dontAsk`, `bypassPermissions`. Images
+  and send are available. Unavailable with reasons: registering a folder,
+  and respond without the hook receiver (no state folder, or it could not
+  open).
 - **Follow-ups** ([ADR 0005](adr/0005-claude-code-harness.md) decision 18,
   E12). **Send** reads the session list fresh (one send at a time) and
   takes a message only for a listed background session that is `done`, or
@@ -799,10 +805,10 @@ sends it a follow-up from Stage (same session, no copy, the new reply),
 then removes it with `claude rm` and checks the closure, an image it must name
 the color of (manual permissions, no prompt), a permission prompt it allows
 from Stage through the hook, another it stops,
-a worktree session and a dependent worktree from that session's branch (a
-predecessor base), then removes the sessions newest first (`claude rm`;
-when Claude keeps the predecessor's worktree for its commit, it deletes
-the scratch worktrees and retries) and purges the folders (`claude purge`). Claude
+a worktree session (launch option `worktree`), then removes the sessions
+newest first (`claude rm`; when Claude keeps a worktree for its commit,
+it deletes the scratch worktrees and retries) and purges the folders
+(`claude purge`). Claude
 processes rewrite the state file, so a trust entry removed by hand can come
 back; the purge is what removes them.
 
@@ -821,9 +827,10 @@ credentials and never writes Codex's config.
 - **Inventory.** Workspaces are the projects Codex trusts
   (`config/read`), local to the machine; a directory inside a Git checkout
   is importable (the machine's ops decide, `ImportInCheckout`; trust a
-  project in Codex to list it). One workspace mode, the project checkout.
-- **Launch (`reserved`).** Validation rejects before any effect (non-root
-  workspace, missing directory, non-image attachment, invalid option or
+  project in Codex to list it). No launch options: a session runs in the
+  project checkout.
+- **Launch (`reserved`).** Validation rejects before any effect (an
+  unknown option such as `worktree`, missing directory, non-image attachment, invalid option or
   permission). `thread/start`, checkpoint the thread id, best-effort
   `thread/name/set`, then `turn/start` with `clientUserMessageId` set to the
   request id. Replay reads the checkpointed thread: a first turn carrying

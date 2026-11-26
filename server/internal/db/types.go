@@ -26,14 +26,7 @@ type (
 	ImportSummary = store.ImportSummary
 )
 
-// Workspace bases: ref or predecessor (docs/api.md "Predecessor base").
-const (
-	BaseRef         = store.BaseRef
-	BasePredecessor = store.BasePredecessor
-)
-
 type (
-	Workspace = store.Workspace
 	Task      = store.Task
 	TaskEvent = store.TaskEvent
 )

@@ -1,6 +1,5 @@
 // Request bodies the task form (components/TaskForm.tsx) saves: a new task, a task edit, or a schedule.
-import type { CreateScheduleRequest, CreateTaskRequest, ExecutionConfig, StartMode, Task, UpdateTaskRequest, Workspace } from "../api/types.ts";
-import { choiceToWorkspace, type WorkspaceChoice } from "./launchbase.ts";
+import type { CreateScheduleRequest, CreateTaskRequest, ExecutionConfig, StartMode, Task, UpdateTaskRequest } from "../api/types.ts";
 import { taskEditBaseline, taskEditChanges } from "./tasks.ts";
 
 /** The fields every form body carries. */
@@ -10,7 +9,6 @@ export interface TaskTemplate {
   prompt: string;
   connectionId: number;
   executionConfig: ExecutionConfig;
-  workspace: Workspace;
 }
 
 /** A tree member's start mode choice; inherit takes the tree's. */
@@ -18,16 +16,6 @@ export type TreeStartChoice = "inherit" | StartMode;
 
 /** A one-shot start time, or null for none. */
 export type TimedStart = { startLocal: string; startTz: string } | null;
-
-/**
- * The workspace a form saves. A harness that picks its own worktree base and branch gets neither from Stage; a
- * predecessor base reaches it without a configured ref (the harness's own worktree is the fallback).
- */
-export function formWorkspace(choice: WorkspaceChoice, baseRef: string, branch: string, baseTaskId: number | null, harnessWorktree: boolean): Workspace {
-  if (!harnessWorktree) return choiceToWorkspace(choice, baseRef, branch, baseTaskId);
-  if (choice === "worktree") return { type: "worktree", baseRef: "", branch: null };
-  return choiceToWorkspace(choice, "", "", baseTaskId);
-}
 
 export function scheduleBody(template: TaskTemplate, s: { notes: string; attachmentIds: number[]; cron: string; tz: string }): CreateScheduleRequest {
   return { ...template, notes: s.notes, attachmentIds: s.attachmentIds, cron: s.cron, tz: s.tz };

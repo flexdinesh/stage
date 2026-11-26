@@ -47,9 +47,10 @@ var HookEvents = []string{"Stop", "StopFailure", "Notification", "PermissionRequ
 // session, so the file always names the current listener.
 const HooksFile = "hooks-settings.json"
 
-// HooksHeadFile is HooksFile plus worktree.baseRef "head", for a launch
-// with a predecessor base (Claude takes one --settings; base.go).
-const HooksHeadFile = "hooks-settings-head.json"
+// legacyHeadFile is the settings file earlier versions passed for a
+// launch with a predecessor base. Sessions launched with it read it again
+// when they wake, so an existing one keeps HooksFile's content.
+const legacyHeadFile = "hooks-settings-head.json"
 
 const (
 	hookPath = "/hooks"
@@ -224,10 +225,6 @@ func (h *Hooks) ImageRoot() string { return h.imageRoot }
 
 // SettingsPath is the file a launch passes with --settings.
 func (h *Hooks) SettingsPath() string { return h.path }
-
-// HeadSettingsPath is the file a launch with a predecessor base passes
-// with --settings (HooksHeadFile).
-func (h *Hooks) HeadSettingsPath() string { return filepath.Join(filepath.Dir(h.path), HooksHeadFile) }
 
 // URL is where Claude posts hooks.
 func (h *Hooks) URL() string { return h.url }
@@ -531,12 +528,7 @@ func (h *Hooks) deliver(n Nudge) {
 // JSON).
 type settingsFile struct {
 	Hooks       map[string][]hookMatcher `json:"hooks,omitempty"`
-	Worktree    *worktreeSettings        `json:"worktree,omitempty"`
 	Permissions *permissionSettings      `json:"permissions,omitempty"`
-}
-
-type worktreeSettings struct {
-	BaseRef string `json:"baseRef"`
 }
 
 type permissionSettings struct {
@@ -558,13 +550,12 @@ type httpHook struct {
 // no matcher. PermissionRequest waits up to permissionTimeout for an
 // answer in Stage; Claude prompts meanwhile.
 func HookSettings(hookURL, token string) ([]byte, error) {
-	return hookSettings(hookURL, token, nil, "")
+	return hookSettings(hookURL, token, "")
 }
 
-// hookSettings is HookSettings with an optional worktree section and, for
-// an image root, its ReadRule.
-func hookSettings(hookURL, token string, wt *worktreeSettings, imageRoot string) ([]byte, error) {
-	f := settingsFile{Hooks: map[string][]hookMatcher{}, Worktree: wt}
+// hookSettings is HookSettings with, for an image root, its ReadRule.
+func hookSettings(hookURL, token string, imageRoot string) ([]byte, error) {
+	f := settingsFile{Hooks: map[string][]hookMatcher{}}
 	if imageRoot != "" {
 		f.Permissions = &permissionSettings{Allow: []string{ReadRule(imageRoot)}}
 	}
@@ -607,25 +598,25 @@ func readHookSettings(path string) (int, string) {
 	return 0, ""
 }
 
-// writeSettings writes the settings files (0600, in a 0700 dir) when their
-// content changed, atomically: HooksFile and its head variant, so both name
-// the current listener.
+// writeSettings writes the settings file (0600, in a 0700 dir) when its
+// content changed, atomically, so it names the current listener; an
+// existing legacyHeadFile gets the same content (never created).
 func (h *Hooks) writeSettings(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	b, err := hookSettings(h.url, h.token, nil, h.imageRoot)
+	b, err := hookSettings(h.url, h.token, h.imageRoot)
 	if err != nil {
 		return err
 	}
 	if err := writeFile0600(dir, h.path, b); err != nil {
 		return err
 	}
-	head, err := hookSettings(h.url, h.token, &worktreeSettings{BaseRef: "head"}, h.imageRoot)
-	if err != nil {
-		return err
+	legacy := filepath.Join(dir, legacyHeadFile)
+	if _, err := os.Stat(legacy); err != nil {
+		return nil
 	}
-	return writeFile0600(dir, h.HeadSettingsPath(), head)
+	return writeFile0600(dir, legacy, b)
 }
 
 // writeFile0600 replaces path (in dir) with b, atomically, unless it

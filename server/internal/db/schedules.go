@@ -50,7 +50,6 @@ type NewSchedule struct {
 	ProjectID       int64
 	Title           string
 	Prompt          string
-	Workspace       Workspace
 	Notes           string
 	AttachmentIDs   []int64
 	Cron            string
@@ -107,7 +106,7 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 		}
 		id, err := tx.Schedules().Insert(ctx, store.ScheduleInsert{
 			ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt,
-			Workspace: in.Workspace, Notes: in.Notes, Cron: strings.TrimSpace(in.Cron), Tz: in.Tz, Paused: in.Paused, NextRunAt: next,
+			Notes: in.Notes, Cron: strings.TrimSpace(in.Cron), Tz: in.Tz, Paused: in.Paused, NextRunAt: next,
 			OriginSessionID: originID, ExecutionConfig: config,
 			ConnectionID: connection, CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx),
 		})
@@ -135,7 +134,6 @@ type SchedulePatch struct {
 	ProjectID           Optional[int64]            `json:"projectId"`
 	Title               Optional[string]           `json:"title"`
 	Prompt              Optional[string]           `json:"prompt"`
-	Workspace           Optional[Workspace]        `json:"workspace"`
 	Notes               Optional[string]           `json:"notes"`
 	AttachmentIDs       Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
 	Cron                Optional[string]           `json:"cron"`
@@ -166,9 +164,9 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 			}
 		}
 		u := store.ScheduleUpdate{ConnectionID: p.ConnectionID, ExecutionConfig: p.ExecutionConfig, ProjectID: p.ProjectID,
-			Title: p.Title, Prompt: p.Prompt, Workspace: p.Workspace, Notes: p.Notes}
+			Title: p.Title, Prompt: p.Prompt, Notes: p.Notes}
 		if p.ConnectionID.Set {
-			if err := checkDestinationChange(ctx, tx, e.ConnectionID, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
+			if err := checkDestinationChange(ctx, tx, e.ConnectionID, p.ConnectionID.V, p.ExecutionConfig); err != nil {
 				return err
 			}
 		}
@@ -200,7 +198,7 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 			}
 		}
 		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !p.Title.Set && !p.Prompt.Set &&
-			!p.Workspace.Set && !p.Notes.Set && !u.NextRunAt.Set && !p.AttachmentIDs.Set {
+			!p.Notes.Set && !u.NextRunAt.Set && !p.AttachmentIDs.Set {
 			return nil
 		}
 		return tx.Schedules().Update(ctx, id, u)
@@ -299,7 +297,7 @@ func (s *Store) spawnTask(ctx context.Context, tx store.Tx, id int64, startAt *t
 		return 0, err
 	}
 	in := NewTask{ProjectID: tpl.ProjectID, Title: tpl.Title, Prompt: tpl.Prompt,
-		Workspace: tpl.Workspace, ConnectionID: tpl.ConnectionID, OriginSession: tpl.OriginSession, ExecutionConfig: tpl.ExecutionConfig}
+		ConnectionID: tpl.ConnectionID, OriginSession: tpl.OriginSession, ExecutionConfig: tpl.ExecutionConfig}
 	tz, notes := tpl.Tz, tpl.Notes
 	// The schedule spawns the task, not the request that ran it: no source
 	// machine.

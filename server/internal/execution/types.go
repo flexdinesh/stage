@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -131,11 +133,86 @@ type Choice struct {
 	Label string `json:"label"`
 	Availability
 }
+
+// OptionKind is how a launch option takes its value: one of Values
+// (choice), true or false (boolean), or a string the adapter validates
+// (text).
+type OptionKind string
+
+const (
+	OptionChoice  OptionKind = "choice"
+	OptionBoolean OptionKind = "boolean"
+	OptionText    OptionKind = "text"
+)
+
+// Option is a launch option a harness declares (harness-wide, or a model's
+// own). Kind, Label and DependsOn may be absent in JSON from an older
+// harness: EffectiveKind and Title fill them in.
 type Option struct {
-	ID      string        `json:"id"`
+	ID string `json:"id"`
+	// Kind: "" reads as boolean when every value is a boolean, else choice.
+	Kind OptionKind `json:"kind,omitempty"`
+	// Label names the option in the harness's own words ("" reads as ID).
+	Label string `json:"label,omitempty"`
+	// Values: a choice's values; a boolean's true and false; none for text.
 	Values  []OptionValue `json:"values"`
 	Default *OptionValue  `json:"default"`
+	// DependsOn: the option applies only while another option (of the
+	// same config) has this value, e.g. baseRef only with worktree true.
+	DependsOn *OptionDependency `json:"dependsOn,omitempty"`
 }
+
+// OptionDependency names the option and value another option applies
+// under.
+type OptionDependency struct {
+	Option string      `json:"option"`
+	Value  OptionValue `json:"value"`
+}
+
+// EffectiveKind is o's kind, inferred for an option declared without one.
+func (o Option) EffectiveKind() OptionKind {
+	if o.Kind != "" {
+		return o.Kind
+	}
+	if len(o.Values) > 0 && !slices.ContainsFunc(o.Values, func(v OptionValue) bool { return !v.IsBool }) {
+		return OptionBoolean
+	}
+	return OptionChoice
+}
+
+// Title is o's label, else its id.
+func (o Option) Title() string {
+	if o.Label != "" {
+		return o.Label
+	}
+	return o.ID
+}
+
+// Lookup is the option of a config: its value and whether it is set.
+func (c Config) Lookup(id string) (OptionValue, bool) {
+	for _, o := range c.Options {
+		if o.ID == id {
+			return o.Value, true
+		}
+	}
+	return OptionValue{}, false
+}
+
+// Bool is a boolean option's value (false when unset or not a boolean).
+func (c Config) Bool(id string) bool {
+	v, ok := c.Lookup(id)
+	return ok && v.IsBool && v.Bool
+}
+
+// Text is a text option's trimmed value ("" when unset or a boolean).
+func (c Config) Text(id string) string {
+	v, ok := c.Lookup(id)
+	if !ok || v.IsBool {
+		return ""
+	}
+	return strings.TrimSpace(v.Str)
+}
+
 type Model struct {
 	Choice
 	Group       string   `json:"group"`
@@ -153,7 +230,6 @@ type Capabilities struct {
 	Operations map[Op]Availability `json:"operations"`
 	Models     []Model             `json:"models"`
 	Modes      []Choice            `json:"modes"`
-	Workspaces []Choice            `json:"workspaces"`
 }
 type Config struct {
 	Model      string        `json:"model"`
@@ -161,27 +237,20 @@ type Config struct {
 	Permission string        `json:"permission"`
 	Mode       string        `json:"mode"`
 }
-type Workspace struct {
-	Kind       string `json:"kind"`
-	Base       string `json:"base,omitempty"`
-	Branch     string `json:"branch,omitempty"`
-	FromRemote bool   `json:"fromRemote"`
-}
 type Image struct {
 	Name     string `json:"name"`
 	MimeType string `json:"mimeType"`
 	Data     []byte `json:"data"`
 }
 type Intent struct {
-	RequestID    string    `json:"requestId"`
-	ConnectionID int64     `json:"connectionId"`
-	Project      string    `json:"project"`
-	Directory    string    `json:"directory"`
-	Title        string    `json:"title"`
-	Prompt       string    `json:"prompt"`
-	Config       Config    `json:"config"`
-	Workspace    Workspace `json:"workspace"`
-	Images       []Image   `json:"images"`
+	RequestID    string  `json:"requestId"`
+	ConnectionID int64   `json:"connectionId"`
+	Project      string  `json:"project"`
+	Directory    string  `json:"directory"`
+	Title        string  `json:"title"`
+	Prompt       string  `json:"prompt"`
+	Config       Config  `json:"config"`
+	Images       []Image `json:"images"`
 	// Marker is LaunchMarker(RequestID) for a correlated launch (also at the
 	// end of Prompt); "" for a reserved one.
 	Marker string `json:"marker,omitempty"`
@@ -231,29 +300,28 @@ type Artifact struct {
 	State      string `json:"state"`
 }
 type Observation struct {
-	ModelLabel  string       `json:"modelLabel"`
-	Parent      *SessionRef  `json:"parent,omitempty"`
-	Config      Config       `json:"config"`
-	Session     SessionRef   `json:"session"`
-	Project     string       `json:"project"`
-	Title       string       `json:"title"`
-	State       string       `json:"state"`
-	Active      bool         `json:"active"`
-	Archived    bool         `json:"archived"`
-	Child       bool         `json:"child"`
-	Branch      string       `json:"branch"`
-	Directory   string       `json:"directory"`
-	Links       Links        `json:"links"`
-	CreatedAt   time.Time    `json:"createdAt"`
-	UpdatedAt   time.Time    `json:"updatedAt"`
-	StartedAt   *time.Time   `json:"startedAt"`
-	EndedAt     *time.Time   `json:"endedAt"`
-	ExecutionID string       `json:"executionId"`
-	Reply       *Reply       `json:"reply,omitempty"`
-	Usage       *Usage       `json:"usage,omitempty"` // nil: the harness reports none (or has not yet)
-	Artifacts   []Artifact   `json:"artifacts"`
-	Base        Availability `json:"base"`
-	Closed      *Closure     `json:"closed,omitempty"`
+	ModelLabel  string      `json:"modelLabel"`
+	Parent      *SessionRef `json:"parent,omitempty"`
+	Config      Config      `json:"config"`
+	Session     SessionRef  `json:"session"`
+	Project     string      `json:"project"`
+	Title       string      `json:"title"`
+	State       string      `json:"state"`
+	Active      bool        `json:"active"`
+	Archived    bool        `json:"archived"`
+	Child       bool        `json:"child"`
+	Branch      string      `json:"branch"`
+	Directory   string      `json:"directory"`
+	Links       Links       `json:"links"`
+	CreatedAt   time.Time   `json:"createdAt"`
+	UpdatedAt   time.Time   `json:"updatedAt"`
+	StartedAt   *time.Time  `json:"startedAt"`
+	EndedAt     *time.Time  `json:"endedAt"`
+	ExecutionID string      `json:"executionId"`
+	Reply       *Reply      `json:"reply,omitempty"`
+	Usage       *Usage      `json:"usage,omitempty"` // nil: the harness reports none (or has not yet)
+	Artifacts   []Artifact  `json:"artifacts"`
+	Closed      *Closure    `json:"closed,omitempty"`
 	// StateReason qualifies State; "" when the state speaks for itself.
 	StateReason string `json:"stateReason,omitempty"`
 	// Origin is the client that started the session as the harness

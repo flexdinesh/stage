@@ -109,7 +109,11 @@ func newFixture(t *testing.T) *liveFixture {
 	return f
 }
 func (f *liveFixture) intent(prompt, kind string) execution.Intent {
-	return execution.Intent{RequestID: prompt, ConnectionID: 2, Project: f.project, Directory: f.dir, Title: "Stage test", Prompt: prompt, Config: execution.Config{Model: "fixture/test"}, Workspace: execution.Workspace{Kind: kind}}
+	in := execution.Intent{RequestID: prompt, ConnectionID: 2, Project: f.project, Directory: f.dir, Title: "Stage test", Prompt: prompt, Config: execution.Config{Model: "fixture/test"}}
+	if kind == "worktree" {
+		in.Config.Options = []execution.ModelOption{{ID: optionWorktree, Value: execution.BoolValue(true)}}
+	}
+	return in
 }
 func observeUntil(t *testing.T, a *Adapter, ref execution.SessionRef, state string) execution.Observation {
 	t.Helper()

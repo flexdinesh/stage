@@ -20,16 +20,12 @@ const (
 	OpOpening   Op = "opening"   // read the session's opening prompt
 	OpAttention Op = "attention" // list sessions waiting for their user
 	OpImages    Op = "images"    // launch with image attachments
-	// OpPredecessorBase: a worktree may start from a need's branch.
-	OpPredecessorBase Op = "predecessorBase"
-	// OpWorktreeBase: Stage supplies a worktree's base ref and branch.
-	OpWorktreeBase Op = "worktreeBase"
-	OpRespond      Op = "respond" // list and answer pending requests (Interactive)
-	OpSend         Op = "send"    // send a message to the session (Interactive)
+	OpRespond   Op = "respond"   // list and answer pending requests (Interactive)
+	OpSend      Op = "send"      // send a message to the session (Interactive)
 )
 
 // Ops are every operation, in a fixed order.
-var Ops = []Op{OpLaunch, OpStop, OpAdopt, OpReply, OpOpening, OpAttention, OpImages, OpPredecessorBase, OpWorktreeBase, OpRespond, OpSend}
+var Ops = []Op{OpLaunch, OpStop, OpAdopt, OpReply, OpOpening, OpAttention, OpImages, OpRespond, OpSend}
 
 // DeclaresOperations reports an operation c leaves out, or one unavailable
 // without a reason. Every adapter declares them all (its contract tests).

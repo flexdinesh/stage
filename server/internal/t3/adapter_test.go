@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"strings"
 	"testing"
 	"time"
 )
@@ -107,7 +108,7 @@ func (c *rotatingClient) LaunchPinned(ctx context.Context, in LaunchInput, scope
 func TestAdapterNeverReplaysAcrossPairingOrEnvironment(t *testing.T) {
 	c := &rotatingClient{Fake: NewFake(), scope: "client:first", environment: "env", lose: true}
 	a := NewAdapter(c)
-	in := execution.Intent{RequestID: "request", ConnectionID: 1, Project: "project", Title: "Task", Config: execution.Config{Mode: "default", Permission: "full-access"}, Workspace: execution.Workspace{Kind: "root"}}
+	in := execution.Intent{RequestID: "request", ConnectionID: 1, Project: "project", Title: "Task", Config: execution.Config{Mode: "default", Permission: "full-access"}}
 	var cp execution.Checkpoint
 	save := func(_ context.Context, next execution.Checkpoint) error { cp = next; return nil }
 	if _, err := a.Launch(t.Context(), in, cp, save); err == nil {
@@ -133,7 +134,7 @@ func TestAdapterNeverReplaysAcrossPairingOrEnvironment(t *testing.T) {
 func TestAdapterCheckpointFailurePreventsDispatch(t *testing.T) {
 	c := &rotatingClient{Fake: NewFake(), scope: "client:first", environment: "env"}
 	a := NewAdapter(c)
-	_, err := a.Launch(t.Context(), execution.Intent{RequestID: "request", Config: execution.Config{Mode: "default", Permission: "full-access"}, Workspace: execution.Workspace{Kind: "root"}}, execution.Checkpoint{}, func(context.Context, execution.Checkpoint) error { return errors.New("disk full") })
+	_, err := a.Launch(t.Context(), execution.Intent{RequestID: "request", Config: execution.Config{Mode: "default", Permission: "full-access"}}, execution.Checkpoint{}, func(context.Context, execution.Checkpoint) error { return errors.New("disk full") })
 	if err == nil || c.calls != 0 {
 		t.Fatal("dispatched before durable identity", err)
 	}
@@ -190,7 +191,7 @@ func TestUnreportedRuntimeModesInheritHarnessPermissions(t *testing.T) {
 		t.Fatalf("inherited permissions = %+v", got)
 	}
 	intent := func(permission string) execution.Intent {
-		return execution.Intent{Config: execution.Config{Model: m.ID, Permission: permission}, Workspace: execution.Workspace{Kind: "root"}}
+		return execution.Intent{Config: execution.Config{Model: m.ID, Permission: permission}}
 	}
 	if err := adapter.validate(t.Context(), intent("full-access")); err != nil {
 		t.Fatal("harness permission rejected:", err)
@@ -211,5 +212,59 @@ func TestUnreportedRuntimeModesInheritHarnessPermissions(t *testing.T) {
 	}
 	if adapter.validate(t.Context(), intent("full-access")) == nil {
 		t.Fatal("permission outside reported modes accepted")
+	}
+}
+
+// The launch options become T3's workspaceStrategy; startFromOrigin follows
+// a remote base ref.
+func TestLaunchOptionsTranslateToWorkspaceStrategy(t *testing.T) {
+	on := execution.ModelOption{ID: OptionWorktree, Value: execution.BoolValue(true)}
+	text := func(id, v string) execution.ModelOption {
+		return execution.ModelOption{ID: id, Value: execution.StringValue(v)}
+	}
+	for _, tc := range []struct {
+		name   string
+		opts   []execution.ModelOption
+		want   *WorkspaceStrategy
+		reject string
+	}{
+		{"project checkout by default", nil, &WorkspaceStrategy{Type: WorkspaceRoot}, ""},
+		{"worktree off", []execution.ModelOption{{ID: OptionWorktree, Value: execution.BoolValue(false)}}, &WorkspaceStrategy{Type: WorkspaceRoot}, ""},
+		{"origin ref", []execution.ModelOption{on, text(OptionBaseRef, "origin/main"), text(OptionBranch, "stage/x")}, &WorkspaceStrategy{Type: WorkspaceWorktree, BaseRef: "origin/main", Branch: "stage/x"}, ""},
+		{"upstream ref", []execution.ModelOption{on, text(OptionBaseRef, "upstream/dev")}, &WorkspaceStrategy{Type: WorkspaceWorktree, BaseRef: "upstream/dev"}, ""},
+		{"local ref", []execution.ModelOption{on, text(OptionBaseRef, "main")}, &WorkspaceStrategy{Type: WorkspaceWorktree, BaseRef: "main"}, ""},
+		{"worktree needs a base ref", []execution.ModelOption{on}, nil, "Set Base ref"},
+		{"base ref needs a worktree", []execution.ModelOption{text(OptionBaseRef, "main")}, nil, "applies only when worktree is true"},
+		{"ref is one word", []execution.ModelOption{on, text(OptionBaseRef, "--orphan")}, nil, "not a Git ref name"},
+		{"worktree takes a boolean", []execution.ModelOption{{ID: OptionWorktree, Value: execution.StringValue("yes")}}, nil, "takes true or false"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &rotatingClient{Fake: NewFake(), scope: "client:first", environment: "env"}
+			a := NewAdapter(c)
+			in := execution.Intent{RequestID: "request", ConnectionID: 1, Project: "project", Title: "Task", Config: execution.Config{Mode: "default", Permission: "full-access", Options: tc.opts}}
+			_, err := a.Launch(t.Context(), in, execution.Checkpoint{}, func(context.Context, execution.Checkpoint) error { return nil })
+			if tc.reject != "" {
+				var rejected *execution.Rejected
+				if !errors.As(err, &rejected) || !strings.Contains(err.Error(), tc.reject) || c.calls != 0 {
+					t.Fatalf("want rejection %q, got %v (calls %d)", tc.reject, err, c.calls)
+				}
+				return
+			}
+			if err != nil || len(c.Launched) != 1 {
+				t.Fatal(err, c.Launched)
+			}
+			got := c.Launched[0]
+			if got.ModelSelection != nil && len(got.ModelSelection.Options) != 0 {
+				t.Fatalf("launch options leaked into the model selection: %+v", got.ModelSelection)
+			}
+			w := got.Workspace
+			if w == nil || w.Type != tc.want.Type || w.BaseRef != tc.want.BaseRef || w.Branch != tc.want.Branch {
+				t.Fatalf("workspace %+v, want %+v", w, tc.want)
+			}
+			remote := strings.HasPrefix(w.BaseRef, "origin/") || strings.HasPrefix(w.BaseRef, "upstream/")
+			if w.Type == WorkspaceWorktree && (w.StartFromOrigin == nil || *w.StartFromOrigin != remote) || w.Type == WorkspaceRoot && w.StartFromOrigin != nil {
+				t.Fatalf("startFromOrigin %+v", w)
+			}
+		})
 	}
 }

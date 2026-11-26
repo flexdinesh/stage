@@ -56,8 +56,7 @@ func (c *checkpoints) save(_ context.Context, cp execution.Checkpoint) error {
 func intent(dir string) execution.Intent {
 	return execution.Intent{
 		RequestID: "req-1", ConnectionID: conn, Project: dir, Directory: dir, Title: "Fix the bug", Prompt: "Fix it",
-		Config:    execution.Config{Model: "gpt-test", Permission: "auto", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("high")}}},
-		Workspace: execution.Workspace{Kind: "root"},
+		Config: execution.Config{Model: "gpt-test", Permission: "auto", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("high")}}},
 	}
 }
 
@@ -206,7 +205,10 @@ func TestLaunchRejectsBeforeAnyEffect(t *testing.T) {
 	r := newRig(t)
 	ctx := t.Context()
 	for name, edit := range map[string]func(*execution.Intent){
-		"worktree":       func(in *execution.Intent) { in.Workspace.Kind = "worktree" },
+		// Codex declares no launch options: a worktree is an unknown option.
+		"worktree": func(in *execution.Intent) {
+			in.Config.Options = append(in.Config.Options, execution.ModelOption{ID: "worktree", Value: execution.BoolValue(true)})
+		},
 		"unknown model":  func(in *execution.Intent) { in.Config.Model = "nope" },
 		"unknown effort": func(in *execution.Intent) { in.Config.Options[0].Value = execution.StringValue("ultra") },
 		"permission":     func(in *execution.Intent) { in.Config.Permission = "yolo" },
@@ -390,7 +392,7 @@ func TestFeaturesFromModelCatalog(t *testing.T) {
 	if len(c.Models) != 1 || c.Models[0].ID != "gpt-test" || len(c.Models[0].Options) != 1 || c.Models[0].Options[0].Default == nil || c.Models[0].Options[0].Default.Str != "low" {
 		t.Fatalf("models %+v", c.Models)
 	}
-	if !c.Operations[execution.OpImages].Available || c.Operations[execution.OpRespond].Available || c.Operations[execution.OpWorktreeBase].Available || len(c.Workspaces) != 1 || len(c.Permissions) != 3 {
+	if !c.Operations[execution.OpImages].Available || c.Operations[execution.OpRespond].Available || len(c.Options) != 0 || len(c.Permissions) != 3 {
 		t.Fatalf("%+v", c)
 	}
 	if err := c.ValidateConfig(execution.Config{}); err != nil {

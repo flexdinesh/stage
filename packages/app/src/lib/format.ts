@@ -1,4 +1,4 @@
-import type { ExecutionConfig, ModelOption, Workspace } from "../api/types.ts";
+import type { ExecutionConfig, ModelOption } from "../api/types.ts";
 
 const UNITS: [number, string][] = [
   [86_400_000, "d"],
@@ -140,12 +140,6 @@ export function configModelText(c: ExecutionConfig | null | undefined): string {
 /** Permission and mode a launch uses ("" = harness default). */
 export function executionModes(x: { executionConfig?: ExecutionConfig | null }): { permission: string; mode: string } {
   return { permission: x.executionConfig?.permission ?? "", mode: x.executionConfig?.mode ?? "" };
-}
-
-export function workspaceText(w: Workspace): string {
-  if (w.type === "root") return "project root";
-  if (!w.baseRef) return "harness-managed worktree";
-  return `worktree from ${w.baseRef}${w.branch === null ? "" : ` → ${w.branch}`}`;
 }
 
 /** Local midnight `daysAgo` days before today, as an ISO datetime. */

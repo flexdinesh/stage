@@ -1,6 +1,9 @@
-import type { Capabilities, ExecutionConfig, HarnessChoice } from "../api/types.ts";
+import type { Capabilities, ExecutionConfig, HarnessChoice, HarnessOption } from "../api/types.ts";
 import { optionsFor } from "../lib/capabilities.ts";
-import { Button, Field, Combobox } from "./ui.tsx";
+import { optionApplies, optionKind, optionLabel, optionValue, setOption as withOption, shownOptions } from "../lib/options.ts";
+import { Button, Field, FieldGroup, Combobox, Input, Segmented } from "./ui.tsx";
+
+export { incompatibleSettings } from "../lib/options.ts";
 
 export const harnessDefaults: ExecutionConfig = {
   model: "",
@@ -8,31 +11,6 @@ export const harnessDefaults: ExecutionConfig = {
   mode: "",
   permission: "",
 };
-
-export function incompatibleSettings(
-  config: ExecutionConfig,
-  caps: Capabilities | undefined,
-): string[] {
-  if (!caps) return [];
-  const model = caps.models?.find((m) => m.id === config.model && m.available);
-  const issues: string[] = [];
-  if (config.model && !model) issues.push("model");
-  if (config.mode && !caps.modes?.some((m) => m.id === config.mode && m.available))
-    issues.push("mode");
-  if (
-    config.permission &&
-    !(model?.permissions ?? caps.permissions)?.some(
-      (p) => p.id === config.permission && p.available,
-    )
-  )
-    issues.push("permission");
-  const allowed = optionsFor(caps, model);
-  for (const o of config.options) {
-    if (!allowed.some((v) => v.id === o.id && v.values.includes(o.value)))
-      issues.push(o.id);
-  }
-  return issues;
-}
 
 export function HarnessFields({
   config,
@@ -86,44 +64,17 @@ export function HarnessFields({
     );
   };
   const setOption = (key: string, value: string | boolean | undefined) =>
-    onChange({
-      ...config,
-      options: [
-        ...config.options.filter((o) => o.id !== key),
-        ...(value === undefined ? [] : [{ id: key, value }]),
-      ],
-    });
+    onChange({ ...config, options: withOption(config.options, options, key, value) });
   return (
     <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
       {choices("Model", "model", caps?.models ?? [])}
       {modelOnly ? null : choices(caps?.modeLabel || "Interaction mode", "mode", caps?.modes ?? [])}
       {modelOnly ? null : choices("Permission", "permission", model?.permissions ?? caps?.permissions ?? [])}
-      {options.map((o) => {
-        const current = config.options.find((v) => v.id === o.id);
-        const idx = o.values.findIndex((v) => v === current?.value);
-        return (
-          <Field key={o.id} label={o.id}>
-            {(id) => (
-              <Combobox
-                id={id}
-                disabled={disabled}
-                value={current && idx < 0 ? "unavailable" : String(idx)}
-                onChange={(next) => setOption(o.id, o.values[Number(next)])}
-                listLabel={o.id}
-                options={[
-                  { value: "-1", label: "Harness default" },
-                  ...(current && idx < 0
-                    ? [{ value: "unavailable", label: `${String(current.value)} (unavailable)`, disabled: true }]
-                    : []),
-                  ...o.values.map((v, i) => ({ value: String(i), label: String(v) })),
-                ]}
-              />
-            )}
-          </Field>
-        );
-      })}
+      {shownOptions(options, config.options).map((o) => (
+          <OptionField key={o.id} option={o} config={config} disabled={disabled} onChange={(v) => setOption(o.id, v)} />
+        ))}
       {config.options
-        .filter((o) => !options.some((v) => v.id === o.id))
+        .filter((o) => !options.some((v) => v.id === o.id && optionApplies(v, config.options, options)))
         .map((o) => (
           <div key={o.id} className="text-small">
             {o.id} = {String(o.value)}{" "}
@@ -134,4 +85,75 @@ export function HarnessFields({
         ))}
     </div>
   );
+}
+
+/** One launch option, by kind: a choice in a combobox, a boolean as on/off, a text as an input (empty: unset). */
+function OptionField({
+  option: o,
+  config,
+  disabled,
+  onChange,
+}: {
+  option: HarnessOption;
+  config: ExecutionConfig;
+  disabled: boolean;
+  onChange: (value: string | boolean | undefined) => void;
+}) {
+  const label = optionLabel(o);
+  const current = config.options.find((v) => v.id === o.id);
+  switch (optionKind(o)) {
+    case "boolean": {
+      const on = optionValue(o, config.options) === true;
+      return (
+        <FieldGroup label={label} start>
+          <Segmented
+            label={label}
+            value={on ? "on" : "off"}
+            onChange={(next) => onChange(next === "on")}
+            options={[
+              { value: "off", label: "Off", disabled },
+              { value: "on", label: "On", disabled },
+            ]}
+          />
+        </FieldGroup>
+      );
+    }
+    case "text":
+      return (
+        <Field label={label}>
+          {(id) => (
+            <Input
+              id={id}
+              disabled={disabled}
+              value={typeof current?.value === "string" ? current.value : ""}
+              placeholder={typeof o.default === "string" ? o.default : "Harness default"}
+              onChange={(e) => onChange(e.target.value)}
+            />
+          )}
+        </Field>
+      );
+    case "choice": {
+      const idx = o.values.findIndex((v) => v === current?.value);
+      return (
+        <Field label={label}>
+          {(id) => (
+            <Combobox
+              id={id}
+              disabled={disabled}
+              value={current && idx < 0 ? "unavailable" : String(idx)}
+              onChange={(next) => onChange(o.values[Number(next)])}
+              listLabel={label}
+              options={[
+                { value: "-1", label: "Harness default" },
+                ...(current && idx < 0
+                  ? [{ value: "unavailable", label: `${String(current.value)} (unavailable)`, disabled: true }]
+                  : []),
+                ...o.values.map((v, i) => ({ value: String(i), label: String(v) })),
+              ]}
+            />
+          )}
+        </Field>
+      );
+    }
+  }
 }

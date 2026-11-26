@@ -17,12 +17,12 @@ that disagrees with this file updates it in the same PR.
 | [Single owner](#single-owner) | as described on both engines (#403, in `serve` #405) | |
 | [Encodings](#encodings) and [errors](#errors) | as described on both engines (#403) | |
 | [Search](#search) | as described on both engines (#404): SQLite FTS5 trigram (0029), Postgres `pg_trgm` GIN (0029) | |
-| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 32; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 32 (0030 `claude_settings`, #372; 0031 `codex_settings`, #384; 0032 `no_default_harness`, #420); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
+| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 34; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 34 (0030 `claude_settings`, #372; 0031 `codex_settings`, #384; 0032 `no_default_harness`, #420; 0033 `launch_options` and 0034 `drop_workspaces`, #420); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
 | [Backups](#backups) | as described on both engines (#403) | |
 | [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) and `serve` on Postgres (#405) | |
 | [Data copy and cutover](#data-copy-and-cutover) | as described (#406): `stage db copy` (`internal/db/datacopy` over the copy ports), cutover and rollback runbook | |
 | [Docker image and compose example](#docker-image-and-compose-example) | as described (#407) | |
-| [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); every other Drop row dropped from SQLite (#417: 0027 backfill, 0028 contract); the Postgres baseline omits them (#403); the `threads` mirror dropped on both engines (0032, #420) | |
+| [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); every other Drop row dropped from SQLite (#417: 0027 backfill, 0028 contract); the Postgres baseline omits them (#403); the `threads` mirror dropped on both engines (0032, #420); task and schedule `workspace` and `task_launch_bases` dropped (0034, #420) | |
 | [Design only](#design-only-queue-events-leases) | Queue decided: [ADR 0004](adr/0004-queue-port.md) (#408), not built | Events, Leases: #409 |
 
 ## Engines and selection
@@ -120,7 +120,7 @@ paging, completion preview) uses `Write`.
 
 **Repositories**, one per aggregate, in `internal/db/store`: `Tasks` (task
 rows and events), `Attempts` (launch attempts and checkpoints, claims, pinned
-destinations and inputs, launch bases, handoffs), `Observations` (normalized
+destinations and inputs, handoffs), `Observations` (normalized
 execution observations), `Trees` (trees, membership, needs), `Journal`,
 `Acceptances`, `Schedules` (and runs), `Projects` (bindings, external
 projects, imports), `Connections` (harness connections, T3, OpenCode and
@@ -403,6 +403,24 @@ and paging. (Thread search was removed with API v3.)
   and `TestFreshInstallHasNoConnection` (`dbtest.FreshEngine`, both
   engines); `dbtest.Reset`/`Engine` seed connection 1 for the suites that
   need a T3 connection.
+  0033 `launch_options` (#420, expand): a worktree becomes a harness launch
+  option. Each task's and schedule's `workspace` of type `worktree` adds
+  `{"id":"worktree","value":true}` to its `execution_config` options on a
+  T3, Claude Code or OpenCode connection (Codex has none); on T3 it also
+  adds its non-empty `baseRef` and `branch` as text options, a
+  predecessor-based workspace's stored fallback included. Unfinished launch attempts (`prepared`, `unconfirmed`)
+  get the same options in their intent's config, so recovery keeps the
+  worktree. An option already set is kept. Each predecessor-based task
+  gets one `task_event` journal entry naming where its worktree now
+  starts, and that the handoff carries the predecessor's branch: T3 from
+  its `baseRef`; a T3 task with no stored `baseRef` (it carries `worktree`
+  without one, which T3 rejects at launch) that a base ref must be set
+  before it starts; Claude Code and OpenCode the harness default. 0034
+  `drop_workspaces` (#420, contract): drops `tasks.workspace`,
+  `schedules.workspace` and `task_launch_bases`. Tests: the step-wise
+  scenarios on both engines (each harness kind, root and worktree, T3
+  predecessor tasks with and without a stored base ref and their journal
+  text, attempts, schedules; columns and table gone).
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -781,10 +799,10 @@ by Go decode) and is `jsonb`.
 | `task_acceptances.evidence` | Evidence: an immutable accepted snapshot (its `evidenceVersion` hash comes from the Go struct, not the stored bytes) | `text` |
 | `acceptance_requests.result` | Queried: decoded for idempotent replay | `jsonb` |
 | `execution_observations.observation` | Queried: `json_extract` in execution, acceptance, notifications, push, tasks | `jsonb` |
-| `tasks.workspace` | Queried: `json_extract`/`json_set` (tasks, trees) | `jsonb` |
-| `schedules.workspace`, `tasks`/`schedules.execution_config`, `harness_connections.new_task_config`, `preferences.notify_events` | Queried (decoded) | `jsonb` |
+| `tasks`/`schedules.execution_config`, `harness_connections.new_task_config`, `preferences.notify_events` | Queried (decoded) | `jsonb` |
 | `execution_attempts.intent`, `checkpoint`, `observed_session` | Queried (decoded; the checkpoint is opaque adapter state) | `jsonb` |
 | `tasks`/`schedules.model_options`, `threads.pull_requests`, `threads.recent_runs`, `question_responses.answers` | Dropped (see Columns) | none |
+| `tasks.workspace`, `schedules.workspace` | Dropped (0034, #420; moved into `execution_config` options by 0033) | none |
 
 `journal_entries.text` and `journal_launch_context.instructions` are plain
 text, not JSON, and stay `text`.

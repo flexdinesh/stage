@@ -21,8 +21,7 @@ import (
 func TestRPCBodiesRoundTripJSON(t *testing.T) {
 	at := time.Date(2026, 11, 22, 10, 0, 5, 0, time.UTC)
 	ref := execution.SessionRef{ConnectionID: 7, ExternalSessionID: "s"}
-	intent := execution.Intent{RequestID: "r", ConnectionID: 7, Project: "p", Directory: "/w", Title: "t", Prompt: "do", Config: execution.Config{Model: "m", Options: []execution.ModelOption{}, Permission: "x", Mode: "y"},
-		Workspace: execution.Workspace{Kind: "root", Base: "b", Branch: "br", FromRemote: true}, Images: []execution.Image{{Name: "a.png", MimeType: "image/png"}}, Marker: "stage-launch:r"}
+	intent := execution.Intent{RequestID: "r", ConnectionID: 7, Project: "p", Directory: "/w", Title: "t", Prompt: "do", Config: execution.Config{Model: "m", Options: []execution.ModelOption{}, Permission: "x", Mode: "y"}, Images: []execution.Image{{Name: "a.png", MimeType: "image/png"}}, Marker: "stage-launch:r"}
 	roots := []machine.SharedRoot{{HarnessRoot: "/srv", StageRoot: "/home/u/srv"}}
 	str := "s"
 	samples := map[string]any{

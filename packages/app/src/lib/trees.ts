@@ -341,11 +341,6 @@ export function treeMetaParts(tree: TreeSummary | TreeDetail): [tasks: string, .
   return [plural(shape.tasks, "task"), plural(shape.levels, "level"), plural(shape.projects, "project"), shape.mode];
 }
 
-/** Needs a task's worktree may start from: its needs in the same project (another project's branch cannot be used). */
-export function baseCandidates(task: Pick<Task, "needs" | "projectId">, tree: Pick<TreeDetail, "tasks">): Task[] {
-  return tree.tasks.filter((t) => task.needs.includes(t.id) && t.projectId === task.projectId).toSorted((a, b) => a.id - b.id);
-}
-
 /** A member's node label: ready / blocked for backlog members with readiness, else its task state. */
 export type NodeState = Task["state"] | "ready" | "blocked";
 

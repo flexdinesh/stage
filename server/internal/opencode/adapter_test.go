@@ -16,32 +16,36 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-func TestWorkspaceSelection(t *testing.T) {
-	c := execution.Capabilities{Modes: []execution.Choice{choice("planner", "Plan")}, Models: []execution.Model{{Choice: choice("provider/family/model", "Model"), Options: []execution.Option{{ID: "variant", Values: []execution.OptionValue{execution.StringValue("fast")}}}}}}
+func TestLaunchOptionSelection(t *testing.T) {
+	c := execution.Capabilities{Options: launchOptions(), Modes: []execution.Choice{choice("planner", "Plan")}, Models: []execution.Model{{Choice: choice("provider/family/model", "Model"), Options: []execution.Option{{ID: "variant", Values: []execution.OptionValue{execution.StringValue("fast")}}}}}}
+	worktree := execution.ModelOption{ID: optionWorktree, Value: execution.BoolValue(true)}
 	for _, tc := range []struct {
-		name      string
-		workspace execution.Workspace
-		config    execution.Config
-		ok        bool
+		name   string
+		config execution.Config
+		ok     bool
 	}{
-		{"harness defaults", execution.Workspace{Kind: "worktree"}, execution.Config{}, true},
-		{"agent and variant", execution.Workspace{Kind: "root"}, execution.Config{Mode: "planner", Model: "provider/family/model", Options: []execution.ModelOption{{ID: "variant", Value: execution.StringValue("fast")}}}, true},
-		{"base", execution.Workspace{Kind: "worktree", Base: "HEAD"}, execution.Config{}, false},
-		{"branch", execution.Workspace{Kind: "worktree", Branch: "new"}, execution.Config{}, false},
-		{"fetch", execution.Workspace{Kind: "worktree", FromRemote: true}, execution.Config{}, false},
-		{"permissions", execution.Workspace{Kind: "root"}, execution.Config{Permission: "full-access"}, false},
-		{"unavailable agent", execution.Workspace{Kind: "root"}, execution.Config{Mode: "removed"}, false},
+		{"harness defaults", execution.Config{}, true},
+		{"worktree", execution.Config{Options: []execution.ModelOption{worktree}}, true},
+		{"agent and variant in a worktree", execution.Config{Mode: "planner", Model: "provider/family/model", Options: []execution.ModelOption{worktree, {ID: "variant", Value: execution.StringValue("fast")}}}, true},
+		{"worktree takes a boolean", execution.Config{Options: []execution.ModelOption{{ID: optionWorktree, Value: execution.StringValue("yes")}}}, false},
+		{"base ref", execution.Config{Model: "provider/family/model", Options: []execution.ModelOption{worktree, {ID: "baseRef", Value: execution.StringValue("HEAD")}}}, false},
+		{"branch", execution.Config{Model: "provider/family/model", Options: []execution.ModelOption{worktree, {ID: "branch", Value: execution.StringValue("new")}}}, false},
+		{"permissions", execution.Config{Permission: "full-access"}, false},
+		{"unavailable agent", execution.Config{Mode: "removed"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			v, e := selection(c, execution.Intent{Workspace: tc.workspace, Config: tc.config})
+			v, e := selection(c, execution.Intent{Config: tc.config})
 			var rejected *execution.Rejected
 			if tc.ok && e != nil || !tc.ok && !errors.As(e, &rejected) {
 				t.Fatalf("selection: %+v %v", v, e)
 			}
-			if tc.config.Model != "" && (v == nil || v.ID != "family/model" || v.Variant != "fast") {
+			if tc.ok && tc.config.Model != "" && (v == nil || v.ID != "family/model" || v.Variant != "fast") {
 				t.Fatal("model changed", v)
 			}
 		})
+	}
+	if err := c.Valid(); err != nil {
+		t.Fatal(err)
 	}
 }
 

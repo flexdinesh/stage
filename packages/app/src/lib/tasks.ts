@@ -66,7 +66,6 @@ export function taskEditBaseline(task: Task): UpdateTaskRequest {
     prompt: task.prompt,
     connectionId: task.connectionId,
     ...(config === null || config === undefined ? {} : { executionConfig: { ...config, options: config.options ?? [] } }),
-    workspace: task.workspace,
     attachmentIds: task.attachments.map((a) => a.id),
   };
 }
@@ -74,7 +73,7 @@ export function taskEditBaseline(task: Task): UpdateTaskRequest {
 /**
  * The update body for a full edit: only the fields that differ from the baseline, so an untouched field never
  * reverts a change another client made while the form was open. A new project or harness also carries the
- * execution config and workspace, which the server checks against them.
+ * execution config, which the server checks against them.
  */
 export function taskEditChanges(baseline: UpdateTaskRequest, next: UpdateTaskRequest): UpdateTaskRequest {
   const body = changedFields(baseline, next);
@@ -82,6 +81,5 @@ export function taskEditChanges(baseline: UpdateTaskRequest, next: UpdateTaskReq
   return {
     ...body,
     ...(next.executionConfig === undefined ? {} : { executionConfig: next.executionConfig }),
-    ...(next.workspace === undefined ? {} : { workspace: next.workspace }),
   };
 }

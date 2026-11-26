@@ -58,7 +58,7 @@ func movedT3Setup(t *testing.T, p placement, a execution.Adapter) (*db.Store, *c
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 3, Title: "Work", Prompt: "Do it", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "m"}})
+	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 3, Title: "Work", Prompt: "Do it", ExecutionConfig: &execution.Config{Model: "m"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestMovedT3UnrecordedLaunchKeepsSession(t *testing.T) {
 		store, svc, task := movedT3Setup(t, p, f)
 		ctx := t.Context()
 		// Another task already holds the session the harness returns.
-		other, err := store.CreateTask(ctx, db.NewTask{ProjectID: task.ProjectID, ConnectionID: 3, Title: "Other", Prompt: "p", Workspace: db.Workspace{Type: "root"}})
+		other, err := store.CreateTask(ctx, db.NewTask{ProjectID: task.ProjectID, ConnectionID: 3, Title: "Other", Prompt: "p"})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -127,7 +127,17 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	if _, err := a.check(ctx); err != nil {
 		return execution.Capabilities{}, err
 	}
-	return execution.Capabilities{Operations: operations(), ModeLabel: "Agent", Workspaces: []execution.Choice{choice("root", "Bound checkout"), choice("worktree", "OpenCode-managed worktree")}}, nil
+	return execution.Capabilities{Operations: operations(), ModeLabel: "Agent", Options: launchOptions()}, nil
+}
+
+// optionWorktree is the worktree launch option: OpenCode creates the
+// worktree (POST /api/worktree) with its selected strategy and default
+// base, and the session runs there.
+const optionWorktree = "worktree"
+
+func launchOptions() []execution.Option {
+	off := execution.BoolValue(false)
+	return []execution.Option{{ID: optionWorktree, Kind: execution.OptionBoolean, Label: "OpenCode worktree", Values: []execution.OptionValue{execution.BoolValue(true), off}, Default: &off}}
 }
 
 // operations are OpenCode's, whatever the server.
@@ -135,11 +145,9 @@ func operations() map[execution.Op]execution.Availability {
 	answer := execution.Availability{Reason: "Answer in OpenCode: open the session there."}
 	return map[execution.Op]execution.Availability{
 		execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
-		execution.OpPredecessorBase: {Reason: "OpenCode selects the worktree strategy and base. Choose its default base."},
-		execution.OpImages:          {Reason: "Image attachment delivery has not been verified for this adapter."},
-		execution.OpWorktreeBase:    {Reason: "OpenCode chooses the worktree base and branch."},
-		execution.OpRespond:         answer,
-		execution.OpSend:            answer,
+		execution.OpImages:  {Reason: "Image attachment delivery has not been verified for this adapter."},
+		execution.OpRespond: answer,
+		execution.OpSend:    answer,
 	}
 }
 
@@ -184,7 +192,7 @@ func (a *Adapter) FeaturesForWorkspace(ctx context.Context, project, dir string)
 		}
 		model := execution.Model{Choice: choice(m.ProviderID+"/"+m.ID, m.Name), Group: m.ProviderID}
 		if len(m.Variants) > 0 {
-			opt := execution.Option{ID: "variant"}
+			opt := execution.Option{ID: "variant", Kind: execution.OptionChoice, Label: "Variant"}
 			for _, v := range m.Variants {
 				opt.Values = append(opt.Values, execution.StringValue(v.ID))
 			}
@@ -201,8 +209,16 @@ func (a *Adapter) FeaturesForWorkspace(ctx context.Context, project, dir string)
 }
 func selection(c execution.Capabilities, in execution.Intent) (*wireModel, error) {
 	reject := func(s string) error { return &execution.Rejected{Reason: s} }
-	if !slices.Contains([]string{"root", "worktree"}, in.Workspace.Kind) || in.Workspace.Base != "" || in.Workspace.Branch != "" || in.Workspace.FromRemote {
-		return nil, reject("Choose the bound checkout or an OpenCode worktree with its default base and branch.")
+	var launch, modelOpts []execution.ModelOption
+	for _, o := range in.Config.Options {
+		if o.ID == optionWorktree {
+			launch = append(launch, o)
+		} else {
+			modelOpts = append(modelOpts, o)
+		}
+	}
+	if err := (execution.Capabilities{Options: c.Options}).ValidateConfig(execution.Config{Options: launch}); err != nil {
+		return nil, reject(err.Error())
 	}
 	if len(in.Images) > 0 {
 		return nil, reject(c.Operations[execution.OpImages].Reason)
@@ -214,7 +230,7 @@ func selection(c execution.Capabilities, in execution.Intent) (*wireModel, error
 		return nil, reject("Choose an available primary OpenCode agent.")
 	}
 	if in.Config.Model == "" {
-		if len(in.Config.Options) > 0 {
+		if len(modelOpts) > 0 {
 			return nil, reject("Select a model before choosing its variant.")
 		}
 		return nil, nil
@@ -225,7 +241,7 @@ func selection(c execution.Capabilities, in execution.Intent) (*wireModel, error
 	}
 	provider, id, _ := strings.Cut(c.Models[i].ID, "/")
 	ref := &wireModel{ID: id, ProviderID: provider}
-	for _, opt := range in.Config.Options {
+	for _, opt := range modelOpts {
 		if ref.Variant != "" || opt.ID != "variant" || opt.Value.IsBool || opt.Value.Str == "" || !slices.ContainsFunc(c.Models[i].Options, func(v execution.Option) bool { return v.ID == opt.ID && slices.Contains(v.Values, opt.Value) }) {
 			return nil, reject(fmt.Sprintf("OpenCode model option %q is unavailable in this workspace.", opt.ID))
 		}

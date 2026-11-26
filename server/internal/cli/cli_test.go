@@ -402,19 +402,13 @@ func TestTreeFlags(t *testing.T) {
 	if b.TreeID == nil || b.StartMode == nil || *b.StartMode != db.StartManual {
 		t.Fatalf("--start-mode manual: %+v", b)
 	}
-	c := add("--title", "c", "--tree", fmt.Sprint(*b.TreeID), "--needs", fmt.Sprintf("%d,%d", a.ID, b.ID),
-		"--base-ref", "origin/main", "--base", "predecessor", "--base-task", fmt.Sprint(b.ID))
-	if c.TreeID == nil || *c.TreeID != *b.TreeID || c.Workspace.BaseTaskID == nil || *c.Workspace.BaseTaskID != b.ID {
-		t.Fatalf("--tree --base-task: %+v", c)
+	c := add("--title", "c", "--tree", fmt.Sprint(*b.TreeID), "--needs", fmt.Sprintf("%d,%d", a.ID, b.ID))
+	if c.TreeID == nil || *c.TreeID != *b.TreeID {
+		t.Fatalf("--tree: %+v", c)
 	}
-	code, stdout, _ := h.run("", "task", "show", fmt.Sprint(c.ID))
-	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("worktree from #%d's branch", b.ID)) {
-		t.Fatalf("show base task:\n%s", stdout)
-	}
-	code, stdout, _ = h.run("", "task", "edit", fmt.Sprint(c.ID), "--start-mode", "manual", "--base-task", fmt.Sprint(a.ID), "--json")
-	if tk := decode[client.Task](t, stdout); code != 0 || tk.StartMode == nil || *tk.StartMode != db.StartManual ||
-		tk.Workspace.BaseTaskID == nil || *tk.Workspace.BaseTaskID != a.ID {
-		t.Fatalf("edit --start-mode manual --base-task: %s", stdout)
+	code, stdout, _ := h.run("", "task", "edit", fmt.Sprint(c.ID), "--start-mode", "manual", "--json")
+	if tk := decode[client.Task](t, stdout); code != 0 || tk.StartMode == nil || *tk.StartMode != db.StartManual {
+		t.Fatalf("edit --start-mode manual: %s", stdout)
 	}
 	code, stdout, _ = h.run("", "task", "edit", fmt.Sprint(c.ID), "--start-mode", "inherit", "--json")
 	if tk := decode[client.Task](t, stdout); code != 0 || tk.StartMode != nil || tk.EffectiveStartMode == nil || *tk.EffectiveStartMode != db.StartAuto {
@@ -593,33 +587,21 @@ func TestHandoffFlags(t *testing.T) {
 	}
 }
 
-func TestBaseFlag(t *testing.T) {
+// The Stage worktree flags are gone: each fails naming the launch options
+// in --execution-config.
+func TestRemovedWorkspaceFlags(t *testing.T) {
 	h := newHarness(t)
 	h.project("/w/cli-base")
 	h.caller = agentctx.Caller{Cwd: "/w/cli-base"}
-	code, stdout, stderr := h.run("", "task", "add", "--project", "1", "--title", "a", "--prompt", "x", "--json")
-	if code != 0 {
-		t.Fatalf("add: %d %s", code, stderr)
+	for _, flag := range []string{"--workspace=worktree", "--base-ref=origin/main", "--branch=feat", "--base=predecessor", "--base-task=1"} {
+		for _, cmd := range [][]string{{"task", "add", "--project", "1", "--title", "a", "--prompt", "x"}, {"task", "edit", "1"}} {
+			code, _, stderr := h.run("", append(cmd, flag)...)
+			if code == 0 || !strings.Contains(stderr, "was removed") || !strings.Contains(stderr, "--execution-config") {
+				t.Fatalf("%v %s: %d %s", cmd, flag, code, stderr)
+			}
+		}
 	}
-	a := decode[client.Task](t, stdout)
-	code, stdout, stderr = h.run("", "task", "add", "--project", "1", "--title", "b", "--prompt", "y", "--needs", fmt.Sprint(a.ID),
-		"--base-ref", "origin/main", "--base", "predecessor", "--json")
-	if code != 0 {
-		t.Fatalf("add b: %d %s", code, stderr)
-	}
-	b := decode[client.Task](t, stdout)
-	if !b.Workspace.FromPredecessor() || b.Workspace.BaseRef != "origin/main" {
-		t.Fatalf("--base predecessor: %+v", b.Workspace)
-	}
-	code, stdout, _ = h.run("", "task", "show", fmt.Sprint(b.ID))
-	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("worktree from #%d's branch (configured ref origin/main, branch -)", a.ID)) {
-		t.Fatalf("show: %s", stdout)
-	}
-	code, stdout, _ = h.run("", "task", "edit", fmt.Sprint(b.ID), "--base", "ref", "--json")
-	if w := decode[client.Task](t, stdout).Workspace; code != 0 || w.FromPredecessor() || w.BaseRef != "origin/main" {
-		t.Fatalf("edit --base ref: %s", stdout)
-	}
-	if code, _, _ = h.run("", "task", "add", "--project", "1", "--title", "c", "--prompt", "z", "--base", "predecessor"); code == 0 {
-		t.Fatal("--base without --base-ref must fail")
+	if code, _, stderr := h.run("", "schedule", "add", "--title", "s", "--prompt", "x", "--cron", "@daily", "--tz", "UTC", "--base-ref", "main"); code == 0 || !strings.Contains(stderr, "--execution-config") {
+		t.Fatalf("schedule --base-ref: %d %s", code, stderr)
 	}
 }

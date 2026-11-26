@@ -8,7 +8,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-func checkDestinationChange(ctx context.Context, tx store.Tx, old, next int64, c Optional[execution.Config], w Optional[Workspace]) error {
+func checkDestinationChange(ctx context.Context, tx store.Tx, old, next int64, c Optional[execution.Config]) error {
 	if err := requireConnection(ctx, tx, next); err != nil {
 		return err
 	}
@@ -17,8 +17,8 @@ func checkDestinationChange(ctx context.Context, tx store.Tx, old, next int64, c
 			return err
 		}
 	}
-	if old != next && (!c.Set || c.Null || !w.Set || w.Null) {
-		return Invalid("Choose the new harness configuration and workspace when changing destination.")
+	if old != next && (!c.Set || c.Null) {
+		return Invalid("Choose the new harness configuration when changing destination.")
 	}
 	return nil
 }
@@ -224,4 +224,3 @@ func (s *Store) HoldScheduled(ctx context.Context, id int64, reason string) erro
 		return addTaskEvent(ctx, tx, id, &from, StateBacklog, reason+" Start manually after repairing the binding or connection.")
 	})
 }
-

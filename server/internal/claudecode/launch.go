@@ -59,7 +59,7 @@ func Args(in execution.Intent, att Attached, settings string) []string {
 	if in.Config.Permission != "" {
 		args = append(args, "--permission-mode", in.Config.Permission)
 	}
-	if in.Workspace.Kind == workspaceWorktree {
+	if in.Config.Bool(optionWorktree) {
 		args = append(args, "-w", WorktreeName(in.RequestID))
 	}
 	if settings != "" {
@@ -78,10 +78,6 @@ func (a *Adapter) validate(ctx context.Context, in execution.Intent) error {
 	switch {
 	case in.ConnectionID != a.conn:
 		return errors.New("launch for another connection")
-	case in.Workspace.Kind != workspaceRoot && in.Workspace.Kind != workspaceWorktree:
-		return fmt.Errorf("Claude Code can't run in a %q workspace; choose the project folder or a Claude Code worktree", in.Workspace.Kind)
-	case in.Workspace.Branch != "" || (in.Workspace.Base != "" && in.Workspace.Kind != workspaceWorktree):
-		return errors.New(reasonBase)
 	case !filepath.IsAbs(in.Directory):
 		return fmt.Errorf("workspace %q is not an absolute folder", in.Directory)
 	}
@@ -145,15 +141,7 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, _ execution.C
 	}
 	call, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	// A base is a branch: launch from its checkout so Claude's worktree
-	// starts at its HEAD (launchSettings).
-	dir := in.Directory
-	if in.Workspace.Base != "" {
-		if dir, err = baseCheckout(call, in.Directory, in.Workspace.Base); err != nil {
-			return reject(err.Error())
-		}
-	}
-	res, err := a.cli.Launch(call, dir, Args(in, att, a.launchSettings(in.Workspace.Base != "", len(att.Paths) > 0))...)
+	res, err := a.cli.Launch(call, in.Directory, Args(in, att, a.launchSettings(len(att.Paths) > 0))...)
 	var start *StartError
 	if errors.As(err, &start) {
 		return reject(fmt.Sprintf("Stage can't run %s (%v). Check the Claude command in Settings.", a.cli.Bin, start.Err))
@@ -232,7 +220,7 @@ func (a *Adapter) Correlate(ctx context.Context, in execution.Intent) (execution
 		return execution.Observation{}, errors.New("launch has no marker")
 	}
 	dirs := []string{in.Directory}
-	if in.Workspace.Kind == workspaceWorktree {
+	if in.Config.Bool(optionWorktree) {
 		dirs = append(dirs, WorktreeDir(in.Directory, WorktreeName(in.RequestID)))
 	}
 	es, err := a.roster.list(ctx, true)

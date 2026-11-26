@@ -195,9 +195,6 @@ type TaskDetail struct {
 	Batch  *CreatedTasks  `json:"batch"` // tasks the origin session created (null without one)
 	// CurrentHandoffs: what the current launch attempt appended, one per need.
 	CurrentHandoffs []db.Handoff `json:"currentHandoffs"`
-	// CurrentLaunchBase: the worktree base the current launch attempt used
-	// (workspace.base predecessor; null when none).
-	CurrentLaunchBase *db.LaunchBase `json:"currentLaunchBase"`
 }
 
 // TreeDetail is a tree with its members, edges and levels.
@@ -245,7 +242,6 @@ type CreateTask struct {
 	ProjectID       int64             `json:"projectId"`
 	Title           string            `json:"title"`
 	Prompt          string            `json:"prompt"`
-	Workspace       *db.Workspace     `json:"workspace,omitempty"`
 	InitialNote     *string           `json:"initialNote,omitempty"`
 	TreeID          *int64            `json:"treeId,omitempty"`
 	Needs           []int64           `json:"needs,omitempty"`
@@ -265,7 +261,6 @@ type CreateSchedule struct {
 	ProjectID       int64             `json:"projectId"`
 	Title           string            `json:"title"`
 	Prompt          string            `json:"prompt"`
-	Workspace       *db.Workspace     `json:"workspace,omitempty"`
 	Notes           *string           `json:"notes,omitempty"`
 	AttachmentIDs   []int64           `json:"attachmentIds,omitempty"`
 	Cron            string            `json:"cron"`

@@ -49,7 +49,7 @@ func newDerivedFixture(t *testing.T, s *Store, ctx context.Context) derivedFixtu
 	f.project = projectWithBinding(t, s, f.t3, "/w/a")
 	task := func(title string) int64 {
 		t.Helper()
-		x, err := s.CreateTask(ctx, NewTask{ConnectionID: dbtest.T3Connection, ProjectID: f.project, Title: title, Prompt: "p", Workspace: Workspace{Type: "root"}})
+		x, err := s.CreateTask(ctx, NewTask{ConnectionID: dbtest.T3Connection, ProjectID: f.project, Title: title, Prompt: "p"})
 		if err != nil {
 			t.Fatal(err)
 		}

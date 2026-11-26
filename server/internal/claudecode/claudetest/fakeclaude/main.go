@@ -163,7 +163,7 @@ func launch(s *fakestate.State, args []string) (int, error) {
 	branch := ""
 	if worktree != "" {
 		var err error
-		if dir, branch, err = makeWorktree(dir, worktree, settings); err != nil {
+		if dir, branch, err = makeWorktree(dir, worktree); err != nil {
 			return 2, err
 		}
 	}
@@ -237,13 +237,12 @@ func resume(s *fakestate.State, id string, args []string) (int, error) {
 	return 0, nil
 }
 
-// makeWorktree is `-w name` as Claude does it (docs/adr/0005 E5, E10): in a
-// Git checkout, a worktree of the main checkout at
+// makeWorktree is `-w name` as Claude does it (docs/adr/0005 E5): in a Git
+// checkout, a worktree of the main checkout at
 // <main>/.claude/worktrees/<name> on a new branch worktree-<name>, from the
-// launch checkout's HEAD when settings set worktree.baseRef "head", else
-// from the main checkout's HEAD (standing in for origin's default branch).
-// Outside Git it is a plain folder.
-func makeWorktree(cwd, name, settings string) (string, string, error) {
+// main checkout's HEAD (standing in for origin's default branch). Outside
+// Git it is a plain folder.
+func makeWorktree(cwd, name string) (string, string, error) {
 	git := func(dir string, args ...string) (string, error) {
 		c := exec.Command("git", append([]string{"-C", dir}, args...)...)
 		c.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
@@ -256,17 +255,9 @@ func makeWorktree(cwd, name, settings string) (string, string, error) {
 		return dir, "", os.MkdirAll(dir, 0o755)
 	}
 	main := filepath.Dir(common)
-	from := main
-	s, err := readSettings(settings)
+	base, err := git(main, "rev-parse", "HEAD")
 	if err != nil {
-		return "", "", err
-	}
-	if s.Worktree.BaseRef == "head" {
-		from = cwd
-	}
-	base, err := git(from, "rev-parse", "HEAD")
-	if err != nil {
-		return "", "", fmt.Errorf("resolve HEAD in %s: %w", from, err)
+		return "", "", fmt.Errorf("resolve HEAD in %s: %w", main, err)
 	}
 	dir, branch := filepath.Join(main, ".claude", "worktrees", name), "worktree-"+name
 	if _, err := git(main, "worktree", "add", "-q", "-b", branch, dir, base); err != nil {
@@ -277,9 +268,6 @@ func makeWorktree(cwd, name, settings string) (string, string, error) {
 
 // settingsFile is what the fake reads of a --settings value.
 type settingsFile struct {
-	Worktree struct {
-		BaseRef string `json:"baseRef"`
-	} `json:"worktree"`
 	Permissions struct {
 		Allow []string `json:"allow"`
 	} `json:"permissions"`

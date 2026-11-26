@@ -77,7 +77,8 @@ daemon, so a thread Stage starts is the user's thread too.
 9. **Closure.** Archive (`thread/archived`, or `thread/list` with
    `archived:true` for a thread no longer loaded) is the closure signal,
    with the auto-complete toggle "Complete tasks when archived in Codex".
-10. **Scope.** Root workspace only (no Codex worktrees), no Plan mode, images
+10. **Scope.** Root workspace only (no Codex worktrees; amended by #420:
+    Codex declares no launch options, so a `worktree` option is rejected), no Plan mode, images
     included. Permission presets: read-only (on-request, read-only), auto
     (on-request, workspace-write; default), full-access (never,
     danger-full-access). Remote machines are out of scope (#374): like every

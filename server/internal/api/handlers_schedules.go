@@ -68,9 +68,6 @@ func validCron(cron, tz string) error {
 	return nil
 }
 
-// errSchedulePredecessor: a schedule's runs have no predecessor.
-var errSchedulePredecessor = db.Invalid("workspace.base predecessor is not a schedule option (schedule runs have no needs)")
-
 func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	var req createScheduleReq
 	if err := decodeConfig(r, &req, true); err != nil {
@@ -83,7 +80,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := s.chooseConnection(r, &req.taskConfigReq); err != nil {
 		return err
 	}
-	in, err := req.validate(s.worktreeRule)
+	in, err := req.validate()
 	if err != nil {
 		return err
 	}
@@ -95,16 +92,12 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	if in.Workspace.FromPredecessor() {
-		return errSchedulePredecessor
-	}
 	if err := validCron(req.Cron, req.Tz); err != nil {
 		return err
 	}
 	sc, err := s.Store.CreateSchedule(r.Context(), db.NewSchedule{
 		ExecutionConfig: in.ExecutionConfig, ConnectionID: in.ConnectionID,
 		ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt,
-		Workspace: in.Workspace,
 		Notes: req.Notes, AttachmentIDs: in.AttachmentIDs,
 		Cron: req.Cron, Tz: req.Tz, Paused: req.Paused, OriginSession: in.OriginSession,
 	})
@@ -176,12 +169,9 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 	}
 	if err := validateConfigPatch(configPatch{
 		ConnectionID: connection, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt,
-		Workspace: &p.Workspace, AttachmentIDs: &p.AttachmentIDs,
-	}, s.worktreeRule); err != nil {
+		AttachmentIDs: &p.AttachmentIDs,
+	}); err != nil {
 		return err
-	}
-	if p.Workspace.Set && p.Workspace.V.FromPredecessor() {
-		return errSchedulePredecessor
 	}
 	if p.Notes.Set && p.Notes.Null {
 		p.Notes.V, p.Notes.Null = "", false

@@ -101,7 +101,7 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, cp execution.
 		return zero, errors.New("OpenCode worktree creation is unconfirmed. Verify setup in OpenCode and link an existing session.")
 	}
 	ref := execution.SessionRef{ConnectionID: a.connection, ExternalSessionID: r.Session}
-	if fresh && in.Workspace.Kind == "worktree" {
+	if fresh && in.Config.Bool(optionWorktree) {
 		c, e := a.FeaturesForWorkspace(ctx, in.Project, in.Directory)
 		if e != nil {
 			return zero, e

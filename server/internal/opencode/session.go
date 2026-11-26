@@ -219,7 +219,6 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 		Archived: s.Time.Archived > 0, Child: s.ParentID != "", Config: execution.Config{Mode: s.Agent},
 		CreatedAt: *millis(s.Time.Created), UpdatedAt: *millis(s.Time.Updated),
 		StartedAt: millis(s.Time.Busy), ExecutionID: runID(s),
-		Base: execution.Availability{Reason: "OpenCode selects its worktree base."},
 	}
 	if o.Child {
 		o.Parent = &execution.SessionRef{ConnectionID: a.connection, ExternalSessionID: s.ParentID}

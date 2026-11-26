@@ -501,9 +501,6 @@ func (s *Store) DeleteTree(ctx context.Context, id int64) error {
 		if err := tr.DeleteMembers(ctx, id); err != nil {
 			return err
 		}
-		if err := tr.ClearStaleBases(ctx); err != nil {
-			return err
-		}
 		return tr.Delete(ctx, id)
 	})
 }
@@ -511,7 +508,6 @@ func (s *Store) DeleteTree(ctx context.Context, id int64) error {
 // DissolveTree detaches members and archives the tree, preserving its journal.
 func (s *Store) DissolveTree(ctx context.Context, id int64) error {
 	return s.e.Write(ctx, func(tx store.Tx) error {
-		tr := tx.Trees()
 		if err := lockTreeWork(ctx, tx, []int64{id}, nil); err != nil {
 			return err
 		}
@@ -519,9 +515,6 @@ func (s *Store) DissolveTree(ctx context.Context, id int64) error {
 			return err
 		}
 		if err := detachMembers(ctx, tx, id); err != nil {
-			return err
-		}
-		if err := tr.ClearStaleBases(ctx); err != nil {
 			return err
 		}
 		return archiveDissolved(ctx, tx, id)
@@ -760,8 +753,7 @@ func joinTree(ctx context.Context, tx store.Tx, id, tree int64) error {
 
 // spliceOut takes task id out of its tree: each dependent drops id and takes
 // over id's needs (A <- X <- B becomes A <- B, deduplicated), id loses its
-// needs and leaves the tree, stale workspace.baseTaskId values are cleared
-// and an emptied tree is archived.
+// needs and leaves the tree, and an emptied tree is archived.
 func spliceOut(ctx context.Context, tx store.Tx, id int64) error {
 	return spliceOutTo(ctx, tx, id, nil)
 }
@@ -787,9 +779,6 @@ func spliceOutTo(ctx context.Context, tx store.Tx, id int64, destination *int64)
 	if err := dropNeeds(ctx, tx, id); err != nil {
 		return err
 	}
-	if err := tr.ClearStaleBases(ctx); err != nil {
-		return err
-	}
 	if tree == nil {
 		return nil
 	}
@@ -800,7 +789,7 @@ func spliceOutTo(ctx context.Context, tx store.Tx, id int64, destination *int64)
 // needs change only in backlog (an unchanged set is a no-op in any state);
 // not with a start time (400); each need exists (404), is not the task, is
 // in the task's tree, and does not (transitively) need the task. A settled
-// need is allowed. Clears a workspace.baseTaskId no longer among the needs.
+// need is allowed.
 func setNeeds(ctx context.Context, tx store.Tx, id int64, needs []int64) error {
 	tr := tx.Trees()
 	want := slices.Clone(needs)
@@ -859,10 +848,8 @@ func setNeeds(ctx context.Context, tx store.Tx, id int64, needs []int64) error {
 			return err
 		}
 	}
-	if _, err := tx.Tasks().Touch(ctx, id); err != nil {
-		return err
-	}
-	return tr.ClearStaleBases(ctx)
+	_, err = tx.Tasks().Touch(ctx, id)
+	return err
 }
 
 // lockTreeWork takes the locks of a tree mutation before any read it checks

@@ -185,11 +185,9 @@ var permissions = []execution.Choice{
 	choice("bypassPermissions", "Bypass permissions"),
 }
 
-// Workspace kinds.
-const (
-	workspaceRoot     = "root"
-	workspaceWorktree = "worktree"
-)
+// optionWorktree is the worktree launch option: `claude -w` with a name
+// per attempt (WorktreeName).
+const optionWorktree = "worktree"
 
 func choice(id, label string) execution.Choice {
 	return execution.Choice{ID: id, Label: label, Availability: execution.Availability{Available: true}}
@@ -200,30 +198,28 @@ var available = execution.Availability{Available: true}
 // Unavailable operation reasons.
 const (
 	reasonAnswer = "Answer in Claude Code: copy the resume command and run it in a terminal."
-	reasonBase   = "Claude Code starts worktrees from origin's default branch, or from a predecessor's branch, and names the branch itself."
 	reasonImages = "Stage has no folder for Claude Code's images on this machine."
 )
 
 // Features is static: the catalog is Claude's aliases, not a probe.
 func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
-	effort := execution.Option{ID: optionEffort}
+	off := execution.BoolValue(false)
+	effort := execution.Option{ID: optionEffort, Kind: execution.OptionChoice, Label: "Effort"}
+	worktree := execution.Option{ID: optionWorktree, Kind: execution.OptionBoolean, Label: "Claude Code worktree", Values: []execution.OptionValue{execution.BoolValue(true), off}, Default: &off}
 	for _, e := range efforts {
 		effort.Values = append(effort.Values, execution.StringValue(e))
 	}
 	return execution.Capabilities{
 		Operations: map[execution.Op]execution.Availability{
 			execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpImages: a.images(),
-			execution.OpAttention:       available,
-			execution.OpPredecessorBase: available,
-			execution.OpWorktreeBase:    {Reason: reasonBase},
-			execution.OpRespond:         a.hooksRunning(),
-			execution.OpSend:            available,
+			execution.OpAttention: available,
+			execution.OpRespond:   a.hooksRunning(),
+			execution.OpSend:      available,
 		},
 		Models:      slices.Clone(models),
-		Options:     []execution.Option{effort},
+		Options:     []execution.Option{effort, worktree},
 		Permissions: slices.Clone(permissions),
 		Modes:       []execution.Choice{},
-		Workspaces:  []execution.Choice{choice(workspaceRoot, "Project folder"), choice(workspaceWorktree, "Claude Code worktree")},
 	}, nil
 }
 
@@ -413,7 +409,6 @@ func (a *Adapter) observation(s session) (execution.Observation, error) {
 		ExecutionID: t.LastPromptID,
 		Links:       a.links(s),
 		Artifacts:   []execution.Artifact{},
-		Base:        baseAvailability(cwd, t.Branch),
 		Config:      execution.Config{Options: []execution.ModelOption{}},
 		Origin:      t.Entrypoint,
 	}

@@ -2,15 +2,15 @@ import { useMutation } from "@tanstack/react-query";
 import { useId, useState, type ReactNode } from "react";
 import { useInvalidateWork } from "../../api/queries.ts";
 import { useNewTask } from "../NewTask.tsx";
-import type { StartMode, Task, TreeDetail, UpdateTaskRequest, Workspace } from "../../api/types.ts";
+import type { StartMode, Task, TreeDetail, UpdateTaskRequest } from "../../api/types.ts";
 import { useApi } from "../../platform/context.tsx";
 import { handoffHint } from "../../lib/handoff.ts";
-import { baseCandidates, needCandidates, startModeCaption, treeClosed } from "../../lib/trees.ts";
+import { needCandidates, startModeCaption, treeClosed } from "../../lib/trees.ts";
 import { StateControl } from "../StateControl.tsx";
 import { HandoffToggle } from "../Handoff.tsx";
 import { IconArrowRight, IconChainLink, IconClose, IconPlus } from "../icons.tsx";
 import { AddExistingTaskDrawer } from "./AddExistingTaskDrawer.tsx";
-import { Button, ConfirmInline, EmptyState, ErrorText, Hint, IconButton, IdTag, MetaLine, Muted, Panel, Segmented, Combobox, SubHeading, TextButton, TextLink, cx, rowClass } from "../ui.tsx";
+import { Button, ConfirmInline, EmptyState, ErrorText, Hint, IconButton, IdTag, MetaLine, Panel, Segmented, SubHeading, TextButton, TextLink, cx, rowClass } from "../ui.tsx";
 import { NeedsPicker } from "./NeedsPicker.tsx";
 import { NodeAction, NodeChip } from "./TreeNode.tsx";
 
@@ -54,13 +54,6 @@ function MemberLine({ task, onSelect, trailing }: { task: Task; onSelect?: ((id:
       {trailing}
     </li>
   );
-}
-
-/** Selected base value: "" (stable base) or the need id whose branch the worktree starts from. */
-function baseValue(w: Workspace, candidates: readonly Task[]): string {
-  if (w.type !== "worktree" || w.base !== "predecessor") return "";
-  const id = w.baseTaskId ?? (candidates.length === 1 ? candidates[0]?.id : undefined);
-  return id === undefined || !candidates.some((c) => c.id === id) ? "unavailable" : String(id);
 }
 
 /**
@@ -111,8 +104,8 @@ export function TreeNodePanel({
 /**
  * A member's tree controls (tree view side panel, task detail Tree panel): needs (remove, cycle-safe add),
  * dependents (stacked New task and Existing task buttons, each captioned: a task added from here waits for this one),
- * start mode, worktree base, handoff, then Remove from tree. Edits apply at once; needs, mode,
- * base and handoff change only in backlog. A done or archived tree is read-only (reopen it first). Member lines select
+ * start mode, handoff, then Remove from tree. Edits apply at once; needs, mode,
+ * and handoff change only in backlog. A done or archived tree is read-only (reopen it first). Member lines select
  * (`onSelect`) or open the task.
  */
 export function TreeNodeEditor({
@@ -128,7 +121,6 @@ export function TreeNodeEditor({
 }) {
   const api = useApi();
   const invalidate = useInvalidateWork();
-  const baseId = useId();
   const newHintId = useId();
   const existingHintId = useId();
   const newTask = useNewTask();
@@ -140,7 +132,6 @@ export function TreeNodeEditor({
   const needs = task.needs.flatMap((id) => byId.get(id) ?? []);
   const dependents = task.dependents.flatMap((id) => byId.get(id) ?? []);
   const candidates = needCandidates(tree.tasks, task.id);
-  const bases = baseCandidates(task, tree);
 
   const setNeeds = useMutation({ mutationFn: (next: number[]) => api.setNeeds(task.id, next), onSettled: invalidate });
   const update = useMutation({
@@ -155,16 +146,6 @@ export function TreeNodeEditor({
   const error = setNeeds.error ?? update.error ?? remove.error;
 
   const mode: ModeChoice = task.startMode ?? "inherit";
-  const w = task.workspace;
-  const setBase = (value: string) => {
-    if (w.type !== "worktree") return;
-    const picked = Number(value);
-    const next: Workspace =
-      value === ""
-        ? { type: "worktree", baseRef: w.baseRef, branch: w.branch, base: "ref" }
-        : { type: "worktree", baseRef: w.baseRef, branch: w.branch, base: "predecessor", baseTaskId: picked };
-    update.mutate({ workspace: next });
-  };
 
   return (
     <>
@@ -239,7 +220,7 @@ export function TreeNodeEditor({
       </Section>
       {linking ? <AddExistingTaskDrawer tree={tree} after={task.id} onClose={() => setLinking(false)} /> : null}
 
-      {/* Start mode, base and handoff only shape a launch: once it has run they no longer apply. */}
+      {/* Start mode and handoff only shape a launch: once it has run they no longer apply. */}
       {editable ? (
       <Section label="Start mode">
         <fieldset disabled={!editable || update.isPending} className="min-w-0 disabled:opacity-55">
@@ -257,39 +238,6 @@ export function TreeNodeEditor({
       </Section>
 
       ) : null}
-
-      {!editable || task.needs.length === 0 ? null : (
-        <Section label="Worktree base">
-          {w.type !== "worktree" ? (
-            <Muted>Runs at the project root, so there is no base to pick.</Muted>
-          ) : (
-            <>
-              <Combobox
-                small
-                id={baseId}
-                aria-label="Worktree base"
-                value={baseValue(w, bases)}
-                disabled={!editable || update.isPending}
-                onChange={setBase}
-                listLabel="Worktree bases"
-                className="w-full font-mono"
-                options={[
-                  { value: "", label: `Stable base (${w.baseRef})` },
-                  ...(baseValue(w, bases) === "unavailable"
-                    ? [{ value: "unavailable", label: "Predecessor unavailable: choose a base", disabled: true }]
-                    : []),
-                  ...bases.map((b) => ({ value: String(b.id), label: `#${b.id}'s branch` })),
-                ]}
-              />
-              <Hint>
-                {bases.length === 0
-                  ? "No eligible predecessor. Choose the stable base explicitly."
-                  : "An unavailable predecessor blocks launch. Choose the stable base explicitly to continue."}
-              </Hint>
-            </>
-          )}
-        </Section>
-      )}
 
       {!editable || task.needs.length === 0 ? null : (
         <div className={rowClass}>

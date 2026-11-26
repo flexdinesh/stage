@@ -71,6 +71,8 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{"referenced connection kept", seedV0032("INSERT INTO projects(id,title) VALUES(1,'P')", "INSERT INTO tasks(id,project_id,title,prompt,connection_id) VALUES(1,1,'T','p',1)"), checkV0032Connection(true)},
 		{"bound connection kept", seedV0032("INSERT INTO projects(id,title) VALUES(1,'P')", "INSERT INTO project_bindings(project_id,connection_id,external_project_id,workspace) VALUES(1,1,'x','/w')"), checkV0032Connection(true)},
 	},
+	33: {{"workspaces become launch options", seedV0032(launchOptionsSeed...), checkV0033LaunchOptions}},
+	34: {{"workspace columns and launch bases dropped", seedV0032(launchBasesSeed...), checkV0034DropWorkspaces}},
 }
 
 // TestStepwiseMigrations is the upgrade coverage (no releases exist yet):
@@ -658,4 +660,88 @@ func checkV0032Connection(kept bool) func(*testing.T, *sqlite.DB) {
 			wantRows(t, pool, `SELECT id FROM harness_connections`, "2")
 		}
 	}
+}
+
+// launchOptionsSeed (0033): a connection per harness kind and tasks,
+// schedules and unfinished attempts with each kind of saved workspace.
+var launchOptionsSeed = []string{
+	`INSERT INTO harness_connections(id,machine_id,harness) VALUES(2,1,'t3'),(3,1,'claude'),(4,1,'opencode'),(5,1,'codex')`,
+	`INSERT INTO projects(id,title) VALUES(1,'P')`,
+	`INSERT INTO task_trees(id,title) VALUES(1,'Stack')`,
+	`INSERT INTO session_identities(id,connection_id,external_id) VALUES(1,2,'thread-a')`,
+	`INSERT INTO tasks(id,project_id,title,prompt,connection_id,workspace,execution_config) VALUES
+	 (1,1,'t3 ref','p',2,'{"type":"worktree","baseRef":"origin/main","branch":"feat-x","base":"ref"}','{"model":"m","options":[{"id":"effort","value":"high"}],"permission":"","mode":""}'),
+	 (2,1,'claude worktree','p',3,'{"type":"worktree","baseRef":"","branch":null,"base":"ref"}',NULL),
+	 (3,1,'opencode worktree','p',4,'{"type":"worktree"}','{"model":"","options":null,"permission":"","mode":""}'),
+	 (4,1,'codex root','p',5,'{"type":"root"}','{"model":"","options":[],"permission":"","mode":""}'),
+	 (5,1,'codex worktree','p',5,'{"type":"worktree"}','{"model":"","options":[],"permission":"","mode":""}'),
+	 (8,1,'t3 root','p',2,'{"type":"root"}','{"model":"","options":[],"permission":"","mode":""}')`,
+	`INSERT INTO tasks(id,project_id,title,prompt,connection_id,workspace,execution_config,tree_id,session_id,launch_attempt,state) VALUES
+	 (6,1,'t3 predecessor','p',2,'{"type":"worktree","baseRef":"origin/main","branch":null,"base":"predecessor","baseTaskId":1}','{"model":"","options":[],"permission":"","mode":""}',1,1,2,'failed'),
+	 (7,1,'claude predecessor','p',3,'{"type":"worktree","base":"predecessor"}','{"model":"","options":[],"permission":"","mode":""}',1,NULL,0,'backlog'),
+	 (9,1,'t3 predecessor without ref','p',2,'{"type":"worktree","baseRef":"","branch":"stack-b","base":"predecessor"}','{"model":"","options":[],"permission":"","mode":""}',1,NULL,0,'backlog')`,
+	`INSERT INTO schedules(id,project_id,title,prompt,cron,tz,connection_id,workspace,execution_config) VALUES
+	 (1,1,'t3 nightly','p','@daily','UTC',2,'{"type":"worktree","baseRef":"main","branch":null,"base":"ref"}','{"model":"","options":[],"permission":"","mode":""}'),
+	 (2,1,'claude nightly','p','@daily','UTC',3,'{"type":"root"}','{"model":"","options":[],"permission":"","mode":""}')`,
+	`INSERT INTO execution_attempts(task_id,attempt,phase,intent) VALUES
+	 (6,2,'unconfirmed','{"requestId":"r6","connectionId":2,"config":{"model":"","options":[],"permission":"","mode":""},"workspace":{"kind":"worktree","base":"feat-a","fromRemote":false}}'),
+	 (1,1,'confirmed','{"requestId":"r1","connectionId":2,"config":{"model":"","options":[],"permission":"","mode":""},"workspace":{"kind":"worktree","base":"origin/main","fromRemote":true}}'),
+	 (2,1,'unconfirmed','{"requestId":"r2","connectionId":3,"config":{"model":"","options":null,"permission":"","mode":""},"workspace":{"kind":"worktree"}}')`,
+}
+
+// checkV0033LaunchOptions: each workspace became its harness's launch
+// options (T3 keeps its base ref and branch, a predecessor's stored
+// fallback included; Claude Code and OpenCode take a worktree; Codex and
+// root nothing), the unfinished attempts' intents carry them, and each
+// predecessor-based task has one journal event naming where it now starts.
+func checkV0033LaunchOptions(t *testing.T, pool *sqlite.DB) {
+	wantRows(t, pool, `SELECT id||' '||COALESCE(json_extract(execution_config,'$.options'),'null') FROM tasks ORDER BY id`,
+		`1 [{"id":"effort","value":"high"},{"id":"worktree","value":true},{"id":"baseRef","value":"origin/main"},{"id":"branch","value":"feat-x"}]`,
+		`2 [{"id":"worktree","value":true}]`,
+		`3 [{"id":"worktree","value":true}]`,
+		`4 []`,
+		`5 []`,
+		`6 [{"id":"worktree","value":true},{"id":"baseRef","value":"origin/main"}]`,
+		`7 [{"id":"worktree","value":true}]`,
+		`8 []`,
+		`9 [{"id":"worktree","value":true},{"id":"branch","value":"stack-b"}]`)
+	wantRows(t, pool, `SELECT json_extract(execution_config,'$.model') FROM tasks WHERE id=1`, "m")
+	wantRows(t, pool, `SELECT id||' '||json_extract(execution_config,'$.options') FROM schedules ORDER BY id`,
+		`1 [{"id":"worktree","value":true},{"id":"baseRef","value":"main"}]`, `2 []`)
+	wantRows(t, pool, `SELECT task_id||' '||COALESCE(json_extract(intent,'$.config.options'),'null') FROM execution_attempts ORDER BY task_id`,
+		`1 []`,
+		`2 [{"id":"worktree","value":true}]`,
+		`6 [{"id":"worktree","value":true},{"id":"baseRef","value":"feat-a"}]`)
+	wantRows(t, pool, `SELECT task_id||' '||COALESCE(tree_id,'-')||' '||COALESCE(source_session_id,'-')||' '||attempt||' '||kind||' '||event_type||' '||created_by_user_id FROM journal_entries ORDER BY id`,
+		"6 1 1 2 event task_event 1", "7 1 - 0 event task_event 1", "9 1 - 0 event task_event 1")
+	wantRows(t, pool, `SELECT task_id||' '||text FROM journal_entries ORDER BY id`, predecessorJournal...)
+}
+
+// predecessorJournal is 0033's journal event per predecessor-based task:
+// a T3 base ref, a T3 task without one, Claude Code's harness default.
+var predecessorJournal = []string{
+	"6 Predecessor bases were removed: this task now starts its worktree from origin/main, not its predecessor's branch. The handoff carries the branch the predecessor reported.",
+	"7 Predecessor bases were removed: this task no longer starts from its predecessor's branch. Its worktree now starts from the harness default. The handoff carries the branch the predecessor reported.",
+	"9 Predecessor bases were removed: this task no longer starts from its predecessor's branch. Set a base ref before it starts (T3 needs one for a new worktree). The handoff carries the branch the predecessor reported.",
+}
+
+// launchBasesSeed (0034): a task and schedule with workspaces and a launch
+// base record.
+var launchBasesSeed = []string{
+	`INSERT INTO harness_connections(id,machine_id,harness) VALUES(2,1,'t3')`,
+	`INSERT INTO projects(id,title) VALUES(1,'P')`,
+	`INSERT INTO tasks(id,project_id,title,prompt,connection_id,workspace,execution_config) VALUES(1,1,'T','p',2,'{"type":"worktree","baseRef":"main"}','{"model":"","options":[{"id":"worktree","value":true}],"permission":"","mode":""}')`,
+	`INSERT INTO schedules(id,project_id,title,prompt,cron,tz,connection_id,workspace) VALUES(1,1,'S','p','@daily','UTC',2,'{"type":"root"}')`,
+	`INSERT INTO task_launch_bases(task_id,attempt,base_ref,start_from_origin,source) VALUES(1,1,'main',0,'fallback')`,
+}
+
+// checkV0034DropWorkspaces: the workspace columns and launch bases are
+// gone, rows and their execution configs stay.
+func checkV0034DropWorkspaces(t *testing.T, pool *sqlite.DB) {
+	if columnExists(t, pool, "tasks", "workspace") || columnExists(t, pool, "schedules", "workspace") || tableExists(t, pool, "task_launch_bases") {
+		t.Fatal("workspace columns or task_launch_bases remain")
+	}
+	wantRows(t, pool, `SELECT id||' '||json_extract(execution_config,'$.options') FROM tasks`, `1 [{"id":"worktree","value":true}]`)
+	wantRows(t, pool, `SELECT count(*) FROM schedules`, "1")
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,connection_id) VALUES(2,1,'New','p',2)`)
 }

@@ -34,7 +34,7 @@ Stage's projects come from the folders Claude knows (`~/.claude.json`); a Git ch
 
 Create a task on the Claude Code connection. Choose:
 
-- **Workspace**: the project folder, a new Claude Code worktree, or, in a tree, a needed task's branch ("#12's branch"): Claude makes and names the worktree either way, from origin's default branch or from that task's branch.
+- **Claude Code worktree**: off runs in the project folder; on, Claude makes and names a new worktree from origin's default branch.
 - **Model**: Claude's default, or opus, sonnet, haiku or fable.
 - **Effort**: low to max.
 - **Permission**: Ask before acting, Accept edits, Auto, Plan only, Don't ask or Bypass permissions.
@@ -106,7 +106,7 @@ Images on the prompt reach Claude Code as files it opens: Stage writes them unde
 
 ## Limits
 
-- A worktree starts from origin's default branch or a needed task's branch: no other base, and Claude names the branch.
+- A worktree starts from origin's default branch: no other base, and Claude names the branch. A task in a tree does not start from a needed task's branch; the handoff names that branch.
 - Follow-ups from Stage are text only, and go to background sessions Stage can see: a session you run in a terminal takes them there.
 - If Stage restarts while a prompt waits, answer that prompt in Claude.
 - Not in Docker. On a worker, only with the worker service or `stage worker run --local-harnesses`; the resume command names the machine to run it on.

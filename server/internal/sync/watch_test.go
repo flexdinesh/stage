@@ -139,8 +139,7 @@ func TestWatchThreads(t *testing.T) {
 	}
 
 	// Task-owned thread and a subagent thread (both never watched).
-	task, err := store.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: 1, Title: "task", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}})
+	task, err := store.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: 1, Title: "task", Prompt: "p"})
 	if err != nil {
 		t.Fatal(err)
 	}

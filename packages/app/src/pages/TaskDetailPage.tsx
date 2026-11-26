@@ -48,9 +48,8 @@ import {
   cx,
   ConfirmInline,
 } from "../components/ui.tsx";
-import { configModelText, dateTime, executionModes, workspaceText } from "../lib/format.ts";
+import { configModelText, dateTime, executionModes } from "../lib/format.ts";
 import { pendingHandoffNote } from "../lib/handoff.ts";
-import { pendingBaseNote, predecessorWorkspaceText } from "../lib/launchbase.ts";
 import { useIdParam } from "../lib/params.ts";
 import { SETTINGS_PATH } from "../lib/settings.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
@@ -388,7 +387,6 @@ function TaskBody({ task }: { task: TaskDetail }) {
                 {pendingHandoffNote(task) === null ? null : (
                   <p className="font-mono text-meta text-muted">{pendingHandoffNote(task)}</p>
                 )}
-                {pendingBaseNote(task) === null ? null : <p className="font-mono text-meta text-muted">{pendingBaseNote(task)}</p>}
                 <ImageStrip attachments={task.attachments} label="Prompt images" />
                 {task.currentHandoffs.map((h) => (
                   <HandoffRecord key={`${h.attempt}:${h.sourceTaskId ?? h.sourceThreadId}`} handoff={h} />
@@ -490,12 +488,6 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
         <Detail label="Model">{configModelText(task.executionConfig)}</Detail>
         <Detail label="Permission">{executionModes(task).permission || "Harness default"}</Detail>
         <Detail label="Mode">{executionModes(task).mode || "Harness default"}</Detail>
-        <Detail label="Workspace">
-          {predecessorWorkspaceText(task, task.currentLaunchBase) ?? workspaceText(task.workspace)}
-          {task.currentLaunchBase?.reason == null ? null : (
-            <span className="block text-meta text-muted">fell back: {task.currentLaunchBase.reason}</span>
-          )}
-        </Detail>
         {task.startAt === null ? null : (
           <Detail label="Starts">
             <span title={dateTime(task.startAt)}>{wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}</span>

@@ -269,31 +269,30 @@ type project struct {
 }
 
 type task struct {
-	ID            int64          `json:"id"`
-	ProjectID     int64          `json:"projectId"`
-	ProjectTitle  string         `json:"projectTitle"`
-	Title         string         `json:"title"`
-	Prompt        string         `json:"prompt"`
-	Config        *execConfig    `json:"executionConfig"`
-	Workspace     map[string]any `json:"workspace"`
-	State         string         `json:"state"`
-	T3ThreadID    *string        `json:"externalSessionId"`
-	TreeID        *int64         `json:"treeId"`
-	Needs         []int64        `json:"needs"`
-	Dependents    []int64        `json:"dependents"`
-	Readiness     *string        `json:"readiness"`
-	StartMode     *string        `json:"startMode"`
-	EffStartMode  *string        `json:"effectiveStartMode"`
-	Adopted       bool           `json:"adopted"`
-	LaunchAttempt int            `json:"launchAttempt"`
-	LastError     *string        `json:"lastError"`
-	Links         links          `json:"links"`
-	LaunchedAt    *string        `json:"launchedAt"`
-	FinishedAt    *string        `json:"finishedAt"`
-	SettledAt     *string        `json:"settledAt"`
-	RunStartedAt  *string        `json:"runStartedAt"`
-	RunEndedAt    *string        `json:"runEndedAt"`
-	CreatedAt     string         `json:"createdAt"`
+	ID            int64       `json:"id"`
+	ProjectID     int64       `json:"projectId"`
+	ProjectTitle  string      `json:"projectTitle"`
+	Title         string      `json:"title"`
+	Prompt        string      `json:"prompt"`
+	Config        *execConfig `json:"executionConfig"`
+	State         string      `json:"state"`
+	T3ThreadID    *string     `json:"externalSessionId"`
+	TreeID        *int64      `json:"treeId"`
+	Needs         []int64     `json:"needs"`
+	Dependents    []int64     `json:"dependents"`
+	Readiness     *string     `json:"readiness"`
+	StartMode     *string     `json:"startMode"`
+	EffStartMode  *string     `json:"effectiveStartMode"`
+	Adopted       bool        `json:"adopted"`
+	LaunchAttempt int         `json:"launchAttempt"`
+	LastError     *string     `json:"lastError"`
+	Links         links       `json:"links"`
+	LaunchedAt    *string     `json:"launchedAt"`
+	FinishedAt    *string     `json:"finishedAt"`
+	SettledAt     *string     `json:"settledAt"`
+	RunStartedAt  *string     `json:"runStartedAt"`
+	RunEndedAt    *string     `json:"runEndedAt"`
+	CreatedAt     string      `json:"createdAt"`
 	Events        []struct {
 		FromState *string `json:"fromState"`
 		ToState   string  `json:"toState"`
@@ -401,15 +400,12 @@ func TestTaskLifecycle(t *testing.T) {
 	if tk.State != "backlog" || tk.T3ThreadID != nil || tk.Links != (links{}) || tk.ProjectTitle != p.Title {
 		t.Fatalf("created %+v", tk)
 	}
-	if tk.Workspace["type"] != "root" {
-		t.Fatalf("defaults %+v", tk)
-	}
 	if c := tk.Config; c == nil || c.Model != t3.ModelKey("claude", "claude-haiku-5-5") || len(c.Options) != 1 {
 		t.Fatalf("executionConfig %+v", tk.Config)
 	}
 	var raw map[string]any
 	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &raw)
-	for _, k := range []string{"t3WebUrl", "t3AppUrl", "t3DeepLink", "providerInstanceId", "model", "modelOptions", "runtimeMode", "interactionMode", "originThreadId", "originThreadTitle"} {
+	for _, k := range []string{"t3WebUrl", "t3AppUrl", "t3DeepLink", "providerInstanceId", "model", "modelOptions", "runtimeMode", "interactionMode", "originThreadId", "originThreadTitle", "workspace", "currentLaunchBase"} {
 		if _, ok := raw[k]; ok {
 			t.Fatalf("task JSON still has legacy field %q", k)
 		}
@@ -515,14 +511,10 @@ func TestTaskActions(t *testing.T) {
 	// Backlog: everything editable; null clears; bad enum 400.
 	var patched task
 	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{
-		"prompt": "new", "executionConfig": map[string]any{"model": t3.ModelKey("claude", "claude-haiku-5-5")},
-		"workspace": map[string]any{"type": "worktree", "baseRef": "origin/main", "branch": nil},
+		"prompt": "new", "executionConfig": map[string]any{"model": t3.ModelKey("claude", "claude-haiku-5-5"), "options": []map[string]any{{"id": "worktree", "value": true}, {"id": "baseRef", "value": "origin/main"}}},
 	}, 200, &patched)
-	if patched.Prompt != "new" || patched.Config == nil || patched.Config.Model != t3.ModelKey("claude", "claude-haiku-5-5") || patched.Workspace["type"] != "worktree" {
+	if patched.Prompt != "new" || patched.Config == nil || patched.Config.Model != t3.ModelKey("claude", "claude-haiku-5-5") || len(patched.Config.Options) != 2 {
 		t.Fatalf("patched %+v", patched)
-	}
-	if b, ok := patched.Workspace["branch"]; !ok || b != nil {
-		t.Fatalf("worktree branch must be present and null: %v", patched.Workspace)
 	}
 	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"executionConfig": map[string]any{}}, 200, &patched)
 	if patched.Config != nil && patched.Config.Model != "" {

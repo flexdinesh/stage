@@ -569,7 +569,7 @@
   box-shadow: inset 2px 0 var(--st-accent);
 }
 
-/* Workspace and Start: joined mono segmented controls, pressed fills Ink */
+/* Start: joined mono segmented control, pressed fills Ink */
 .bl .bl-launch {
   display: flex;
   gap: 14px;

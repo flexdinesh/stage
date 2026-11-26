@@ -321,8 +321,8 @@ func TestLifecycleWaitTools(t *testing.T) {
 	if !slices.Equal(b.Needs, []int64{a.ID}) || b.TreeID == nil {
 		t.Fatalf("needs %+v", b)
 	}
-	mustCall(t, cs, "update_task", map[string]any{"id": b.ID, "title": "b2", "baseRef": "origin/main"}, &b)
-	if b.Title != "b2" || b.Workspace.Type != "worktree" || b.Workspace.BaseRef != "origin/main" {
+	mustCall(t, cs, "update_task", map[string]any{"id": b.ID, "title": "b2"}, &b)
+	if b.Title != "b2" {
 		t.Fatalf("update %+v", b)
 	}
 
@@ -606,27 +606,21 @@ func TestLifecycleTreeTools(t *testing.T) {
 		t.Fatalf("set_needs [] clears needs, keeps the tree: %+v", ft)
 	}
 
-	// create_task with treeId + startMode; update_task startMode and baseTaskId.
-	g := newTask("g", map[string]any{"treeId": tree.ID, "needs": []int64{c.ID, f.ID}, "startMode": "auto",
-		"baseRef": "origin/main", "base": "predecessor", "baseTaskId": c.ID})
-	if g.TreeID == nil || *g.TreeID != tree.ID || g.StartMode == nil || *g.StartMode != db.StartAuto ||
-		g.Workspace.BaseTaskID == nil || *g.Workspace.BaseTaskID != c.ID {
+	// create_task with treeId + startMode; update_task startMode.
+	g := newTask("g", map[string]any{"treeId": tree.ID, "needs": []int64{c.ID, f.ID}, "startMode": "auto"})
+	if g.TreeID == nil || *g.TreeID != tree.ID || g.StartMode == nil || *g.StartMode != db.StartAuto {
 		t.Fatalf("create_task tree fields %+v", g)
 	}
-	mustCall(t, cs, "update_task", map[string]any{"id": g.ID, "startMode": "inherit", "baseTaskId": f.ID}, &g)
-	if g.StartMode != nil || g.EffectiveStartMode == nil || *g.EffectiveStartMode != db.StartManual ||
-		g.Workspace.BaseTaskID == nil || *g.Workspace.BaseTaskID != f.ID || !g.Workspace.FromPredecessor() {
-		t.Fatalf("update_task startMode inherit, baseTaskId: %+v", g)
+	mustCall(t, cs, "update_task", map[string]any{"id": g.ID, "startMode": "inherit"}, &g)
+	if g.StartMode != nil || g.EffectiveStartMode == nil || *g.EffectiveStartMode != db.StartManual {
+		t.Fatalf("update_task startMode inherit: %+v", g)
 	}
-	mustCall(t, cs, "update_task", map[string]any{"id": g.ID, "startMode": "manual", "baseTaskId": 0}, &g)
-	if g.StartMode == nil || *g.StartMode != db.StartManual || g.Workspace.BaseTaskID != nil {
-		t.Fatalf("update_task startMode manual, baseTaskId 0: %+v", g)
+	mustCall(t, cs, "update_task", map[string]any{"id": g.ID, "startMode": "manual"}, &g)
+	if g.StartMode == nil || *g.StartMode != db.StartManual {
+		t.Fatalf("update_task startMode manual: %+v", g)
 	}
 	if msg := call(t, cs, "update_task", map[string]any{"id": g.ID, "startMode": "soon"}, nil); !strings.Contains(msg, "invalid startMode") {
 		t.Fatalf("update_task bad startMode: %q", msg)
-	}
-	if msg := call(t, cs, "create_task", map[string]any{"project": "1", "title": "h", "prompt": "x", "baseTaskId": c.ID}, nil); !strings.Contains(msg, "base needs a worktree") {
-		t.Fatalf("baseTaskId without a worktree: %q", msg)
 	}
 
 	// start_tree starts the ready c (manual) and f (a root now).
@@ -884,44 +878,30 @@ func TestHandoffFlagTools(t *testing.T) {
 	}
 }
 
-func TestBaseTools(t *testing.T) {
+// A worktree is a launch option in executionConfig; the removed
+// workspace arguments fail.
+func TestLaunchOptionTools(t *testing.T) {
 	e := newEnv(t)
 	e.project("/w/base")
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/base"}, PollEvery: 10 * time.Millisecond})
 
-	var a, b, r client.Task
-	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "a", "prompt": "x"}, &a)
-	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "b", "prompt": "y", "needs": []int64{a.ID}, "baseRef": "origin/main", "base": "predecessor"}, &b)
-	if !b.Workspace.FromPredecessor() || b.Workspace.BaseRef != "origin/main" {
-		t.Fatalf("create_task base=predecessor: %+v", b.Workspace)
+	opts := []map[string]any{{"id": "worktree", "value": true}, {"id": "baseRef", "value": "origin/main"}, {"id": "branch", "value": "stage/b"}}
+	var b client.Task
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "b", "prompt": "y", "executionConfig": map[string]any{"options": opts}}, &b)
+	c := b.ExecutionConfig
+	if c == nil || !c.Bool("worktree") || c.Text("baseRef") != "origin/main" || c.Text("branch") != "stage/b" {
+		t.Fatalf("create_task launch options %+v", b.ExecutionConfig)
 	}
-	mustCall(t, cs, "update_task", map[string]any{"id": b.ID, "base": "ref"}, &b)
-	if b.Workspace.Type != "worktree" || b.Workspace.FromPredecessor() || b.Workspace.BaseRef != "origin/main" {
-		t.Fatalf("update_task base=ref keeps the worktree: %+v", b.Workspace)
+	if msg := call(t, cs, "create_task", map[string]any{"project": "1", "title": "x", "prompt": "z", "executionConfig": map[string]any{"options": []map[string]any{{"id": "baseRef", "value": "origin/main"}}}}, nil); !strings.Contains(msg, "applies only when worktree is true") {
+		t.Fatalf("baseRef without a worktree: %s", msg)
 	}
-	mustCall(t, cs, "update_task", map[string]any{"id": b.ID, "base": "predecessor"}, &b)
-	if !b.Workspace.FromPredecessor() {
-		t.Fatalf("update_task base=predecessor: %+v", b.Workspace)
-	}
-	var d client.TaskDetail
-	mustCall(t, cs, "get_task", map[string]any{"id": b.ID}, &d)
-	if !d.Workspace.FromPredecessor() || d.CurrentLaunchBase != nil {
-		t.Fatalf("get_task %+v", d)
-	}
-	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "r", "prompt": "z"}, &r)
-	if msg := call(t, cs, "update_task", map[string]any{"id": r.ID, "base": "predecessor"}, nil); !strings.Contains(msg, "base needs a worktree") {
-		t.Fatal("update_task base=predecessor on a root task must fail")
-	}
-	if msg := call(t, cs, "create_task", map[string]any{"project": "1", "title": "x", "prompt": "z", "base": "predecessor"}, nil); !strings.Contains(msg, "base needs a worktree") {
-		t.Fatal("create_task base without baseRef must fail")
-	}
-	// A worktree with base=predecessor and no baseRef reaches the server,
-	// whose harness policy decides: T3 needs the fallback ref.
-	if msg := call(t, cs, "create_task", map[string]any{"project": "1", "title": "x", "prompt": "z", "needs": []int64{a.ID}, "workspaceType": "worktree", "base": "predecessor"}, nil); !strings.Contains(msg, "baseRef is required") {
-		t.Fatalf("create_task worktree base=predecessor without baseRef on T3: %s", msg)
-	}
-	if msg := call(t, cs, "update_task", map[string]any{"id": r.ID, "workspaceType": "worktree", "base": "predecessor"}, nil); !strings.Contains(msg, "baseRef is required") {
-		t.Fatalf("update_task worktree base=predecessor without baseRef on T3: %s", msg)
+	for _, arg := range []string{"workspaceType", "baseRef", "branch", "base", "baseTaskId"} {
+		if msg := call(t, cs, "create_task", map[string]any{"project": "1", "title": "x", "prompt": "z", arg: "worktree"}, nil); msg == "" {
+			t.Fatalf("create_task accepted removed %s", arg)
+		}
+		if msg := call(t, cs, "update_task", map[string]any{"id": b.ID, arg: "worktree"}, nil); msg == "" {
+			t.Fatalf("update_task accepted removed %s", arg)
+		}
 	}
 }
 

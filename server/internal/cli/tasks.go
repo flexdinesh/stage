@@ -39,12 +39,25 @@ type configFlags struct {
 	connection                         int64
 	executionConfig                    *agenttools.ConfigInput
 	project, title, prompt, promptFile string
-	baseRef, branch, base, workspace   string
 	images                             list
 }
 
 // removedConfigFlags are the T3 model flags removed with API v8.
 var removedConfigFlags = []string{"provider", "model", "effort", "option", "runtime", "mode"}
+
+// removedWorkspaceFlags are the Stage worktree flags removed with API v8:
+// a worktree, its base ref and branch are harness launch options.
+var removedWorkspaceFlags = []string{"workspace", "base-ref", "branch", "base", "base-task"}
+
+// removeWorkspaceFlags registers names as flags that fail naming the
+// replacement.
+func removeWorkspaceFlags(c *cmd, names ...string) {
+	for _, name := range names {
+		c.fs.Func(name, "removed", func(string) error {
+			return fmt.Errorf("--%s was removed; set the harness's launch options (worktree, baseRef, branch where it declares them) in --execution-config; models ls --connection ID shows them", name)
+		})
+	}
+}
 
 func (f *configFlags) configInputFlag(c *cmd) {
 	c.fs.Func("execution-config", "harness configuration as JSON", func(raw string) error {
@@ -64,15 +77,12 @@ func (f *configFlags) configInputFlag(c *cmd) {
 func (f *configFlags) register(c *cmd) {
 	f.configInputFlag(c)
 	c.fs.Int64Var(&f.connection, "connection", 0, "destination connection ID")
-	c.fs.StringVar(&f.workspace, "workspace", "", "root or harness-managed worktree")
 	c.fs.StringVar(&f.project, "project", "", "project id or title")
 	c.fs.StringVar(&f.title, "title", "", "title")
 	c.fs.StringVar(&f.prompt, "prompt", "", "prompt text (- = stdin)")
 	c.fs.StringVar(&f.promptFile, "prompt-file", "", "read the prompt from a file")
-	c.fs.StringVar(&f.baseRef, "base-ref", "", "worktree base ref")
-	c.fs.StringVar(&f.branch, "branch", "", "worktree branch")
-	c.fs.StringVar(&f.base, "base", "", "worktree base: ref (from --base-ref) | predecessor (from a need's branch, --base-task or the sole need; unavailable predecessors block launch; without --base-ref pass --workspace worktree)")
 	c.fs.Var(&f.images, "image", "image file (repeatable)")
+	removeWorkspaceFlags(c, removedWorkspaceFlags[:4]...)
 	for _, name := range removedConfigFlags {
 		c.fs.Func(name, "removed", func(string) error {
 			return fmt.Errorf("--%s was removed; use --connection ID --execution-config JSON", name)
@@ -104,8 +114,8 @@ func (f *configFlags) create(c *cmd) (agenttools.ConfigArgs, error) {
 		return agenttools.ConfigArgs{}, usagef("--title and --prompt are required")
 	}
 	return agenttools.ConfigArgs{
-		WorkspaceType: f.workspace, ConnectionID: f.connection, ExecutionConfig: f.executionConfig, Project: f.project, Title: f.title, Prompt: prompt,
-		BaseRef: f.baseRef, Branch: f.branch, Base: f.base, ImagePaths: f.images,
+		ConnectionID: f.connection, ExecutionConfig: f.executionConfig, Project: f.project, Title: f.title, Prompt: prompt,
+		ImagePaths: f.images,
 	}, nil
 }
 
@@ -133,9 +143,7 @@ func (f *configFlags) update(c *cmd, id int64) (agenttools.UpdateArgs, error) {
 		return agenttools.UpdateArgs{}, err
 	}
 	a := agenttools.UpdateArgs{
-		ConnectionID: f.connection, WorkspaceType: strFlag(c, "workspace", f.workspace), ExecutionConfig: f.executionConfig, ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
-		BaseRef: strFlag(c, "base-ref", f.baseRef),
-		Branch:  strFlag(c, "branch", f.branch), Base: strFlag(c, "base", f.base),
+		ConnectionID: f.connection, ExecutionConfig: f.executionConfig, ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
 	}
 	if promptSet {
 		a.Prompt = &prompt
@@ -162,7 +170,7 @@ func (c *cmd) oneID() (int64, error) {
 // waitFlags are the tree, needs and start flags of task add.
 type waitFlags struct {
 	needs            string
-	tree, baseTask   int64
+	tree             int64
 	startMode        string
 	afterMe          bool
 	handoff          bool
@@ -173,7 +181,7 @@ func (w *waitFlags) register(c *cmd) {
 	c.fs.StringVar(&w.needs, "needs", "", "task ids this task runs after (comma-separated; joins their tree): eligible once the user completes all needs in Stage")
 	c.fs.Int64Var(&w.tree, "tree", 0, "join this tree (a parallel root unless --needs)")
 	c.fs.StringVar(&w.startMode, "start-mode", "", "inherit (default)|auto|manual; set shared policy on the tree, override only for a task exception")
-	c.fs.Int64Var(&w.baseTask, "base-task", 0, "with --base predecessor, the need whose branch the worktree starts from")
+	removeWorkspaceFlags(c, "base-task")
 	c.fs.BoolVar(&w.afterMe, "after-me", false, "also need your own session (adopted as a task)")
 	c.fs.BoolVar(&w.handoff, "handoff", true, "append each need's final reply, PRs, branch and thread link at launch (--handoff=false to skip)")
 	c.fs.StringVar(&w.startAt, "start-at", "", "one-shot start YYYY-MM-DDTHH:mm")
@@ -278,7 +286,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 			ConfigArgs: cfg, Start: start, InitialNote: initialNote,
 			WaitArgs: agenttools.WaitArgs{
 				TreeID: int64Flag(c, "tree", wf.tree), Needs: needs, AfterMe: wf.afterMe,
-				StartMode: wf.startMode, BaseTaskID: int64Flag(c, "base-task", wf.baseTask),
+				StartMode:  wf.startMode,
 				StartLocal: wf.startAt, StartTz: wf.startTz, Handoff: boolFlag(c, "handoff", wf.handoff),
 			},
 		})
@@ -290,13 +298,12 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		var f configFlags
 		var startAt, tz, startMode string
 		var handoff bool
-		var baseTask int64
 		f.register(c)
 		c.fs.StringVar(&startAt, "start-at", "", "one-shot start (empty clears)")
 		c.fs.StringVar(&tz, "tz", "", "zone for --start-at")
 		c.fs.BoolVar(&handoff, "handoff", true, "append the needs' handoff at launch (true|false)")
 		c.fs.StringVar(&startMode, "start-mode", "", "auto|manual|inherit")
-		c.fs.Int64Var(&baseTask, "base-task", 0, "with --base predecessor, the need whose branch the worktree starts from (0 = the sole need)")
+		removeWorkspaceFlags(c, "base-task")
 		if err := c.parse(rest); err != nil {
 			return err
 		}
@@ -310,7 +317,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		}
 		a := agenttools.UpdateTaskArgs{
 			UpdateArgs: u, StartLocal: strFlag(c, "start-at", startAt), StartTz: strFlag(c, "tz", tz), Handoff: boolFlag(c, "handoff", handoff),
-			StartMode: strFlag(c, "start-mode", startMode), BaseTaskID: int64Flag(c, "base-task", baseTask),
+			StartMode: strFlag(c, "start-mode", startMode),
 		}
 		res, err := o().UpdateTask(ctx, a)
 		if err != nil {

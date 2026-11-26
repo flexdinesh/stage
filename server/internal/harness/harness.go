@@ -97,9 +97,6 @@ type Descriptor struct {
 	// user tracks it (Track session); a host shows it as the field's hint.
 	// "": the host's generic copy.
 	SessionHint string `json:"sessionHint,omitempty"`
-	// Worktree is what a worktree workspace on this harness may take from
-	// Stage; task and schedule validation enforces it.
-	Worktree Worktree `json:"worktree"`
 	// Wraps: this harness runs other harnesses' sessions (T3 runs Claude
 	// Code and Codex). Nil: it runs only its own.
 	Wraps *Wraps `json:"wraps,omitempty"`
@@ -115,19 +112,6 @@ type Wraps struct {
 	// records them and its adapter reports them (execution.Observation
 	// Origin): Claude Code's entrypoint, Codex's originator.
 	Origins []string `json:"origins"`
-}
-
-// Worktree is the static policy for a worktree workspace's base. The live
-// predecessorBase and worktreeBase operations may still be unavailable.
-type Worktree struct {
-	// BaseRef: Stage supplies the base ref (required) and branch
-	// (optional). Otherwise the harness chooses both and Stage passes
-	// neither.
-	BaseRef bool `json:"baseRef"`
-	// Predecessor: the worktree may start from a need's branch. Without
-	// BaseRef the harness names the branch and its own default is the
-	// fallback.
-	Predecessor bool `json:"predecessor"`
 }
 
 // OwnsProcesses: the harness runs its sessions as processes Stage (or a

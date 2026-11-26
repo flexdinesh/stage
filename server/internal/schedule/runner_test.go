@@ -47,7 +47,7 @@ func TestReconcileLaunchesDueStarts(t *testing.T) {
 	}
 	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: dbtest.T3Connection,
 		ProjectID: p.ID, Title: "every5", Prompt: "p",
-		Workspace: db.Workspace{Type: "root"}, Cron: "*/5 * * * *", Tz: "UTC",
+		Cron: "*/5 * * * *", Tz: "UTC",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestReconcileLaunchesDueStarts(t *testing.T) {
 	oneShot := func(title string, at time.Time) db.Task {
 		task, err := store.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection,
 			ProjectID: p.ID, Title: title, Prompt: "p",
-			Workspace: db.Workspace{Type: "root"}, StartAt: &at, StartTz: &tz,
+			StartAt: &at, StartTz: &tz,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -115,7 +115,7 @@ func TestUnboundScheduleHoldsOneOccurrenceUntilManualStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "Review", Prompt: "Review", Workspace: db.Workspace{Type: "root"}, Cron: "*/5 * * * *", Tz: "UTC"})
+	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "Review", Prompt: "Review", Cron: "*/5 * * * *", Tz: "UTC"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestRunnersPerConnectionFireOnlyTheirMachinesSchedules(t *testing.T) {
 	for _, id := range []int64{local, laptop} {
 		sc, err := store.CreateSchedule(ctx, db.NewSchedule{
 			ProjectID: p.ID, ConnectionID: id, Title: "nightly", Prompt: "p",
-			Workspace: db.Workspace{Type: "root"}, Cron: "*/5 * * * *", Tz: "UTC",
+			Cron: "*/5 * * * *", Tz: "UTC",
 		})
 		if err != nil {
 			t.Fatal(err)

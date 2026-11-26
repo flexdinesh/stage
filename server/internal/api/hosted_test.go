@@ -218,7 +218,7 @@ func TestHostedHarnessEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := e.store.CreateTask(ctx, db.NewTask{ProjectID: project.ID, ConnectionID: conn, Title: "Work", Prompt: "Do it", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "m"}})
+	task, err := e.store.CreateTask(ctx, db.NewTask{ProjectID: project.ID, ConnectionID: conn, Title: "Work", Prompt: "Do it", ExecutionConfig: &execution.Config{Model: "m"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +284,7 @@ func TestHostedHarnessRefusedWhereTheProfileDisallowsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := e.store.CreateTask(ctx, db.NewTask{ProjectID: project.ID, ConnectionID: sw.New, Title: "Work", Prompt: "Do it", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "m"}})
+	task, err := e.store.CreateTask(ctx, db.NewTask{ProjectID: project.ID, ConnectionID: sw.New, Title: "Work", Prompt: "Do it", ExecutionConfig: &execution.Config{Model: "m"}})
 	if err != nil {
 		t.Fatal(err)
 	}

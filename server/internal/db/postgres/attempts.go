@@ -112,33 +112,6 @@ func (r attempts) PinDestination(ctx context.Context, taskID int64, n int, b sto
 	return err
 }
 
-func (r attempts) RecordBase(ctx context.Context, taskID int64, b store.LaunchBase, sourceID *int64) error {
-	_, err := r.Exec(ctx, `
-INSERT INTO task_launch_bases (task_id, attempt, base_ref, start_from_origin, source, source_task_id, source_title, reason, source_session_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-ON CONFLICT (task_id, attempt) DO UPDATE SET
-  base_ref = EXCLUDED.base_ref, start_from_origin = EXCLUDED.start_from_origin, source = EXCLUDED.source,
-  source_task_id = EXCLUDED.source_task_id,
-  source_title = EXCLUDED.source_title, reason = EXCLUDED.reason, source_session_id=excluded.source_session_id, created_at = `+nowSQL+``,
-		taskID, b.Attempt, b.BaseRef, b.StartFromOrigin, b.Source, b.SourceTaskID, b.SourceTitle, b.Reason, sourceID)
-	return err
-}
-
-func (r attempts) Base(ctx context.Context, taskID int64, attempt int) (*store.LaunchBase, error) {
-	var b store.LaunchBase
-	err := r.QueryRow(ctx, `
-SELECT attempt, base_ref, start_from_origin, source, source_task_id, (SELECT external_id FROM session_identities WHERE id=task_launch_bases.source_session_id), source_title, reason, created_at, (SELECT jsonb_build_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=task_launch_bases.source_session_id)
-FROM task_launch_bases WHERE task_id = $1 AND attempt = $2`, taskID, attempt).
-		Scan(&b.Attempt, &b.BaseRef, &b.StartFromOrigin, &b.Source, &b.SourceTaskID, &b.SourceThreadID, &b.SourceTitle, &b.Reason, &b.At, &b.Session)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &b, nil
-}
-
 func (r attempts) RecordHandoff(ctx context.Context, taskID int64, h store.Handoff, sourceID *int64) error {
 	_, err := r.Exec(ctx, `
 INSERT INTO task_handoffs (task_id, attempt, source_task_id, source_title, status, text, reason, source_session_id)

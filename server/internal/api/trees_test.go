@@ -134,17 +134,6 @@ func TestTreesLifecycle(t *testing.T) {
 	e.must("PUT", taskPath(c.ID, "/needs"), map[string]any{"needs": []int64{99999}}, 404, nil)
 	e.must("PUT", taskPath(c.ID, "/needs"), map[string]any{}, 400, nil)
 
-	// workspace.baseTaskId: only with base predecessor, and must be a need.
-	ws := func(base string, baseTask int64) map[string]any {
-		return map[string]any{"workspace": map[string]any{"type": "worktree", "baseRef": "origin/main", "base": base, "baseTaskId": baseTask}}
-	}
-	e.must("PATCH", taskPath(c.ID), ws("ref", a.ID), 400, nil)
-	e.must("PATCH", taskPath(c.ID), ws("predecessor", b.ID), 400, nil)
-	e.must("PATCH", taskPath(c.ID), ws("predecessor", a.ID), 200, &got)
-	if got.Workspace["baseTaskId"] != float64(a.ID) {
-		t.Fatalf("baseTaskId %+v", got.Workspace)
-	}
-
 	// Add d (needs c), remove c: d takes over c's needs; c leaves.
 	d := e.task(p.ID, "d", nil)
 	e.must("POST", treePath(tr.ID, "/tasks"), map[string]any{"needs": []int64{c.ID}}, 400, nil)
@@ -156,7 +145,7 @@ func TestTreesLifecycle(t *testing.T) {
 	if got = e.getTask(d.ID); !slices.Equal(got.Needs, []int64{a.ID}) {
 		t.Fatalf("splice %+v", got)
 	}
-	if got = e.getTask(c.ID); got.TreeID != nil || len(got.Needs) != 0 || got.Tree != nil || got.Workspace["baseTaskId"] != nil {
+	if got = e.getTask(c.ID); got.TreeID != nil || len(got.Needs) != 0 || got.Tree != nil {
 		t.Fatalf("removed %+v", got)
 	}
 	e.must("DELETE", treePath(tr.ID, fmt.Sprintf("/tasks/%d", c.ID)), nil, 404, nil)

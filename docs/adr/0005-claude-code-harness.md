@@ -25,6 +25,11 @@
   decision 9 (T3's sessions are refused through T3's declared `wraps`, not
   by the adapter naming T3) and E6's precedence note (the wrapper's
   variable wins through `wraps` and Claude's declared origin variable).
+- **Amended** 2026-11-26 by #420 ([ADR 0007](0007-harness-boundary.md)
+  decisions 5 and 6): decision 10. A worktree is the `worktree` launch
+  option (`claude --bg -w stage-<requestId>`); predecessor bases are
+  removed, so E10 is history and `worktree.baseRef` `head` is no longer
+  passed.
 - **Sources:** probes of the local `claude` CLI on Linux x86_64 with a
   claude.ai (Max) login, 2026-11-25, in scratch directories with haiku
   prompts. The CLI auto-updated from 2.1.331 to 2.1.332 two minutes in;
@@ -137,7 +142,9 @@ them. 2, 3, 13 and 14 come from the evidence.
    one (the row's Track). Global hooks (`stage setup --claude`) were
    rejected: they would write the user's global Claude settings, and the
    roster already reports waiting sessions.
-10. **Workspaces**: the project root, or Claude's `-w <name>`. Claude picks
+10. **Workspaces** (amended by #420: the root, or `-w` with the boolean
+    launch option `worktree`; the predecessor base below is removed and
+    Stage passes no `worktree.baseRef`): the project root, or Claude's `-w <name>`. Claude picks
     the base and the branch (`worktree-<name>`), so `worktreeBase` is
     unavailable. `predecessorBase` is available (#379): Stage launches
     from the checkout that has the predecessor's branch checked out (its

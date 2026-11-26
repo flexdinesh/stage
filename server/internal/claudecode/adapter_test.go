@@ -18,11 +18,13 @@ import (
 
 const conn = 7
 
+var worktreeOn = execution.ModelOption{ID: "worktree", Value: execution.BoolValue(true)}
+
 func intent(f *claudetest.Fake, req string) execution.Intent {
 	marker := execution.LaunchMarker(req)
 	return execution.Intent{
 		RequestID: req, ConnectionID: conn, Project: f.Workspace, Directory: f.Workspace, Title: "Fix the thing",
-		Prompt: "- do it\n\n" + marker, Marker: marker, Workspace: execution.Workspace{Kind: "root"},
+		Prompt: "- do it\n\n" + marker, Marker: marker,
 		Config: execution.Config{Model: "haiku", Permission: "acceptEdits", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("low")}}},
 	}
 }
@@ -81,8 +83,9 @@ func TestLaunchRejections(t *testing.T) {
 	img.Images = []execution.Image{{Name: "a.bmp", MimeType: "image/bmp", Data: []byte("BM")}}
 	empty := intent(f, "req-e")
 	empty.Images = []execution.Image{{Name: "a.png", MimeType: "image/png"}}
+	// Claude Code declares only worktree; a base ref is an unknown option.
 	base := intent(f, "req-b")
-	base.Workspace.Base = "main"
+	base.Config.Options = append(base.Config.Options, execution.ModelOption{ID: "worktree", Value: execution.BoolValue(true)}, execution.ModelOption{ID: "baseRef", Value: execution.StringValue("main")})
 	model := intent(f, "req-m")
 	model.Config.Model = "gpt"
 	for _, in := range []execution.Intent{img, empty, base, model} {
@@ -153,7 +156,7 @@ func TestLaunchWritesImages(t *testing.T) {
 		t.Fatalf("session %+v", s)
 	}
 	wt := intent(f, "req-wt")
-	wt.Workspace.Kind = "worktree"
+	wt.Config.Options = append(wt.Config.Options, worktreeOn)
 	wt.Images = in.Images[:1]
 	if _, err := a.Launch(t.Context(), wt, execution.Checkpoint{}, nil); err != nil {
 		t.Fatal(err)
@@ -170,11 +173,19 @@ func TestReadRule(t *testing.T) {
 	}
 }
 
-// With hooks the settings file carries the rule (its head variant too);
-// without an image root images are unavailable and a launch with images is
+// With hooks the settings file carries the rule (and so does the
+// predecessor-base variant an earlier version wrote, which sessions it
+// launched read again when they wake; never created); without an image root images are unavailable and a launch with images is
 // rejected.
 func TestImagesThroughHookSettings(t *testing.T) {
 	f := claudetest.New(t)
+	legacy := filepath.Join(f.Home, "stage-claude", "hooks-settings-head.json")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte(`{"worktree":{"baseRef":"head"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	h := f.Hooks()
 	a := f.HookedAdapter(conn, h)
 	in := intent(f, "req-h")
@@ -187,11 +198,12 @@ func TestImagesThroughHookSettings(t *testing.T) {
 	if i := slices.Index(args, "--settings"); i < 0 || args[i+1] != h.SettingsPath() {
 		t.Fatalf("args %q", args)
 	}
-	for _, p := range []string{h.SettingsPath(), h.HeadSettingsPath()} {
-		b, err := os.ReadFile(p)
-		if err != nil || !strings.Contains(string(b), `"Read(/`+f.ImageRoot()+`/**)"`) {
-			t.Fatalf("%s: %s %v", p, b, err)
-		}
+	plain, err := os.ReadFile(h.SettingsPath())
+	if err != nil || !strings.Contains(string(plain), `"Read(/`+f.ImageRoot()+`/**)"`) || strings.Contains(string(plain), "worktree") {
+		t.Fatalf("%s: %s %v", h.SettingsPath(), plain, err)
+	}
+	if b, err := os.ReadFile(legacy); err != nil || string(b) != string(plain) {
+		t.Fatalf("legacy head settings %s %v", b, err)
 	}
 	if s := f.Session(o.Session.ExternalSessionID); s.State != "working" {
 		t.Fatalf("session %+v", s)
@@ -373,7 +385,7 @@ func TestWorktreeLaunch(t *testing.T) {
 	f := claudetest.New(t)
 	a := f.Adapter(conn)
 	in := intent(f, "req-w")
-	in.Workspace.Kind = "worktree"
+	in.Config.Options = append(in.Config.Options, worktreeOn)
 	f.Update(func(s *fakestate.State) { s.Launch = fakestate.CrashAfterCreate })
 	if _, err := a.Launch(t.Context(), in, execution.Checkpoint{}, nil); err == nil {
 		t.Fatal("lost reply reported success")
@@ -741,12 +753,12 @@ func TestFeatures(t *testing.T) {
 	if err != nil || c.Valid() != nil || c.DeclaresOperations() != nil {
 		t.Fatal(err, c.Valid(), c.DeclaresOperations())
 	}
-	for _, op := range []execution.Op{execution.OpWorktreeBase, execution.OpRespond} {
+	for _, op := range []execution.Op{execution.OpRespond} {
 		if a := c.Operations[op]; a.Available || a.Reason == "" {
 			t.Fatalf("%s %+v", op, a)
 		}
 	}
-	for _, op := range []execution.Op{execution.OpImages, execution.OpPredecessorBase, execution.OpSend, execution.OpAttention} {
+	for _, op := range []execution.Op{execution.OpImages, execution.OpSend, execution.OpAttention} {
 		if a := c.Operations[op]; !a.Available {
 			t.Fatalf("%s %+v", op, a)
 		}
@@ -754,7 +766,15 @@ func TestFeatures(t *testing.T) {
 	if err := c.ValidateConfig(execution.Config{}); err != nil {
 		t.Fatal("Claude's defaults", err)
 	}
-	if err := c.ValidateConfig(execution.Config{Model: "opus", Permission: "plan", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("max")}}}); err != nil {
+	if err := c.ValidateConfig(execution.Config{Model: "opus", Permission: "plan", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("max")}, worktreeOn}}); err != nil {
 		t.Fatal(err)
+	}
+	if i := slices.IndexFunc(c.Options, func(o execution.Option) bool { return o.ID == "worktree" }); i < 0 || c.Options[i].EffectiveKind() != execution.OptionBoolean || c.Options[i].Label == "" {
+		t.Fatalf("worktree option %+v", c.Options)
+	}
+	for _, id := range []string{"baseRef", "branch"} {
+		if err := c.ValidateConfig(execution.Config{Options: []execution.ModelOption{worktreeOn, {ID: id, Value: execution.StringValue("x")}}}); err == nil {
+			t.Fatalf("%s is not a Claude Code option", id)
+		}
 	}
 }

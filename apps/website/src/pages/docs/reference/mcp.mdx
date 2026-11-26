@@ -83,7 +83,7 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 - Results are the REST shapes as JSON; lists are compact rows. Errors are tool errors carrying the API `error`.
 - `list_tasks` rows carry `treeId`, `needs`, `readiness`, `adopted` and `lastWordPreview`. Open tasks by default; `closed: true|all` adds archived tasks and members of done or archived trees.
 - `list_trees` returns active trees by default (`status` done, archived or all for others).
-- `get_task` returns the task's events, `thread.lastWord` (the final reply), static `artifactLinks`, its tree, `handoff`, `currentHandoffs`, `currentLaunchBase` and the grouped `batch`. The CLI prints the final reply and artifact URLs.
+- `get_task` returns the task's events, `thread.lastWord` (the final reply), static `artifactLinks`, its tree, `handoff`, `currentHandoffs` and the grouped `batch`. The CLI prints the final reply and artifact URLs.
 - `imagePaths` reads local files (PNG, JPEG, GIF, WebP, up to 8) and uploads them. CLI and stdio only; HTTP MCP rejects them.
 - `wait_task` polls the task every 3s until its state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` passes (default 600, max 3600). CLI `task wait` defaults to `--timeout 10m` and exits 3 on timeout.
 - `preview_schedule` returns the next three fire times of a cron in a zone.
@@ -93,7 +93,7 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 - `get_context` returns your session, cwd, resolved Stage project, owning task and current tree. The owner remains available offline. An unowned session resolves through its verified project binding. An external session can legitimately have no Stage task.
 - `list_projects` lists projects with bindings and configured connections. Set `connectionId` on `create_task` to choose the execution harness, independently of the creator's. A sole binding supplies the default; with both harnesses bound, choose one explicitly. With no binding, the caller's connection or the sole configured connection; there is no default harness.
 - `list_models` with `connectionId` (required; and `projectId` for workspace-specific choices) lists a harness's models, agents and options. Pass the advertised values in `executionConfig` on tasks and schedules; the old T3 `provider`, `model` and `effort` parameters were removed.
-- `workspaceType: "worktree"` selects the harness default worktree. OpenCode selects its base and branch.
+- Launch options go in `executionConfig.options` like any other option: a worktree (`{"id":"worktree","value":true}`), and on T3 its `baseRef` and `branch`. `list_models` lists them with their `kind` (`choice`, `boolean` or `text`) and `dependsOn` (T3's `baseRef` and `branch` apply only with `worktree` true). Claude Code and OpenCode pick the worktree's base and branch; Codex has none. The old `workspaceType`, `baseRef`, `branch`, `base` and `baseTaskId` arguments were removed.
 - `startLocal` with `startTz` schedules a one-shot start.
 
 ## Journals
@@ -144,13 +144,7 @@ When a task with needs starts, its launch prompt gets one block per accepted nee
 - Handoff uses the saved accepted snapshot in Stage, without a live source-harness read. Missing replies remain missing; storage errors block launch.
 - `get_task` returns `handoff` and `currentHandoffs` (one per need). `stage task show` prints `handoff  on|off` for tasks with needs and the current attempt's records.
 
-### Predecessor base
-
-`base: "predecessor"` starts a task's worktree from a need's branch, so stacked work builds on unmerged changes. `baseTaskId` picks the need, else the sole need; `baseRef` keeps an explicit base choice. CLI: `--base predecessor --base-task ID --base-ref origin/main`. On Claude Code, which makes and names the worktree, pass `workspaceType: "worktree"` instead of `baseRef` (CLI `--workspace worktree`).
-
-- Tasks only; schedules reject it (their runs have no needs). It needs an available branch in the same harness and project.
-- Unavailable, ambiguous, merged or deleted predecessor branches block launch. Choose the configured base explicitly to continue.
-- `get_task` returns `currentLaunchBase`. `stage task show` prints `worktree from #12's branch (configured ref origin/main, branch -)` and, once launched, `base     feat/api (from #12)` or `base     origin/main (fallback: <reason>)`.
+A dependent's worktree starts where its own launch options say, never from a need's branch: the handoff names the branch each need reported, and the agent works from there.
 
 ## Run after me
 

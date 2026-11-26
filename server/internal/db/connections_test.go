@@ -120,12 +120,12 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 		t.Fatalf("stamp %+v %v", sw, err)
 	}
 	project := projectWithBinding(t, s, first, "/w/a")
-	backlog, err := s.CreateTask(ctx, NewTask{ProjectID: project, Title: "queued", Prompt: "p", ConnectionID: first, Workspace: Workspace{Type: "root"}})
+	backlog, err := s.CreateTask(ctx, NewTask{ProjectID: project, Title: "queued", Prompt: "p", ConnectionID: first})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ranTask(t, pool, project, first, "running", "thread-a")
-	schedule, err := s.CreateSchedule(ctx, NewSchedule{ProjectID: project, Title: "nightly", Prompt: "p", Cron: "0 3 * * *", Tz: "UTC", ConnectionID: first, Workspace: Workspace{Type: "root"}})
+	schedule, err := s.CreateSchedule(ctx, NewSchedule{ProjectID: project, Title: "nightly", Prompt: "p", Cron: "0 3 * * *", Tz: "UTC", ConnectionID: first})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 	if _, err := s.BindProject(ctx, ProjectBinding{ProjectID: project, ConnectionID: first, ExternalProjectID: "x", Workspace: "/x"}); !errors.As(err, &conflict) || conflict.Code != "connection_retired" {
 		t.Fatalf("bind on replaced: %v", err)
 	}
-	if _, err := s.CreateTask(ctx, NewTask{ProjectID: project, Title: "t", Prompt: "p", ConnectionID: first, Workspace: Workspace{Type: "root"}}); !errors.As(err, &conflict) || conflict.Code != "connection_retired" {
+	if _, err := s.CreateTask(ctx, NewTask{ProjectID: project, Title: "t", Prompt: "p", ConnectionID: first}); !errors.As(err, &conflict) || conflict.Code != "connection_retired" {
 		t.Fatalf("task on replaced: %v", err)
 	}
 

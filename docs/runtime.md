@@ -581,12 +581,11 @@ meanwhile ([execution.md](execution.md#claude-code-adapter)).
 `<state dir>/hooks-settings.json` (dir `0700`, file `0600`, written atomically when its content changes) is the Claude
 settings file every launch passes with `--settings`: one HTTP hook per
 event, all with that URL and token (timeout 5 s, `PermissionRequest`
-3600 s). `hooks-settings-head.json` beside it
-(same modes, written with it) adds `worktree.baseRef` `head`; both also
-allow `Read(//<state dir>/images/**)` so sessions read their launch
-images without a prompt. A launch
-with a predecessor base passes it instead, since Claude takes one
-`--settings`. Claude saves the file's path with each
+3600 s). It also allows `Read(//<state dir>/images/**)` so sessions
+read their launch images without a prompt. `hooks-settings-head.json`
+(the predecessor-base variant earlier versions wrote beside it) is
+rewritten with the same content when it exists, for the sessions launched
+with it, and never created. Claude saves the file's path with each
 session and reads it again when it wakes the session, so the file always
 names the current listener. A restart keeps the token and binds the port
 the file names when it is free; otherwise it takes a free port and

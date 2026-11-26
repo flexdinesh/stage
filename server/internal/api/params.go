@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
 const maxBody = 1 << 20
@@ -42,9 +41,13 @@ func rawBody(r *http.Request) ([]byte, error) {
 // removedModelFields are the T3 model inputs removed in API v8.
 var removedModelFields = []string{"providerInstanceId", "model", "modelOptions", "runtimeMode", "interactionMode"}
 
+// removedWorkspaceField is the Stage worktree input removed in API v8
+// (ADR 0007 decisions 5 and 6).
+const removedWorkspaceField = "workspace"
+
 // decodeConfig reads a task or schedule body into v (rejecting unknown
-// fields when strict). A removed model input is a 400 naming its
-// replacement.
+// fields when strict). A removed model or workspace input is a 400 naming
+// its replacement.
 func decodeConfig(r *http.Request, v any, strict bool) error {
 	body, err := rawBody(r)
 	if err != nil {
@@ -56,6 +59,9 @@ func decodeConfig(r *http.Request, v any, strict bool) error {
 			if _, ok := fields[f]; ok {
 				return db.Invalid("%s was removed in API v8; send executionConfig with connectionId", f)
 			}
+		}
+		if _, ok := fields[removedWorkspaceField]; ok {
+			return db.Invalid("workspace was removed in API v8; set the harness's launch options in executionConfig.options (worktree, baseRef, branch where the connection declares them; see its capabilities)")
 		}
 	}
 	if strict {
@@ -177,105 +183,6 @@ func taskStateStrings() []string {
 		out[i] = string(s)
 	}
 	return out
-}
-
-// worktreeRule is a destination connection's harness name and worktree
-// policy (harness.Descriptor.Worktree).
-type worktreeRule func(connection int64) (name string, policy harness.Worktree)
-
-// anyWorktree is the rule without a destination: the most permissive.
-func anyWorktree(int64) (string, harness.Worktree) {
-	return "", harness.Worktree{BaseRef: true, Predecessor: true}
-}
-
-// worktreeRule reads a connection's policy from its harness descriptor; an
-// unknown kind takes nothing from Stage.
-func (s *server) worktreeRule(connection int64) (string, harness.Worktree) {
-	if connection <= 0 {
-		return anyWorktree(connection)
-	}
-	kind := s.Store.Harness(connection)
-	d, ok := s.registry().Lookup(kind)
-	if !ok {
-		return kind, harness.Worktree{}
-	}
-	return d.Name, d.Worktree
-}
-
-func validateWorkspace(w db.Workspace) (db.Workspace, error) {
-	return validateWorkspaceFor(w, 0, anyWorktree)
-}
-
-func validateWorkspaceFor(w db.Workspace, connection int64, rule worktreeRule) (db.Workspace, error) {
-	name, policy := rule(connection)
-	if !policy.BaseRef {
-		return harnessWorktree(w, name, policy)
-	}
-	if w.Base != "" && w.Base != db.BaseRef && w.Base != db.BasePredecessor {
-		return w, db.Invalid("invalid workspace.base %q (want ref|predecessor)", w.Base)
-	}
-	if w.BaseTaskID != nil && w.Base != db.BasePredecessor {
-		return w, db.Invalid("workspace.baseTaskId needs base predecessor")
-	}
-	switch w.Type {
-	case "root":
-		if w.Base == db.BasePredecessor {
-			return w, db.Invalid("workspace.base predecessor needs type worktree")
-		}
-		return db.Workspace{Type: "root"}, nil
-	case "worktree":
-		w.BaseRef = strings.TrimSpace(w.BaseRef)
-		if w.BaseRef == "" {
-			return w, db.Invalid("workspace.baseRef is required for worktree (the fallback with base predecessor)")
-		}
-		if w.Base != db.BasePredecessor {
-			w.Base = ""
-		}
-		if w.Branch != nil {
-			b := strings.TrimSpace(*w.Branch)
-			if b == "" {
-				w.Branch = nil
-			} else {
-				w.Branch = &b
-			}
-		}
-		return w, nil
-	}
-	return w, db.Invalid("invalid workspace.type %q (want root|worktree)", w.Type)
-}
-
-// harnessWorktree validates a workspace for a harness that chooses the
-// worktree base and branch: no ref or branch, and a predecessor base only
-// when the policy allows it (the harness's default is its fallback).
-func harnessWorktree(w db.Workspace, name string, policy harness.Worktree) (db.Workspace, error) {
-	if name == "" {
-		name = "This harness"
-	}
-	if w.Base != "" && w.Base != db.BaseRef && w.Base != db.BasePredecessor {
-		return w, db.Invalid("invalid workspace.base %q (want ref|predecessor)", w.Base)
-	}
-	if w.BaseTaskID != nil && w.Base != db.BasePredecessor {
-		return w, db.Invalid("workspace.baseTaskId needs base predecessor")
-	}
-	if !policy.Predecessor && (w.Base == db.BasePredecessor || strings.TrimSpace(w.BaseRef) != "" || w.Branch != nil) {
-		return w, db.Invalid("%s manages the worktree base and branch. Choose root or worktree without a ref, branch or predecessor.", name)
-	}
-	if strings.TrimSpace(w.BaseRef) != "" || w.Branch != nil {
-		return w, db.Invalid("%s manages the worktree base and branch. Choose root, worktree or a predecessor's branch, without a ref or branch.", name)
-	}
-	switch w.Type {
-	case "root":
-		if w.Base == db.BasePredecessor {
-			return w, db.Invalid("workspace.base predecessor needs type worktree")
-		}
-		return db.Workspace{Type: "root"}, nil
-	case "worktree":
-		if w.Base != db.BasePredecessor {
-			return db.Workspace{Type: "worktree"}, nil
-		}
-		return db.Workspace{Type: "worktree", Base: db.BasePredecessor, BaseTaskID: w.BaseTaskID}, nil
-	}
-	return w, db.Invalid("invalid workspace.type %q (want root|worktree)", w.Type)
 }
 
 // requiredText validates a PATCH text field that must not be null/empty.

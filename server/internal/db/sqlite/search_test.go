@@ -56,7 +56,7 @@ func TestSearchIndexFollowsWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	newTask := func(title string) db.Task {
-		task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: 1, ProjectID: p.ID, Title: title, Prompt: "prompt " + title, Workspace: db.Workspace{Type: "root"}})
+		task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: 1, ProjectID: p.ID, Title: title, Prompt: "prompt " + title})
 		if err != nil {
 			t.Fatal(err)
 		}

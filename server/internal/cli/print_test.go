@@ -35,13 +35,16 @@ func TestPrintUsage(t *testing.T) {
 	}
 }
 
-func TestPrintLaunchBase(t *testing.T) {
-	id := int64(12)
-	reason := "#12 ran at project root"
+func TestPrintLaunchOptions(t *testing.T) {
 	var b strings.Builder
-	printTaskDetail(&b, client.TaskDetail{CurrentLaunchBase: &db.LaunchBase{BaseRef: "feat/a", Source: db.LaunchBasePredecessor, SourceTaskID: &id}})
-	printTaskDetail(&b, client.TaskDetail{CurrentLaunchBase: &db.LaunchBase{BaseRef: "origin/main", Source: db.LaunchBaseFallback, Reason: &reason}})
-	for _, want := range []string{"base     feat/a (from #12)", "base     origin/main (fallback: #12 ran at project root)"} {
+	cfg := execution.Config{Options: []execution.ModelOption{{ID: "worktree", Value: execution.BoolValue(true)}, {ID: "baseRef", Value: execution.StringValue("origin/main")}}}
+	printTaskDetail(&b, client.TaskDetail{Task: client.Task{Task: db.Task{ExecutionConfig: &cfg}}})
+	off := execution.BoolValue(false)
+	printCapabilities(&b, execution.Capabilities{Options: []execution.Option{
+		{ID: "worktree", Kind: execution.OptionBoolean, Label: "New worktree", Values: []execution.OptionValue{execution.BoolValue(true), off}, Default: &off},
+		{ID: "baseRef", Kind: execution.OptionText, Label: "Base ref", DependsOn: &execution.OptionDependency{Option: "worktree", Value: execution.BoolValue(true)}},
+	}})
+	for _, want := range []string{"options  worktree=true baseRef=origin/main", "option worktree=true|false  New worktree (any model)", "option baseRef=TEXT  Base ref (any model, with worktree=true)"} {
 		if !strings.Contains(b.String(), want) {
 			t.Fatalf("missing %q:\n%s", want, b.String())
 		}

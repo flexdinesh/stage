@@ -31,9 +31,6 @@ type taskDetailJSON struct {
 	// CurrentHandoffs: what the current launch attempt appended, one per
 	// need (empty when none).
 	CurrentHandoffs []db.Handoff `json:"currentHandoffs"`
-	// CurrentLaunchBase: the worktree base the current launch attempt used
-	// (workspace.base predecessor; null when none).
-	CurrentLaunchBase *db.LaunchBase `json:"currentLaunchBase"`
 }
 
 // treeDetailJSON is db.TreeDetail with API task shapes.

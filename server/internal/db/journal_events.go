@@ -281,4 +281,3 @@ func recordHandoff(ctx context.Context, tx store.Tx, taskID int64, h Handoff) er
 	}
 	return tx.Attempts().RecordHandoff(ctx, taskID, h, sourceID)
 }
-

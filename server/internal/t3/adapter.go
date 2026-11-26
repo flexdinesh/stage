@@ -47,6 +47,7 @@ func ModelKey(provider, model string) string {
 	b, _ := json.Marshal([2]string{provider, model})
 	return string(b)
 }
+
 // threadConfig is the execution config a thread reports.
 func threadConfig(provider, model string, opts []execution.ModelOption, permission, mode string) execution.Config {
 	key := ""
@@ -69,7 +70,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	}
 	yes := execution.Availability{Available: true}
 	out := execution.Capabilities{Operations: map[execution.Op]execution.Availability{}, Models: []execution.Model{}}
-	for _, op := range []execution.Op{execution.OpLaunch, execution.OpStop, execution.OpAdopt, execution.OpOpening, execution.OpReply, execution.OpAttention, execution.OpImages, execution.OpPredecessorBase, execution.OpWorktreeBase} {
+	for _, op := range []execution.Op{execution.OpLaunch, execution.OpStop, execution.OpAdopt, execution.OpOpening, execution.OpReply, execution.OpAttention, execution.OpImages} {
 		out.Operations[op] = yes
 	}
 	for _, op := range []execution.Op{execution.OpRespond, execution.OpSend} {
@@ -81,9 +82,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	for _, mode := range []string{"default", "plan"} {
 		out.Modes = append(out.Modes, execution.Choice{ID: mode, Label: mode, Availability: yes})
 	}
-	for _, mode := range []string{"root", "worktree"} {
-		out.Workspaces = append(out.Workspaces, execution.Choice{ID: mode, Label: mode, Availability: yes})
-	}
+	out.Options = launchOptions()
 	for _, p := range c.Providers {
 		av := yes
 		if len(p.Constraints) > 0 {
@@ -119,10 +118,17 @@ func (a *Adapter) validate(ctx context.Context, in execution.Intent) error {
 	if err != nil {
 		return err
 	}
-	if !slices.ContainsFunc(c.Workspaces, func(w execution.Choice) bool { return w.ID == in.Workspace.Kind && w.Available }) {
-		return &execution.Rejected{Reason: "Workspace mode is unavailable. Choose a supported mode."}
+	launch, modelOpts := splitOptions(in.Config.Options)
+	if err := c.ValidateConfig(execution.Config{Options: launch}); err != nil {
+		return &execution.Rejected{Reason: err.Error()}
 	}
-	if in.Config.Model == "" && len(in.Config.Options) > 0 {
+	if err := validRefs(in.Config); err != nil {
+		return &execution.Rejected{Reason: err.Error()}
+	}
+	if _, err := workspaceStrategy(in.Config); err != nil {
+		return &execution.Rejected{Reason: err.Error()}
+	}
+	if in.Config.Model == "" && len(modelOpts) > 0 {
 		return &execution.Rejected{Reason: "Choose a model before setting model options."}
 	}
 	if in.Config.Model == "" && in.Config.Permission != "" && !slices.Contains([]string{"approval-required", "auto-accept-edits", "auto", "full-access"}, in.Config.Permission) {
@@ -140,7 +146,7 @@ func (a *Adapter) validate(ctx context.Context, in execution.Intent) error {
 		if in.Config.Permission != "" && !slices.ContainsFunc(c.PermissionsFor(m), func(p execution.Choice) bool { return p.ID == in.Config.Permission && p.Available }) {
 			return &execution.Rejected{Reason: "Selected permission mode is unavailable for this model. Choose a supported mode."}
 		}
-		for _, opt := range in.Config.Options {
+		for _, opt := range modelOpts {
 			if !slices.ContainsFunc(m.Options, func(o execution.Option) bool { return o.ID == opt.ID && slices.Contains(o.Values, opt.Value) }) {
 				return &execution.Rejected{Reason: "Model option " + opt.ID + " is unavailable. Choose a supported value."}
 			}
@@ -220,16 +226,6 @@ func (d ThreadDetail) Observation() execution.Observation {
 		case !old.RequestedAt.IsZero():
 			o.StartedAt = &old.RequestedAt
 		}
-	}
-	switch {
-	case o.Directory == "":
-		o.Base.Reason = "Session ran at project root."
-	case o.Branch == "":
-		o.Base.Reason = "Session has no branch."
-	case len(d.PullRequests) > 0 && !slices.ContainsFunc(d.PullRequests, func(p PullRequest) bool { return !strings.EqualFold(p.State, "merged") }):
-		o.Base.Reason = "The predecessor's pull requests are merged."
-	default:
-		o.Base.Available = true
 	}
 	return o
 }
@@ -429,10 +425,14 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, checkpoint ex
 		if e != nil {
 			return execution.Observation{}, &execution.Rejected{Reason: e.Error()}
 		}
-		model = &ModelSelection{InstanceID: provider, Model: name, Options: in.Config.Options}
+		_, modelOpts := splitOptions(in.Config.Options)
+		model = &ModelSelection{InstanceID: provider, Model: name, Options: modelOpts}
 	}
-	remote := in.Workspace.FromRemote
-	launch := LaunchInput{ProjectID: in.Project, Title: in.Title, Message: in.Prompt, ClientRequestID: in.RequestID, ModelSelection: model, RuntimeMode: RuntimeMode(in.Config.Permission), InteractionMode: InteractionMode(in.Config.Mode), Attachments: cp.Uploads, Workspace: &WorkspaceStrategy{Type: WorkspaceType(in.Workspace.Kind), BaseRef: in.Workspace.Base, Branch: in.Workspace.Branch, StartFromOrigin: &remote}}
+	strategy, e := workspaceStrategy(in.Config)
+	if e != nil {
+		return execution.Observation{}, &execution.Rejected{Reason: e.Error()}
+	}
+	launch := LaunchInput{ProjectID: in.Project, Title: in.Title, Message: in.Prompt, ClientRequestID: in.RequestID, ModelSelection: model, RuntimeMode: RuntimeMode(in.Config.Permission), InteractionMode: InteractionMode(in.Config.Mode), Attachments: cp.Uploads, Workspace: &strategy}
 	cp.Sent = true
 	if err = persist(); err != nil {
 		return execution.Observation{}, err

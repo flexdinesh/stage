@@ -31,7 +31,7 @@ func codexSetup(t *testing.T, p placement) (*db.Store, *codextest.Server, *coord
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 3, Title: "Fix", Prompt: "Fix it", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "gpt-test", Permission: "auto"}})
+	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 3, Title: "Fix", Prompt: "Fix it", ExecutionConfig: &execution.Config{Model: "gpt-test", Permission: "auto"}})
 	if err != nil {
 		t.Fatal(err)
 	}

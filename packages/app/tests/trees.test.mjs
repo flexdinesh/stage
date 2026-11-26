@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   bandState,
-  baseCandidates,
   byTreeGroup,
   closeBlocker,
   closedLabel,
@@ -260,19 +259,6 @@ test("empty trees have no member projects", () => {
     assert.deepEqual(treeProjects(tree), []);
     assert.equal(treeProjectLabel(tree), "No member projects");
   }
-});
-
-test("base candidates are the task's needs in its own project", () => {
-  const tree = {
-    tasks: [
-      { id: 1, projectId: 10 },
-      { id: 2, projectId: 20 },
-      { id: 3, projectId: 10 },
-      { id: 4, projectId: 10 },
-    ],
-  };
-  assert.deepEqual(baseCandidates({ needs: [3, 2, 1], projectId: 10 }, tree).map((t) => t.id), [1, 3]);
-  assert.deepEqual(baseCandidates({ needs: [], projectId: 10 }, tree), []);
 });
 
 test("node state reads readiness for backlog members", () => {
