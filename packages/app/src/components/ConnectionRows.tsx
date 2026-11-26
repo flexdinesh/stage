@@ -4,43 +4,17 @@
 // A disconnected connection stays a row (Reconnect, Forget) until it is forgotten or connected again.
 // A machine whose setup cannot run (offline, another API version) lists its connections on record, read-only.
 // Logic: lib/connectionRows.ts.
-import { useMemo, useState, type ReactNode } from "react";
-import { HarnessScopeProvider, LOCAL_SCOPE, type HarnessScope } from "../api/harnessScope.tsx";
-import {
-  useCodexStatus,
-  useDisconnectHarness,
-  useForgetConnection,
-  useHarnesses,
-  useHarnessStatus,
-  useOpenCodeStatus,
-  usePreferences,
-  useScopedHarnessDescriptors,
-  useT3Status,
-} from "../api/queries.ts";
+import { useState } from "react";
+import { useForgetConnection, useHarnesses, usePreferences, useScopedHarnessDescriptors } from "../api/queries.ts";
 import type { HarnessDescriptor, Machine } from "../api/types.ts";
+import { harnessSlots } from "../harnesses/index.ts";
 import { addConnectionOptions, addConnectionReason, connectShortcuts, connectionRows, machineLive, type ConnectionRowModel } from "../lib/connectionRows.ts";
-import { codexRowDetail, codexSummary, openCodeRowDetail, openCodeSummary, statusRead, t3RowDetail, t3Summary } from "../lib/connections.ts";
-import { shortDate } from "../lib/format.ts";
 import { forgetPrompt, usageText } from "../lib/harnesses.ts";
-import { machineScopeId } from "../lib/machines.ts";
-import { disconnectAvailability, t3DisconnectPrompt } from "../lib/onboarding.ts";
-import { CODEX_DISCONNECT_PROMPT, useDisconnectCodex } from "./CodexSetup.tsx";
-import { CLAUDE, CLAUDE_DISCONNECT_PROMPT, claudeChip, claudeRowDetail } from "../lib/claude.ts";
-import { ConnectionSetup } from "./HarnessConnections.tsx";
-import { IconStep } from "./icons.tsx";
-import { OPENCODE_DISCONNECT_PROMPT, useDisconnectOpenCode } from "./OpenCodeSetup.tsx";
-import { useDisconnectT3 } from "./T3Setup.tsx";
-import { Button, Chip, ConfirmInline, Drawer, Hint, Menu, MenuItem, Row, RowButton, RowList, useMenu, type ChipTone } from "./ui.tsx";
+import { ConnectionCapabilities } from "./ConnectionCapabilities.tsx";
+import { ConnectionRow, MachineScope } from "./ConnectionRow.tsx";
+import { Button, ConfirmInline, Drawer, Hint, Menu, MenuItem, RowList, useMenu } from "./ui.tsx";
 
-/** The harness scope of a machine: the local routes for the main machine, its worker's for a remote one. */
-export function MachineScope({ machine, children }: { machine: Pick<Machine, "id" | "kind" | "label">; children: ReactNode }) {
-  const { id, kind, label } = machine;
-  const scope = useMemo<HarnessScope>(() => {
-    const machineId = machineScopeId({ id, kind });
-    return machineId === null ? LOCAL_SCOPE : { machineId, label };
-  }, [id, kind, label]);
-  return <HarnessScopeProvider scope={scope}>{children}</HarnessScopeProvider>;
-}
+export { MachineScope } from "./ConnectionRow.tsx";
 
 /** A machine's rows and Add connection options; call inside its MachineScope. */
 export function useMachineConnections(machine: Machine) {
@@ -117,19 +91,8 @@ export function ConnectionRowList({ machine, connections, onManage }: { machine:
         const isDefault = r.id === defaultId;
         if (!connections.live || descriptor === undefined) return <RecordedRow key={r.id} machine={machine} row={r} isDefault={isDefault} />;
         if (r.disconnected) return <DisconnectedRow key={r.id} machine={machine} row={r} isDefault={isDefault} onManage={() => onManage({ descriptor, disconnected: r })} />;
-        const manage = () => onManage({ descriptor });
-        switch (r.harness) {
-          case "t3":
-            return <T3Row key={r.id} name={descriptor.name} machine={machine} onManage={manage} isDefault={isDefault} />;
-          case "opencode":
-            return <OpenCodeRow key={r.id} name={descriptor.name} machine={machine} onManage={manage} isDefault={isDefault} />;
-          case "codex":
-            return <CodexRow key={r.id} name={descriptor.name} machine={machine} onManage={manage} isDefault={isDefault} />;
-          case CLAUDE:
-            return <ClaudeRow key={r.id} name={descriptor.name} machine={machine} onManage={manage} isDefault={isDefault} />;
-          default:
-            return <GenericRow key={r.id} descriptor={descriptor} machine={machine} onManage={manage} isDefault={isDefault} />;
-        }
+        const { Row } = harnessSlots(r.harness);
+        return <Row key={r.id} descriptor={descriptor} machine={machine} onManage={() => onManage({ descriptor })} isDefault={isDefault} />;
       })}
     </RowList>
   );
@@ -137,266 +100,17 @@ export function ConnectionRowList({ machine, connections, onManage }: { machine:
 
 /** The Manage drawer: the harness's own setup panel(s) on the machine. */
 export function ManageDrawer({ machine, target, onClose }: { machine: Machine; target: ManageTarget; onClose: () => void }) {
+  const { Setup } = harnessSlots(target.descriptor.kind);
   return (
     <Drawer title={`${target.descriptor.name} on ${machine.label}`} onClose={onClose}>
       <MachineScope machine={machine}>
         <div className="flex flex-col gap-3.5">
-          <ConnectionSetup descriptor={target.descriptor} />
+          <Setup descriptor={target.descriptor} />
+          {target.disconnected === undefined ? <ConnectionCapabilities descriptor={target.descriptor} /> : null}
           {target.disconnected === undefined ? null : <ForgetDisconnected row={target.disconnected} name={target.descriptor.name} onForgotten={onClose} />}
         </div>
       </MachineScope>
     </Drawer>
-  );
-}
-
-// ---- Rows ----
-
-/** The row's confirmed secondary action: Disconnect, or Forget on a disconnected row. */
-interface Disconnect {
-  /** Button and confirm label; "Disconnect" when omitted. */
-  label?: string;
-  prompt: string;
-  busy: boolean;
-  error: unknown;
-  /** Disconnects; `done` closes the confirm once it succeeded. */
-  run: (done: () => void) => void;
-  reset: () => void;
-}
-
-/** One connection: name (and the default chip) and where, state chip, Manage and Disconnect (laptop) or a whole-row button (phone). */
-function ConnectionRow({
-  name,
-  machine,
-  detail,
-  chip,
-  onManage,
-  manageLabel = "Manage",
-  disconnect,
-  isDefault,
-}: {
-  name: string;
-  machine: Machine;
-  detail: string;
-  chip: { tone: ChipTone; label: string };
-  onManage?: () => void;
-  /** The primary button's label: Manage, or Reconnect on a disconnected row. */
-  manageLabel?: string;
-  /** null: the harness cannot disconnect from here. */
-  disconnect: Disconnect | null;
-  /** New tasks start on this connection (Preferences.defaultConnectionId). */
-  isDefault: boolean;
-}) {
-  const [confirm, setConfirm] = useState(false);
-  const action = disconnect?.label ?? "Disconnect";
-  const state = (
-    <Chip tone={chip.tone} dot className="shrink-0">
-      {chip.label}
-    </Chip>
-  );
-  const title = (
-    <span className="flex min-w-0 flex-1 items-baseline gap-x-2">
-      <span className="shrink-0 text-body font-medium text-fg">{name}</span>
-      {isDefault ? (
-        <Chip className="shrink-0 self-center" title="New tasks start on this connection">
-          default
-        </Chip>
-      ) : null}
-      <span className="min-w-0 truncate font-mono text-meta text-muted" title={detail}>
-        {detail}
-      </span>
-    </span>
-  );
-  return (
-    <Row bare>
-      {onManage === undefined ? (
-        <div className="flex min-h-11 items-center gap-3 py-1.5 pr-3 pl-[30px] md:min-h-control">
-          {title}
-          {state}
-          <Hint className="max-md:hidden">editable when {machine.label} is back</Hint>
-        </div>
-      ) : (
-        <>
-          <RowButton className="gap-3 pl-[30px] md:hidden" onClick={onManage} aria-label={`${manageLabel} ${name} on ${machine.label}`}>
-            {title}
-            {state}
-            <span className="text-muted">
-              <IconStep />
-            </span>
-          </RowButton>
-          <div className="flex items-center gap-3 py-1.5 pr-3 pl-[30px] max-md:hidden">
-            {title}
-            {state}
-            <div className="flex shrink-0 items-center gap-1.5">
-              <Button small onClick={onManage} aria-label={`${manageLabel} ${name} on ${machine.label}`}>
-                {manageLabel}
-              </Button>
-              {disconnect === null ? null : (
-                <Button
-                  small
-                  variant="ghost"
-                  disabled={confirm}
-                  aria-label={`${action} ${name} on ${machine.label}`}
-                  onClick={() => {
-                    disconnect.reset();
-                    setConfirm(true);
-                  }}
-                >
-                  {action}
-                </Button>
-              )}
-            </div>
-          </div>
-        </>
-      )}
-      {confirm && disconnect !== null ? (
-        <div className="pr-3 pb-2.5 pl-[30px] max-md:hidden">
-          <ConfirmInline danger confirmLabel={action} busy={disconnect.busy} error={disconnect.error} onConfirm={() => disconnect.run(() => setConfirm(false))} onCancel={() => setConfirm(false)}>
-            {disconnect.prompt}
-          </ConfirmInline>
-        </div>
-      ) : null}
-    </Row>
-  );
-}
-
-function T3Row({ name, machine, onManage, isDefault }: { name: string; machine: Machine; onManage: () => void; isDefault: boolean }) {
-  const query = useT3Status();
-  const read = statusRead(query);
-  const summary = t3Summary(read);
-  const disconnect = useDisconnectT3();
-  const s = read.data;
-  return (
-    <ConnectionRow
-      name={name}
-      machine={machine}
-      detail={s === undefined ? (read.error ?? "") : t3RowDetail(s)}
-      chip={{ tone: summary.tone, label: summary.state }}
-      onManage={onManage}
-      isDefault={isDefault}
-      disconnect={
-        s === undefined || disconnectAvailability(s) === "hidden"
-          ? null
-          : {
-              prompt: t3DisconnectPrompt(s, shortDate),
-              busy: disconnect.isPending,
-              error: disconnect.error,
-              run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
-              reset: disconnect.reset,
-            }
-      }
-    />
-  );
-}
-
-function OpenCodeRow({ name, machine, onManage, isDefault }: { name: string; machine: Machine; onManage: () => void; isDefault: boolean }) {
-  const query = useOpenCodeStatus();
-  const read = statusRead(query);
-  const summary = openCodeSummary(read);
-  const disconnect = useDisconnectOpenCode();
-  const s = read.data;
-  return (
-    <ConnectionRow
-      name={name}
-      machine={machine}
-      detail={s === undefined ? (read.error ?? "") : openCodeRowDetail(s)}
-      chip={{ tone: summary.tone, label: summary.state }}
-      onManage={onManage}
-      isDefault={isDefault}
-      disconnect={
-        s === undefined || s.state === "unconfigured"
-          ? null
-          : {
-              prompt: OPENCODE_DISCONNECT_PROMPT,
-              busy: disconnect.isPending,
-              error: disconnect.error,
-              run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
-              reset: disconnect.reset,
-            }
-      }
-    />
-  );
-}
-
-function CodexRow({ name, machine, onManage, isDefault }: { name: string; machine: Machine; onManage: () => void; isDefault: boolean }) {
-  const read = statusRead(useCodexStatus());
-  const summary = codexSummary(read);
-  const disconnect = useDisconnectCodex();
-  const s = read.data;
-  return (
-    <ConnectionRow
-      name={name}
-      machine={machine}
-      detail={s === undefined ? (read.error ?? "") : codexRowDetail(s)}
-      chip={{ tone: summary.tone, label: summary.state }}
-      onManage={onManage}
-      isDefault={isDefault}
-      disconnect={
-        s === undefined || !s.configured
-          ? null
-          : {
-              prompt: CODEX_DISCONNECT_PROMPT,
-              busy: disconnect.isPending,
-              error: disconnect.error,
-              run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
-              reset: disconnect.reset,
-            }
-      }
-    />
-  );
-}
-
-function ClaudeRow({ name, machine, onManage, isDefault }: { name: string; machine: Machine; onManage: () => void; isDefault: boolean }) {
-  const status = useHarnessStatus(CLAUDE);
-  const disconnect = useDisconnectHarness(CLAUDE);
-  const s = status.data;
-  return (
-    <ConnectionRow
-      name={name}
-      machine={machine}
-      detail={s === undefined ? (status.error?.message ?? "") : claudeRowDetail(s)}
-      chip={s === undefined ? { tone: "idle", label: "checking" } : claudeChip(s)}
-      onManage={onManage}
-      isDefault={isDefault}
-      disconnect={
-        s === undefined || !s.configured
-          ? null
-          : {
-              prompt: CLAUDE_DISCONNECT_PROMPT,
-              busy: disconnect.isPending,
-              error: disconnect.error,
-              run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
-              reset: disconnect.reset,
-            }
-      }
-    />
-  );
-}
-
-function GenericRow({ descriptor, machine, onManage, isDefault }: { descriptor: HarnessDescriptor; machine: Machine; onManage: () => void; isDefault: boolean }) {
-  const status = useHarnessStatus(descriptor.kind);
-  const disconnect = useDisconnectHarness(descriptor.kind);
-  const s = status.data;
-  const tone: ChipTone = s === undefined ? "idle" : s.connected ? "ok" : s.configured ? "bad" : "idle";
-  return (
-    <ConnectionRow
-      name={descriptor.name}
-      machine={machine}
-      detail={s === undefined ? (status.error?.message ?? "") : (s.reason ?? s.lastError ?? "")}
-      chip={{ tone, label: s?.state ?? "checking" }}
-      onManage={onManage}
-      isDefault={isDefault}
-      disconnect={
-        s === undefined || !descriptor.setup.disconnect || !s.configured
-          ? null
-          : {
-              prompt: `Disconnect ${descriptor.name}? Tasks and history stay. You can connect again any time. It stays listed as disconnected until you forget it.`,
-              busy: disconnect.isPending,
-              error: disconnect.error,
-              run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
-              reset: disconnect.reset,
-            }
-      }
-    />
   );
 }
 

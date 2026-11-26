@@ -62,79 +62,6 @@ export interface Health {
   harnesses: { kind: Harness; connectionId: number; configured: boolean; connected: boolean; lastError: string | null }[];
 }
 
-// ---- T3 connection / sync ----
-
-/** Precedence: unreachable > unpaired > expired > rejected > connected. */
-export type T3State = "unreachable" | "unpaired" | "expired" | "rejected" | "connected";
-
-/** Where the T3 URL comes from: saved in Settings, or the default. */
-export type T3UrlSource = "settings" | "default";
-
-/** Why the server cannot pair through the local t3 CLI. */
-export type AutoPairReason = "not_local" | "cli_not_found" | "fake";
-
-/** The T3 server that answered the last probe. */
-export interface T3Identity {
-  environmentId: string;
-  label: string;
-  serverVersion: string;
-}
-
-/** Background full sync; counts tick while it runs. */
-export interface T3SyncProgress {
-  running: boolean;
-  startedAt: string | null;
-  projects: number;
-  threads: number;
-}
-
-/** The details of GET /api/harnesses/t3/status (also of its settings, actions and disconnect replies). */
-export interface T3Status {
-  /** Holds a valid token (unchanged meaning). */
-  connected: boolean;
-  state: T3State;
-  t3Url: string;
-  /** The saved Browser URL, else the T3 URL. */
-  publicUrl: string;
-  t3UrlSource: T3UrlSource;
-  environmentId: string | null;
-  clientId: string | null;
-  tokenExpiresAt: string | null;
-  /** An admin token is saved in Settings (Stage renews its token itself). */
-  adminTokenConfigured: boolean;
-  lastError: string | null;
-  lastFullSyncAt: string | null;
-  /** Last probe of the T3 URL answered. */
-  reachable: boolean;
-  checkedAt: string | null;
-  probeError: string | null;
-  t3: T3Identity | null;
-  autoPair: { available: boolean; reason: AutoPairReason | null };
-  sync: T3SyncProgress;
-  /** Pair and auto-pair only: the previous T3 connection this pairing replaced. */
-  replaced?: ReplacedConnection | null;
-}
-
-/** T3Status as an older server may send it: fields added with onboarding can be missing. */
-export type T3StatusWire = Omit<
-  T3Status,
-  "state" | "t3UrlSource" | "reachable" | "checkedAt" | "probeError" | "t3" | "autoPair" | "sync"
-> &
-  Partial<Pick<T3Status, "state" | "t3UrlSource" | "reachable" | "checkedAt" | "probeError" | "t3" | "autoPair" | "sync">>;
-
-/** PUT T3 settings: at least one field; a string sets it, null clears it (url: the default, publicUrl: the T3 URL, adminToken: none). */
-export interface T3SettingsRequest {
-  url?: string | null;
-  /** Browser URL for Open in T3 links. */
-  publicUrl?: string | null;
-  /** Lets Stage renew its token itself. */
-  adminToken?: string | null;
-}
-
-export interface PairRequest {
-  code: string;
-}
-
 export interface SyncResult {
   unavailableConnections?: number[];
   projects: number;
@@ -235,7 +162,7 @@ export interface LaunchRecovery {attempt:number; revision:number; phase:string; 
 export interface LaunchSession extends SessionRef { title: string; state: string; links?: ExecutionLinks }
 /** Session destinations; `command` resumes it in the harness's own client (copy, never run). */
 export interface ExecutionLinks { web?: string; native?: string; app?: string; service?: string; command?: string }
-/** A harness kind ("t3", "opencode", ...): the server's registry (GET /harnesses) says which exist. */
+/** A harness kind: the server's registry (GET /harnesses) says which exist. */
 export type Harness = string;
 /** A closure signal the harness reports and the copy that names it (an inferred completion's provenance). */
 export interface HarnessClosure { signal: string; provenance: Acceptance["provenance"]; setting: string; completed: string; via: string }
@@ -361,54 +288,8 @@ export interface HarnessConnection {
   /** The model and options new tasks here start with (permission and mode empty); null = the harness default. */
   newTaskConfig: ExecutionConfig | null;
 }
-/** The T3 connection a pairing replaced. */
+/** The connection a pairing replaced. */
 export interface ReplacedConnection { id: number; label: string; tasks: number; bindings: number }
-export interface OpenCodeStatus {
-  connectionId: number;
-  endpoint: string;
-  browserEndpoint: string;
-  webClient: string;
-  hasCredentials: boolean;
-  /** `rejected`: OpenCode answered but refused Stage's sign-in (pairing expired or password changed). */
-  state: "unconfigured" | "connected" | "unavailable" | "rejected";
-  reason?: string;
-  checkedAt?: string;
-  /** How Stage signs in: the local service's own password, a pairing session, Basic credentials, or none. */
-  auth: OpenCodeAuth;
-  /** Pairing session expiry (RFC3339); paired only. */
-  expiresAt?: string;
-  /** The OpenCode service discovered on the Stage server's machine (one-click Connect). */
-  local: OpenCodeLocal;
-}
-/** Status as sent; servers before OpenCode pairing omit `auth` and `local` (see normalizeOpenCodeStatus). */
-export type OpenCodeStatusWire = Omit<OpenCodeStatus, "auth" | "local"> & Partial<Pick<OpenCodeStatus, "auth" | "local">>;
-export type OpenCodeAuth = "none" | "local" | "paired" | "basic";
-export interface OpenCodeLocal {
-  available: boolean;
-  url: string;
-  version: string;
-  reason: "" | "missing" | "invalid" | "unreachable";
-}
-/** Codex's harness state words (HarnessStatus.state). */
-export type CodexState = "connected" | "not_connected" | "signed_out" | "unreachable" | "not_installed";
-/** How the Codex CLI is signed in. */
-export interface CodexAccount { type: "chatgpt" | "apiKey" | "amazonBedrock" | "gcp"; email: string | null; plan: string | null }
-/** Codex's own status details (only its panel and summaries read them). */
-export interface CodexDetails {
-  /** The configured CLI path; "" uses codex on PATH. */
-  binary: string;
-  /** "" when unknown. */
-  cliVersion: string;
-  appServerVersion: string;
-  codexHome: string;
-  daemon: "running" | "stopped" | "unknown";
-  account: CodexAccount | null;
-  /** A shell command that fixes the current problem ("codex login"); "" none. */
-  fix: string;
-  checkedAt: string | null;
-}
-/** Codex's harness status with its details parsed (lib/codex.ts); null details: missing or malformed. */
-export type CodexStatus = Omit<HarnessStatus, "details"> & { details: CodexDetails | null };
 export interface HarnessChoice {id: string; label: string; available: boolean; reason?: string}
 /** How a launch option takes its value: one of `values`, true or false, or a string the harness validates. */
 export type HarnessOptionKind = "choice" | "boolean" | "text";
@@ -586,6 +467,8 @@ export interface TaskDetail extends Task {
   finalReply?: { text: string; truncated: boolean; updatedAt: string; runId: string };
   /** The current session's usage, when its harness reports one. */
   usage?: Usage;
+  /** Where the current session's harness says it works; absent when it reports neither. */
+  reported?: { branch?: string; directory?: string };
   acceptances: Acceptance[];
   events: TaskEvent[];
   /** The task's tree; null outside one. */

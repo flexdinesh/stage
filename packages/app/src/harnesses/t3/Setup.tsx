@@ -1,26 +1,27 @@
-// T3 onboarding: the setup screen that is the Dashboard until the first full
-// sync, the Dashboard alert for later trouble, and the pairing, settings and
-// disconnect controls Settings shares. Logic lives in lib/onboarding.ts.
+// T3 setup (Settings > Connections, in the Manage drawer): pairing, settings and
+// disconnect, and the status card once paired. Logic lives in onboarding.ts.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { invalidateConnectionChange, keys, useT3Status } from "../api/queries.ts";
-import type { ReplacedConnection, T3SettingsRequest, T3Status } from "../api/types.ts";
-import { replacedNotice } from "../lib/harnesses.ts";
-import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
-import { T3_STATE_TONE, codeReason, dashboardAlert, disconnectAvailability, primaryAction, savedBrowserUrl, setupSteps, t3Configured, t3DisconnectPrompt, t3Identity, t3SettingsChanges } from "../lib/onboarding.ts";
-import { useHarnessApi, useScopedKey, useSetupCopy } from "../api/harnessScope.tsx";
-import { useApi } from "../platform/context.tsx";
-import { AutoCompleteToggle } from "./Completion.tsx";
-import { NewTaskDefaults } from "./NewTaskDefaults.tsx";
-import { Step, Steps } from "./Steps.tsx";
-import { Alert, Button, ConfirmInline, Chip, Detail, Details, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, QueryState, CommandBox } from "./ui.tsx";
+import { invalidateConnectionChange } from "../../api/queries.ts";
+import type { ReplacedConnection } from "../../api/types.ts";
+import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
+import { useHarnessApi, useScopedKey, useSetupCopy } from "../../api/harnessScope.tsx";
+import { useApi } from "../../platform/context.tsx";
+import { AutoCompleteToggle } from "../../components/Completion.tsx";
+import { NewTaskDefaults } from "../../components/NewTaskDefaults.tsx";
+import { Step, Steps } from "../../components/Steps.tsx";
+import { Alert, Button, ConfirmInline, Chip, Detail, Details, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, QueryState, CommandBox } from "../../components/ui.tsx";
+import { T3_KIND, t3Api } from "./api.ts";
+import { T3_STATE_TONE, codeReason, disconnectAvailability, primaryAction, replacedNotice, savedBrowserUrl, setupSteps, t3Configured, t3DisconnectPrompt, t3Identity, t3SettingsChanges } from "./onboarding.ts";
+import { T3_STATUS_KEY, useT3Status } from "./queries.ts";
+import type { T3SettingsRequest, T3Status } from "./types.ts";
 
 /** Pair, auto-pair and set-URL answer with the new status: show it at once (and whether T3 now counts as configured). */
 function useSetStatus(): (s: T3Status) => void {
   const qc = useQueryClient();
   const scoped = useScopedKey();
   return (s) => {
-    qc.setQueryData(scoped(keys.t3Status), s);
+    qc.setQueryData(scoped(T3_STATUS_KEY), s);
     void invalidateConnectionChange(qc, scoped);
   };
 }
@@ -28,12 +29,12 @@ function useSetStatus(): (s: T3Status) => void {
 /** Re-reads the status; the server probes T3 again when its last probe is stale. */
 function useRetry() {
   const qc = useQueryClient();
-  const key = useScopedKey()(keys.t3Status);
+  const key = useScopedKey()(T3_STATUS_KEY);
   return useMutation({ mutationFn: () => qc.refetchQueries({ queryKey: key, exact: true }, { throwOnError: true }) });
 }
 
 function CodeForm({ primary, onPaired }: { primary: boolean; onPaired?: (s: T3Status) => void }) {
-  const api = useHarnessApi();
+  const api = t3Api(useHarnessApi());
   const setStatus = useSetStatus();
   const [code, setCode] = useState("");
   const pair = useMutation({
@@ -80,7 +81,7 @@ function CodeForm({ primary, onPaired }: { primary: boolean; onPaired?: (s: T3St
  * while connected).
  */
 export function PairActions({ status, primary = true }: { status: T3Status; primary?: boolean }) {
-  const api = useHarnessApi();
+  const api = t3Api(useHarnessApi());
   const copy = useSetupCopy();
   const setStatus = useSetStatus();
   const [showCode, setShowCode] = useState(false);
@@ -137,13 +138,13 @@ type SettingsSave = { which: "save" | "resetUrl" | "clearToken"; body: T3Setting
  * only the fields that changed.
  */
 export function T3SettingsForm({ status, urlOnly = false }: { status: T3Status; urlOnly?: boolean }) {
-  const api = useHarnessApi();
+  const api = t3Api(useHarnessApi());
   const setStatus = useSetStatus();
   const [url, setUrl] = useState(status.t3Url);
   const [browser, setBrowser] = useState(savedBrowserUrl(status));
   const [token, setToken] = useState("");
   const save = useMutation({
-    mutationFn: (v: SettingsSave) => api.saveT3Settings(v.body),
+    mutationFn: (v: SettingsSave) => api.saveSettings(v.body),
     onSuccess: (s) => {
       setUrl(s.t3Url);
       setBrowser(savedBrowserUrl(s));
@@ -263,10 +264,10 @@ export function DisconnectT3({ status }: { status: T3Status }) {
 
 /** Disconnects T3 on the harness scope's machine and shows the new status at once. */
 export function useDisconnectT3(onDone?: () => void) {
-  const api = useHarnessApi();
+  const api = t3Api(useHarnessApi());
   const setStatus = useSetStatus();
   return useMutation({
-    mutationFn: api.disconnectT3,
+    mutationFn: api.disconnect,
     onSuccess: (s) => {
       onDone?.();
       setStatus(s);
@@ -280,7 +281,7 @@ function SyncNow() {
   const sync = useMutation({
     mutationFn: api.sync,
     // The status refetch sees the first sync land and refreshes the views it fills.
-    onSettled: () => qc.invalidateQueries({ queryKey: keys.t3Status }),
+    onSettled: () => qc.invalidateQueries({ queryKey: T3_STATUS_KEY }),
   });
   return (
     <div className="flex flex-col gap-3">
@@ -361,66 +362,9 @@ export function T3SetupPanel({ status }: { status: T3Status }) {
   );
 }
 
-/** Trouble after the first sync: an Alert above the Dashboard with the same fix inline. */
-export function T3Alert({ status }: { status: T3Status | undefined }) {
-  const api = useHarnessApi();
-  const setStatus = useSetStatus();
-  const retry = useRetry();
-  const auto = useMutation({ mutationFn: api.autoPair, onSuccess: setStatus });
-  const [open, setOpen] = useState(false);
-  const alert = dashboardAlert(status);
-  if (alert === null || status === undefined) return null;
-  const action = primaryAction(status);
-  const toggle = (label: string) => (
-    <Button small variant="ghost" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-      {open ? "Hide" : label}
-    </Button>
-  );
-  const actions =
-    action === "retry" ? (
-      <>
-        <Button small busy={retry.isPending} onClick={() => retry.mutate()}>
-          Retry
-        </Button>
-        {toggle("Show fix")}
-      </>
-    ) : action === "autoPair" ? (
-      <>
-        <Button small busy={auto.isPending} onClick={() => auto.mutate()}>
-          Pair with T3
-        </Button>
-        {toggle("Use a pairing code")}
-      </>
-    ) : (
-      toggle("Pair with a code")
-    );
-  const fixOpen = open || auto.isError;
-  return (
-    <div className="mb-3.5 flex flex-col gap-2">
-      <Alert tone={alert.tone} actions={actions}>
-        {alert.message}
-      </Alert>
-      <ErrorText error={retry.error ?? auto.error} />
-      {fixOpen ? (
-        <Panel>
-          <div className="max-w-[640px]">
-            {action === "retry" ? (
-              <ReachFix status={status} retry={null} />
-            ) : action === "autoPair" ? (
-              <CodeForm primary />
-            ) : (
-              <PairActions status={status} />
-            )}
-          </div>
-        </Panel>
-      ) : null}
-    </div>
-  );
-}
-
 const when = (iso: string | null) => (iso === null ? "-" : `${dateTime(iso)} (${relativeTime(iso)})`);
 
-/** The T3 setup panel in Settings (registered for kind t3 in HarnessConnections); the status card once T3 is set up. */
+/** The T3 setup panel in Settings (its registry entry's Setup); the status card once T3 is set up. */
 export function T3ConnectionPanel() {
   const status = useT3Status();
   return (
@@ -428,7 +372,7 @@ export function T3ConnectionPanel() {
       {status.data === undefined ? null : (
         <>
           {t3Configured(status.data) ? <StatusCard status={status.data} /> : null}
-          <NewTaskDefaults harness="t3" />
+          <NewTaskDefaults harness={T3_KIND} />
           <PairCard status={status.data} />
         </>
       )}
@@ -462,7 +406,7 @@ function StatusCard({ status }: { status: T3Status }) {
             {status.lastError === null ? "-" : <InlineError>{status.lastError}</InlineError>}
           </Detail>
         </Details>
-        <AutoCompleteToggle harness="t3" className="border-t border-line pt-2" />
+        <AutoCompleteToggle harness={T3_KIND} className="border-t border-line pt-2" />
         <DisconnectT3 status={status} />
       </div>
     </Panel>

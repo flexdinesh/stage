@@ -1,9 +1,8 @@
 // Harness connections: one per harness instance, at most one active per harness kind. Ids are not fixed: name and
 // branch by `harness`, never by id. Names, closure copy and availability come from the server's harness descriptors
 // (GET /harnesses), never from a list here. Retired connections keep their tasks and bindings as read-only history.
-import { ApiError } from "../api/client.ts";
 import type { ExecutionLinks } from "../platform/index.ts";
-import type { ExternalProject, Harness, HarnessConnection, HarnessDescriptor, Project, ProjectBinding, ReplacedConnection, Task } from "../api/types.ts";
+import type { ExternalProject, Harness, HarnessConnection, HarnessDescriptor, Project, ProjectBinding, Task } from "../api/types.ts";
 
 /** Lookups over GET /connections (every row, active first) and GET /harnesses (descriptors). */
 export interface Harnesses {
@@ -145,31 +144,6 @@ export const usageText = (c: Pick<HarnessConnection, "tasks" | "bindings">) =>
 
 export function forgetPrompt(c: Pick<HarnessConnection, "label">): string {
   return `Forget ${c.label || "this connection"}? Its tasks keep their history and stay read-only. Its project bindings stop asking for repair, and pairing this instance again starts a new connection.`;
-}
-
-/** After a pairing replaced the previous T3 connection. */
-export function replacedNotice(r: ReplacedConnection): string {
-  return `Paired. T3${quoted(r.label)} was replaced; its ${count(r.tasks, "task")} stay read-only. Bind projects to continue.`;
-}
-
-/** Saving OpenCode settings hit a different service (instance_changed) or a replaced one returning (instance_returned): the user confirms before it replaces the current one. */
-export const isInstanceChanged = (err: unknown) =>
-  err instanceof ApiError && err.status === 409 && (err.code === "instance_changed" || err.code === "instance_returned");
-
-/** The address serves a replaced OpenCode service: confirming revives its connection. */
-export const isInstanceReturned = (err: unknown) => err instanceof ApiError && err.status === 409 && err.code === "instance_returned";
-
-/** Confirm before reconnecting a replaced OpenCode service (save answered 409 instance_returned). */
-export function returnedServicePrompt(address: string, old: Pick<HarnessConnection, "label"> | undefined): string {
-  const who = old === undefined || old.label === "" ? "the current service" : old.label;
-  return `${address} is the OpenCode service Stage used before. Connect it again? Its tasks and project bindings come back, and ${who} becomes read-only.`;
-}
-
-/** Confirm before connecting a different OpenCode service (save answered 409 instance_changed). */
-export function newServicePrompt(address: string, old: Pick<HarnessConnection, "label" | "tasks"> | undefined): string {
-  const who = old === undefined || old.label === "" ? "The current service" : old.label;
-  const tasks = old === undefined ? "its tasks keep" : `its ${count(old.tasks, "task")} ${old.tasks === 1 ? "keeps its" : "keep their"}`;
-  return `${address} is a different OpenCode service. Connect it as a new service? ${who} becomes read-only: ${tasks} last state and its project bindings need rebinding.`;
 }
 
 /** Projects list chip: current (active-connection) bindings only; replaced ones never ask for repair. */

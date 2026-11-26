@@ -1,4 +1,4 @@
-// Generic harness connection setup forms (components/HarnessConnections.tsx):
+// Generic harness connection setup forms (harnesses/generic.tsx):
 // form values from a setup schema and the request bodies they send.
 import type { HarnessStatus, SetupField } from "../api/types.ts";
 

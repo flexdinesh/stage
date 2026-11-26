@@ -1,7 +1,10 @@
-// Codex connection status (components/CodexSetup.tsx, its Settings row and status slot): the generic harness status
+// Codex connection status (Setup.tsx, its Settings row and status reader): the generic harness status
 // with Codex's details read structurally, so a malformed or missing details object reads as none instead of
 // breaking the panel. Absent strings read as "" and absent nullable fields as null (the server may omit empties).
-import type { CodexAccount, CodexDetails, CodexState, CodexStatus, HarnessStatus } from "../api/types.ts";
+import type { HarnessStatus } from "../../api/types.ts";
+import type { CodexAccount, CodexDetails, CodexState, CodexStatus } from "./types.ts";
+
+export const CODEX_KIND = "codex";
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 

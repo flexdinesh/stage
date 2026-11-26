@@ -6,15 +6,10 @@ import {
   bindingsSummary,
   forgetPrompt,
   harnessLookup,
-  isInstanceChanged,
   isDisconnected,
-  isInstanceReturned,
   isRetired,
-  newServicePrompt,
-  returnedServicePrompt,
   previousConnections,
   rebindCandidate,
-  replacedNotice,
   replacedPaths,
   retiredNotice,
   sessionLinks,
@@ -24,6 +19,9 @@ import {
   usageText,
 } from "../src/lib/harnesses.ts";
 import { canStart, canStop } from "../src/lib/tasks.ts";
+import { openCodeApi } from "../src/harnesses/opencode/api.ts";
+import { isInstanceChanged, isInstanceReturned, newServicePrompt, returnedServicePrompt } from "../src/harnesses/opencode/opencode.ts";
+import { replacedNotice } from "../src/harnesses/t3/onboarding.ts";
 import { fakeApi } from "./fake-transport.mjs";
 
 const connection = (id, harness, extra = {}) => ({
@@ -250,13 +248,13 @@ test("OpenCode instance_changed is confirmed, then the same body is resent with 
     const body = JSON.parse(init.body);
     bodies.push(body);
     if (body.newInstance !== true) return Response.json({ error: "another OpenCode service", code: "instance_changed" }, { status: 409 });
-    return new Response(null, { status: 204 });
+    return Response.json({});
   });
   const settings = { endpoint: "http://new:4096" };
-  const err = await api.saveOpenCode(settings).then(() => null, (e) => e);
+  const err = await openCodeApi(api).save(settings).then(() => null, (e) => e);
   assert.ok(err instanceof ApiError);
   assert.equal(isInstanceChanged(err), true);
-  await api.saveOpenCode({ ...settings, newInstance: true });
+  await openCodeApi(api).save({ ...settings, newInstance: true });
   assert.deepEqual(bodies, [{ endpoint: "http://new:4096" }, { endpoint: "http://new:4096", newInstance: true }]);
   assert.equal(isInstanceChanged(new ApiError(409, "x", "connection_retired")), false);
   assert.equal(isInstanceChanged(new Error("x")), false);

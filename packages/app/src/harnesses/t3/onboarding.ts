@@ -1,5 +1,6 @@
 // T3 connection status and recovery actions. Planning remains available offline.
-import type { AutoPairReason, T3SettingsRequest, T3State, T3Status } from "../api/types.ts";
+import type { ReplacedConnection } from "../../api/types.ts";
+import type { AutoPairReason, T3SettingsRequest, T3State, T3Status } from "./types.ts";
 
 /** True once, when a refetch sees the first full sync land: work, projects and catalog refresh then. */
 export function firstSyncLanded(prev: T3Status | undefined, next: T3Status): boolean {
@@ -152,24 +153,9 @@ export function codeReason(reason: AutoPairReason | null): string {
   }
 }
 
-export interface DashboardAlert {
-  tone: "need" | "bad";
-  message: string;
-}
+const quoted = (label: string) => (label === "" ? "" : ` '${label}'`);
 
-/** Connection trouble is an Alert; planning never depends on pairing or sync. */
-export function dashboardAlert(s: T3Status | undefined): DashboardAlert | null {
-  if (s === undefined) return null;
-  switch (s.state) {
-    case "connected":
-      return null;
-    case "unreachable":
-      return { tone: "bad", message: `No T3 server answered at ${s.t3Url}.` };
-    case "unpaired":
-      return { tone: "need", message: "stage is not paired with T3. Pair to keep threads in sync." };
-    case "expired":
-      return { tone: "need", message: "The T3 pairing expired. Pair again to keep threads in sync." };
-    case "rejected":
-      return { tone: "bad", message: "T3 rejected stage's pairing. Pair again to keep threads in sync." };
-  }
+/** After a pairing replaced the previous T3 connection. */
+export function replacedNotice(r: ReplacedConnection): string {
+  return `Paired. T3${quoted(r.label)} was replaced; its ${plural(r.tasks, "task")} stay read-only. Bind projects to continue.`;
 }

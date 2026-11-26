@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { newTaskConnection, optionsFor, prefillConfig } from "../src/lib/capabilities.ts";
+import { OPERATION_LABELS, capabilityLines, launchParts, newTaskConnection, optionsFor, prefillConfig } from "../src/lib/capabilities.ts";
 
 test("options are the harness-wide ones, then the model's own", () => {
   const sandbox = { id: "sandbox", values: ["read-only", "workspace"] };
@@ -38,4 +38,47 @@ test("new-task connection: default, else the only binding, else the first availa
     ["default on a replaced binding", [b(1, "available", false), b(3)], 1, 3],
   ];
   for (const [name, bindings, def, want] of cases) assert.equal(newTaskConnection(bindings, def, machineOf), want, name);
+});
+
+test("capability lines: declared operations in Stage's order and words, with the harness's reason when unavailable", () => {
+  const lines = capabilityLines({
+    send: { available: false, reason: "Sessions take follow-ups in their own client." },
+    launch: { available: true },
+    images: { available: false },
+    stop: { available: true, reason: "ignored while available" },
+  });
+  assert.deepEqual(lines, [
+    { op: "launch", label: OPERATION_LABELS.launch, available: true, reason: null },
+    { op: "stop", label: OPERATION_LABELS.stop, available: true, reason: null },
+    { op: "images", label: OPERATION_LABELS.images, available: false, reason: null },
+    { op: "send", label: OPERATION_LABELS.send, available: false, reason: "Sessions take follow-ups in their own client." },
+  ]);
+  assert.deepEqual(capabilityLines({}), []);
+});
+
+test("launch parts: the model, non-default options in declared order, permission and mode, in the harness's labels", () => {
+  const caps = {
+    models: [{ id: "m1", label: "Model One", available: true, options: [{ id: "effort", label: "Reasoning effort", kind: "choice", values: ["low", "high"], default: "low" }] }],
+    options: [{ id: "fast", label: "Fast mode", kind: "boolean", values: [true, false], default: false }],
+    permissions: [{ id: "full", label: "Full access", available: true }],
+    modes: [{ id: "plan", label: "Plan", available: true }],
+    modeLabel: "Agent mode",
+  };
+  const config = { model: "m1", options: [{ id: "effort", value: "high" }, { id: "fast", value: true }, { id: "extra", value: "x" }], permission: "full", mode: "plan" };
+  assert.deepEqual(launchParts(config, caps), [
+    { label: "Model", value: "Model One" },
+    { label: "Fast mode", value: "on" },
+    { label: "Reasoning effort", value: "high" },
+    { label: "extra", value: "x" },
+    { label: "Permission", value: "Full access" },
+    { label: "Agent mode", value: "Plan" },
+  ]);
+  const defaults = { model: "m1", options: [{ id: "effort", value: "low" }, { id: "fast", value: false }], permission: "", mode: "" };
+  assert.deepEqual(launchParts(defaults, caps), [{ label: "Model", value: "Model One" }], "options at their default drop out");
+  assert.deepEqual(launchParts({ model: "", options: [], permission: "", mode: "" }, caps), []);
+  assert.deepEqual(launchParts(null, caps), []);
+  assert.deepEqual(launchParts({ model: "gone", options: [], permission: "auto", mode: "" }, undefined), [
+    { label: "Model", value: "gone" },
+    { label: "Permission", value: "auto" },
+  ], "without capabilities: the saved ids");
 });

@@ -1,16 +1,16 @@
 // Claude Code connection card (Settings > Connections, Manage drawer) and its Settings row. Stage runs tasks as
 // Claude background sessions with Claude's own login: the card checks the claude command and its login (Connect),
 // shows which Claude it uses, takes the Claude command, and disconnects. Status is the generic
-// GET /harnesses/claude/status (shared cache with the status button). Logic: lib/claude.ts.
+// GET /harnesses/claude/status (shared cache with the status button). Logic: claude.ts.
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { useHarnessApi, useSetupCopy } from "../api/harnessScope.tsx";
-import { useApplyHarnessStatus, useDisconnectHarness, useHarnessStatus, useHarnesses } from "../api/queries.ts";
-import type { HarnessStatus } from "../api/types.ts";
-import { CLAUDE, CLAUDE_DISCONNECT_PROMPT, approvalsText, claudeChip, claudeDetails, claudeFix, commandText, configText, updatesText, versionText, type ClaudeEvents } from "../lib/claude.ts";
-import { AutoCompleteToggle } from "./Completion.tsx";
-import { NewTaskDefaults } from "./NewTaskDefaults.tsx";
-import { Alert, Button, Chip, CommandBox, ConfirmInline, ErrorText, Field, Hint, Input, Muted, Panel, QueryState } from "./ui.tsx";
+import { useHarnessApi, useSetupCopy } from "../../api/harnessScope.tsx";
+import { useApplyHarnessStatus, useDisconnectHarness, useHarnessStatus, useHarnesses } from "../../api/queries.ts";
+import type { HarnessStatus } from "../../api/types.ts";
+import { AutoCompleteToggle } from "../../components/Completion.tsx";
+import { NewTaskDefaults } from "../../components/NewTaskDefaults.tsx";
+import { Alert, Button, Chip, CommandBox, ConfirmInline, ErrorText, Field, Hint, Input, Muted, Panel, QueryState } from "../../components/ui.tsx";
+import { CLAUDE, CLAUDE_DISCONNECT_PROMPT, approvalsText, claudeChip, claudeDetails, claudeFix, commandText, configText, updatesText, versionText, type ClaudeEvents } from "./claude.ts";
 
 export function ClaudeSetup() {
   const status = useHarnessStatus(CLAUDE);

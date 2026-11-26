@@ -1498,3 +1498,48 @@ func TestNotificationGroups(t *testing.T) {
 		e.must("GET", "/api/notifications/groups?"+query, nil, 400, nil)
 	}
 }
+
+// Task detail carries the branch and directory the session's harness reports, and omits them when it reports neither.
+func TestTaskDetailReportsHarnessWorkspace(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	p := e.project("/w/reported")
+	tk := e.task(p.ID, "where", nil)
+	type detail struct {
+		Reported *struct {
+			Branch    string `json:"branch"`
+			Directory string `json:"directory"`
+		} `json:"reported"`
+	}
+	var before detail
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &before)
+	if before.Reported != nil {
+		t.Fatalf("unstarted task reported %+v", *before.Reported)
+	}
+	var started task
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
+	e.poll()
+	ref := db.SessionRef{ConnectionID: 1, ExternalSessionID: *started.T3ThreadID}
+	o, err := e.store.Observation(ctx, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Branch, o.Directory = "feat/where", "/w/wt-where"
+	if err := e.store.PutObservation(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	var after detail
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &after)
+	if after.Reported == nil || after.Reported.Branch != "feat/where" || after.Reported.Directory != "/w/wt-where" {
+		t.Fatalf("reported %+v", after.Reported)
+	}
+	o.Branch, o.Directory = "", ""
+	if err := e.store.PutObservation(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	var cleared detail
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &cleared)
+	if cleared.Reported != nil {
+		t.Fatalf("reported neither, got %+v", *cleared.Reported)
+	}
+}

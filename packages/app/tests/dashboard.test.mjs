@@ -9,6 +9,7 @@ import {
   completedSince,
   endLinger,
   filterByTree,
+  dashboardProblems,
   harnessNotice,
   inGroup,
   isFolded,
@@ -126,15 +127,20 @@ test("collapsed Needs input reopens for a new needs-input episode", () => {
 
 const conn = (harness, over = {}) => ({ harness, machineId: 1, active: true, configured: true, ...over });
 
-test("harness notice: connect when no harness is set up, T3's alert when T3 is set up here, nothing while loading", () => {
-  assert.equal(harnessNotice(null, 1), null, "connections loading");
-  assert.equal(harnessNotice([], 1), "connect", "first run: no connections");
-  assert.equal(harnessNotice([conn("t3", { configured: false }), conn("opencode", { configured: false })], 1), "connect", "unpaired T3 and unconfigured OpenCode");
-  assert.equal(harnessNotice([conn("t3", { active: false })], 1), "connect", "a replaced connection does not count");
-  assert.equal(harnessNotice([conn("t3")], 1), "t3");
-  assert.equal(harnessNotice([conn("opencode")], 1), null, "OpenCode alone: its own alerts");
-  assert.equal(harnessNotice([conn("t3", { machineId: 2 })], 1), null, "T3 set up on another machine only");
-  assert.equal(harnessNotice([conn("t3", { configured: false }), conn("opencode")], 1), null);
-  assert.equal(harnessNotice([conn("claude")], 1), null, "any harness counts, hosted ones included");
-  assert.equal(harnessNotice([conn("claude", { configured: false })], 1), "connect", "an unconfigured connection of any harness does not count");
+test("harness notice: connect while no harness is set up anywhere, nothing once one is or while loading", () => {
+  assert.equal(harnessNotice(null), null, "connections loading");
+  assert.equal(harnessNotice([]), "connect", "first run: no connections");
+  assert.equal(harnessNotice([conn("a", { configured: false }), conn("b", { configured: false })]), "connect", "none set up");
+  assert.equal(harnessNotice([conn("a", { active: false })]), "connect", "a replaced connection does not count");
+  assert.equal(harnessNotice([conn("a")]), null, "any set-up harness counts");
+  assert.equal(harnessNotice([conn("a", { machineId: 2 })]), null, "on any machine");
+  assert.equal(harnessNotice([conn("a", { configured: false }), conn("b")]), null);
+});
+
+const item = (key, tone) => ({ key, group: "Harnesses", name: key, tone, state: tone, label: `${key} ${tone}` });
+
+test("dashboard problems are the status button's yellow and red items, in its order", () => {
+  const items = [item("x", "bad"), item("y", "need"), item("z", "ok"), item("w", "idle")];
+  assert.deepEqual(dashboardProblems(items).map((p) => p.key), ["x", "y"]);
+  assert.deepEqual(dashboardProblems([item("z", "ok")]), []);
 });

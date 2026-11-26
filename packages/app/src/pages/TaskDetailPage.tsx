@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
-import { useConnectionOperation, useHarnesses, useInvalidateWork, useMachines, useSendMessage, useSessionRequests, useTask } from "../api/queries.ts";
+import { useConnectionCapabilities, useConnectionOperation, useHarnesses, useInvalidateWork, useMachines, useSendMessage, useSessionRequests, useTask } from "../api/queries.ts";
 import { useSessionAction, useSessionDestination } from "../lib/hostState.ts";
 import { SessionActionButton } from "../components/SessionAction.tsx";
 import { RequestsPanel } from "../components/Requests.tsx";
@@ -58,6 +58,9 @@ import { canStart, canStop, isActive } from "../lib/tasks.ts";
 import { treeTaskPath } from "../lib/trees.ts";
 import { isRetired, resumeCommand, retiredHint, retiredNotice } from "../lib/harnesses.ts";
 import { ReplacedChip } from "../components/HarnessName.tsx";
+import { LaunchMeta } from "../components/LaunchMeta.tsx";
+import { harnessSlots } from "../harnesses/index.ts";
+import { launchParts } from "../lib/capabilities.ts";
 import { HarnessConnectionState } from "../components/ConnectionState.tsx";
 import { machineTag, withMachine } from "../lib/machines.ts";
 import { NotFoundPage } from "./NotFoundPage.tsx";
@@ -381,7 +384,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
         <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="flex min-w-0 flex-col gap-3.5">
             {task.adopted && task.externalSessionId !== null ? (
-              <OpeningPrompt taskId={task.id} live={isActive(task)} />
+              <OpeningPrompt taskId={task.id} connectionId={task.connectionId} harness={kindName(task.harness)} live={isActive(task)} />
             ) : (
               <PromptPanel text={task.prompt}>
                 {pendingHandoffNote(task) === null ? null : (
@@ -434,20 +437,26 @@ function StatePanel({ task, className }: { task: TaskDetail; className: string }
 
 function ThreadPanel({ task }: { task: TaskDetail }) {
   const destination = useSessionDestination();
-  const title = `${useHarnesses().kindName(task.harness)} session`;
+  const name = useHarnesses().kindName(task.harness);
+  const title = `${name} session`;
+  const caps = useConnectionCapabilities(task.connectionId, true);
+  const meta = <LaunchMeta parts={launchParts(task.executionConfig, caps.data)} reported={task.reported} harness={name} />;
   const session = task.session;
   if (session === null) {
     const seen = task.state === "launching" ? (task.launch?.session ?? null) : null;
     return (
       <Panel title={title}>
-        {seen === null ? (
-          <Muted>{task.state === "launching" ? "Waiting for confirmation of the existing launch." : task.acceptanceId === null ? "No session yet. Start the task to launch one." : "Completed without an execution reference."}</Muted>
-        ) : (
-          <div className="flex flex-col gap-1">
-            <Muted>Started; Stage has not recorded it yet.</Muted>
-            <p className="break-all font-mono text-meta">{seen.externalSessionId}</p>
-          </div>
-        )}
+        <div className="flex flex-col gap-3">
+          {seen === null ? (
+            <Muted>{task.state === "launching" ? "Waiting for confirmation of the existing launch." : task.acceptanceId === null ? "No session yet. Start the task to launch one." : "Completed without an execution reference."}</Muted>
+          ) : (
+            <div className="flex flex-col gap-1">
+              <Muted>Started; Stage has not recorded it yet.</Muted>
+              <p className="break-all font-mono text-meta">{seen.externalSessionId}</p>
+            </div>
+          )}
+          {meta}
+        </div>
       </Panel>
     );
   }
@@ -463,7 +472,8 @@ function ThreadPanel({ task }: { task: TaskDetail }) {
           </span>
         </Detail>
       </Details>
-      {destination(task) === null && !isRetired(task) && resumeCommand(task) === null ? (
+      <div className="mt-3 empty:hidden">{meta}</div>
+      {harnessSlots(task.harness).webAddress && destination(task) === null && !isRetired(task) && resumeCommand(task) === null ? (
         <TextLink to={SETTINGS_PATH.connections} className="mt-3 inline-block text-small text-fg">
           Configure browser address
         </TextLink>

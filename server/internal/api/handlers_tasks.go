@@ -280,6 +280,9 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		obs, e := s.Store.Observation(ctx, *task.Session)
 		if e == nil {
 			out.FinalReply, out.Usage = obs.Reply, obs.Usage
+			if obs.Branch != "" || obs.Directory != "" {
+				out.Reported = &reportedJSON{Branch: obs.Branch, Directory: obs.Directory}
+			}
 			for _, link := range obs.Artifacts {
 				if link.URL != "" && !slices.ContainsFunc(out.ArtifactLinks, func(a artifactLink) bool { return a.URL == link.URL }) {
 					label := link.Repository

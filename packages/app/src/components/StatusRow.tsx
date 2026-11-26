@@ -1,5 +1,6 @@
 import { Link } from "react-router";
-import { useConnectionStatuses, useHarnesses, useMachines } from "../api/queries.ts";
+import { useHarnesses, useMachines } from "../api/queries.ts";
+import { useConnectionStatuses } from "../harnesses/index.ts";
 import { machineSetupState } from "../lib/machines.ts";
 import { connectionStatusItem, statusTargets, unreachableDetail, type StatusDetail, type StatusView } from "../lib/connections.ts";
 import { statusGroups, statusRow, type StatusItem, type StatusKind, type StatusRow as Row, type StatusTone } from "../lib/status.ts";

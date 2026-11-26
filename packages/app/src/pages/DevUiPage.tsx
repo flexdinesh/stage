@@ -5,7 +5,11 @@ import { IconClose, IconPlus, IconSearch } from "../components/icons.tsx";
 import { RequestCard, RowRequestControls, RowRequestLine } from "../components/Requests.tsx";
 import { FollowUpPanel } from "../components/FollowUp.tsx";
 import { ApiError } from "../api/client.ts";
-import type { SessionRequest } from "../api/types.ts";
+import type { Capabilities, ExecutionConfig, SessionRequest } from "../api/types.ts";
+import { CapabilityList } from "../components/ConnectionCapabilities.tsx";
+import { HarnessFields } from "../components/HarnessFields.tsx";
+import { LaunchMeta } from "../components/LaunchMeta.tsx";
+import { launchParts } from "../lib/capabilities.ts";
 import { rowRequestAction } from "../lib/requests.ts";
 import { replyPrompt, type FollowUpView } from "../lib/followup.ts";
 import {
@@ -105,6 +109,36 @@ const SAMPLE_QUESTION: SessionRequest = {
   createdAt: "2026-11-25T07:00:00Z",
 };
 const noop = () => undefined;
+// A harness as its capabilities declare it: the Harness group, the capability list and the launch meta line read only this.
+const SAMPLE_CAPS: Capabilities = {
+  models: [
+    { id: "gpt-5", label: "GPT-5", available: true, group: "", permissions: null, options: [{ id: "effort", kind: "choice", label: "Reasoning effort", values: ["low", "medium", "high"], default: "medium" }] },
+    { id: "gpt-5-mini", label: "GPT-5 mini", available: true, group: "", permissions: null, options: null },
+  ],
+  options: [
+    { id: "worktree", kind: "boolean", label: "Worktree", values: [true, false], default: false },
+    { id: "baseRef", kind: "text", label: "Base branch", values: [], dependsOn: { option: "worktree", value: true } },
+  ],
+  permissions: [choice("read-only", "Read only"), choice("workspace", "Workspace write"), choice("full", "Full access")],
+  modes: null,
+  operations: {
+    launch: { available: true },
+    stop: { available: true },
+    adopt: { available: true },
+    reply: { available: true },
+    opening: { available: false, reason: "Codex does not keep a session's first prompt apart from its history." },
+    attention: { available: true },
+    images: { available: true },
+    respond: { available: false, reason: "Approvals are answered in the Codex terminal." },
+    send: { available: false },
+  },
+};
+const SAMPLE_CONFIG: ExecutionConfig = { model: "gpt-5", options: [{ id: "effort", value: "high" }, { id: "worktree", value: true }, { id: "baseRef", value: "main" }], permission: "workspace", mode: "" };
+
+function HarnessFieldsDemo() {
+  const [config, setConfig] = useState(SAMPLE_CONFIG);
+  return <HarnessFields title="Harness · Codex" config={config} caps={SAMPLE_CAPS} onChange={setConfig} disabled={false} />;
+}
 const BUSY_ERROR = new ApiError(409, "Claude Code is working. Send once it finishes.", "session_busy");
 
 /** One composer with its own draft, as task detail holds it. */
@@ -444,6 +478,19 @@ export function DevUiPage() {
         <FollowUpDemo view={{ placement: "after-reply", title: "Follow up", busy: false }} initial="Also add a test for the empty case." />
         <FollowUpDemo view={{ placement: "after-reply", title: "Follow up", busy: true }} initial="Then open a PR." sentAt="2026-11-25T07:00:00Z" />
         <FollowUpDemo view={{ placement: "after-reply", title: "Follow up", busy: false }} initial="Run the live test again." error={BUSY_ERROR} />
+      </Section>
+
+      <Section title="Harness" meta="read from capabilities · never by harness">
+        <HarnessFieldsDemo />
+        <Panel title="Capabilities" meta="declared by Codex" flush>
+          <CapabilityList operations={SAMPLE_CAPS.operations} name="Codex" />
+        </Panel>
+        <Panel title="Capabilities" meta="declared by Codex" flush>
+          <CapabilityList operations={{}} name="Codex" />
+        </Panel>
+        <Panel title="Codex session">
+          <LaunchMeta parts={launchParts(SAMPLE_CONFIG, SAMPLE_CAPS)} reported={{ branch: "codex/fix-empty-state", directory: "~/src/zero/.worktrees/fix-empty-state" }} harness="Codex" />
+        </Panel>
       </Section>
 
       <Section title="Layout">

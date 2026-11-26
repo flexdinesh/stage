@@ -2,7 +2,8 @@
 // form. One provider reads connections, machines, projects and each connection's live status (the status row's
 // queries, without a second poll), so a long list does not multiply status reads.
 import { createContext, useContext, type ReactNode } from "react";
-import { useConnectionStatuses, useHarnesses, useMachines, useProjects } from "../api/queries.ts";
+import { useHarnesses, useMachines, useProjects } from "../api/queries.ts";
+import { useConnectionStatuses } from "../harnesses/index.ts";
 import type { Task } from "../api/types.ts";
 import { statusTargets, type HarnessSummary } from "../lib/connections.ts";
 import { launchBlock, type LaunchBlock } from "../lib/launch.ts";
