@@ -139,7 +139,7 @@ suite cannot tell a remote machine from the local one.
   back to the stored observation's links.
 - **Optional interfaces.** The proxy implements all of them in Go and
   reports which ones the worker's adapter has (`execution.Partial`, traits
-  from `machine.describe`; all assumed until the first describe). Product
+  from `machine.describe`; all assumed until the worker describes that connection). Product
   code reaches them only through `execution.As[T]`, never a type assertion
   (`execution/as_boundary_test.go`).
 - **Launch.** The intent goes down without image bytes. While the call
