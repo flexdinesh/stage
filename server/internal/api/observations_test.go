@@ -84,17 +84,20 @@ func TestPushObservationsIngest(t *testing.T) {
 	}
 
 	// Malformed: unknown state, contradictory activity, missing updatedAt,
-	// and a lost owner reported by a harness that does not own processes.
+	// updatedAt far ahead of the server's clock (it would pin the stored
+	// snapshot), and a lost owner reported by a harness that does not own
+	// processes.
 	bogus := pushed(1, session, p.T3ProjectID, "exploded", at.Add(3*time.Second))
 	contradictory := pushed(1, session, p.T3ProjectID, "failed", at.Add(3*time.Second))
 	contradictory["active"] = true
 	undated := pushed(1, session, p.T3ProjectID, "failed", at.Add(3*time.Second))
 	delete(undated, "updatedAt")
+	future := pushed(1, session, p.T3ProjectID, "failed", time.Now().UTC().Add(time.Hour))
 	ownerExited := pushed(1, session, p.T3ProjectID, "interrupted", at.Add(3*time.Second))
 	ownerExited["stateReason"] = "owner_exited"
 	unownedBogus := pushed(1, "not-tracked", p.T3ProjectID, "exploded", at)
-	e.must("POST", path, pushBody(bogus, contradictory, undated, ownerExited, unownedBogus), 200, &out)
-	if len(out.Results) != 5 {
+	e.must("POST", path, pushBody(bogus, contradictory, undated, future, ownerExited, unownedBogus), 200, &out)
+	if len(out.Results) != 6 {
 		t.Fatalf("results %+v", out)
 	}
 	for i, r := range out.Results {

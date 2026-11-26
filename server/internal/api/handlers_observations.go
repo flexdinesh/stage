@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -10,6 +11,11 @@ import (
 
 // maxPushedObservations caps one POST /api/connections/{id}/observations.
 const maxPushedObservations = 100
+
+// maxPushSkew is how far past the server's clock a pushed updatedAt may be.
+// Stored snapshots only move forward, so one dated in the future would pin
+// the task's state until the clock caught up, discarding every poll.
+const maxPushSkew = 5 * time.Minute
 
 // Pushed observation statuses (ObservationResult.Status).
 const (
@@ -100,6 +106,9 @@ func (s *server) pushObservation(r *http.Request, kind string, o execution.Obser
 	}
 	if o.UpdatedAt.IsZero() {
 		return ObservationResult{Status: observationInvalid, Reason: "malformed observation: missing updatedAt"}, nil
+	}
+	if o.UpdatedAt.After(time.Now().Add(maxPushSkew)) {
+		return ObservationResult{Status: observationInvalid, Reason: "malformed observation: updatedAt is more than 5 minutes ahead of the server's clock"}, nil
 	}
 	got, err := s.Sync.Ingest(r.Context(), o)
 	switch {
