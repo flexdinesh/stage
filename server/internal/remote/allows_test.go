@@ -1,10 +1,10 @@
 package remote_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
@@ -26,10 +26,16 @@ func TestRemoteMachineAllowsEverythingUntilDescribed(t *testing.T) {
 	}
 }
 
-// A described machine hosts a hosted kind as its worker's profile allows,
-// with the fix in the worker's terms; connected kinds always.
+type advertisedConnector struct{ harness.Connector }
+
+func (advertisedConnector) Summary(context.Context) harness.Summary { return harness.Summary{} }
+
+// Placement policy remains distinct from whether the worker supports a kind.
 func TestRemoteMachineAllowsHostedKindsByItsWorkersProfile(t *testing.T) {
-	rig := remotetest.New(t, 2, map[int64]execution.Adapter{})
+	rig := remotetest.NewWithConnectors(t, 2, nil, map[string]harness.Connector{
+		connectedKind.Kind: advertisedConnector{},
+		hostedKind.Kind:    advertisedConnector{},
+	})
 	if a := rig.Machine().Allows(hostedKind); !a.Available {
 		t.Fatalf("local harnesses allowed: %+v", a)
 	}
@@ -57,5 +63,13 @@ func TestRemoteMachineAllowsHostedKindsByItsWorkersProfile(t *testing.T) {
 		if a := m.Allows(connectedKind); !a.Available {
 			t.Fatalf("%s connected: %+v", c.profile.Kind, a)
 		}
+	}
+}
+
+func TestMissingHarnessKindIsScopedToThatHarness(t *testing.T) {
+	rig := remotetest.NewWithConnectors(t, 2, nil, map[string]harness.Connector{hostedKind.Kind: advertisedConnector{}})
+	m := rig.Machine()
+	if missing, hosted := m.Allows(connectedKind), m.Allows(hostedKind); missing.Available || missing.Reason == "" || !hosted.Available || !m.Online() {
+		t.Fatalf("missing = %+v, hosted = %+v, online = %v", missing, hosted, m.Online())
 	}
 }

@@ -35,6 +35,10 @@ type Machine interface {
 	Adapter(connection int64) (execution.Adapter, bool)
 	// Adapters are the machine's installed adapters by connection.
 	Adapters() map[int64]execution.Adapter
+	// Retired drops a connection's adapter after its record is retired.
+	Retired(connection int64)
+	// AgentGateways are the live worker's agent gateway listener URLs.
+	AgentGateways() []string
 	// Connector is the machine's connection setup for a harness kind.
 	Connector(kind string) (harness.Connector, bool)
 	// Connectors are the machine's connectors by kind.
@@ -71,6 +75,7 @@ func (l *Local) ID() int64                { return l.id }
 func (l *Local) Online() bool             { return true }
 func (l *Local) Profile() harness.Profile { return l.profile }
 func (l *Local) Ops() Ops                 { return l.ops }
+func (l *Local) AgentGateways() []string  { return nil }
 
 // Allows is the machine's profile policy (harness.Profile.Allows).
 func (l *Local) Allows(d harness.Descriptor) execution.Availability { return l.profile.Allows(d) }
@@ -145,13 +150,14 @@ func (l *Local) SetConnector(kind string, c harness.Connector) {
 // Set is the server's machines, in id order. Remote machines join and
 // leave while the server runs (Add, Remove). Safe for concurrent use.
 type Set struct {
-	mu   sync.RWMutex
-	list []Machine
+	localID int64
+	mu      sync.RWMutex
+	list    []Machine
 }
 
-// NewSet validates ms: positive, unique ids.
-func NewSet(ms ...Machine) (*Set, error) {
-	ms = slices.Clone(ms)
+// NewSet hosts local as the server's default machine and validates all ids.
+func NewSet(local Machine, others ...Machine) (*Set, error) {
+	ms := append([]Machine{local}, others...)
 	slices.SortFunc(ms, func(a, b Machine) int { return cmp.Compare(a.ID(), b.ID()) })
 	for i, m := range ms {
 		if m.ID() <= 0 {
@@ -161,16 +167,31 @@ func NewSet(ms ...Machine) (*Set, error) {
 			return nil, fmt.Errorf("machine %d hosted twice", m.ID())
 		}
 	}
-	return &Set{list: ms}, nil
+	return &Set{localID: local.ID(), list: ms}, nil
 }
 
 // MustSet is NewSet for fixed compositions and tests.
-func MustSet(ms ...Machine) *Set {
-	s, err := NewSet(ms...)
+func MustSet(local Machine, others ...Machine) *Set {
+	s, err := NewSet(local, others...)
 	if err != nil {
 		panic(err)
 	}
 	return s
+}
+
+// DefaultID is the machine this server runs on.
+func (s *Set) DefaultID() int64 { return s.localID }
+
+// AgentGateways gives a remote machine's live gateway URLs. A machine id
+// of zero (unknown connection placement) uses the server's local API.
+func (s *Set) AgentGateways(id int64) (remote bool, urls []string) {
+	if id == 0 || id == s.localID {
+		return false, nil
+	}
+	if m, ok := s.Get(id); ok {
+		return true, m.AgentGateways()
+	}
+	return true, nil
 }
 
 // Add hosts m (a machine that joined); an error when its id is invalid or
@@ -192,14 +213,14 @@ func (s *Set) Add(m Machine) error {
 // Remove stops hosting machine id (it was removed); the in-process machine
 // stays. False when no remote machine id was hosted.
 func (s *Set) Remove(id int64) bool {
+	if id == s.localID {
+		return false
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, m := range s.list {
 		if m.ID() != id {
 			continue
-		}
-		if _, local := m.(*Local); local {
-			return false
 		}
 		s.list = slices.Delete(s.list, i, i+1)
 		return true
@@ -217,12 +238,9 @@ func (s *Set) Get(id int64) (Machine, bool) {
 	return nil, false
 }
 
-// Local is machine id when it runs in this process.
+// Local looks up an in-process host for adapter setup.
 func (s *Set) Local(id int64) (*Local, bool) {
-	m, ok := s.Get(id)
-	if !ok {
-		return nil, false
-	}
+	m, _ := s.Get(id)
 	l, ok := m.(*Local)
 	return l, ok
 }

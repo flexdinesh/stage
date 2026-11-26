@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,6 +33,8 @@ const (
 	KindHeartbeat = "heartbeat"
 	// KindResult answers the request with the same id: Body or Error.
 	KindResult = "result"
+	// KindReady publishes the worker's full capability snapshot for this session.
+	KindReady = "ready"
 )
 
 // GatewayPath is the worker route a worker's agent gateway forwards local
@@ -43,7 +46,9 @@ const GatewayPath = "/api/worker/gateway"
 const (
 	// SessionHeader names the channel session on an up POST (the hello
 	// event's session).
-	SessionHeader = "Stage-Channel-Session"
+	SessionHeader     = "Stage-Channel-Session"
+	ProtocolMinHeader = "Stage-Channel-Protocol-Min"
+	ProtocolMaxHeader = "Stage-Channel-Protocol-Max"
 	// VersionHeader carries the worker's build version (buildinfo.Version)
 	// on the stream request and join.
 	VersionHeader = "Stage-Version"
@@ -91,23 +96,76 @@ type Error struct {
 
 // Error codes in results.
 const (
-	CodeUnknownKind = "unknown_kind"
-	CodeCancelled   = "cancelled"
-	CodeTimeout     = "timeout"
-	CodeInternal    = "internal"
+	CodeUnknownKind          = "unknown_kind"
+	CodeCancelled            = "cancelled"
+	CodeTimeout              = "timeout"
+	CodeInternal             = "internal"
+	CodeProtocolMismatch     = "channel_protocol_mismatch"
+	CodeOperationUnavailable = "operation_unavailable"
 	// CodeCallEnded: a callback named a request that no longer waits (it
 	// returned, timed out or its stream ended).
 	CodeCallEnded = "call_ended"
 )
 
+// ProtocolVersion is the current worker channel contract, independent of the API.
+const ProtocolVersion = 1
+
+type VersionRange struct {
+	Min int `json:"min"`
+	Max int `json:"max"`
+}
+
+func CurrentRange() VersionRange { return VersionRange{Min: ProtocolVersion, Max: ProtocolVersion} }
+
+func (r VersionRange) Valid() bool { return r.Min >= 1 && r.Max >= r.Min }
+
+// Select chooses the highest shared version. Both ranges must be valid.
+func (r VersionRange) Select(peer VersionRange) (int, bool) {
+	v := min(r.Max, peer.Max)
+	return v, r.Valid() && peer.Valid() && v >= max(r.Min, peer.Min)
+}
+
+// ParseRange validates the two opening request headers.
+func ParseRange(lo, hi string) (VersionRange, bool) {
+	lower, loErr := strconv.Atoi(lo)
+	upper, hiErr := strconv.Atoi(hi)
+	r := VersionRange{Min: lower, Max: upper}
+	return r, loErr == nil && hiErr == nil && r.Valid()
+}
+
+func UpdateReason(serverOlder bool) string {
+	if serverOlder {
+		return "Update Stage on the main machine. Its worker channel protocol is older than this worker's."
+	}
+	return "Update Stage on the worker machine. Its worker channel protocol is older than the main machine's."
+}
+
 // Hello is the first event of a stream.
 type Hello struct {
-	Session   string `json:"session"`
-	MachineID int64  `json:"machineId"`
+	Session         string       `json:"session"`
+	MachineID       int64        `json:"machineId"`
+	ProtocolRange   VersionRange `json:"protocolRange"`
+	ProtocolVersion int          `json:"protocolVersion"`
+	Kinds           []string     `json:"kinds"`
+	ChannelKinds    []string     `json:"channelKinds"`
 	// HeartbeatSec is how often the worker should POST a heartbeat.
 	HeartbeatSec int `json:"heartbeatSec"`
 	// TimeoutSec is the silence after which either side ends the channel.
 	TimeoutSec int `json:"timeoutSec"`
+}
+
+// Ready replaces a session's capabilities, including the traits of each connection.
+// Details carries placement metadata handled by the worker host.
+type Ready struct {
+	Kinds        []string        `json:"kinds"`
+	ChannelKinds []string        `json:"channelKinds"`
+	Connections  []Connection    `json:"connections"`
+	Details      json.RawMessage `json:"details,omitempty"`
+}
+
+type Connection struct {
+	ConnectionID int64    `json:"connectionId"`
+	Traits       []string `json:"traits"`
 }
 
 // Pong is a ping result.
@@ -125,11 +183,13 @@ func (e *RemoteError) Error() string {
 
 var (
 	// ErrOffline: the machine has no live channel. The call was not sent.
-	ErrOffline = errors.New("machine offline: its worker is not connected")
+	ErrOffline     = errors.New("machine offline: its worker is not connected")
+	ErrNegotiating = errors.New("the Stage worker is negotiating its capabilities")
 	// ErrLostReply: the call was sent but no reply arrived before its
 	// deadline or the stream ended. The outcome is unknown, never failure:
 	// callers reconcile.
-	ErrLostReply = errors.New("worker reply lost: outcome unknown")
+	ErrLostReply    = errors.New("worker reply lost: outcome unknown")
+	ErrReplyTimeout = fmt.Errorf("%w: deadline elapsed", ErrLostReply)
 	// ErrReplaced: an up POST named a channel session that a newer stream
 	// replaced or that ended.
 	ErrReplaced = errors.New("channel session replaced or ended")
@@ -228,3 +288,7 @@ type Upcall func(ctx context.Context, kind string, body any) (json.RawMessage, e
 // WorkerHandler answers one of the main server's calls on the worker. A
 // *RemoteError keeps its code in the result.
 type WorkerHandler func(ctx context.Context, env Envelope, up Upcall) (any, error)
+
+// RefreshCapabilities is a handler result that changed the worker's setup.
+// The runner sends a new ready snapshot before returning Value to the server.
+type RefreshCapabilities struct{ Value any }

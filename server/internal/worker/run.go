@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,18 +55,20 @@ type RunOptions struct {
 	// worker-initiated call to the main server over the live channel
 	// (ErrOffline when none). Nil serves ping only.
 	Host func(machineID int64, call workerchan.Upcall) Host
+	// ProtocolRange defaults to workerchan.CurrentRange.
+	ProtocolRange workerchan.VersionRange
 }
 
 // Host is what a worker serves over its channel.
 type Host interface {
 	// Handlers answer the main server's calls by kind.
 	Handlers() map[string]workerchan.WorkerHandler
-	// Changes signals that what the host serves changed (reported to the
-	// main server as machine.changed).
+	// Changes signals that what the host serves changed.
 	Changes() <-chan struct{}
-	// Attached runs (in its own goroutine) each time a channel session
-	// goes online; ctx ends when the worker stops.
-	Attached(ctx context.Context)
+	// Attached composes the host after hello and before ready. Its ctx
+	// owns persistent harness resources for the lifetime of the worker.
+	Attached(ctx context.Context, serverKinds []string) error
+	Snapshot(ctx context.Context) (workerchan.Ready, error)
 }
 
 // ErrOffline: no channel to the main server is live (a worker-initiated
@@ -86,6 +90,12 @@ func Run(ctx context.Context, o RunOptions) error {
 	}
 	if o.MaxBackoff <= 0 {
 		o.MaxBackoff = time.Minute
+	}
+	if o.ProtocolRange == (workerchan.VersionRange{}) {
+		o.ProtocolRange = workerchan.CurrentRange()
+	}
+	if !o.ProtocolRange.Valid() {
+		return config.Invalid(errors.New("invalid worker channel protocol range"))
 	}
 	dir := Dir(o.ConfigPath)
 	if _, err := LoadConfig(o.ConfigPath); err != nil {
@@ -227,8 +237,10 @@ func (w *runner) loop(ctx context.Context) error {
 			w.log.Error("machine token refused; stopping", "err", err)
 			return ErrRevoked
 		case VersionMismatch(err):
-			w.log.Warn("API version mismatch; install the same Stage version as the server", "err", err)
-			w.set(State{State: StateNeedsUpdate, LastError: err.Error()})
+			w.log.Warn("worker channel protocol mismatch", "err", err)
+			var he *HTTPError
+			errors.As(err, &he)
+			w.set(State{State: StateNeedsUpdate, LastError: he.Msg})
 			wait = w.o.MaxBackoff
 		default:
 			msg := ""
@@ -263,12 +275,18 @@ func (w *runner) session(parent context.Context) error {
 	}
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set(workerchan.GatewayHeader, strings.Join(w.gateway, ","))
+	req.Header.Set(workerchan.ProtocolMinHeader, strconv.Itoa(w.o.ProtocolRange.Min))
+	req.Header.Set(workerchan.ProtocolMaxHeader, strconv.Itoa(w.o.ProtocolRange.Max))
 	res, err := w.api.http.Do(req)
 	if err != nil {
 		return err
 	}
 	defer res.Body.Close()
 	if err := checkStatus(res); err != nil {
+		var he *HTTPError
+		if errors.As(err, &he) && he.Code == "api_version_mismatch" {
+			return olderServer()
+		}
 		return err
 	}
 	if ct := res.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
@@ -317,8 +335,15 @@ func (w *runner) session(parent context.Context) error {
 		return fmt.Errorf("worker channel: first event %q, want hello", ev.Name)
 	}
 	var hello workerchan.Hello
-	if err := json.Unmarshal(ev.Data, &hello); err != nil || hello.Session == "" {
+	if err := json.Unmarshal(ev.Data, &hello); err != nil || hello.Session == "" || hello.MachineID != w.cfg.MachineID {
 		return fmt.Errorf("worker channel: bad hello")
+	}
+	if hello.ProtocolRange == (workerchan.VersionRange{}) && hello.ProtocolVersion == 0 {
+		return olderServer()
+	}
+	version, shared := w.o.ProtocolRange.Select(hello.ProtocolRange)
+	if !hello.ProtocolRange.Valid() || !shared || version != hello.ProtocolVersion || hello.Kinds == nil || hello.ChannelKinds == nil || !slices.Contains(hello.ChannelKinds, workerchan.KindReady) {
+		return fmt.Errorf("worker channel: invalid protocol negotiation in hello")
 	}
 	if hello.TimeoutSec > 0 {
 		timeoutMu.Lock()
@@ -329,17 +354,12 @@ func (w *runner) session(parent context.Context) error {
 	if hello.HeartbeatSec > 0 {
 		heartbeat = time.Duration(hello.HeartbeatSec) * time.Second
 	}
-	sess := &channel{w: w, id: hello.Session, ctx: ctx, cancel: cancel, calls: map[string]context.CancelFunc{}}
-	w.set(State{State: StateOnline, Session: hello.Session, ServerVersion: res.Header.Get(workerchan.VersionHeader)})
-	w.log.Info("worker channel online", "session", hello.Session)
+	sess := &channel{w: w, id: hello.Session, ctx: ctx, cancel: cancel, calls: map[string]context.CancelFunc{}, serverKinds: hello.ChannelKinds}
 
 	wg.Go(func() { sess.heartbeats(heartbeat) })
 	w.cur.Store(sess)
 	defer w.cur.CompareAndSwap(sess, nil)
-	if w.host != nil {
-		wg.Go(func() { sess.changes(w.host.Changes()) })
-		go w.host.Attached(parent)
-	}
+	wg.Go(func() { sess.advertise(parent, hello.Kinds, res.Header.Get(workerchan.VersionHeader)) })
 	defer sess.cancelAll()
 	for {
 		ev, err := rd.Next()
@@ -362,6 +382,10 @@ func (w *runner) session(parent context.Context) error {
 	}
 }
 
+func olderServer() error {
+	return &HTTPError{Status: http.StatusConflict, Code: workerchan.CodeProtocolMismatch, Msg: workerchan.UpdateReason(true)}
+}
+
 // streamErr is the reason a stream read failed: the session's cancel cause
 // (watchdog, replaced, revoked) when it ended, else the read error.
 func streamErr(ctx context.Context, err error) error {
@@ -376,10 +400,12 @@ func streamErr(ctx context.Context, err error) error {
 
 // channel is one live channel session on the worker.
 type channel struct {
-	w      *runner
-	id     string
-	ctx    context.Context
-	cancel context.CancelCauseFunc
+	w           *runner
+	id          string
+	ctx         context.Context
+	cancel      context.CancelCauseFunc
+	serverKinds []string
+	readyMu     sync.Mutex
 
 	mu    sync.Mutex
 	calls map[string]context.CancelFunc
@@ -437,23 +463,54 @@ func (c *channel) heartbeats(every time.Duration) {
 	}
 }
 
-// changes reports each change of what the host serves.
-func (c *channel) changes(ch <-chan struct{}) {
+// advertise composes once for this attachment, then sends complete ready snapshots serially.
+func (c *channel) advertise(life context.Context, kinds []string, serverVersion string) {
+	var changes <-chan struct{}
+	if c.w.host != nil {
+		if err := c.w.host.Attached(life, kinds); err != nil {
+			c.cancel(fmt.Errorf("prepare harness setup: %w", err))
+			return
+		}
+		changes = c.w.host.Changes()
+	}
+	if err := c.ready(); err != nil {
+		c.cancel(fmt.Errorf("publish worker capabilities: %w", err))
+		return
+	}
+	c.w.set(State{State: StateOnline, Session: c.id, ServerVersion: serverVersion})
+	c.w.log.Info("worker channel online", "session", c.id)
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
-		case <-ch:
-			if err := c.post(workerchan.Envelope{ID: c.nextID(), Kind: remoteChanged}, nil); err != nil && c.ctx.Err() == nil {
-				c.w.log.Warn("worker change report", "err", err)
+		case <-changes:
+			if err := c.ready(); err != nil {
+				c.cancel(fmt.Errorf("update worker capabilities: %w", err))
+				return
 			}
 		}
 	}
 }
 
-// remoteChanged is remote.KindChanged (the worker package does not import
-// the remote machine's protocol).
-const remoteChanged = "machine.changed"
+func (c *channel) ready() error {
+	c.readyMu.Lock()
+	defer c.readyMu.Unlock()
+	snapshot := workerchan.Ready{Kinds: []string{}, Connections: []workerchan.Connection{}}
+	if c.w.host != nil {
+		var err error
+		if snapshot, err = c.w.host.Snapshot(c.ctx); err != nil {
+			return err
+		}
+	}
+	snapshot.ChannelKinds = slices.Collect(maps.Keys(c.w.handlers))
+	snapshot.ChannelKinds = append(snapshot.ChannelKinds, workerchan.KindCancel)
+	slices.Sort(snapshot.ChannelKinds)
+	body, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	return c.post(workerchan.Envelope{Kind: workerchan.KindReady, Body: body}, nil)
+}
 
 // nextID is a fresh id for a worker-initiated call.
 func (c *channel) nextID() string {
@@ -464,6 +521,9 @@ func (c *channel) nextID() string {
 // returns its reply body.
 func (c *channel) upcall(parent workerchan.Envelope) workerchan.Upcall {
 	return func(ctx context.Context, kind string, body any) (json.RawMessage, error) {
+		if !slices.Contains(c.serverKinds, kind) {
+			return nil, &workerchan.RemoteError{Code: workerchan.CodeOperationUnavailable, Message: "Update Stage on the main machine to use " + kind + "."}
+		}
 		raw, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
@@ -502,6 +562,15 @@ func (c *channel) handle(env workerchan.Envelope) {
 		res.Error = &workerchan.Error{Code: workerchan.CodeUnknownKind, Message: "this worker does not handle " + env.Kind}
 	} else {
 		body, err := h(ctx, env, c.upcall(env))
+		if changed, ok := body.(workerchan.RefreshCapabilities); ok && err == nil {
+			// Setup has already changed. Recover the snapshot on a fresh session
+			// if the server cannot acknowledge this update.
+			if err := c.ready(); err != nil {
+				c.cancel(fmt.Errorf("update worker capabilities: %w", err))
+				return
+			}
+			body = changed.Value
+		}
 		var re *workerchan.RemoteError
 		switch {
 		case err == nil:

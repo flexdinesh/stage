@@ -54,9 +54,7 @@ type (
 )
 
 // Observed is the attempt record of the session o names. It keeps o's
-// resume command (Links.Command): with no stored observation, it is the
-// only way back to a session on a machine whose adapter offers no
-// destination (a remote one's Destinations is empty).
+// resume command (Links.Command) in case recording the observation failed.
 func Observed(o execution.Observation) *ObservedSession {
 	s := &ObservedSession{SessionRef: o.Session, Title: o.Title, State: o.State}
 	if o.Links.Command != "" {
@@ -93,8 +91,7 @@ func (s *Store) Unconfirmed(ctx context.Context, a Attempt, cause error, seen *O
 	for i := 0; i < a.RetryCount && delay < time.Minute; i++ {
 		delay = min(delay*2, time.Minute)
 	}
-	// The session's destinations are resolved when read; only its resume
-	// command is kept (Observed).
+	// Keep only the resume command as a fallback for the observation (Observed).
 	var observed *ObservedSession
 	if seen != nil {
 		stored := *seen

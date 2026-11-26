@@ -25,8 +25,8 @@ func TestRPCBodiesRoundTripJSON(t *testing.T) {
 	roots := []machine.SharedRoot{{HarnessRoot: "/srv", StageRoot: "/home/u/srv"}}
 	str := "s"
 	samples := map[string]any{
-		"Description": Description{Profile: harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true}, Connections: []Hosted{{ConnectionID: 7, Traits: []string{execution.TraitLinkResolver}}},
-			Connectors: []ConnectorState{{Kind: "t3", Summary: harness.Summary{ConnectionID: 7, Configured: true, Connected: true, LastError: "e"}}}, SetupReady: true},
+		"description": description{Profile: harness.Profile{Kind: harness.ProfileDesktop, LocalProcesses: true},
+			Connectors: []ConnectorState{{Kind: "t3", Summary: harness.Summary{ConnectionID: 7, Configured: true, Connected: true, LastError: "e"}}}},
 		"ConnectorRequest": ConnectorRequest{Kind: "opencode", Refresh: true, Settings: json.RawMessage(`{"endpoint":"x"}`), Action: "pair", Input: json.RawMessage(`{"link":"l"}`)},
 		"ConnectorStatus": ConnectorStatus{Status: harness.Status{Summary: harness.Summary{ConnectionID: 7, Configured: true, Connected: true, LastError: "e"}, State: "connected", Reason: "r",
 			Fields: []harness.FieldState{{ID: "url", Value: "v", Set: true, Source: "saved"}}, Actions: []harness.ActionState{{ID: "pair", Available: true, Reason: "r"}},
@@ -105,14 +105,23 @@ func TestErrorsCrossTheChannel(t *testing.T) {
 	unavailable := []error{
 		workerchan.ErrOffline,
 		&workerchan.RemoteError{Code: CodeNotHosted, Message: "no adapter"},
-		&workerchan.RemoteError{Code: CodeUnsupported, Message: "no interaction"},
-		&workerchan.RemoteError{Code: workerchan.CodeUnknownKind, Message: "adapter.launch"},
 	}
 	for _, in := range unavailable {
 		if err := decodeError(in); !errors.Is(err, execution.ErrUnavailable) || errors.As(err, &rejected) {
 			t.Fatal(in, err)
 		}
 	}
+	for _, in := range []error{
+		&workerchan.RemoteError{Code: CodeUnsupported, Message: "no interaction"},
+		&workerchan.RemoteError{Code: workerchan.CodeUnknownKind, Message: "adapter.launch"},
+		&workerchan.RemoteError{Code: workerchan.CodeOperationUnavailable, Message: "no interaction"},
+	} {
+		var conflict *db.ConflictError
+		if err := decodeError(in); errors.Is(err, execution.ErrUnavailable) || !errors.As(err, &conflict) || conflict.Code != workerchan.CodeOperationUnavailable {
+			t.Fatal(in, err)
+		}
+	}
+
 	uncertain := []error{
 		workerchan.ErrLostReply,
 		&workerchan.RemoteError{Code: workerchan.CodeTimeout, Message: "deadline"},

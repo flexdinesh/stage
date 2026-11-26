@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -45,6 +46,18 @@ func newTestHub(t *testing.T, o Options) (*Hub, context.CancelFunc) {
 	return NewHub(ctx, o), cancel
 }
 
+func attachReady(t *testing.T, h *Hub, id int64, version string) *Session {
+	t.Helper()
+	s := h.attach(id, version, nil)
+	if s.alive() {
+		body := json.RawMessage(`{"kinds":[],"channelKinds":["ping","launch","x"],"connections":[{"connectionId":3,"traits":[]}]}`)
+		if _, err := h.Deliver(t.Context(), id, s.ID, Envelope{Kind: KindReady, Body: body}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return s
+}
+
 // worker answers every request on s with answer, until s ends.
 func serve(s *Session, answer func(Envelope) *Envelope) {
 	go func() {
@@ -63,7 +76,7 @@ func serve(s *Session, answer func(Envelope) *Envelope) {
 
 func TestCallResult(t *testing.T) {
 	h, _ := newTestHub(t, Options{})
-	s := h.Attach(7, "1.0")
+	s := attachReady(t, h, 7, "1.0")
 	var got Envelope
 	serve(s, func(env Envelope) *Envelope {
 		got = env
@@ -80,7 +93,7 @@ func TestCallResult(t *testing.T) {
 
 func TestCallRemoteError(t *testing.T) {
 	h, _ := newTestHub(t, Options{})
-	s := h.Attach(7, "")
+	s := attachReady(t, h, 7, "")
 	serve(s, func(env Envelope) *Envelope {
 		return &Envelope{ID: env.ID, Kind: KindResult, Error: &Error{Code: "rejected", Message: "no"}}
 	})
@@ -100,7 +113,7 @@ func TestCallOffline(t *testing.T) {
 
 func TestCallDeadlineIsLostReplyAndLateReplyDropped(t *testing.T) {
 	h, _ := newTestHub(t, Options{})
-	s := h.Attach(7, "")
+	s := attachReady(t, h, 7, "")
 	reqs := make(chan Envelope, 1)
 	serve(s, func(env Envelope) *Envelope { reqs <- env; return nil })
 	_, err := h.Call(context.Background(), 7, KindPing, 0, nil, 50*time.Millisecond)
@@ -119,7 +132,7 @@ func TestCallDeadlineIsLostReplyAndLateReplyDropped(t *testing.T) {
 
 func TestStreamEndIsLostReply(t *testing.T) {
 	h, _ := newTestHub(t, Options{})
-	s := h.Attach(7, "")
+	s := attachReady(t, h, 7, "")
 	serve(s, func(Envelope) *Envelope { go h.Detach(s); return nil })
 	if _, err := h.Call(context.Background(), 7, KindPing, 0, nil, 5*time.Second); !errors.Is(err, ErrLostReply) {
 		t.Fatalf("err = %v", err)
@@ -128,7 +141,7 @@ func TestStreamEndIsLostReply(t *testing.T) {
 
 func TestCallerCancelSendsCancel(t *testing.T) {
 	h, _ := newTestHub(t, Options{})
-	s := h.Attach(7, "")
+	s := attachReady(t, h, 7, "")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
@@ -148,7 +161,7 @@ func TestCallerCancelSendsCancel(t *testing.T) {
 
 func TestCallDeadlineFollowsContext(t *testing.T) {
 	h, _ := newTestHub(t, Options{})
-	s := h.Attach(7, "")
+	s := attachReady(t, h, 7, "")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	go func() { _, _ = h.Call(ctx, 7, KindPing, 0, nil, time.Hour) }()
@@ -161,14 +174,14 @@ func TestCallDeadlineFollowsContext(t *testing.T) {
 func TestReplaceEndsOlderSession(t *testing.T) {
 	seen := &seenLog{}
 	h, _ := newTestHub(t, Options{Seen: seen.seen})
-	old := h.Attach(7, "1")
+	old := attachReady(t, h, 7, "1")
 	inflight := make(chan error, 1)
 	go func() {
 		_, err := h.Call(context.Background(), 7, KindPing, 0, nil, 5*time.Second)
 		inflight <- err
 	}()
 	<-old.Outbound()
-	next := h.Attach(7, "2")
+	next := attachReady(t, h, 7, "2")
 	if err := <-inflight; !errors.Is(err, ErrLostReply) {
 		t.Fatalf("in-flight on replaced session: %v", err)
 	}
@@ -193,7 +206,7 @@ func TestReplaceEndsOlderSession(t *testing.T) {
 func TestWatchdogEndsSilentSession(t *testing.T) {
 	c := &clock{t: time.Unix(1000, 0)}
 	h, _ := newTestHub(t, Options{Timeout: 30 * time.Millisecond, Now: c.now})
-	s := h.Attach(7, "")
+	s := attachReady(t, h, 7, "")
 	c.add(time.Second)
 	select {
 	case <-s.Done():
@@ -209,7 +222,7 @@ func TestPresenceAndPersistThrottle(t *testing.T) {
 	c := &clock{t: time.Unix(1000, 0)}
 	seen := &seenLog{}
 	h, _ := newTestHub(t, Options{Timeout: time.Hour, PersistEvery: time.Minute, Seen: seen.seen, Now: c.now})
-	s := h.Attach(7, "1.2")
+	s := attachReady(t, h, 7, "1.2")
 	if seen.n() != 1 || seen.got[0] != "1.2" {
 		t.Fatalf("connect not persisted with version: %v", seen.got)
 	}
@@ -242,11 +255,11 @@ func TestPresenceAndPersistThrottle(t *testing.T) {
 
 func TestNeedsUpdateClearedByMatchingWorker(t *testing.T) {
 	h, _ := newTestHub(t, Options{})
-	h.MarkNeedsUpdate(7, "5", "0.9")
-	if p := h.Presence(7); p.NeedsUpdate == nil || p.NeedsUpdate.APIVersion != "5" || p.Online {
+	h.markNeedsUpdate(7, true, "0.9")
+	if p := h.Presence(7); p.NeedsUpdate == nil || !p.NeedsUpdate.ServerOlder || p.Online {
 		t.Fatalf("presence %+v", p)
 	}
-	h.Attach(7, "1.0")
+	attachReady(t, h, 7, "1.0")
 	if p := h.Presence(7); p.NeedsUpdate != nil || !p.Online {
 		t.Fatalf("presence after attach %+v", p)
 	}
@@ -254,14 +267,14 @@ func TestNeedsUpdateClearedByMatchingWorker(t *testing.T) {
 
 func TestCloseAndContextEnd(t *testing.T) {
 	h, cancel := newTestHub(t, Options{})
-	a := h.Attach(7, "")
+	a := attachReady(t, h, 7, "")
 	h.Close(7)
 	select {
 	case <-a.Done():
 	default:
 		t.Fatal("Close left the session live")
 	}
-	b := h.Attach(8, "")
+	b := attachReady(t, h, 8, "")
 	cancel()
 	select {
 	case <-b.Done():
@@ -269,7 +282,7 @@ func TestCloseAndContextEnd(t *testing.T) {
 		t.Fatal("context end left the session live")
 	}
 	// Attaching after the hub's context ended yields an ended session.
-	c := h.Attach(9, "")
+	c := attachReady(t, h, 9, "")
 	select {
 	case <-c.Done():
 	default:
@@ -279,7 +292,7 @@ func TestCloseAndContextEnd(t *testing.T) {
 
 func TestWorkerInitiatedPingAndUnknownKind(t *testing.T) {
 	h, _ := newTestHub(t, Options{Version: "9.9"})
-	s := h.Attach(7, "")
+	s := attachReady(t, h, 7, "")
 	r, err := h.Deliver(context.Background(), 7, s.ID, Envelope{ID: "w1", Kind: KindPing})
 	if err != nil || r == nil || r.ID != "w1" || r.Kind != KindResult {
 		t.Fatalf("ping reply %+v %v", r, err)
@@ -330,7 +343,7 @@ func TestSSERoundTrip(t *testing.T) {
 
 func TestCallbacksRunOnlyWhileTheirCallWaits(t *testing.T) {
 	h, _ := newTestHub(t, Options{})
-	s := h.Attach(7, "")
+	s := attachReady(t, h, 7, "")
 	var during, after *Envelope
 	serve(s, func(env Envelope) *Envelope {
 		during, _ = h.Deliver(context.Background(), 7, s.ID, Envelope{ID: "w1", Kind: "save", Call: env.ID, Body: json.RawMessage(`2`)})
@@ -356,14 +369,14 @@ func TestCallbacksRunOnlyWhileTheirCallWaits(t *testing.T) {
 func TestHandlersAndAttachHook(t *testing.T) {
 	h, _ := newTestHub(t, Options{})
 	attached := make(chan int64, 1)
-	h.OnAttach(func(id int64) { attached <- id })
+	h.OnReady(func(id int64) { attached <- id })
 	h.Handle("changed", func(_ context.Context, id int64, env Envelope) (any, error) {
 		if id != 7 {
 			return nil, errors.New("wrong machine")
 		}
 		return "ok", nil
 	})
-	s := h.Attach(7, "")
+	s := attachReady(t, h, 7, "")
 	select {
 	case id := <-attached:
 		if id != 7 {
@@ -380,7 +393,7 @@ func TestHandlersAndAttachHook(t *testing.T) {
 
 func TestCallReturnsOnlyAfterItsCallbacks(t *testing.T) {
 	h, _ := newTestHub(t, Options{})
-	s := h.Attach(7, "")
+	s := attachReady(t, h, 7, "")
 	inCallback := make(chan struct{})
 	delivered := make(chan *Envelope, 1)
 	serve(s, func(env Envelope) *Envelope {
@@ -403,5 +416,68 @@ func TestCallReturnsOnlyAfterItsCallbacks(t *testing.T) {
 	<-inCallback
 	if r := <-delivered; r == nil || r.Error == nil {
 		t.Fatalf("cancelled callback answered %+v", r)
+	}
+}
+
+func TestVersionRangeSelectsHighestOverlap(t *testing.T) {
+	for _, tc := range []struct {
+		local, peer VersionRange
+		version     int
+	}{
+		{CurrentRange(), CurrentRange(), 1},
+		{VersionRange{1, 4}, VersionRange{2, 5}, 4},
+		{VersionRange{1, 2}, VersionRange{2, 5}, 2},
+		{VersionRange{3, 4}, VersionRange{1, 2}, 0},
+		{VersionRange{1, 2}, VersionRange{3, 4}, 0},
+		{CurrentRange(), VersionRange{0, 2}, 0},
+	} {
+		got, ok := tc.local.Select(tc.peer)
+		if ok != (tc.version != 0) || (ok && got != tc.version) {
+			t.Fatalf("%+v and %+v: got %d, %v; want %d", tc.local, tc.peer, got, ok, tc.version)
+		}
+	}
+}
+
+func TestReadySnapshotGatesCallsAndReplacesTraits(t *testing.T) {
+	h, _ := newTestHub(t, Options{})
+	var updates int
+	h.OnReady(func(id int64) {
+		updates++
+		if !h.Presence(id).Online {
+			t.Error("ready hook ran before online publication")
+		}
+	})
+	initialization := func(context.Context, int64, Envelope) (any, error) { return "setup", nil }
+	h.HandleInitialization("settings.get", initialization)
+	h.Handle("afterReady", initialization)
+	s := h.attach(7, "test", nil)
+	if p := h.Presence(7); p.Online || !p.Negotiating || updates != 0 {
+		t.Fatalf("before composition: %+v (ready hooks %d)", p, updates)
+	}
+	if _, err := h.Call(t.Context(), 7, KindPing, 0, nil, time.Second); !errors.Is(err, ErrNegotiating) {
+		t.Fatalf("outbound call before ready: %v", err)
+	}
+	for kind, want := range map[string]string{"settings.get": "", "afterReady": CodeOperationUnavailable} {
+		r, err := h.Deliver(t.Context(), 7, s.ID, Envelope{ID: "w1", Kind: kind})
+		if err != nil || r == nil || (want == "" && r.Error != nil) || (want != "" && (r.Error == nil || r.Error.Code != want)) {
+			t.Fatalf("%s during negotiation: %+v %v", kind, r, err)
+		}
+	}
+	first := json.RawMessage(`{"kinds":["svc"],"channelKinds":["ping"],"connections":[{"connectionId":3,"traits":["interactive","futureTrait"]}]}`)
+	second := json.RawMessage(`{"kinds":["svc"],"channelKinds":["ping"],"connections":[{"connectionId":3,"traits":[]}]}`)
+	for _, body := range []json.RawMessage{first, first, second} {
+		if _, err := h.Deliver(t.Context(), 7, s.ID, Envelope{Kind: KindReady, Body: body}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, id := h.Advertisement(7); id != s.ID || got == nil || !reflect.DeepEqual(got.Connections, []Connection{{ConnectionID: 3, Traits: []string{}}}) || updates != 2 {
+		t.Fatalf("updated snapshot: %+v (session %s, ready hooks %d)", got, id, updates)
+	}
+	h.attach(7, "next", nil)
+	if _, err := h.Deliver(t.Context(), 7, s.ID, Envelope{Kind: KindReady, Body: first}); !errors.Is(err, ErrReplaced) {
+		t.Fatal(err)
+	}
+	if got, _ := h.Advertisement(7); got != nil || updates != 2 {
+		t.Fatalf("replaced session published %+v (ready hooks %d)", got, updates)
 	}
 }

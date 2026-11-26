@@ -140,17 +140,15 @@ in-process `machine.Local` whose adapters setup installs, plus
 `machine.LocalOps`). The coordinator, sync, the runners and the contract
 suite cannot tell a remote machine from the local one.
 
-- **Adapters.** The machine's adapters are proxies (`remote.Adapter`) of the
-  connections the main server records as active on it, so an offline
-  machine's connections still answer, as offline. Every `execution.Adapter`
-  call and optional interface is a channel call (`adapter.*`, the
-  connection in the envelope). `Destinations` makes no call: task lists fall
-  back to the stored observation's links.
-- **Optional interfaces.** The proxy implements all of them in Go and
-  reports which ones the worker's adapter has (`execution.Partial`, traits
-  from `machine.describe`; all assumed until the worker describes that connection). Product
-  code reaches them only through `execution.As[T]`, never a type assertion
-  (`execution/as_boundary_test.go`).
+- **Adapters.** The machine proxies active connections recorded by the
+  main server. Both placements expose session links through
+  `Observation.Links`. Task and session reads use the latest stored
+  observation and show empty links until one exists.
+- **Optional interfaces.** One registry in `execution/optional.go` names
+  traits and defines their Go interfaces. `execution.As[T]` requires a
+  remote proxy's current ready snapshot to declare the trait. Unknown
+  trait names have no effect. An absent channel request kind limits that
+  operation, and an absent harness kind limits that harness.
 - **Launch.** The intent goes down without image bytes. While the call
   waits, the worker calls back: `checkpoint.save` runs the coordinator's
   `SaveCheckpoint` before each external effect (a failure stops the
@@ -160,19 +158,22 @@ suite cannot tell a remote machine from the local one.
   checkpoint, as for any uncertain launch.
 - **Push.** `Events` is one long-running `adapter.events` call (10 minute
   window): each pushed observation is an `events.observation` callback,
-  ingested (`sync.Service.Ingest`) before the worker continues; polling
-  reconciles anything missed.
-- **Health.** Offline answers at once with the reason (offline, or needs
-  update); an online answer is reused for 5s.
+  ingested (`sync.Service.Ingest`) before the worker continues. Unexpected
+  termination goes to connection status and logs while polling reconciles.
+  The stream renews at the end of the window and stops on cancellation.
+- **Health.** Offline, negotiating and incompatible channels answer at
+  once with their reason. A ready snapshot scopes the 5s health cache.
 - **Ops.** `ops.inventory` and `ops.checkout` run `machine.LocalOps` on the
   worker with the shared roots the main server loads (a `Local` workspace,
   such as a worker's Claude Code folder, is read in place there); evidence
   is still compared on the main server, within one machine.
 - **Errors.** `execution.ErrUnavailable`, `ErrNotFound`, `ErrNoReply`,
   `Rejected` and `Refused` keep their meaning (`unavailable`, `not_found`,
-  `no_reply`, `rejected`, `refused`). Offline, `not_hosted`, `unsupported` and an older worker
-  (`unknown_kind`) are unavailable. A lost reply, a worker timeout or any
-  other error stays uncertain; only the worker adapter's own rejection is
+  `no_reply`, `rejected`, `refused`). Offline and `not_hosted` mean the
+  connection cannot answer. An absent optional trait or request kind
+  returns `operation_unavailable`; `unsupported` and `unknown_kind` are
+  defensive replies. A lost reply or worker timeout after dispatch stays
+  uncertain; only the worker adapter's own rejection is
   `Rejected`. The removed `adapter.registerWorkspace` (an older main
   server's call) answers `unknown_kind`. A session's `origin` crosses the
   channel raw; the main server's registry decides a wrapped refusal.
@@ -184,8 +185,8 @@ suite cannot tell a remote machine from the local one.
   (`server/internal/workersetup`): the same `t3setup`, `opencodesetup`,
   `claudecodesetup` and `codexsetup` constructors as the local machine
   (Claude Code and Codex only when the worker's profile allows local
-  harnesses), composed once
-  the channel is first online, over ports that call the main server
+  harnesses), composed during authenticated negotiation, over ports that
+  call the main server
   (`setup.*` worker-to-main kinds, `remote.ServeSetup`, always scoped to
   the token's machine; a connection of another machine is `not_found`).
   The main server keeps the connection rows, identity, status, non-secret
@@ -194,20 +195,18 @@ suite cannot tell a remote machine from the local one.
   `setup.claude.get` and `setup.claude.save`; Codex's CLI path and
   connected: `setup.codex.get` and `setup.codex.save`, the machine's
   `codex_settings` row) and sync bookkeeping; Claude Code and Codex have
-  no credentials (Claude's own login, `codex login`, on that machine). A
-  worker whose main server is older (it answers `setup.claude.*` or
-  `setup.codex.*` with `unknown_kind`) composes the other harnesses
-  without that one and logs why; a worker older than its main server
-  answers that kind's connector calls `not_hosted`, which the main server
-  reports as 503 `machine_needs_update`. Stage never stops a worker's
+  no credentials (Claude's own login, `codex login`, on that machine).
+  A server can omit a harness kind or setup request kind from its
+  advertisement. The worker composes the other harnesses. The server
+  applies the same availability rule for missing connected and hosted
+  harness kinds. Stage never stops a worker's
   Codex daemon either (ADR 0007 decision 14). Harness credentials (the
   T3 token and admin token, OpenCode Basic credentials or paired token) stay in the
   worker's `credentials.json` (`0600`, deleted on join and leave) and never
   cross the channel. The main server's `remote.Connector` per machine and
   kind forwards `Status`, `Configure`, `Run` and `Disconnect` as
   `connector.*` calls; `Summary` is memory only (the main server's active
-  connection plus the worker's last report from `machine.describe`, which
-  carries connector summaries once `setupReady`). Offline, needs update and
+  connection plus the worker's last ready snapshot and connector status). Offline, needs update and
   a worker still composing its setup are `remote.UnavailableError`
   (503 `machine_offline`, `machine_needs_update`,
   `machine_setup_starting`). Every registered kind has a connector proxy
@@ -230,14 +229,12 @@ suite cannot tell a remote machine from the local one.
   coordinator whose stored observation carries the resume command,
   disconnect; refused without local harnesses; left out against an older
   main server).
-- **Resume command.** `Destinations` makes no call, so a remote session's
-  `links.command` comes from its stored observation (every observation
-  carries its links). A launch whose session Stage saw but could not
-  record keeps that session's resume command on the attempt
-  (`execution_attempts.observed_session`, command only; destinations are
-  still resolved when read), and the API falls back to it. On task rows and task detail, with more than
-  one machine, the UI names the machine the command must run on ("Copy
-  resume command for laptop").
+- **Resume command.** Both placements read the command from
+  `Observation.Links`. An unconfirmed launch also keeps the reported
+  command on its attempt (`execution_attempts.observed_session`) in case
+  saving the observation failed. Handoffs keep the link recorded at
+  acceptance. With multiple machines, task rows and detail name the machine
+  to run the command on ("Copy resume command for laptop").
 
 ## Harness registry
 

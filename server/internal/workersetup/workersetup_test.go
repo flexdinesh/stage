@@ -167,7 +167,7 @@ func (r *rig) startWorker() {
 	}()
 	r.wait("setup composed and described", func() bool {
 		m := r.machine()
-		if !m.Online() || !m.Described() {
+		if !m.Online() {
 			return false
 		}
 		_, err := m.Connectors()[t3.Kind].Status(context.Background(), false)
@@ -234,17 +234,16 @@ func TestRemoteT3PairCreatesTheMachinesConnectionAndInstallsItsAdapter(t *testin
 	if err := r.fake.Unpair(ctx); err != nil {
 		t.Fatal(err)
 	}
-	r.machine().Describe(ctx)
 	c := r.connector(t3.Kind)
+	st, err := c.Status(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if sum := c.Summary(ctx); sum.ConnectionID != 0 || sum.Configured {
 		t.Fatalf("fresh machine summary %+v", sum)
 	}
 	if id := r.store.ActiveID(r.id, t3.Kind); id != 0 {
 		t.Fatalf("T3 connection %d before pairing", id)
-	}
-	st, err := c.Status(ctx, true)
-	if err != nil {
-		t.Fatal(err)
 	}
 	if f := st.Fields[0]; f.ID != "url" || f.Source != "default" {
 		t.Fatalf("url field %+v", f)
@@ -258,8 +257,8 @@ func TestRemoteT3PairCreatesTheMachinesConnectionAndInstallsItsAdapter(t *testin
 		t.Fatalf("pairing created connection %d on machine %d", id, r.store.ConnectionMachine(id))
 	}
 	r.wait("adapter on the new connection", func() bool {
-		_, ok := r.machine().Adapter(id)
-		return ok && r.machine().Described()
+		a, ok := r.machine().Adapter(id)
+		return ok && a.Health(ctx).Available
 	})
 	if sum := c.Summary(ctx); sum.ConnectionID != id || !sum.Configured || !sum.Connected {
 		t.Fatalf("paired summary %+v", sum)

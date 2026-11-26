@@ -56,19 +56,19 @@ func TestSeparateWebClientResolvesTheSameSessionOnBothOrigins(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := execution.SessionRef{ConnectionID: 2, ExternalSessionID: "ses_origin"}
-	links := a.Destinations(t.Context(), ref)
-	path, ok := strings.CutPrefix(links.Web, cfg.WebClient)
+	link := a.sessionWebURL(ref.ExternalSessionID)
+	path, ok := strings.CutPrefix(link, cfg.WebClient)
 	if !ok || !strings.HasPrefix(path, "/server/") {
-		t.Fatal(links)
+		t.Fatal(link)
 	}
 	serviceURL := cfg.BrowserEndpoint + path
-	for _, input := range []string{ref.ExternalSessionID, links.Web, serviceURL} {
+	for _, input := range []string{ref.ExternalSessionID, link, serviceURL} {
 		got, err := a.ResolveLink(t.Context(), input)
 		if err != nil || got != ref {
 			t.Errorf("%q: %+v, %v", input, got, err)
 		}
 	}
-	for _, input := range []string{strings.Replace(links.Web, "client.example", "foreign.example", 1), links.Web + "?token=x", strings.Replace(serviceURL, "/session/", "/project/", 1)} {
+	for _, input := range []string{strings.Replace(link, "client.example", "foreign.example", 1), link + "?token=x", strings.Replace(serviceURL, "/session/", "/project/", 1)} {
 		if _, err := a.ResolveLink(t.Context(), input); err == nil {
 			t.Errorf("accepted %q", input)
 		}
@@ -78,8 +78,7 @@ func TestSeparateWebClientResolvesTheSameSessionOnBothOrigins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	direct := a.Destinations(t.Context(), ref)
-	if direct.Web != serviceURL {
+	if direct := a.sessionWebURL(ref.ExternalSessionID); direct != serviceURL {
 		t.Fatal(direct)
 	}
 }

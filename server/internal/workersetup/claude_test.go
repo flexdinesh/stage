@@ -38,8 +38,7 @@ var localHarnesses = harness.Profile{Kind: harness.ProfileServer, LocalProcesses
 // the main server (nothing in the worker's credentials file) and installs
 // the adapter there; a task launched through the coordinator runs over the
 // worker channel and its stored observation carries the resume command
-// (the remote adapter's Destinations is empty). Disconnect is recorded on
-// the main server too.
+// reported by Claude. Disconnect is recorded on the main server too.
 func TestRemoteClaudeConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	f := claudetest.New(t)
 	r := newRigWith(t, map[string]string{}, rigOptions{profile: localHarnesses, claude: claudeOptions(f)})
@@ -78,7 +77,7 @@ func TestRemoteClaudeConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	}
 	r.wait("adapter on the new connection", func() bool {
 		_, ok := m.Adapter(id)
-		return ok && m.Described()
+		return ok && m.Online()
 	})
 	if h := m.Adapters()[id].Health(ctx); !h.Available {
 		t.Fatalf("adapter health %+v", h)
@@ -106,10 +105,6 @@ func TestRemoteClaudeConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	if err != nil || !strings.HasPrefix(o.Links.Command, "claude attach ") {
 		t.Fatalf("stored observation links %+v %v", o.Links, err)
 	}
-	if links := m.Adapters()[id].Destinations(ctx, *got.Session); links != (execution.Links{}) {
-		t.Fatalf("remote destinations %+v", links)
-	}
-
 	if err := c.Disconnect(ctx); err != nil {
 		t.Fatal(err)
 	}

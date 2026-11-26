@@ -143,7 +143,8 @@ test("connectionGate: no chip for a replaced connection or one not loaded", () =
 
 test("connectionGate: a worker that cannot answer reads as Settings records it, no Settings link", () => {
   assert.deepEqual(connectionGate(conn(), worker("offline")), { tone: "idle", label: "offline", title: "studio is offline", fixable: false });
-  assert.deepEqual(connectionGate(conn(), worker("needs_update")), { tone: "idle", label: "needs update", title: "studio needs an update", fixable: false });
+  assert.deepEqual(connectionGate(conn(), { ...worker("negotiating"), statusReason: "Waiting for studio to finish connecting." }), { tone: "idle", label: "Negotiating", title: "Waiting for studio to finish connecting.", fixable: false });
+  assert.deepEqual(connectionGate(conn(), { ...worker("needs_update"), statusReason: "Update Stage on the main machine." }), { tone: "idle", label: "needs update", title: "Update Stage on the main machine.", fixable: false });
 });
 
 test("connectionGate: disconnected links to Settings; a set-up connection on a ready machine is read live", () => {
@@ -254,19 +255,23 @@ test("an offline or outdated worker's connection is a red problem naming the mac
   assert.deepEqual([item.tone, item.state, item.label], ["bad", "offline", "controlbox offline"]);
   assert.deepEqual(statusRow([item], { checking: false, empty: "" }).text, "controlbox offline");
   const outdated = connectionStatusItem({ ...target, machine: { ...statusWorker, status: "needs_update" } }, "T3", undefined, true);
-  assert.deepEqual([outdated.tone, outdated.state, outdated.label], ["bad", "needs update", "controlbox needs an update"]);
+  assert.deepEqual([outdated.tone, outdated.state, outdated.label], ["bad", "needs update", "Stage update required for controlbox's connection"]);
 });
 
-test("a ready machine's connection without a read yet is checking", () => {
+test("negotiating connections and ready connections waiting for a status read count as checking", () => {
   const [target] = statusTargets([statusMain, statusWorker], (id) => configured.get(id));
   const item = connectionStatusItem(target, "T3", undefined, true);
   assert.deepEqual([item.tone, item.state], ["idle", "checking"]);
+  const negotiating = connectionStatusItem({ ...target, machine: { ...statusWorker, status: "negotiating" } }, "T3", undefined, true);
+  assert.deepEqual([negotiating.tone, negotiating.state], ["idle", "Negotiating"]);
+  assert.equal(statusRow([negotiating], { checking: false, empty: "" }).kind, "checking");
 });
 
-test("unreachableDetail says when an offline machine was last seen, or what an outdated one runs", () => {
+test("unreachableDetail reports last contact or the server's protocol status reason", () => {
   const now = Date.parse("2026-01-01T00:05:00Z");
   assert.deepEqual(unreachableDetail({ ...statusWorker, status: "offline" }, now), ["seen 5m ago"]);
   assert.deepEqual(unreachableDetail({ ...statusWorker, status: "offline", lastSeenAt: null }, now), ["never seen"]);
-  assert.deepEqual(unreachableDetail({ ...statusWorker, status: "needs_update", version: "0.9.0" }, now), ["runs 0.9.0"]);
+  assert.deepEqual(unreachableDetail({ ...statusWorker, status: "negotiating", statusReason: "Waiting for the worker to finish connecting." }, now), ["Waiting for the worker to finish connecting."]);
+  assert.deepEqual(unreachableDetail({ ...statusWorker, status: "needs_update", statusReason: "Update Stage on the main machine." }, now), ["Update Stage on the main machine."]);
   assert.deepEqual(unreachableDetail(statusWorker, now), []);
 });

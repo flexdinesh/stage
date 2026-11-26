@@ -11,23 +11,24 @@ export const LOCAL_MACHINE_ID = 1;
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
 /** The machine's marker tone: ok while online, idle otherwise. */
-export const machineTone = (m: Pick<Machine, "online">): "ok" | "idle" => (m.online ? "ok" : "idle");
+export const machineTone = (m: Pick<Machine, "status">): "ok" | "idle" => (m.status === "online" ? "ok" : "idle");
 
-/** True when the machine runs another build than the server (`serverVersion`: the local machine's). */
-export function versionDiffers(m: Pick<Machine, "kind" | "version">, serverVersion: string | null): boolean {
-  return m.kind === "remote" && m.version !== null && serverVersion !== null && m.version !== serverVersion;
-}
+const MACHINE_STATUS_LABEL: Record<Machine["status"], string> = {
+  online: "online",
+  offline: "offline",
+  negotiating: "Negotiating",
+  needs_update: "needs update",
+};
+
+export const machineStatusLabel = (status: Machine["status"]): string => MACHINE_STATUS_LABEL[status];
 
 /** Mono status line: "online · v1.6.0", "offline · seen 4m ago · v1.5.0", "offline · never seen". */
-export function machineStatusLine(m: Pick<Machine, "online" | "lastSeenAt" | "version">, now: number = Date.now()): string {
-  const parts = [m.online ? "online" : "offline"];
-  if (!m.online) parts.push(m.lastSeenAt === null ? "never seen" : `seen ${relativeTime(m.lastSeenAt, now)}`);
+export function machineStatusLine(m: Pick<Machine, "status" | "lastSeenAt" | "version">, now: number = Date.now()): string {
+  const parts = [machineStatusLabel(m.status)];
+  if (m.status === "offline") parts.push(m.lastSeenAt === null ? "never seen" : `seen ${relativeTime(m.lastSeenAt, now)}`);
   if (m.version !== null) parts.push(m.version);
   return parts.join(" · ");
 }
-
-/** The local machine's build, the one remote machines are compared with. */
-export const serverVersion = (machines: readonly Machine[]): string | null => machines.find((m) => m.kind === "local")?.version ?? null;
 
 /** Remaining time on a pairing code as m:ss ("0:00" once past). */
 export function countdown(expiresAt: string, now: number = Date.now()): string {
@@ -133,23 +134,23 @@ export const machineScopeId = (m: Pick<Machine, "id" | "kind">): number | null =
 export const machineKey = (machineId: number | null, key: readonly unknown[]): readonly unknown[] =>
   machineId === null ? key : ["machine", machineId, ...key];
 
-/** Where a machine's harness setup stands: ready (online), offline, or needs_update (another API version). */
-export type MachineSetupState = "ready" | "offline" | "needs_update";
+/** Only the local machine and an online worker can serve harness setup. */
+export type MachineSetupState = "ready" | Exclude<Machine["status"], "online">;
 
 export const machineSetupState = (m: Pick<Machine, "kind" | "status">): MachineSetupState =>
   m.kind === "local" || m.status === "online" ? "ready" : m.status;
 
 /** Why a machine's harness setup cannot be driven (Settings Connections); null when it can. */
-export function machineSetupAlert(m: Pick<Machine, "kind" | "status" | "label" | "version">, server: string | null): string | null {
+export function machineSetupAlert(m: Pick<Machine, "kind" | "status" | "label" | "statusReason">): string | null {
   switch (machineSetupState(m)) {
     case "ready":
       return null;
     case "offline":
       return `${m.label} is offline. Its harness setup returns when its worker reconnects (stage worker run, or its service).`;
-    case "needs_update": {
-      const versions = m.version !== null && server !== null ? ` It runs ${m.version}; the main machine runs ${server}.` : "";
-      return `${m.label} needs an update: its worker speaks another API version.${versions} Install the same Stage version there.`;
-    }
+    case "negotiating":
+      return m.statusReason || "Waiting for the worker to finish connecting before harness setup is available.";
+    case "needs_update":
+      return m.statusReason || "The worker and main machine need compatible Stage versions before harness setup is available.";
   }
 }
 

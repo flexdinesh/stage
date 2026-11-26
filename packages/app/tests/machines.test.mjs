@@ -14,9 +14,7 @@ import {
   removePrompt,
   resumeLabel,
   resumeMachine,
-  serverVersion,
   setupCopy,
-  versionDiffers,
   withMachine,
 } from "../src/lib/machines.ts";
 
@@ -26,22 +24,18 @@ const local = { id: 1, label: "This computer", kind: "local", online: true, stat
 const desk = { id: 2, label: "desk", kind: "remote", online: false, status: "offline", lastSeenAt: "2026-11-22T09:56:00Z", version: "v1.5.0", connections: [] };
 const conn = (id, harness, machineId) => ({ id, harness, machineId });
 
-test("status line: online local, offline remote with last seen, never seen", () => {
+test("status line shows worker readiness without comparing builds", () => {
   assert.equal(machineStatusLine(local, NOW), "online · v1.6.0");
   assert.equal(machineStatusLine(desk, NOW), "offline · seen 4m ago · v1.5.0");
   assert.equal(machineStatusLine({ ...desk, lastSeenAt: null, version: null }, NOW), "offline · never seen");
-  assert.equal(machineTone(local), "ok");
+  const negotiating = { ...desk, status: "negotiating", version: null };
+  const ready = { ...desk, online: true, status: "online" };
+  assert.equal(machineStatusLine(negotiating, NOW), "Negotiating");
+  assert.equal(machineStatusLine({ ...desk, status: "needs_update" }, NOW), "needs update · v1.5.0");
+  assert.equal(machineStatusLine(ready, NOW), "online · v1.5.0");
+  assert.equal(machineTone(ready), "ok");
+  assert.equal(machineTone(negotiating), "idle");
   assert.equal(machineTone(desk), "idle");
-});
-
-test("version differs only for a remote machine with a known, different build", () => {
-  const server = serverVersion([local, desk]);
-  assert.equal(server, "v1.6.0");
-  assert.equal(versionDiffers(desk, server), true);
-  assert.equal(versionDiffers({ ...desk, version: "v1.6.0" }, server), false);
-  assert.equal(versionDiffers({ ...desk, version: null }, server), false);
-  assert.equal(versionDiffers(local, "v0"), false);
-  assert.equal(serverVersion([desk]), null);
 });
 
 test("countdown is m:ss and stops at 0:00", () => {
@@ -134,17 +128,22 @@ test("connection options: the default connection is marked, with not bound when 
   ]);
 });
 
-test("machine page: setup state and alert per presence", () => {
-  const online = { ...desk, online: true, status: "online" };
+test("machine setup defers to channel status and uses the server's update direction", () => {
+  const old = { ...desk, status: "needs_update", statusReason: "Update Stage on desk." };
+  const negotiating = { ...old, status: "negotiating", statusReason: "Waiting for desk to advertise its harness capabilities." };
+  const online = { ...old, online: true, status: "online" };
   assert.equal(machineSetupState(online), "ready");
   assert.equal(machineSetupState(local), "ready");
-  assert.equal(machineSetupAlert(online, "v1.6.0"), null);
+  assert.equal(machineSetupAlert(online), null);
   assert.equal(machineSetupState(desk), "offline");
-  assert.match(machineSetupAlert(desk, "v1.6.0"), /^desk is offline\. Its harness setup returns when its worker reconnects/);
-  const old = { ...desk, status: "needs_update" };
+  assert.match(machineSetupAlert(desk), /^desk is offline\. Its harness setup returns when its worker reconnects/);
+  assert.equal(machineSetupState(negotiating), "negotiating");
+  assert.equal(machineSetupAlert(negotiating), negotiating.statusReason);
+  assert.match(machineSetupAlert({ ...negotiating, statusReason: undefined }), /Waiting for the worker to finish connecting/);
   assert.equal(machineSetupState(old), "needs_update");
-  assert.equal(machineSetupAlert(old, "v1.6.0"), "desk needs an update: its worker speaks another API version. It runs v1.5.0; the main machine runs v1.6.0. Install the same Stage version there.");
-  assert.equal(machineSetupAlert({ ...old, version: null }, "v1.6.0"), "desk needs an update: its worker speaks another API version. Install the same Stage version there.");
+  assert.equal(machineSetupAlert(old), "Update Stage on desk.");
+  assert.equal(machineSetupAlert({ ...old, statusReason: "Update Stage on the main machine." }), "Update Stage on the main machine.");
+  assert.match(machineSetupAlert({ ...old, statusReason: undefined }), /compatible Stage versions/);
 });
 
 test("setup copy names the remote machine; locally it is this machine", () => {

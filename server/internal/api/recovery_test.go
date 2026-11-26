@@ -67,9 +67,8 @@ func TestRecoveryPreviewRejectsForeignOwnedAndUnverifiedSessions(t *testing.T) {
 	e.must("POST", endpoint, map[string]any{"link": t3.AppThreadURL("other-environment", foreign.ThreadID)}, 400, nil)
 }
 
-// A launch whose session Stage saw but could not record, on a connection
-// whose adapter resolves no destination (a remote machine's) and with no
-// stored observation, still offers the resume command the attempt kept.
+// A launch whose session Stage could not record still offers the resume command
+// the attempt kept until the session has a stored observation.
 func TestUnrecordedLaunchOffersTheKeptResumeCommand(t *testing.T) {
 	e := newEnv(t)
 	ctx := t.Context()
@@ -98,8 +97,18 @@ func TestUnrecordedLaunchOffersTheKeptResumeCommand(t *testing.T) {
 			} `json:"session"`
 		} `json:"launch"`
 	}
-	e.must("GET", fmt.Sprintf("/api/tasks/%d", pending.ID), nil, 200, &got)
+	path := fmt.Sprintf("/api/tasks/%d", pending.ID)
+	e.must("GET", path, nil, 200, &got)
 	if got.Launch.Session.Links.Command != "claude attach s1" {
 		t.Fatalf("launch session links %+v", got.Launch.Session.Links)
+	}
+
+	if err := e.store.PutObservation(ctx, execution.Observation{Session: seen.SessionRef, Project: "test", State: "running", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	got.Launch.Session.Links = links{}
+	e.must("GET", path, nil, 200, &got)
+	if got.Launch.Session.Links != (links{}) {
+		t.Fatalf("empty observed links should supersede the kept command: %+v", got.Launch.Session.Links)
 	}
 }

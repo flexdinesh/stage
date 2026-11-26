@@ -40,20 +40,20 @@ function retryMeta(failed: number, retryAt: string | null, since: string | null,
 }
 
 /** Why a task's connection cannot launch it right now. */
-export type LaunchBlockKind = "disconnected" | "offline" | "needs_update" | "unreachable" | "unbound";
+export type LaunchBlockKind = "disconnected" | "offline" | "negotiating" | "needs_update" | "unreachable" | "unbound";
 
 /** A task Start refuses before the request: why (a sentence for an Alert or a tooltip) and where the user fixes it. */
 export interface LaunchBlock {
   kind: LaunchBlockKind;
   reason: string;
-  /** The page that fixes it; null when only waiting helps (an offline machine). */
+  /** The page that fixes it; null when waiting for the machine to connect. */
   fix: { label: string; to: string } | null;
 }
 
 /** What `launchBlock` reads about a task's connection; undefined parts are not loaded yet and block nothing. */
 export interface LaunchContext {
   connection: Pick<HarnessConnection, "active" | "configured"> | undefined;
-  machine: Pick<Machine, "kind" | "status" | "label"> | undefined;
+  machine: Pick<Machine, "kind" | "status" | "label" | "statusReason"> | undefined;
   /** Its live status on its machine; undefined until read (checking blocks nothing). */
   live: Pick<HarnessSummary, "tone" | "label"> | undefined;
   /** The task's project bindings; undefined until projects load. */
@@ -68,7 +68,7 @@ export interface LaunchContext {
 
 /**
  * Why Start cannot launch the task on its connection now, or null when it can (as far as Stage knows; the server
- * checks again). In order: disconnected, its machine offline or out of date, the harness not answering (unreachable,
+ * checks again). In order: disconnected, its machine unavailable, the harness not answering (unreachable,
  * unpaired, expired, rejected), the project without an available workspace there. A replaced connection is not a
  * block here: it never launches again (isRetired).
  */
@@ -79,11 +79,14 @@ export function launchBlock(t: Pick<Task, "connectionId" | "projectId" | "projec
     return { kind: "disconnected", reason: `${name} is disconnected. Connect it to start this task.`, fix: { label: "Connect in Settings", to: settings } };
   }
   if (machine !== undefined) {
-    switch (machineSetupState(machine)) {
+    const state = machineSetupState(machine);
+    switch (state) {
       case "offline":
         return { kind: "offline", reason: `${machine.label} is offline. Start this task once it is back.`, fix: null };
+      case "negotiating":
+        return { kind: state, reason: `${machine.label} is connecting. Start this task when it is online.`, fix: null };
       case "needs_update":
-        return { kind: "needs_update", reason: `${machine.label} needs an update before it can start tasks.`, fix: { label: "Open Settings", to: settings } };
+        return { kind: state, reason: machine.statusReason || "A Stage update is required before this task can start.", fix: { label: "Open Settings", to: settings } };
       case "ready":
         break;
     }

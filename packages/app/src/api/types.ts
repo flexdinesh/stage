@@ -230,10 +230,11 @@ export interface Machine {
   id: number;
   label: string;
   kind: "local" | "remote";
-  /** Local: always. Remote: its worker channel is live. */
+  /** Local: always. Remote: its worker is ready to serve requests. */
   online: boolean;
-  /** online; offline; needs_update: its worker last connected with an incompatible API version (cleared when it connects again). */
-  status: "online" | "offline" | "needs_update";
+  status: "online" | "offline" | "negotiating" | "needs_update";
+  /** Explains ongoing negotiation or which side needs a Stage update. */
+  statusReason?: string;
   /** Last worker contact; null for the local machine. */
   lastSeenAt: string | null;
   /** The build it runs; null when unknown. */

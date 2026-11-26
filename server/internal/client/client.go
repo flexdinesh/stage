@@ -173,7 +173,7 @@ func IsStatus(err error, status int) bool {
 
 // Task is the API Task shape.
 type Task struct {
-	// Links: where the session opens (its harness's destinations).
+	// Links are from the session's latest stored observation.
 	Links execution.Links `json:"links"`
 	db.Task
 }

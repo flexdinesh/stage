@@ -25,7 +25,7 @@ var remotePlacement = placement{name: "remote", remote: true}
 func remoteSetup(t *testing.T, a execution.Adapter) (*db.Store, *remotetest.Rig, *coordinator.Service, db.Task) {
 	t.Helper()
 	store, task := contractTask(t, remotePlacement)
-	rig := remotetest.New(t, remoteMachine, map[int64]execution.Adapter{2: a})
+	rig := newContractWorker(t, store, map[int64]execution.Adapter{2: a})
 	svc := coordinator.NewForMachines(store, rig.Set(), nil)
 	svc.Harnesses = documentHarnesses
 	return store, rig, svc, task

@@ -29,7 +29,27 @@ func (h *Hub) ServeStream(w http.ResponseWriter, r *http.Request, machineID int6
 		writeError(w, http.StatusInternalServerError, "", "streaming unsupported")
 		return
 	}
-	sess := h.AttachGateway(machineID, r.Header.Get(VersionHeader), ParseGateway(r.Header.Get(GatewayHeader)))
+	lo, hi := r.Header.Get(ProtocolMinHeader), r.Header.Get(ProtocolMaxHeader)
+	version := r.Header.Get(VersionHeader)
+	refuse := func(serverOlder bool) {
+		h.markNeedsUpdate(machineID, serverOlder, version)
+		writeError(w, http.StatusConflict, CodeProtocolMismatch, UpdateReason(serverOlder))
+	}
+	if len(r.Header.Values(ProtocolMinHeader)) == 0 && len(r.Header.Values(ProtocolMaxHeader)) == 0 {
+		refuse(false)
+		return
+	}
+	peer, valid := ParseRange(lo, hi)
+	if !valid || len(r.Header.Values(ProtocolMinHeader)) != 1 || len(r.Header.Values(ProtocolMaxHeader)) != 1 {
+		writeError(w, http.StatusBadRequest, "invalid_channel_protocol", "Send a valid worker channel protocol range with min at least 1 and max at least min.")
+		return
+	}
+	selected, shared := h.opts.ProtocolRange.Select(peer)
+	if !shared {
+		refuse(h.opts.ProtocolRange.Max < peer.Min)
+		return
+	}
+	sess := h.attach(machineID, version, ParseGateway(r.Header.Get(GatewayHeader)))
 	defer h.Detach(sess)
 	hd := w.Header()
 	hd.Set("Content-Type", "text/event-stream")
@@ -37,7 +57,9 @@ func (h *Hub) ServeStream(w http.ResponseWriter, r *http.Request, machineID int6
 	hd.Set("X-Accel-Buffering", "no")
 	hd.Set(VersionHeader, serverVersion)
 	w.WriteHeader(http.StatusOK)
-	hello := Hello{Session: sess.ID, MachineID: machineID,
+	kinds, channelKinds := h.advertised()
+	hello := Hello{Session: sess.ID, MachineID: machineID, ProtocolRange: h.opts.ProtocolRange, ProtocolVersion: selected,
+		Kinds: kinds, ChannelKinds: channelKinds,
 		HeartbeatSec: int(h.Keepalive() / time.Second), TimeoutSec: int(h.Timeout() / time.Second)}
 	if err := WriteEvent(w, EventHello, hello); err != nil {
 		return
@@ -104,6 +126,11 @@ func (h *Hub) ServePost(w http.ResponseWriter, r *http.Request, machineID int64)
 	reply, err := h.Deliver(r.Context(), machineID, session, env)
 	if errors.Is(err, ErrReplaced) {
 		writeError(w, http.StatusConflict, "channel_replaced", "this channel session was replaced or ended; reconnect the stream")
+		return
+	}
+	var protocolError *RemoteError
+	if errors.As(err, &protocolError) {
+		writeError(w, http.StatusBadRequest, protocolError.Code, protocolError.Message)
 		return
 	}
 	if err != nil {

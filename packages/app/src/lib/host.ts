@@ -234,7 +234,7 @@ export function workerHeadline(w: HostWorker): string {
     case "removed":
       return `${w.serverName} removed this machine`;
     case "needs_update":
-      return "This machine's worker needs an update";
+      return "Stage update required";
     case "failed":
       return "This machine's worker failed";
     default:

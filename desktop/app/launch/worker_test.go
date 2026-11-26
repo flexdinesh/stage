@@ -381,7 +381,7 @@ func TestWorkerStatusMapping(t *testing.T) {
 		{workerJSON("not-installed", false, true, u, "", "", false), WorkerOffline, "The worker service is not running."},
 		{workerJSON("starting", false, true, u, "", "", false), WorkerStarting, ""},
 		{workerJSON("failed", false, true, u, "", "", false), WorkerFailed, "The worker service failed."},
-		{workerJSON("running", false, true, u, "needs_update", "", false), WorkerNeedsUpdate, "stage.example.com runs another Stage version than this app."},
+		{workerJSON("running", false, true, u, "needs_update", "Update Stage on the main machine.", false), WorkerNeedsUpdate, "Update Stage on the main machine."},
 		{workerJSON("stopped", false, true, u, "revoked", "", false), WorkerRemoved, "stage.example.com removed this machine."},
 	} {
 		cli := newFakeCLI(t)

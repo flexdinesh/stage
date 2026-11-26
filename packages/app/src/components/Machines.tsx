@@ -9,7 +9,7 @@ import { keys, useHarnesses, useMachines, useRemoveMachine, useRenameMachine } f
 import type { Machine, MachinePairing, PairingStatus } from "../api/types.ts";
 import { machineRole } from "../lib/connectionRows.ts";
 import { dateTime } from "../lib/format.ts";
-import { countdown, machineSetupAlert, machineSetupState, machineStatusLine, machineTone, pairingPhase, removePrompt, serverVersion, versionDiffers } from "../lib/machines.ts";
+import { countdown, machineSetupAlert, machineStatusLine, machineTone, pairingPhase, removePrompt } from "../lib/machines.ts";
 import { useApi } from "../platform/context.tsx";
 import { AddConnection, ConnectionRowList, MachineScope, ManageDrawer, useMachineConnections, type ManageTarget } from "./ConnectionRows.tsx";
 import { Step, Steps } from "./Steps.tsx";
@@ -18,14 +18,13 @@ import { Alert, Button, ConfirmInline, Drawer, ErrorText, Field, Hint, Input, Ma
 /** The Machines panel: one group per machine, the main machine first. */
 export function MachinesPanel({ meta }: { meta?: string }) {
   const machines = useMachines();
-  const server = serverVersion(machines.machines);
   return (
     <Panel title="Machines" {...(meta === undefined ? {} : { meta })} flush>
       <QueryState isPending={machines.isPending} error={machines.error} hasData={machines.data !== undefined}>
         <RowList label="Machines">
           {machines.machines.map((m) => (
             <MachineScope key={m.id} machine={m}>
-              <MachineGroup machine={m} serverVersion={server} />
+              <MachineGroup machine={m} />
             </MachineScope>
           ))}
         </RowList>
@@ -37,7 +36,7 @@ export function MachinesPanel({ meta }: { meta?: string }) {
   );
 }
 
-function MachineGroup({ machine: m, serverVersion: server }: { machine: Machine; serverVersion: string | null }) {
+function MachineGroup({ machine: m }: { machine: Machine }) {
   const harnesses = useHarnesses();
   const connections = useMachineConnections(m);
   const [mode, setMode] = useState<"view" | "rename" | "remove">("view");
@@ -47,7 +46,7 @@ function MachineGroup({ machine: m, serverVersion: server }: { machine: Machine;
   const role = machineRole(m);
   // Usage counts come from GET /connections (which lists only connections this server can reach); unknown ones show none.
   const usage = m.connections.map((c) => harnesses.connection(c.id) ?? c);
-  const alert = machineSetupState(m) === "needs_update" ? machineSetupAlert(m, server) : null;
+  const alert = m.status === "negotiating" || m.status === "needs_update" ? machineSetupAlert(m) : null;
   return (
     <Row bare>
       <div className="flex flex-col gap-2 bg-panel px-3 py-2">
@@ -59,9 +58,8 @@ function MachineGroup({ machine: m, serverVersion: server }: { machine: Machine;
             <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <span className="min-w-0 truncate text-body font-medium text-fg">{m.label}</span>
               <Meta title={role === "main" ? "Stage runs here; workers connect to it" : "Runs harnesses for the main machine"}>{role}</Meta>
-              <span className="font-mono text-meta text-muted" title={m.lastSeenAt === null ? undefined : `Last seen ${dateTime(m.lastSeenAt)}`}>
-                <span className="tabular">{machineStatusLine(m)}</span>
-                {versionDiffers(m, server) ? <span className="whitespace-nowrap"> · main {server}</span> : null}
+              <span className="font-mono text-meta wrap-anywhere text-muted tabular" title={m.lastSeenAt === null ? undefined : `Last seen ${dateTime(m.lastSeenAt)}`}>
+                {machineStatusLine(m)}
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5 max-md:w-full max-md:pl-[18px]">
@@ -102,7 +100,7 @@ function MachineGroup({ machine: m, serverVersion: server }: { machine: Machine;
             ))}
           </ConfirmInline>
         ) : null}
-        {alert === null ? null : <Hint className="pl-[18px]">{alert}</Hint>}
+        {alert === null ? null : <Hint className="wrap-anywhere pl-[18px]">{alert}</Hint>}
       </div>
       <ConnectionRowList machine={m} connections={connections} onManage={setManage} />
       {manage === null ? null : <ManageDrawer machine={m} target={manage} onClose={() => setManage(null)} />}

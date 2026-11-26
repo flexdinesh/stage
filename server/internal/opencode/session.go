@@ -215,7 +215,7 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 	}
 	o = execution.Observation{
 		Session: ref, Title: s.Title, Project: s.ProjectID, State: "idle",
-		Directory: s.Location.Directory, Links: a.Destinations(ctx, ref),
+		Directory: s.Location.Directory, Links: execution.Links{Web: a.sessionWebURL(s.ID)},
 		Archived: s.Time.Archived > 0, Child: s.ParentID != "", Config: execution.Config{Mode: s.Agent},
 		CreatedAt: *millis(s.Time.Created), UpdatedAt: *millis(s.Time.Updated),
 		StartedAt: millis(s.Time.Busy), ExecutionID: runID(s),

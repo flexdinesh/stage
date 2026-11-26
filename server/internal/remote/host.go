@@ -28,25 +28,29 @@ type Host struct {
 	ready atomic.Bool
 
 	mu         sync.Mutex
-	onAttached func(ctx context.Context)
+	onAttached func(ctx context.Context, kinds []string) error
 }
 
 // OnAttached sets the hook Attached runs (the worker composes its
 // connection setup once the main server is reachable).
-func (h *Host) OnAttached(fn func(ctx context.Context)) {
+func (h *Host) OnAttached(fn func(ctx context.Context, kinds []string) error) {
 	h.mu.Lock()
 	h.onAttached = fn
 	h.mu.Unlock()
 }
 
-// Attached runs the OnAttached hook: a channel session went online.
-func (h *Host) Attached(ctx context.Context) {
+// Attached composes the host before the session can publish ready.
+func (h *Host) Attached(ctx context.Context, kinds []string) error {
 	h.mu.Lock()
 	fn := h.onAttached
 	h.mu.Unlock()
 	if fn != nil {
-		fn(ctx)
+		if err := fn(ctx, kinds); err != nil {
+			return err
+		}
 	}
+	h.ready.Store(true)
+	return nil
 }
 
 // Ready reports whether the connection setup is composed.
@@ -59,7 +63,7 @@ func NewHost(local *machine.Local) *Host {
 	return h
 }
 
-// Notify reports that what the host serves changed (machine.changed).
+// Notify reports that what the host serves changed.
 func (h *Host) Notify() {
 	select {
 	case h.changes <- struct{}{}:
@@ -67,43 +71,34 @@ func (h *Host) Notify() {
 	}
 }
 
-// SetReady marks the connection setup composed (its connectors are set on
-// Local) and reports the change.
-func (h *Host) SetReady() {
-	h.ready.Store(true)
-	h.Notify()
-}
-
 // Local is the machine the host serves.
 func (h *Host) Local() *machine.Local { return h.local }
 
-// Changes signals that the hosted connections changed (machine.changed).
+// Changes signals that the hosted connections changed.
 func (h *Host) Changes() <-chan struct{} { return h.changes }
 
-// Describe is what the host serves now. Connector summaries are memory
-// only, but a connector may read its machine's settings from the main
-// server (ctx bounds that).
-func (h *Host) Describe(ctx context.Context) Description {
-	d := Description{Profile: h.local.Profile(), Connections: []Hosted{}, Connectors: []ConnectorState{}, SetupReady: h.ready.Load()}
+// Snapshot captures the configured connectors and installed adapter traits.
+func (h *Host) Snapshot(ctx context.Context) (workerchan.Ready, error) {
+	r := workerchan.Ready{Kinds: []string{}, Connections: []workerchan.Connection{}}
+	d := description{Profile: h.local.Profile(), Connectors: []ConnectorState{}}
 	for id, a := range h.local.Adapters() {
-		d.Connections = append(d.Connections, Hosted{ConnectionID: id, Traits: execution.Traits(a)})
+		r.Connections = append(r.Connections, workerchan.Connection{ConnectionID: id, Traits: execution.Traits(a)})
 	}
-	slices.SortFunc(d.Connections, func(a, b Hosted) int { return cmp.Compare(a.ConnectionID, b.ConnectionID) })
-	if d.SetupReady {
-		for kind, c := range h.local.Connectors() {
-			d.Connectors = append(d.Connectors, ConnectorState{Kind: kind, Summary: c.Summary(ctx)})
-		}
-		slices.SortFunc(d.Connectors, func(a, b ConnectorState) int { return strings.Compare(a.Kind, b.Kind) })
+	slices.SortFunc(r.Connections, func(a, b workerchan.Connection) int { return cmp.Compare(a.ConnectionID, b.ConnectionID) })
+	for kind, c := range h.local.Connectors() {
+		r.Kinds = append(r.Kinds, kind)
+		d.Connectors = append(d.Connectors, ConnectorState{Kind: kind, Summary: c.Summary(ctx)})
 	}
-	return d
+	slices.Sort(r.Kinds)
+	slices.SortFunc(d.Connectors, func(a, b ConnectorState) int { return strings.Compare(a.Kind, b.Kind) })
+	var err error
+	r.Details, err = json.Marshal(d)
+	return r, err
 }
 
 // Handlers answer the main server's calls by kind.
 func (h *Host) Handlers() map[string]workerchan.WorkerHandler {
 	return map[string]workerchan.WorkerHandler{
-		KindDescribe: func(ctx context.Context, _ workerchan.Envelope, _ workerchan.Upcall) (any, error) {
-			return h.Describe(ctx), nil
-		},
 		KindConnectorStatus: h.connector(func(ctx context.Context, c harness.Connector, r ConnectorRequest) (harness.Result, error) {
 			return harness.Result{}, nil
 		}),
@@ -271,7 +266,14 @@ func (h *Host) connector(fn func(ctx context.Context, c harness.Connector, r Con
 		if err != nil {
 			return nil, EncodeSetupError(err)
 		}
-		return ConnectorStatus{Status: st, Result: res}, nil
+		out := ConnectorStatus{Status: st, Result: res}
+		if env.Kind != KindConnectorStatus {
+			return workerchan.RefreshCapabilities{Value: out}, nil
+		}
+		if r.Refresh {
+			h.Notify()
+		}
+		return out, nil
 	}
 }
 
@@ -339,5 +341,5 @@ func decode(env workerchan.Envelope, v any) error {
 }
 
 func unsupported(what string) error {
-	return &workerchan.RemoteError{Code: CodeUnsupported, Message: "this harness does not support " + what}
+	return &workerchan.RemoteError{Code: workerchan.CodeOperationUnavailable, Message: "this harness does not support " + what}
 }

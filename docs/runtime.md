@@ -317,8 +317,10 @@ Order for a worker request:
    sends no `Origin` or `Sec-Fetch-*` and a JSON body. A DNS-rebinding Host or
    a cross-site browser request is still refused with 403 before any
    credential is read.
-2. **API version.** `Stage-Api-Version` must equal the server's: 409
-   `api_version_mismatch` otherwise.
+2. **API version for product requests.** Join, leave, machine status and
+   gateway requests require the server's `Stage-Api-Version` (409
+   `api_version_mismatch`). The SSE stream and its POST route use the
+   independent channel handshake below.
 3. **Credential.** Join takes only the code in its body (an `Authorization`
    header is 400). Other worker routes need `Authorization: Bearer
    stage_mt_...`; the machine id it names is the request's principal (a
@@ -353,10 +355,25 @@ serving), `server/internal/api` (routes and auth), `server/internal/worker`
 (client), `server/internal/remote` (the remote machine's calls,
 [execution.md](execution.md#remote-machines)).
 
-- **Session.** Each stream gets a session id in its `hello` event; up POSTs
-  name it in `Stage-Channel-Session`. A newer stream of the same machine
-  replaces the older (the old stream ends, its POSTs get 409
-  `channel_replaced`).
+- **Handshake.** The authenticated opening GET carries the inclusive
+  `Stage-Channel-Protocol-Min` and `Stage-Channel-Protocol-Max` integer
+  headers. Both bounds start at 1. The server uses the highest shared
+  version and advertises its `protocolRange` (`min`, `max`),
+  `protocolVersion`, harness `kinds` and accepted `channelKinds` in
+  `hello`. Malformed ranges get 400 `invalid_channel_protocol`.
+  Disjoint ranges or a legacy worker with no range get 409
+  `channel_protocol_mismatch`, naming the side to update.
+- **Session and ready.** POSTs carry `hello.session` in
+  `Stage-Channel-Session`. While negotiating, the worker composes setup
+  with the server's advertised kinds and setup ports. Only liveness and
+  composition messages may run in this phase. The worker then POSTs
+  `kind: ready` with `body: {kinds, channelKinds, connections, details}`,
+  where connections hold `{connectionId, traits}`. The server publishes
+  the entire snapshot before waking sync and launch scheduling. Further
+  ready messages replace the snapshot after setup changes. Duplicate
+  snapshots have no effect. A newer stream replaces its predecessor and
+  clears its capabilities. Old advertisements and results are discarded
+  with 409 `channel_replaced`.
 - **Liveness.** The server writes a `: keepalive` comment every 15s and the
   worker POSTs a heartbeat every 15s. Either side treats 45s of silence as a
   dead channel: the server closes the session, the worker reconnects.
@@ -367,23 +384,21 @@ serving), `server/internal/api` (routes and auth), `server/internal/worker`
   channel when called) or lost reply (deadline passed or the channel dropped
   in flight: unknown outcome, never failure). Results after that are dropped.
   Calls: `ping` (`POST /api/machines/{id}/ping`, `stage machine ping ID`)
-  and the remote machine's adapter, ops and describe calls.
+  and the remote machine's adapter, ops and connector calls. An absent
+  request kind or trait answers `operation_unavailable` before dispatch.
 - **Worker-initiated calls.** An up POST may carry a call; its result is the
   POST's response. A callback names the waiting request (`call`) and runs
   only while that request waits (`checkpoint.save`, `launch.image`,
   `events.observation`); after that it gets `call_ended`. A callback still
   running when its request stops waiting is cancelled, and the request
-  returns only after it ended. `machine.changed`
-  names no request. An up message is at most 32 MiB (launch images travel
+  returns only after it ended. An up message is at most 32 MiB (launch images travel
   down one per `launch.image` reply).
-- **Attach.** Each new session is described (`machine.describe`) and the
-  coordinator polls the machine's connections at once.
-- **Presence.** Online means a live channel, kept in memory, so a main
-  restart shows every worker offline until it reconnects (seconds).
+- **Presence.** The server reports `negotiating` until ready is accepted,
+  then `online` while the session remains live. A refusal appears as
+  `needs_update` with `statusReason` in Machines until compatible
+  negotiation begins. Presence and capabilities are process-local.
   `machines.last_seen_at` and `version` are written on connect, on
   disconnect and at most once a minute while connected (never moved back).
-  A worker refused with `api_version_mismatch` while presenting a valid token
-  shows `status: needs_update` until it connects again (memory only).
 - **Shutdown.** Server shutdown closes every stream; workers reconnect to the
   next instance with backoff.
 
@@ -420,7 +435,7 @@ All take `--config PATH` and `--json`. Worker commands never use
   status` shows it while a process holds the lock, and asks the main server
   (`GET /api/worker/machine`) whether this machine is online or revoked.
 - **Reconnect:** exponential backoff 1s to 60s with jitter, reset after a
-  stream that stayed up 30s. `api_version_mismatch` waits the maximum
+  stream that stayed up 30s. `channel_protocol_mismatch` waits the maximum
   interval. 401 (the machine was removed) ends the run as revoked, without
   a retry loop.
 - **Exit status:** 0 on SIGINT/SIGTERM; 75 the worker dir or a gateway

@@ -51,7 +51,7 @@ func (hostedAdapter) Workspaces(context.Context) ([]execution.WorkspaceInfo, err
 }
 func (hostedAdapter) observation(ref execution.SessionRef) execution.Observation {
 	now := time.Now().UTC()
-	return execution.Observation{Session: ref, Project: "repo", Title: "Kit", State: "running", Active: true, CreatedAt: now, UpdatedAt: now}
+	return execution.Observation{Session: ref, Project: "repo", Title: "Kit", State: "running", Active: true, CreatedAt: now, UpdatedAt: now, Links: execution.Links{Command: "kit attach"}}
 }
 func (a hostedAdapter) Observe(_ context.Context, ref execution.SessionRef) (execution.Observation, error) {
 	return a.observation(ref), nil
@@ -74,9 +74,6 @@ func (hostedAdapter) Attention(context.Context) ([]execution.SessionRef, error) 
 }
 func (hostedAdapter) Opening(context.Context, execution.SessionRef, bool) (*execution.Reply, error) {
 	return nil, execution.ErrUnavailable
-}
-func (hostedAdapter) Destinations(context.Context, execution.SessionRef) execution.Links {
-	return execution.Links{Command: "kit attach"}
 }
 
 // hostedConnector is the fake hosted harness's setup: connect records the

@@ -276,11 +276,8 @@ func (a *Adapter) valid(ref execution.SessionRef) bool {
 func (a *Adapter) sessionPath() string {
 	return "/server/" + base64.RawURLEncoding.EncodeToString([]byte(a.browserEndpoint)) + "/session/"
 }
-func (a *Adapter) Destinations(_ context.Context, ref execution.SessionRef) execution.Links {
-	if !a.valid(ref) {
-		return execution.Links{}
-	}
-	return execution.Links{Web: a.web + a.sessionPath() + ref.ExternalSessionID}
+func (a *Adapter) sessionWebURL(id string) string {
+	return a.web + a.sessionPath() + id
 }
 func (a *Adapter) ResolveLink(_ context.Context, s string) (execution.SessionRef, error) {
 	id := strings.TrimSpace(s)

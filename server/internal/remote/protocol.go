@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
@@ -39,7 +40,6 @@ const (
 	KindSend                 = "adapter.send"
 	KindInventory            = "ops.inventory"
 	KindCheckout             = "ops.checkout"
-	KindDescribe             = "machine.describe"
 )
 
 // Worker-initiated calls. The callbacks name the pending request they
@@ -54,9 +54,6 @@ const (
 	// KindObservation (callback of adapter.events) ingests one pushed
 	// observation.
 	KindObservation = "events.observation"
-	// KindChanged (no request) reports that the worker's hosted
-	// connections changed; the main server describes the machine again.
-	KindChanged = "machine.changed"
 )
 
 // Result error codes beyond workerchan's.
@@ -82,22 +79,10 @@ const (
 	CodeUnsupported = "unsupported"
 )
 
-// Description is machine.describe's result: what the worker hosts.
-type Description struct {
-	Profile     harness.Profile `json:"profile"`
-	Connections []Hosted        `json:"connections"`
-	// Connectors are the connection setups the worker hosts (none until
-	// it composed them), with their memory-only summaries.
+// description carries placement metadata and connector summaries in ready.details.
+type description struct {
+	Profile    harness.Profile  `json:"profile"`
 	Connectors []ConnectorState `json:"connectors"`
-	// SetupReady: the worker composed its connection setup.
-	SetupReady bool `json:"setupReady"`
-}
-
-// Hosted is one connection the worker has an adapter for, with the
-// optional interfaces it implements (execution.Traits).
-type Hosted struct {
-	ConnectionID int64    `json:"connectionId"`
-	Traits       []string `json:"traits"`
 }
 
 // SessionRequest names a session (observe, stop, requests).
@@ -212,6 +197,8 @@ func decodeError(err error) error {
 		return nil
 	case errors.Is(err, workerchan.ErrOffline):
 		return ErrOffline
+	case errors.Is(err, workerchan.ErrNegotiating):
+		return fmt.Errorf("%w: %s", execution.ErrUnavailable, err)
 	case !errors.As(err, &re):
 		return err
 	}
@@ -230,10 +217,10 @@ func decodeError(err error) error {
 		return fmt.Errorf("%w: %s", execution.ErrNotFound, re.Message)
 	case CodeNoReply:
 		return fmt.Errorf("%w: %s", execution.ErrNoReply, re.Message)
-	case CodeNotHosted, CodeUnsupported:
+	case CodeNotHosted:
 		return fmt.Errorf("%w: %s", execution.ErrUnavailable, re.Message)
-	case workerchan.CodeUnknownKind:
-		return fmt.Errorf("%w: the machine's worker needs an update (%s)", execution.ErrUnavailable, re.Message)
+	case CodeUnsupported, workerchan.CodeOperationUnavailable, workerchan.CodeUnknownKind:
+		return &db.ConflictError{Code: workerchan.CodeOperationUnavailable, Msg: re.Message}
 	}
 	return err
 }

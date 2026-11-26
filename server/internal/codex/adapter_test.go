@@ -112,8 +112,8 @@ func TestLaunchStartsThreadThenTurnAndObservesToDone(t *testing.T) {
 	if err != nil || opening.Text != "Fix it" {
 		t.Fatal(opening, err)
 	}
-	if links := r.adapter.Destinations(ctx, o.Session); links.Command != o.Links.Command {
-		t.Fatalf("destinations %+v", links)
+	if o.Links.Command != "cd /w/app && codex resume "+th.ID {
+		t.Fatalf("resume %q", o.Links.Command)
 	}
 }
 

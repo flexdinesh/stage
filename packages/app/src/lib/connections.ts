@@ -4,7 +4,7 @@
 import type { Harness, HarnessConnection, HarnessStatus, Machine } from "../api/types.ts";
 import { connectedRows, connectionRows } from "./connectionRows.ts";
 import { relativeTime } from "./format.ts";
-import { machineSetupState } from "./machines.ts";
+import { machineSetupAlert, machineSetupState, machineStatusLabel } from "./machines.ts";
 import type { StatusItem } from "./status.ts";
 
 /** A status query as the control reads it; a data-less query returns to pending on every refetch, so only the first counts as checking. */
@@ -72,14 +72,15 @@ export interface ConnectionChip {
  */
 export function connectionGate(
   connection: Pick<HarnessConnection, "active" | "configured"> | undefined,
-  machine: Pick<Machine, "kind" | "status" | "label"> | undefined,
+  machine: Pick<Machine, "kind" | "status" | "label" | "statusReason"> | undefined,
 ): ConnectionChip | "live" | null {
   if (connection === undefined || !connection.active || machine === undefined) return null;
   switch (machineSetupState(machine)) {
     case "offline":
       return { tone: "idle", label: "offline", title: `${machine.label} is offline`, fixable: false };
+    case "negotiating":
     case "needs_update":
-      return { tone: "idle", label: "needs update", title: `${machine.label} needs an update`, fixable: false };
+      return { tone: "idle", label: machineStatusLabel(machine.status), title: machineSetupAlert(machine) ?? "", fixable: false };
     case "ready":
       return connection.configured ? "live" : { tone: "idle", label: "disconnected", title: "Not connected. Connect it in Settings.", fixable: true };
   }
@@ -95,7 +96,7 @@ export function liveChip(summary: Pick<HarnessSummary, "tone" | "state" | "label
 export interface StatusTarget {
   connectionId: number;
   harness: Harness;
-  machine: Pick<Machine, "id" | "kind" | "label" | "status" | "lastSeenAt" | "version">;
+  machine: Pick<Machine, "id" | "kind" | "label" | "status" | "statusReason" | "lastSeenAt">;
 }
 
 /** Every machine's set-up connections (its connected Settings rows; disconnected ones are not), in machine order. */
@@ -108,8 +109,8 @@ export function statusTargets(
 
 /**
  * A connection's status item. With `grouped` (two or more machines) its section is its machine and its sentence names
- * the machine; otherwise one Harnesses section, as on a single machine. A machine that cannot answer (offline, needs an
- * update) is a red problem: its tasks cannot run. `summary`: the live read on a machine that can; undefined: checking.
+ * the machine; otherwise one Harnesses section, as on a single machine. Negotiation counts as checking. An offline
+ * machine or protocol mismatch is a red problem. `summary`: the live read on a machine that can; undefined: checking.
  */
 export function connectionStatusItem(target: StatusTarget, name: string, summary: Pick<HarnessSummary, "tone" | "state" | "label"> | undefined, grouped: boolean): StatusItem {
   const { machine } = target;
@@ -117,8 +118,10 @@ export function connectionStatusItem(target: StatusTarget, name: string, summary
   switch (machineSetupState(machine)) {
     case "offline":
       return { ...base, tone: "bad", state: "offline", label: `${machine.label} offline` };
+    case "negotiating":
+      return { ...base, tone: "idle", state: machineStatusLabel(machine.status), label: `Waiting for ${machine.label} to finish connecting` };
     case "needs_update":
-      return { ...base, tone: "bad", state: "needs update", label: `${machine.label} needs an update` };
+      return { ...base, tone: "bad", state: machineStatusLabel(machine.status), label: `Stage update required for ${machine.label}'s connection` };
     case "ready":
       break;
   }
@@ -126,13 +129,16 @@ export function connectionStatusItem(target: StatusTarget, name: string, summary
   return { ...base, tone: summary.tone, state: summary.state, label: grouped ? `${summary.label} on ${machine.label}` : summary.label };
 }
 
-/** Detail line of a connection whose machine cannot answer: when it was last seen, or the build it runs. */
-export function unreachableDetail(m: Pick<Machine, "kind" | "status" | "lastSeenAt" | "version">, now: number = Date.now()): string[] {
+/** Detail lines of a connection whose machine cannot answer. */
+export function unreachableDetail(m: Omit<StatusTarget["machine"], "id">, now: number = Date.now()): string[] {
   switch (machineSetupState(m)) {
     case "offline":
       return [m.lastSeenAt === null ? "never seen" : `seen ${relativeTime(m.lastSeenAt, now)}`];
-    case "needs_update":
-      return m.version === null ? [] : [`runs ${m.version}`];
+    case "negotiating":
+    case "needs_update": {
+      const reason = machineSetupAlert(m);
+      return reason === null ? [] : [reason];
+    }
     case "ready":
       return [];
   }

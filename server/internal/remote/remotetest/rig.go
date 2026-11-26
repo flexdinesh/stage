@@ -34,17 +34,19 @@ import (
 
 // Rig is one remote machine with its worker.
 type Rig struct {
-	t         *testing.T
-	machineID int64
-	hub       *workerchan.Hub
-	set       *machine.Set
-	hosts     *remote.Hosts
-	srv       *httptest.Server
-	cfgPath   string
-	listen    []listen.Addr // the worker's agent gateway: a temp socket
-	adapters  map[int64]execution.Adapter
+	t          *testing.T
+	machineID  int64
+	hub        *workerchan.Hub
+	set        *machine.Set
+	hosts      *remote.Hosts
+	srv        *httptest.Server
+	cfgPath    string
+	listen     []listen.Addr // the worker's agent gateway: a temp socket
+	adapters   map[int64]execution.Adapter
+	connectors map[string]harness.Connector
 	// profile is what the worker reports (SetProfile).
-	profile harness.Profile
+	profile      harness.Profile
+	missingKinds []string
 
 	mu    sync.Mutex
 	kinds map[string]string // request id -> kind, from the down stream
@@ -58,10 +60,15 @@ type Rig struct {
 // record of the machine's active connections is adapters' keys. The
 // worker allows local harnesses (`stage worker run --local-harnesses`).
 func New(t *testing.T, machineID int64, adapters map[int64]execution.Adapter) *Rig {
+	return NewWithConnectors(t, machineID, adapters, nil)
+}
+
+// NewWithConnectors also runs connection setup on the real worker.
+func NewWithConnectors(t *testing.T, machineID int64, adapters map[int64]execution.Adapter, connectors map[string]harness.Connector) *Rig {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Rig{t: t, machineID: machineID, adapters: adapters, kinds: map[string]string{}, drop: map[string]int{},
-		profile: harness.Profile{Kind: harness.ProfileServer, LocalProcesses: true}}
+		profile: harness.Profile{Kind: harness.ProfileServer, LocalProcesses: true}, connectors: connectors}
 	r.hub = workerchan.NewHub(ctx, workerchan.Options{Version: "test"})
 	r.set = machine.MustSet(machine.NewLocal(1, harness.Profile{}, nil))
 	conns := func(id int64) []int64 {
@@ -73,6 +80,7 @@ func New(t *testing.T, machineID int64, adapters map[int64]execution.Adapter) *R
 		return ids
 	}
 	r.hosts = remote.NewHosts(r.set, r.hub, conns, nil, quiet())
+	r.hosts.SetSetup(remote.SetupHooks{Kinds: slices.Sorted(maps.Keys(connectors))})
 	r.hosts.Join(machineID)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/worker/channel", func(w http.ResponseWriter, req *http.Request) {
@@ -136,6 +144,22 @@ func (r *Rig) Adapter(connection int64) execution.Adapter {
 // (stop the running one first).
 func (r *Rig) SetProfile(p harness.Profile) { r.profile = p }
 
+// SetMissingRequestKinds omits kinds from the next worker's handlers and ready advertisement.
+func (r *Rig) SetMissingRequestKinds(kinds ...string) { r.missingKinds = kinds }
+
+type host struct {
+	*remote.Host
+	missing []string
+}
+
+func (h host) Handlers() map[string]workerchan.WorkerHandler {
+	handlers := h.Host.Handlers()
+	for _, kind := range h.missing {
+		delete(handlers, kind)
+	}
+	return handlers
+}
+
 // StartWorker starts a worker process (a fresh host over the same
 // adapters) and waits until the main server has described it.
 func (r *Rig) StartWorker() {
@@ -149,19 +173,22 @@ func (r *Rig) StartWorker() {
 	r.stop, r.done = cancel, make(chan error, 1)
 	r.mu.Unlock()
 	profile := r.profile
-	host := func(id int64, _ workerchan.Upcall) worker.Host {
+	makeHost := func(id int64, _ workerchan.Upcall) worker.Host {
 		h := remote.NewHost(machine.NewLocal(id, profile, machine.LocalOps{}))
 		for conn, a := range r.adapters {
 			h.Local().Install(conn, conn, a)
 		}
-		return h
+		for kind, c := range r.connectors {
+			h.Local().SetConnector(kind, c)
+		}
+		return host{Host: h, missing: r.missingKinds}
 	}
 	done := r.done
 	go func() {
 		done <- worker.Run(ctx, worker.RunOptions{ConfigPath: r.cfgPath, Logger: quiet(), HTTP: r.srv.Client(), Listen: r.listen,
-			MinBackoff: 20 * time.Millisecond, MaxBackoff: 100 * time.Millisecond, Host: host})
+			MinBackoff: 20 * time.Millisecond, MaxBackoff: 100 * time.Millisecond, Host: makeHost})
 	}()
-	r.wait("worker online and described", func() bool { return r.Machine().Online() && r.Machine().Described() })
+	r.wait("worker ready", r.Machine().Online)
 }
 
 // StopWorker stops the worker process (its calls in flight end with it)

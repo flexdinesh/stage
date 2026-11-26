@@ -16,13 +16,18 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
+	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/listen"
+	"github.com/flexdinesh/stage/server/internal/machine"
+	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/serve"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/worker"
+	"github.com/flexdinesh/stage/server/internal/workerchan"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -189,11 +194,32 @@ func TestMainAndWorker(t *testing.T) {
 	}
 
 	states := make(chan worker.State, 64)
+	composing, finishSetup := make(chan struct{}, 1), make(chan struct{})
 	runCtx, stopWorker := context.WithCancel(ctx)
 	defer stopWorker()
 	done := make(chan error, 1)
 	go func() {
 		done <- worker.Run(runCtx, worker.RunOptions{ConfigPath: cfgPath, Logger: quiet(), MinBackoff: 20 * time.Millisecond, MaxBackoff: 200 * time.Millisecond,
+			HTTP: &http.Client{Transport: channelAPISkew{}}, ProtocolRange: workerchan.VersionRange{Min: 1, Max: 2},
+			Host: func(id int64, call workerchan.Upcall) worker.Host {
+				h := remote.NewHost(machine.NewLocal(id, harness.Profile{}, nil))
+				h.OnAttached(func(life context.Context, _ []string) error {
+					if _, err := call(life, remote.KindT3Get, nil); err != nil {
+						return err
+					}
+					select {
+					case composing <- struct{}{}:
+					default:
+					}
+					select {
+					case <-finishSetup:
+						return nil
+					case <-life.Done():
+						return life.Err()
+					}
+				})
+				return h
+			},
 			OnState: func(s worker.State) { states <- s }})
 	}()
 	waitState := func(want string) {
@@ -212,6 +238,15 @@ func TestMainAndWorker(t *testing.T) {
 			}
 		}
 	}
+	select {
+	case <-composing:
+	case <-time.After(10 * time.Second):
+		t.Fatal("worker setup callback did not complete during negotiation")
+	}
+	if got := m.machine(c.MachineID); got.Online || got.Status != "negotiating" || got.StatusReason == "" {
+		t.Fatalf("machine before composition %+v", got)
+	}
+	close(finishSetup)
 	waitState(worker.StateOnline)
 	eventually(t, "machine online", func() bool { x := m.machine(c.MachineID); return x.Online && x.Status == "online" })
 	ping, err := m.client().PingMachine(ctx, c.MachineID)
@@ -285,6 +320,17 @@ func TestMainAndWorker(t *testing.T) {
 	if s, err := worker.ReadState(filepath.Dir(cfgPath)); err != nil || s != nil {
 		t.Fatalf("state after rejoin %+v %v", s, err)
 	}
+}
+
+// Only the channel requests differ from the server's application API version.
+type channelAPISkew struct{}
+
+func (channelAPISkew) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Path == "/api/worker/channel" {
+		r = r.Clone(r.Context())
+		r.Header.Set(buildinfo.APIVersionHeader, "42")
+	}
+	return http.DefaultTransport.RoundTrip(r)
 }
 
 // TestLeaveRemovesMachine: leave removes the machine on the server, and a

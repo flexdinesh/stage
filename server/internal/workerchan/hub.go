@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -31,6 +33,8 @@ type Options struct {
 	Now func() time.Time
 	// Version is this server's build, reported in pong replies.
 	Version string
+	// ProtocolRange defaults to the current channel protocol version.
+	ProtocolRange VersionRange
 }
 
 // Hub multiplexes calls to remote machines over their worker channels: at
@@ -41,12 +45,15 @@ type Hub struct {
 	ctx  context.Context
 	opts Options
 
-	mu       sync.Mutex
-	sessions map[int64]*Session
-	stale    map[int64]Mismatch
-	seq      atomic.Uint64
-	handlers map[string]Handler
-	onAttach func(machineID int64)
+	mu            sync.Mutex
+	sessions      map[int64]*Session
+	stale         map[int64]Mismatch
+	seq           atomic.Uint64
+	handlers      map[string]Handler
+	initializing  map[string]bool
+	kinds         []string
+	callbackKinds []string
+	onReady       func(machineID int64)
 }
 
 // Callback answers one worker-initiated call that names a pending request
@@ -69,25 +76,24 @@ type pending struct {
 	running  sync.WaitGroup
 }
 
-// Mismatch is a worker that presented a valid token with another API
-// version: its machine "needs update" until a matching worker connects.
+// Mismatch is a refused channel negotiation for an authenticated worker.
 type Mismatch struct {
-	APIVersion string    `json:"apiVersion"`
-	Version    string    `json:"version"`
-	At         time.Time `json:"at"`
+	Reason      string
+	Version     string
+	ServerOlder bool
 }
 
 // Presence is what the hub knows about a machine right now.
 type Presence struct {
 	// Online: a live session heard from within the timeout.
-	Online bool
+	Online      bool
+	Negotiating bool
 	// LastSeen is the last message from its worker this process saw (zero
 	// when none).
 	LastSeen time.Time
 	// Version is the build of the connected (or last) worker ("" unknown).
 	Version string
-	// NeedsUpdate is set while the last worker attempt spoke another API
-	// version and no matching worker connected since.
+	// NeedsUpdate records an incompatible channel opening.
 	NeedsUpdate *Mismatch
 }
 
@@ -99,6 +105,8 @@ type Session struct {
 	// Gateway is the worker's agent gateway listener URLs (fixed for the
 	// session).
 	Gateway []string
+	// ready is immutable after publication and protected by hub.mu.
+	ready *Ready
 
 	hub  *Hub
 	out  chan Envelope
@@ -125,7 +133,10 @@ func NewHub(ctx context.Context, o Options) *Hub {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	h := &Hub{ctx: ctx, opts: o, sessions: map[int64]*Session{}, stale: map[int64]Mismatch{}, handlers: map[string]Handler{}}
+	if o.ProtocolRange == (VersionRange{}) {
+		o.ProtocolRange = CurrentRange()
+	}
+	h := &Hub{ctx: ctx, opts: o, sessions: map[int64]*Session{}, stale: map[int64]Mismatch{}, handlers: map[string]Handler{}, initializing: map[string]bool{}}
 	go func() {
 		<-ctx.Done()
 		h.mu.Lock()
@@ -149,11 +160,42 @@ func (h *Hub) Handle(kind string, fn Handler) {
 	h.mu.Unlock()
 }
 
-// OnAttach sets the hook that runs (in its own goroutine) after each new
-// session of a machine starts.
-func (h *Hub) OnAttach(fn func(machineID int64)) {
+// HandleInitialization registers a handler that composition needs before ready.
+func (h *Hub) HandleInitialization(kind string, fn Handler) {
 	h.mu.Lock()
-	h.onAttach = fn
+	h.handlers[kind] = fn
+	h.initializing[kind] = true
+	h.mu.Unlock()
+}
+
+// SetHarnessKinds sets the harness kinds advertised by the server.
+func (h *Hub) SetHarnessKinds(kinds []string) {
+	h.mu.Lock()
+	h.kinds = slices.Clone(kinds)
+	h.mu.Unlock()
+}
+
+// SetCallbackKinds sets the request-scoped callbacks served by the server.
+func (h *Hub) SetCallbackKinds(callbackKinds []string) {
+	h.mu.Lock()
+	h.callbackKinds = slices.Clone(callbackKinds)
+	h.mu.Unlock()
+}
+
+func (h *Hub) advertised() ([]string, []string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	kinds := append([]string{}, h.kinds...)
+	channels := append([]string{KindHeartbeat, KindPing, KindReady, KindResult}, h.callbackKinds...)
+	channels = append(channels, slices.Collect(maps.Keys(h.handlers))...)
+	slices.Sort(channels)
+	return kinds, slices.Compact(channels)
+}
+
+// OnReady runs after a new ready snapshot is published for a machine.
+func (h *Hub) OnReady(fn func(machineID int64)) {
+	h.mu.Lock()
+	h.onReady = fn
 	h.mu.Unlock()
 }
 
@@ -169,15 +211,8 @@ func randomID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// Attach starts a session for machineID, replacing (ending) any older one.
-// The caller streams Outbound until Done and then calls Detach.
-func (h *Hub) Attach(machineID int64, version string) *Session {
-	return h.AttachGateway(machineID, version, nil)
-}
-
-// AttachGateway is Attach for a worker that reported its agent gateway
-// listener URLs.
-func (h *Hub) AttachGateway(machineID int64, version string, gateway []string) *Session {
+// attach starts negotiation and replaces any older session for the machine.
+func (h *Hub) attach(machineID int64, version string, gateway []string) *Session {
 	now := h.opts.Now()
 	s := &Session{
 		ID: randomID(), MachineID: machineID, Version: version, Gateway: gateway, hub: h,
@@ -186,22 +221,18 @@ func (h *Hub) AttachGateway(machineID int64, version string, gateway []string) *
 	}
 	h.mu.Lock()
 	old := h.sessions[machineID]
-	h.sessions[machineID] = s
-	delete(h.stale, machineID)
-	attached := h.onAttach
-	h.mu.Unlock()
 	if old != nil {
 		old.close()
 	}
+	h.sessions[machineID] = s
+	delete(h.stale, machineID)
+	h.mu.Unlock()
 	if h.ctx.Err() != nil {
 		h.Detach(s)
 		return s
 	}
 	h.seen(machineID, now, version)
 	go h.watch(s)
-	if attached != nil {
-		go attached(machineID)
-	}
 	return s
 }
 
@@ -254,11 +285,12 @@ func (h *Hub) Close(machineID int64) {
 	}
 }
 
-// MarkNeedsUpdate records that machineID's worker spoke another API
-// version.
-func (h *Hub) MarkNeedsUpdate(machineID int64, apiVersion, version string) {
+// markNeedsUpdate records a refused range without replacing a live session.
+func (h *Hub) markNeedsUpdate(machineID int64, serverOlder bool, version string) {
 	h.mu.Lock()
-	h.stale[machineID] = Mismatch{APIVersion: apiVersion, Version: version, At: h.opts.Now().UTC()}
+	if h.sessions[machineID] == nil {
+		h.stale[machineID] = Mismatch{Reason: UpdateReason(serverOlder), Version: version, ServerOlder: serverOlder}
+	}
 	h.mu.Unlock()
 }
 
@@ -270,6 +302,7 @@ func (h *Hub) Presence(machineID int64) Presence {
 	if m, ok := h.stale[machineID]; ok {
 		p.NeedsUpdate = &m
 	}
+	ready := s != nil && s.ready != nil
 	h.mu.Unlock()
 	if s == nil {
 		return p
@@ -278,8 +311,20 @@ func (h *Hub) Presence(machineID int64) Presence {
 	p.LastSeen = s.lastSeen
 	s.mu.Unlock()
 	p.Version = s.Version
-	p.Online = s.alive() && h.opts.Now().Sub(p.LastSeen) <= h.opts.Timeout
+	live := s.alive() && h.opts.Now().Sub(p.LastSeen) <= h.opts.Timeout
+	p.Online, p.Negotiating = live && ready, live && !ready
 	return p
+}
+
+// Advertisement is the live session's immutable ready snapshot (nil while negotiating).
+func (h *Hub) Advertisement(machineID int64) (*Ready, string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s := h.sessions[machineID]
+	if s == nil || !s.alive() {
+		return nil, ""
+	}
+	return s.ready, s.ID
 }
 
 // SessionID is machineID's live channel session ("" when offline).
@@ -350,11 +395,28 @@ func (h *Hub) Deliver(ctx context.Context, machineID int64, sessionID string, en
 	case KindHeartbeat:
 		return nil, nil
 	case KindResult:
+		h.mu.Lock()
+		if h.sessions[machineID] != s {
+			h.mu.Unlock()
+			return nil, ErrReplaced
+		}
 		s.resolve(env)
+		h.mu.Unlock()
 		return nil, nil
+	case KindReady:
+		return nil, h.publish(s, env.Body)
 	case KindPing:
 		body, _ := json.Marshal(Pong{Version: h.opts.Version, Time: h.opts.Now().UTC()})
 		return &Envelope{ID: env.ID, Kind: KindResult, Body: body}, nil
+	}
+	h.mu.Lock()
+	ready, initializing := s.ready != nil, h.initializing[env.Kind]
+	fn := h.handlers[env.Kind]
+	h.mu.Unlock()
+	if !ready && !initializing {
+		return answer(ctx, env, func(context.Context) (any, error) {
+			return nil, &RemoteError{Code: CodeOperationUnavailable, Message: ErrNegotiating.Error()}
+		}), nil
 	}
 	if env.Call != "" {
 		s.mu.Lock()
@@ -373,13 +435,40 @@ func (h *Hub) Deliver(ctx context.Context, machineID int64, sessionID string, en
 		defer stop()
 		return answer(ctx, env, func(ctx context.Context) (any, error) { return p.callback(ctx, env) }), nil
 	}
-	h.mu.Lock()
-	fn := h.handlers[env.Kind]
-	h.mu.Unlock()
 	if fn == nil {
 		return &Envelope{ID: env.ID, Kind: KindResult, Error: &Error{Code: CodeUnknownKind, Message: "unknown kind " + strconv.Quote(env.Kind)}}, nil
 	}
 	return answer(ctx, env, func(ctx context.Context) (any, error) { return fn(ctx, machineID, env) }), nil
+}
+
+func (h *Hub) publish(s *Session, body json.RawMessage) error {
+	var next Ready
+	if err := json.Unmarshal(body, &next); err != nil || next.Kinds == nil || next.ChannelKinds == nil || next.Connections == nil {
+		return &RemoteError{Code: "invalid_ready", Message: "ready requires kinds, channelKinds and connections arrays"}
+	}
+	ids := make(map[int64]bool, len(next.Connections))
+	for _, c := range next.Connections {
+		if c.ConnectionID <= 0 || ids[c.ConnectionID] {
+			return &RemoteError{Code: "invalid_ready", Message: "ready requires unique positive connection IDs"}
+		}
+		ids[c.ConnectionID] = true
+	}
+	h.mu.Lock()
+	if h.sessions[s.MachineID] != s || !s.alive() {
+		h.mu.Unlock()
+		return ErrReplaced
+	}
+	if reflect.DeepEqual(s.ready, &next) {
+		h.mu.Unlock()
+		return nil
+	}
+	s.ready = &next
+	ready := h.onReady
+	h.mu.Unlock()
+	if ready != nil {
+		ready(s.MachineID)
+	}
+	return nil
 }
 
 // answer runs a worker-initiated call and wraps its outcome as a result.
@@ -422,11 +511,35 @@ func (h *Hub) Call(ctx context.Context, machineID int64, kind string, connection
 // calls naming this request (Envelope.Call) run callback; once CallWith
 // returns, they are refused with call_ended.
 func (h *Hub) CallWith(ctx context.Context, machineID int64, kind string, connectionID int64, body any, timeout time.Duration, callback Callback) (json.RawMessage, error) {
+	return h.CallWithTrait(ctx, machineID, kind, connectionID, body, timeout, callback, "")
+}
+
+// CallWithTrait requires the current ready snapshot to declare trait for the connection.
+func (h *Hub) CallWithTrait(ctx context.Context, machineID int64, kind string, connectionID int64, body any, timeout time.Duration, callback Callback, trait string) (json.RawMessage, error) {
 	h.mu.Lock()
 	s := h.sessions[machineID]
+	var ready *Ready
+	if s != nil {
+		ready = s.ready
+	}
 	h.mu.Unlock()
 	if s == nil || !s.alive() {
 		return nil, ErrOffline
+	}
+	if ready == nil {
+		return nil, ErrNegotiating
+	}
+	if !slices.Contains(ready.ChannelKinds, kind) {
+		return nil, &RemoteError{Code: CodeOperationUnavailable, Message: "Update Stage on the worker machine to use " + kind + "."}
+	}
+	if connectionID != 0 {
+		i := slices.IndexFunc(ready.Connections, func(c Connection) bool { return c.ConnectionID == connectionID })
+		if i < 0 {
+			return nil, &RemoteError{Code: CodeOperationUnavailable, Message: "The worker has no adapter for this connection."}
+		}
+		if trait != "" && !slices.Contains(ready.Connections[i].Traits, trait) {
+			return nil, &RemoteError{Code: CodeOperationUnavailable, Message: "This connection does not support " + kind + "."}
+		}
 	}
 	var raw json.RawMessage
 	if body != nil {
@@ -468,7 +581,7 @@ func (h *Hub) CallWith(ctx context.Context, machineID int64, kind string, connec
 	case <-s.done:
 		return nil, ErrLostReply
 	case <-timer.C:
-		return nil, ErrLostReply
+		return nil, ErrReplyTimeout
 	case <-ctx.Done():
 		s.send(Envelope{ID: id, Kind: KindCancel})
 		return nil, ctx.Err()

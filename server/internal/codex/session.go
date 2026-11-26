@@ -98,7 +98,6 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 // evidence of an outcome: it is reported as an error, never a state.
 func (a *Adapter) observation(t thread, last *turn, archived bool) (execution.Observation, error) {
 	ref := a.ref(t.ID)
-	a.remember(t.ID, t.Cwd)
 	o := execution.Observation{
 		Session: ref, Project: t.Cwd, Directory: t.Cwd, Title: threadTitle(t), State: "idle",
 		Links:     execution.Links{Command: a.resumeIn(t.Cwd, t.ID)},
@@ -299,17 +298,4 @@ func (a *Adapter) Attention(ctx context.Context) ([]execution.SessionRef, error)
 		}
 	}
 	return out, nil
-}
-
-// remember keeps the thread's directory for Destinations' resume command.
-func (a *Adapter) remember(id, dir string) {
-	if dir == "" {
-		return
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.dirs == nil {
-		a.dirs = map[string]string{}
-	}
-	a.dirs[id] = dir
 }

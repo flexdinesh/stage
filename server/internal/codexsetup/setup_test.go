@@ -201,8 +201,9 @@ func TestBinarySettingPersistsAndSwitchesTheAdapter(t *testing.T) {
 		t.Fatal("adapter kept the old CLI")
 	}
 	ref := execution.SessionRef{ConnectionID: id, ExternalSessionID: "019a0000-0000-7000-8000-000000000001"}
-	if cmd := after.Destinations(ctx, ref).Command; cmd != "/opt/codex/bin/codex resume "+ref.ExternalSessionID {
-		t.Fatal(cmd)
+	r.srv.AddThread(codextest.Thread{ID: ref.ExternalSessionID, Cwd: "/w/app"})
+	if o, err := after.Observe(ctx, ref); err != nil || o.Links.Command != "cd /w/app && /opt/codex/bin/codex resume "+ref.ExternalSessionID {
+		t.Fatal(o.Links, err)
 	}
 	saved, err := r.store.CodexSettings(ctx, db.LocalMachine)
 	if err != nil || saved.Binary != "/opt/codex/bin/codex" || !saved.Connected {

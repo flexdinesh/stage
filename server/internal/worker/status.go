@@ -92,14 +92,13 @@ func ReadStatus(ctx context.Context, configPath string, hc *http.Client) (Status
 	switch {
 	case err == nil:
 		srv.Reachable, srv.Status, srv.LastSeenAt = true, m.Status, m.LastSeenAt
+		srv.Error = m.StatusReason
 		if m.Status == StateOnline {
 			return st, StatusOnline
 		}
 	case Revoked(err):
 		srv.Reachable, srv.Status, srv.Error = true, StateRevoked, err.Error()
 		return st, StatusRevoked
-	case VersionMismatch(err):
-		srv.Reachable, srv.Status, srv.Error = true, StateNeedsUpdate, err.Error()
 	default:
 		srv.Error = err.Error()
 	}

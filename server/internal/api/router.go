@@ -101,6 +101,7 @@ func NewRouter(deps Deps) http.Handler {
 	if s.Channels == nil {
 		s.Channels = newChannelHub(context.Background(), s.Store)
 	}
+	s.Channels.SetHarnessKinds(s.registry().Kinds())
 	mux := http.NewServeMux()
 	s.mux = mux
 	h := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
@@ -152,13 +153,13 @@ func NewRouter(deps Deps) http.Handler {
 	h("PATCH /api/machines/{id}", s.renameMachine)
 	h("DELETE /api/machines/{id}", s.removeMachine)
 	h("POST /api/machines/{id}/ping", s.pingMachine)
-	mux.Handle("POST /api/worker/join", s.worker(false, s.joinWorker))
-	mux.Handle("GET /api/worker/machine", s.worker(true, s.workerMachine))
-	mux.Handle("GET /api/worker/channel", s.worker(true, s.workerChannelStream))
-	mux.Handle("POST /api/worker/channel", s.worker(true, s.workerChannelPost))
-	mux.Handle("POST /api/worker/leave", s.worker(true, s.workerLeave))
-	mux.Handle(GatewayPrefix+"/", s.worker(true, s.workerGateway))
-	mux.Handle(WorkerPrefix, s.worker(true, func(w http.ResponseWriter, _ *http.Request) error {
+	mux.Handle("POST /api/worker/join", s.worker(false, true, s.joinWorker))
+	mux.Handle("GET /api/worker/machine", s.worker(true, true, s.workerMachine))
+	mux.Handle("GET /api/worker/channel", s.worker(true, false, s.workerChannelStream))
+	mux.Handle("POST /api/worker/channel", s.worker(true, false, s.workerChannelPost))
+	mux.Handle("POST /api/worker/leave", s.worker(true, true, s.workerLeave))
+	mux.Handle(GatewayPrefix+"/", s.worker(true, true, s.workerGateway))
+	mux.Handle(WorkerPrefix, s.worker(true, true, func(w http.ResponseWriter, _ *http.Request) error {
 		writeError(w, http.StatusNotFound, "not found")
 		return nil
 	}))
@@ -314,10 +315,10 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	h.Harnesses = []HealthHarness{}
 	// The harness setup API serves the local machine's connectors.
 	s.connectors().Each(func(machine int64, d harness.Descriptor, c harness.Connector) {
-		if machine != db.LocalMachine {
+		if machine != s.Sync.Machines().DefaultID() {
 			return
 		}
-		sum := c.Summary(r.Context())
+		sum := s.harnessSummary(c.Summary(r.Context()))
 		hh := HealthHarness{Kind: d.Kind, ConnectionID: sum.ConnectionID, Configured: sum.Configured, Connected: sum.Connected}
 		if sum.LastError != "" {
 			hh.LastError = &sum.LastError

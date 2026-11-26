@@ -131,13 +131,6 @@ func (r *roster) load(ctx context.Context) ([]Entry, error) {
 	return es, nil
 }
 
-// cached is the last list read, without reading ("" ok false when none).
-func (r *roster) cached() ([]Entry, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.entries, !r.at.IsZero()
-}
-
 // invalidate makes the next list read the CLI.
 func (r *roster) invalidate() {
 	r.mu.Lock()

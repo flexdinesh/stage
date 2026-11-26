@@ -258,7 +258,6 @@ func Run(ctx context.Context, o Options) error {
 	channels := workerchan.NewHub(ctx, workerchan.Options{Version: buildinfo.Version, Seen: api.TouchMachineFunc(store, func(err error) {
 		logger.Warn("machine presence", "err", err)
 	})})
-	syncSvc.Gateways = channels.Gateways
 	// Remote machines: each joined machine's connections are proxied over
 	// its worker channel (ADR 0002, docs/execution.md "Remote machines").
 	hosts := remote.NewHosts(machines, channels, func(machineID int64) []int64 {
@@ -285,7 +284,10 @@ func Run(ctx context.Context, o Options) error {
 	hosts.SetSetup(remoteSetupHooks(store, harnesses, progress, syncSvc.Kick))
 	remote.ServeSetup(channels, func(machineID int64) machine.StorePorts {
 		return machine.NewStorePorts(store.OnMachine(machineID), harnesses)
-	}, func(_ int64, sw db.Switch) {
+	}, func(machineID int64, sw db.Switch) {
+		if !channels.Presence(machineID).Online {
+			return // the ready snapshot will wake sync and scheduling
+		}
 		syncSvc.ConnectionsChanged(sw.Old, sw.New)
 		releases.Resync()
 		schedules.Resync()
@@ -296,7 +298,7 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	for _, m := range remotes {
-		if m.ID != db.LocalMachine {
+		if m.ID != machines.DefaultID() {
 			hosts.Join(m.ID)
 		}
 	}
@@ -310,19 +312,15 @@ func Run(ctx context.Context, o Options) error {
 		}
 		return c
 	}
-	moved.reachable = func(machine int64) bool {
-		return machine == db.LocalMachine || channels.Presence(machine).Online
+	moved.reachable = func(id int64) bool {
+		m, ok := machines.Get(id)
+		return ok && m.Online()
 	}
-	moved.onRetired = func(machine, old, next int64) {
-		// A local connection's adapter outlives the record; its change hook
-		// resyncs. A remote machine's adapters follow the record.
-		if l, ok := machines.Local(machine); ok {
-			l.Retired(old)
-			return
+	moved.onRetired = func(id, old, next int64) {
+		if m, ok := machines.Get(id); ok {
+			m.Retired(old)
 		}
 		syncSvc.ConnectionsChanged(old, next)
-		releases.Resync()
-		schedules.Resync()
 	}
 	// Before the poller, release runner, scheduler and HTTP server can touch launching tasks.
 	syncSvc.RecoverLaunching(ctx)

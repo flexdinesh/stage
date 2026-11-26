@@ -59,12 +59,17 @@ test("launchBlock refuses a disconnected connection and links to Settings", () =
   assert.deepEqual(b?.fix, { label: "Connect in Settings", to: "/settings/connections" });
 });
 
-test("launchBlock refuses an offline or out-of-date machine", () => {
+test("launchBlock refuses to start while the worker is offline, negotiating, or incompatible", () => {
   const off = launchBlock(subject, ctx({ machine: { kind: "remote", status: "offline", label: "desk" } }));
   assert.equal(off?.kind, "offline");
   assert.equal(off?.reason, "desk is offline. Start this task once it is back.");
   assert.equal(off?.fix, null);
-  assert.equal(launchBlock(subject, ctx({ machine: { kind: "remote", status: "needs_update", label: "desk" } }))?.kind, "needs_update");
+  const negotiating = launchBlock(subject, ctx({ machine: { kind: "remote", status: "negotiating", label: "desk" } }));
+  assert.equal(negotiating?.kind, "negotiating");
+  assert.equal(negotiating?.fix, null);
+  const update = launchBlock(subject, ctx({ machine: { kind: "remote", status: "needs_update", label: "desk", statusReason: "Update Stage on the main machine." } }));
+  assert.equal(update?.kind, "needs_update");
+  assert.equal(update?.reason, "Update Stage on the main machine.");
   // The local machine always answers.
   assert.equal(launchBlock(subject, ctx({ machine: { kind: "local", status: "offline", label: "here" } })), null);
 });

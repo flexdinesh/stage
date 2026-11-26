@@ -35,9 +35,10 @@ type Adapter struct {
 	m    *Machine
 	conn int64
 
-	mu       sync.Mutex
-	health   execution.Health
-	healthAt time.Time
+	mu             sync.Mutex
+	health         execution.Health
+	healthAt       time.Time
+	healthSnapshot *workerchan.Ready
 }
 
 var (
@@ -50,16 +51,21 @@ var (
 	_ execution.Interactive       = (*Adapter)(nil)
 )
 
-// Implements reports whether the worker's adapter has trait. Before the
-// worker first described its machine, every trait is assumed: the call
-// itself then answers (offline or unsupported).
+// Implements reads the current peer's declaration, never the Go proxy's methods.
 func (a *Adapter) Implements(trait string) bool {
-	traits, known := a.m.traits(a.conn)
-	return !known || slices.Contains(traits, trait)
+	return slices.Contains(a.m.traits(a.conn), trait)
+}
+
+func callTrait[T any](ctx context.Context, a *Adapter, kind string, body, out any) error {
+	return a.request(ctx, kind, body, out, CallTimeout, nil, execution.TraitOf[T]())
 }
 
 func (a *Adapter) call(ctx context.Context, kind string, body, out any, timeout time.Duration, cb workerchan.Callback) error {
-	raw, err := a.m.hub.CallWith(ctx, a.m.id, kind, a.conn, body, timeout, cb)
+	return a.request(ctx, kind, body, out, timeout, cb, "")
+}
+
+func (a *Adapter) request(ctx context.Context, kind string, body, out any, timeout time.Duration, cb workerchan.Callback, trait string) error {
+	raw, err := a.m.hub.CallWithTrait(ctx, a.m.id, kind, a.conn, body, timeout, cb, trait)
 	if err = decodeError(err); err != nil {
 		return err
 	}
@@ -77,12 +83,13 @@ func (a *Adapter) call(ctx context.Context, kind string, body, out any, timeout 
 func (a *Adapter) Health(ctx context.Context) execution.Health {
 	now := time.Now()
 	a.mu.Lock()
-	last, at := a.health, a.healthAt
+	last, at, cached := a.health, a.healthAt, a.healthSnapshot
 	a.mu.Unlock()
 	if reason, offline := a.m.offline(); offline {
 		return execution.Health{Availability: execution.Availability{Reason: reason}, Identity: last.Identity, CheckedAt: now.UTC()}
 	}
-	if !at.IsZero() && now.Sub(at) < HealthTTL {
+	snapshot, _ := a.m.hub.Advertisement(a.m.id)
+	if snapshot != nil && snapshot == cached && now.Sub(at) < HealthTTL {
 		return last
 	}
 	var h execution.Health
@@ -92,7 +99,7 @@ func (a *Adapter) Health(ctx context.Context) execution.Health {
 		h = execution.Health{Availability: execution.Availability{Reason: "Its machine's worker did not answer: " + err.Error()}, Identity: last.Identity, CheckedAt: now.UTC()}
 	}
 	a.mu.Lock()
-	a.health, a.healthAt = h, now
+	a.health, a.healthAt, a.healthSnapshot = h, now, snapshot
 	a.mu.Unlock()
 	return h
 }
@@ -100,13 +107,40 @@ func (a *Adapter) Health(ctx context.Context) execution.Health {
 func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) {
 	var c execution.Capabilities
 	err := a.call(ctx, KindFeatures, nil, &c, CallTimeout, nil)
+	a.limitOperations(&c)
 	return c, err
 }
 
 func (a *Adapter) FeaturesForWorkspace(ctx context.Context, project, directory string) (execution.Capabilities, error) {
 	var c execution.Capabilities
-	err := a.call(ctx, KindFeaturesForWorkspace, WorkspaceRequest{Project: project, Directory: directory}, &c, CallTimeout, nil)
+	err := callTrait[execution.WorkspaceFeatures](ctx, a, KindFeaturesForWorkspace, WorkspaceRequest{Project: project, Directory: directory}, &c)
+	a.limitOperations(&c)
 	return c, err
+}
+
+var operationKinds = map[execution.Op][]string{
+	execution.OpLaunch: {KindLaunch, KindWorkspaces}, execution.OpImages: {KindLaunch},
+	execution.OpStop: {KindStop}, execution.OpAdopt: {KindObserve}, execution.OpReply: {KindObserve},
+	execution.OpOpening: {KindOpening}, execution.OpAttention: {KindAttention},
+	execution.OpRespond: {KindRequests, KindRespond}, execution.OpSend: {KindSend},
+}
+
+func (a *Adapter) limitOperations(c *execution.Capabilities) {
+	snapshot, _ := a.m.hub.Advertisement(a.m.id)
+	if snapshot == nil {
+		return
+	}
+	for op, availability := range c.Operations {
+		if !availability.Available {
+			continue
+		}
+		for _, kind := range operationKinds[op] {
+			if !slices.Contains(snapshot.ChannelKinds, kind) {
+				c.Operations[op] = execution.Availability{Reason: "Update Stage on the worker machine to use " + string(op) + "."}
+				break
+			}
+		}
+	}
 }
 
 func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, error) {
@@ -188,30 +222,22 @@ func (a *Adapter) Opening(ctx context.Context, ref execution.SessionRef, full bo
 	return r, err
 }
 
-// Destinations makes no call: it is read for every task in a list, so the
-// caller falls back to the links of the session's stored observation (the
-// adapters report the same links there).
-func (a *Adapter) Destinations(context.Context, execution.SessionRef) execution.Links {
-	return execution.Links{}
-}
-
 func (a *Adapter) ResolveLink(ctx context.Context, link string) (execution.SessionRef, error) {
 	var ref execution.SessionRef
-	err := a.call(ctx, KindResolveLink, LinkRequest{Link: link}, &ref, CallTimeout, nil)
+	err := callTrait[execution.LinkResolver](ctx, a, KindResolveLink, LinkRequest{Link: link}, &ref)
 	return ref, err
 }
 
 func (a *Adapter) Correlate(ctx context.Context, in execution.Intent) (execution.Observation, error) {
 	var o execution.Observation
-	err := a.call(ctx, KindCorrelate, CorrelateRequest{Intent: withoutImageData(in)}, &o, CallTimeout, nil)
+	err := callTrait[execution.Correlator](ctx, a, KindCorrelate, CorrelateRequest{Intent: withoutImageData(in)}, &o)
 	return o, err
 }
 
 // Events is one long-running adapter.events call: the worker streams its
 // adapter's pushed observations as callbacks, each ingested by sink before
 // the worker continues (a sink error reaches the worker's adapter). It
-// returns nil when the machine is offline, the window ends or the stream
-// breaks: polling reconciles and the caller calls it again.
+// renews after its bounded window. Unexpected termination reaches connection status.
 func (a *Adapter) Events(ctx context.Context, sink execution.Sink) error {
 	cb := func(ctx context.Context, env workerchan.Envelope) (any, error) {
 		if env.Kind != KindObservation {
@@ -226,27 +252,25 @@ func (a *Adapter) Events(ctx context.Context, sink execution.Sink) error {
 		}
 		return Empty{}, nil
 	}
-	_, err := a.m.hub.CallWith(ctx, a.m.id, KindEvents, a.conn, nil, EventsWindow, cb)
-	var re *workerchan.RemoteError
-	switch {
-	case err == nil, ctx.Err() != nil, errors.Is(err, workerchan.ErrOffline), errors.Is(err, workerchan.ErrLostReply):
-		return nil
-	case errors.As(err, &re) && (re.Code == CodeUnsupported || re.Code == workerchan.CodeTimeout || re.Code == workerchan.CodeCancelled):
+	ctx, cancel := context.WithTimeout(ctx, EventsWindow)
+	defer cancel()
+	err := a.request(ctx, KindEvents, nil, nil, EventsWindow, cb, execution.TraitOf[execution.EventSource]())
+	if ctx.Err() != nil || errors.Is(err, workerchan.ErrReplyTimeout) {
 		return nil
 	}
-	return decodeError(err)
+	return err
 }
 
 func (a *Adapter) Requests(ctx context.Context, ref execution.SessionRef) ([]execution.Request, error) {
 	var rs []execution.Request
-	err := a.call(ctx, KindRequests, SessionRequest{Session: ref}, &rs, CallTimeout, nil)
+	err := callTrait[execution.Interactive](ctx, a, KindRequests, SessionRequest{Session: ref}, &rs)
 	return rs, err
 }
 
 func (a *Adapter) Respond(ctx context.Context, ref execution.SessionRef, requestID string, r execution.Response) error {
-	return a.call(ctx, KindRespond, RespondRequest{Session: ref, RequestID: requestID, Response: r}, nil, CallTimeout, nil)
+	return callTrait[execution.Interactive](ctx, a, KindRespond, RespondRequest{Session: ref, RequestID: requestID, Response: r}, nil)
 }
 
 func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m execution.Message) error {
-	return a.call(ctx, KindSend, SendRequest{Session: ref, Message: m}, nil, CallTimeout, nil)
+	return callTrait[execution.Interactive](ctx, a, KindSend, SendRequest{Session: ref, Message: m}, nil)
 }

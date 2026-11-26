@@ -30,9 +30,6 @@ type callerHarness struct {
 	offline atomic.Bool
 }
 
-func (h *callerHarness) Destinations(context.Context, db.SessionRef) execution.Links {
-	return execution.Links{Web: "https://example.invalid/session"}
-}
 func (h *callerHarness) Health(context.Context) execution.Health {
 	return execution.Health{Availability: execution.Availability{Available: !h.offline.Load()}}
 }

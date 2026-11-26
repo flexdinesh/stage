@@ -71,6 +71,9 @@ func TestSetRoutesConnectionsToTheirMachine(t *testing.T) {
 	local.Install(3, 3, a)
 	laptop.Install(4, 4, b)
 	set := machine.MustSet(laptop, local)
+	if set.DefaultID() != laptop.ID() || set.Remove(laptop.ID()) {
+		t.Fatal("the designated default must remain hosted")
+	}
 	if ids := []int64{set.All()[0].ID(), set.All()[1].ID()}; !slices.Equal(ids, []int64{1, 2}) {
 		t.Fatalf("order %v", ids)
 	}
@@ -83,8 +86,8 @@ func TestSetRoutesConnectionsToTheirMachine(t *testing.T) {
 	if all := set.Adapters(); len(all) != 2 || all[3] != a || all[4] != b {
 		t.Fatalf("adapters %v", all)
 	}
-	if l, ok := set.Local(2); !ok || l != laptop {
-		t.Fatal("local host lookup")
+	if m, ok := set.Get(2); !ok || m != laptop {
+		t.Fatal("default machine lookup")
 	}
 	if _, err := machine.NewSet(local, machine.NewLocal(1, harness.Profile{}, nil)); err == nil {
 		t.Fatal("a machine hosted twice")

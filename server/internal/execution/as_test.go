@@ -34,17 +34,17 @@ func TestAsHonorsPartialTraits(t *testing.T) {
 	if _, ok := execution.As[execution.LinkResolver](resolving{}); !ok {
 		t.Fatal("resolver not found")
 	}
-	p := partial{traits: []string{execution.TraitLinkResolver}}
+	p := partial{traits: []string{execution.TraitOf[execution.LinkResolver](), "futureTrait"}}
 	if _, ok := execution.As[execution.LinkResolver](p); !ok {
 		t.Fatal("forwarded trait hidden")
 	}
 	if _, ok := execution.As[execution.Correlator](p); ok {
 		t.Fatal("unforwarded trait offered")
 	}
-	if got := execution.Traits(resolving{}); !slices.Equal(got, []string{execution.TraitLinkResolver}) {
+	if got := execution.Traits(resolving{}); !slices.Equal(got, []string{execution.TraitOf[execution.LinkResolver]()}) {
 		t.Fatal(got)
 	}
-	if got := execution.Traits(p); !slices.Equal(got, []string{execution.TraitLinkResolver}) {
+	if got := execution.Traits(p); !slices.Equal(got, []string{execution.TraitOf[execution.LinkResolver]()}) {
 		t.Fatal(got)
 	}
 }

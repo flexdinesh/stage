@@ -50,7 +50,7 @@ var errNotServed = errors.New("the Stage server does not serve this setup call; 
 func (p Ports) call(ctx context.Context, kind string, body, out any) error {
 	raw, err := p.Call(ctx, kind, body)
 	var re *workerchan.RemoteError
-	if errors.As(err, &re) && re.Code == workerchan.CodeUnknownKind {
+	if errors.As(err, &re) && (re.Code == workerchan.CodeUnknownKind || re.Code == workerchan.CodeOperationUnavailable) {
 		return fmt.Errorf("%w (%s)", errNotServed, kind)
 	}
 	if err != nil {

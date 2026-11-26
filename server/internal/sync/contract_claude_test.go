@@ -19,7 +19,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
-	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
 	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -409,7 +408,7 @@ func TestRemoteClaudeConnectionOnAWorkerWithoutLocalHarnesses(t *testing.T) {
 	if _, err := pool.ExecContext(t.Context(), "INSERT INTO harness_connections(id,harness,machine_id) VALUES($1,$2,$3)", claudeConn, claudecode.Kind, placement{remote: true}.machine(t, pool)); err != nil {
 		t.Fatal(err)
 	}
-	rig := remotetest.New(t, remoteMachine, map[int64]execution.Adapter{claudeConn: f.Adapter(claudeConn)})
+	rig := newContractWorker(t, store, map[int64]execution.Adapter{claudeConn: f.Adapter(claudeConn)})
 	svc := coordinator.NewForMachines(store, rig.Set(), nil)
 	svc.Harnesses = harness.MustRegistry(claudecode.Descriptor)
 	if _, err := svc.Adapter(claudeConn); err != nil {

@@ -94,7 +94,7 @@ func TestUnconfirmedRecordsObservedSession(t *testing.T) {
 	if err != nil || a.Session != nil {
 		t.Fatalf("fresh attempt %+v %v", a, err)
 	}
-	// Destinations are resolved when read; only the resume command is kept.
+	// The attempt keeps the resume command as a fallback for the observation.
 	seen := Observed(execution.Observation{Session: SessionRef{ConnectionID: moved, ExternalSessionID: "thr"}, Title: "Work", State: "running",
 		Links: execution.Links{Web: "https://t3/thread", Command: "claude attach thr"}})
 	if seen.Links == nil || *seen.Links != (execution.Links{Command: "claude attach thr"}) {

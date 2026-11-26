@@ -78,7 +78,7 @@ export function ConnectionRow({
         <div className="flex min-h-11 items-center gap-3 py-1.5 pr-3 pl-[30px] md:min-h-control">
           {title}
           {state}
-          <Hint className="max-md:hidden">editable when {machine.label} is back</Hint>
+          {machine.status === "offline" ? <Hint className="max-md:hidden">editable when {machine.label} is back</Hint> : null}
         </div>
       ) : (
         <>
