@@ -1,6 +1,7 @@
 import { useCallback, useMemo, type ReactNode } from "react";
 import type { Project } from "../api/types.ts";
-import { matchProjects, projectDetail, type ProjectMatch } from "../lib/projects.ts";
+import { matchProjects, type ProjectMatch } from "../lib/projects.ts";
+import { WorkspaceDisplay, useWorkspaceConnections } from "./WorkspaceDisplay.tsx";
 import { Combobox, type ComboboxOption } from "./ui.tsx";
 
 function toOption(m: ProjectMatch): ComboboxOption {
@@ -8,8 +9,6 @@ function toOption(m: ProjectMatch): ComboboxOption {
     value: String(m.project.id),
     label: m.project.title,
     labelMatch: m.title,
-    detail: projectDetail(m.project),
-    detailMatch: m.path,
     ...(m.project.archivedAt === null ? {} : { chip: "archived" }),
   };
 }
@@ -27,6 +26,7 @@ export function ProjectCombobox({
   size,
   autoFocus,
   emptyText = "No matching projects",
+  connectionId,
 }: {
   projects: readonly Project[];
   id?: string | undefined;
@@ -41,8 +41,10 @@ export function ProjectCombobox({
   autoFocus?: boolean | undefined;
   /** Shown when no project matches. */
   emptyText?: ReactNode;
+  connectionId?: number | undefined;
 }) {
   const options = useCallback((query: string) => matchProjects(projects, query).map(toOption), [projects]);
+  const connections = useWorkspaceConnections();
   const pinnedOptions = useMemo(() => (pinned === undefined ? [] : [{ value: "", label: pinned }]), [pinned]);
   return (
     <Combobox
@@ -50,6 +52,10 @@ export function ProjectCombobox({
       value={value}
       onChange={onChange}
       options={options}
+      renderDetail={(option) => {
+        const project = projects.find((p) => String(p.id) === option.value);
+        return project === undefined ? null : <WorkspaceDisplay bindings={project.bindings} connectionId={connectionId} connections={connections} />;
+      }}
       pinned={pinnedOptions}
       // Projects match on paths and repos too, so filtering helps even in a short list.
       searchable

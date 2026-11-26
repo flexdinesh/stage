@@ -556,22 +556,24 @@ The Settings OpenCode connection card; chip `not connected` (idle), `connected` 
 The Settings Codex connection card ("Codex connection", the `codex` entry of the `packages/app/src/harnesses/` slot registry, the same Manage drawer); chip `connected` (ok), `not connected` (idle), `signed out` (need), `unreachable` or `not installed` (bad). Ruled facts: the Codex CLI and app server versions, the account (`dee@example.com · plus` for ChatGPT, else the provider: API key, Amazon Bedrock, Google Cloud; "Not signed in" when signed out), `CODEX_HOME /home/u/.codex`, `daemon running · checked 2m ago`. Not connected: the reason as an inline error, then the fix and its command (`codex login`, `codex app-server daemon start`) in a `CommandBox`, then primary Connect (disabled with a muted "Unavailable: reason" where the machine cannot run Codex). Connected: small Check again; Disconnect (danger, right) behind an inline confirm "Disconnect Codex? Tasks and history stay. You can connect again any time. It stays listed as disconnected until you forget it." Under a hairline the "Codex CLI" field (mono, placeholder `codex`, hint "Path to the codex binary. Empty uses codex on PATH.") with Save, sent only on a change, then the "Complete tasks when archived in Codex" toggle. No new components, tokens or colors.
 
 ### Project workspaces
-Title-only creation works offline. Project detail uses the existing ruled Workspace
-panel for binding status, rename/archive and explicit unbind confirmation.
-Bind workspace opens the shared Drawer, full screen on phone. Show external title,
-full wrapping mono path and any existing Stage owner. Selection requires explicit
-confirmation; never preselect by title or path. Stage never registers a directory
-in a harness. Missing/changed bindings show a concrete repair action.
-The task form offers Save to backlog when launch needs a binding.
+Project list rows, headers and picker results share a compact placement line with
+the primary workspace, machine, harness, state and extra workspace count. The
+ruled Workspaces panel groups each checkout under its machine. Rows label the
+harness, copyable path or external workspace, and text state chip. The fields
+stack and paths wrap below 768px. Offline and retired locations stay visible.
 
-The Workspace panel has one section per active connection ("T3 workspace",
-"OpenCode workspace"). A binding left on a replaced connection is a muted mono
-line, "Previously /w/app on replaced T3 'box a'"; it never asks for repair. When
-the project is unbound on the active connection and that connection serves the
-replaced binding's exact path, a primary "Bind /w/app" (path truncated, full in
-`title`) binds it in one click, with "Bind workspace" kept beside it as secondary.
-In the Bind drawer that row carries the mono Slate hint "Same path as the
-replaced binding"; it is marked, never preselected.
+Bind workspace opens a Drawer, full screen on phone, with suggestions first,
+a repository filter, and links to Stage owners and candidate projects.
+Discovery review pairs its attention count with reason-labelled inventory.
+Resolve and merge open with a preview step. Focus moves to the plan after
+it loads, and a changed confirmation returns to an updated plan. A merge
+names the project to keep and the records moving to it. Split identifies
+what stays. Project actions contains the archive confirmation.
+
+Task and schedule forms identify the workspace on the chosen connection.
+Primary follows the connection's default. A different selection pins the
+workspace and keeps its full path in the field's details. A missing pin shows
+its repair in the field. Task detail identifies the assignment recorded at launch.
 
 ### Replaced connections
 A connection is one harness instance. When another T3 or OpenCode replaces it,

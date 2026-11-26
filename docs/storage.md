@@ -771,8 +771,11 @@ resolutions in one write transaction. Confirmation recomputes the plan
 under that lock. Task and schedule creation, edits, duplication and spawning
 use the same lock to serialize the selected workspace with identity changes.
 Launch claims take it before the task lock and pin the active, available
-chosen binding or primary. Each attempt keeps its pinned path and binding
-revision. See [workspace discovery](discovery.md) for rule priority
+chosen binding or primary. Each attempt keeps its pinned path, external
+workspace ID and binding revision. Task readers take the pinned workspace
+address from the launch destination on both engines. Review reads the
+undismissed project pairs from the per-pair dismissal records.
+See [workspace discovery](discovery.md) for rule priority
 and [the API](api.md#workspace-discovery-and-project-identity) for previews.
 
 ## Legacy columns and compatibility triggers

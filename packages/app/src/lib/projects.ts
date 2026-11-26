@@ -23,7 +23,7 @@ export interface ProjectMatch {
   project: Project;
   /** Matched span in `project.title`; null when the title did not match (or the query is empty). */
   title: MatchRange | null;
-  /** Matched span in `projectDetail(project)` (paths, then repos); null when neither matched (or the query is empty). */
+  /** Matched span in workspace or repository metadata; null when neither matched. */
   path: MatchRange | null;
   /** True when only the repo metadata matched. */
   repo: boolean;
@@ -47,7 +47,7 @@ export function repoLabel(repo: string): string {
   return repo.startsWith("github.com/") ? repo.slice("github.com/".length) : repo;
 }
 
-/** Paths, then repo labels: the picker subtext. Paths stay the source of truth; repos only aid search. */
+/** Primary path, then repo labels for project search. */
 export function projectDetail(project: Project): string {
   const repos = project.repos.map(repoLabel).join(", ");
   const path = projectWorkspace(project);
@@ -58,6 +58,12 @@ function matchDetail(project: Project, q: string): { range: MatchRange | null; r
   const path = projectWorkspace(project);
   const inPath = find(path, q);
   if (inPath !== null) return { range: inPath, repo: false };
+  for (const binding of project.bindings) {
+    const match = find(workspaceLocation(binding), q);
+    if (match !== null) return { range: match, repo: false };
+    const external = find(binding.externalProjectId, q);
+    if (external !== null) return { range: external, repo: false };
+  }
   const repos = project.repos.map(repoLabel).join(", ");
   const inRepo = find(repos, q);
   if (inRepo === null) return { range: null, repo: false };
@@ -106,7 +112,25 @@ export function projectsForConnection(projects: readonly Project[], connectionId
 }
 
 export function projectWorkspace(project: Project): string {
-  return project.bindings.map((binding) => binding.workspace || binding.title || binding.externalProjectId).join(" · ") || "Workspace not bound";
+  const binding = primaryWorkspace(orderedWorkspaces(project.bindings));
+  return binding === undefined ? "Workspace not bound" : workspaceLocation(binding);
+}
+
+export const workspaceLocation = (binding: Pick<ProjectBinding, "workspace" | "title" | "externalProjectId">): string =>
+  binding.workspace || binding.title || binding.externalProjectId;
+
+export function orderedWorkspaces(bindings: readonly ProjectBinding[]): ProjectBinding[] {
+  return bindings.toSorted((a, b) =>
+    a.machineId - b.machineId || a.connectionId - b.connectionId ||
+    Number(b.primary) - Number(a.primary) ||
+    workspaceLocation(a).localeCompare(workspaceLocation(b)) || a.id - b.id,
+  );
+}
+
+export function primaryWorkspace(ordered: readonly ProjectBinding[], connectionId = 0): ProjectBinding | undefined {
+  const scoped = connectionId === 0 ? ordered : ordered.filter((b) => b.connectionId === connectionId);
+  return scoped.find((b) => b.connectionActive && b.primary) ??
+    scoped.find((b) => b.connectionActive) ?? scoped[0];
 }
 
 /** The explicit choice or the primary on this connection, including when unavailable. */

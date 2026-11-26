@@ -56,7 +56,11 @@ Discovery review shows **New**, **Suggested**, **Ambiguous**, **Declined** and *
 
 Merge is directional. Its preview names the survivor and counts the workspaces, tasks, schedules and snippets that move. Confirmation checks for stale inputs and can be blocked by a launching task in the source project. The merged ID becomes an alias. An existing project link opens the current surviving project, including after a later merge, and API responses use the survivor's ID. Keep separate dismisses the pair's suggestion. Split moves one binding to a new project and dismisses the pair's merge suggestion. Tasks, schedules and snippets stay with the source. Tasks and schedules that explicitly chose the split workspace need a new choice. The source must keep at least one active workspace.
 
-The layer 08 views show machine, harness, path or external ID, availability and primary. Cached offline rows stay visible with their machine status. Declines remain visible outside the actionable count. The exact layout and interaction design belong to layer 08.
+Projects shows the primary workspace and extra workspace count. Project detail groups all workspaces by machine, with a copyable path or external ID, harness facts, state and primary marker. The Projects **Discovery review** filter shows new, suggested, ambiguous, declined and moved rows with candidate project links. Cached rows remain visible when a machine is offline. Live inventory, binding and resolution need its connection back. Decline and undo decline update cached decisions.
+
+Use **Resolve now** to preview which workspaces will be created, joined or moved on one connection. Confirmation uses the preview token. Changed evidence or placements require a new confirmation. The bind drawer puts suggestions first, filters by repository and links any Stage owner. Its discovery instructions come from the harness descriptor when provided.
+
+Merge names the survivor and previews the tasks, schedules, snippets and workspaces that move. **Keep separate** dismisses only the named pair. Split moves the chosen workspace to a new project while the other workspaces and records stay. Stage refuses to split the last workspace. Links to a merged project open its surviving ID.
 
 ## Resolver examples (07)
 
@@ -227,11 +231,15 @@ Send `bindingId: 56` with the task or schedule and the same connection ID.
 Use `GET /api/connections/7/capabilities?projectId=42&bindingId=56` and
 `/api/projects/42/actions?connectionId=7&bindingId=56` for scoped catalogs
 and actions. The task reports `workspace: {"bindingId":56,"path":"/work/app-review","source":"chosen"}`
-before launch and `source: "pinned"` once the destination is stored.
+before launch and `source: "pinned"` once the destination is stored. The
+pinned assignment includes `externalId`, which identifies a pathless
+destination even after its binding is removed. In the task and schedule
+drawers, use Primary to follow the connection's default, or select a
+specific workspace to pin it.
 
 ## Refresh and adapter contract (07 behavior, 09 ownership)
 
-A harness implements `Workspaces` with stable external IDs within its connection, display titles, and paths where available. It reports import eligibility and any known archive, deletion or activity information. It sets locality only when the files are local to the connection's machine. It can supply an origin and checkout-relative subpath learned from its harness. `machine.Ops` supplies filesystem evidence. An adapter can expose a descriptor hint for how to add a workspace in layer 08.
+A harness implements `Workspaces` with stable external IDs within its connection, display titles, and paths where available. It reports import eligibility and any known archive, deletion or activity information. It sets locality only when the files are local to the connection's machine. It can supply an origin and checkout-relative subpath learned from its harness. `machine.Ops` supplies filesystem evidence. The optional descriptor field `discoveryHint` tells a user how to make a workspace appear.
 
 Return success only for a complete snapshot. A successful empty snapshot is authoritative and marks prior rows unavailable. An unreachable service, missing inventory source or known partial response returns an error. Stage retains its last good inventory, skips refresh and import, reports the inventory error and continues polling linked tasks. Layer 08 distinguishes an empty review from an unavailable inventory source.
 

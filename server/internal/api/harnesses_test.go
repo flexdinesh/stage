@@ -8,6 +8,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/claudecode"
+	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -39,6 +40,7 @@ type harnessesReply struct {
 		Reason         string            `json:"reason"`
 		Closures       []harness.Closure `json:"closures"`
 		LinkSchemes    []string          `json:"linkSchemes"`
+		DiscoveryHint  *string           `json:"discoveryHint"`
 	} `json:"harnesses"`
 }
 
@@ -83,6 +85,10 @@ func TestHarnessesListDescriptorsAndMachineAvailability(t *testing.T) {
 			}
 			if oc.StateReasons == nil || len(oc.StateReasons) != 0 || t3h.StateReasons == nil || len(t3h.StateReasons) != 0 {
 				t.Fatalf("state reasons: t3 %#v, opencode %#v", t3h.StateReasons, oc.StateReasons)
+			}
+			if t3h.DiscoveryHint == nil || !strings.Contains(*t3h.DiscoveryHint, "as a project in T3") ||
+				oc.DiscoveryHint == nil || !strings.Contains(*oc.DiscoveryHint, "Open the workspace in OpenCode") || hosted.DiscoveryHint != nil {
+				t.Fatalf("discovery hints: t3 %+v, opencode %+v, hosted %+v", t3h, oc, hosted)
 			}
 			if !hosted.LocalProcesses || hosted.Sessions != harness.SessionsMachine || hosted.Available != tc.hosted || (hosted.Reason == "") != tc.hosted || hosted.Closures == nil {
 				t.Fatalf("hosted %+v", hosted)
@@ -172,7 +178,7 @@ func TestHarnessConnectionRoutes(t *testing.T) {
 // variables by them), and a connect action.
 func TestHarnessListServesClaudeCode(t *testing.T) {
 	e := newEnv(t, func(d *api.Deps) {
-		d.Harnesses = harness.MustRegistry(t3.Descriptor, opencode.Descriptor, claudecode.Descriptor)
+		d.Harnesses = harness.MustRegistry(t3.Descriptor, opencode.Descriptor, claudecode.Descriptor, codex.Descriptor)
 	})
 	var list struct {
 		Harnesses []struct {
@@ -182,6 +188,7 @@ func TestHarnessListServesClaudeCode(t *testing.T) {
 			StateReasons   []string         `json:"stateReasons"`
 			Launch         string           `json:"launch"`
 			SessionHint    *string          `json:"sessionHint"`
+			DiscoveryHint  string           `json:"discoveryHint"`
 			Setup          harness.Setup    `json:"setup"`
 			Attribution    struct {
 				Env        string              `json:"env"`
@@ -192,7 +199,10 @@ func TestHarnessListServesClaudeCode(t *testing.T) {
 		} `json:"harnesses"`
 	}
 	e.must("GET", "/api/harnesses", nil, 200, &list)
-	cc := list.Harnesses[2]
+	cc, cx := list.Harnesses[2], list.Harnesses[3]
+	if !strings.Contains(cc.DiscoveryHint, "Run Claude Code in the workspace") || !strings.Contains(cx.DiscoveryHint, "Trust the workspace folder in Codex") {
+		t.Fatalf("discovery hints: Claude Code %q, Codex %q", cc.DiscoveryHint, cx.DiscoveryHint)
+	}
 	// Claude Code names how its sessions are pasted; T3 leaves the field out.
 	if cc.SessionHint == nil || !strings.Contains(*cc.SessionHint, "claude agents") || list.Harnesses[0].SessionHint != nil {
 		t.Fatalf("sessionHint claude %v t3 %v", cc.SessionHint, list.Harnesses[0].SessionHint)

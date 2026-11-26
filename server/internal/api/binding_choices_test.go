@@ -25,7 +25,8 @@ func TestTaskWorkspaceChoiceAndLaunchSnapshot(t *testing.T) {
 	var started db.Task
 	e.must("POST", "/api/tasks", body, 201, &started)
 	if started.BindingID == nil || *started.BindingID != chosen || started.Session == nil ||
-		started.Workspace == nil || started.Workspace.BindingID != chosen || started.Workspace.Path != alt.WorkspaceRoot || started.Workspace.Source != "pinned" {
+		started.Workspace == nil || started.Workspace.BindingID != chosen || started.Workspace.Path != alt.WorkspaceRoot ||
+		started.Workspace.Source != "pinned" || started.Workspace.ExternalID != alt.ID {
 		t.Fatalf("started task %+v, workspace %+v", started, started.Workspace)
 	}
 	dest, err := e.store.LaunchDestination(t.Context(), started.ID, started.LaunchAttempt)

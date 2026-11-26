@@ -26,6 +26,9 @@ A schedule holds a task's config (project, connection, prompt, options, optional
 
 Times are evaluated in the schedule's IANA zone, so daylight saving follows the zone.
 
+Choose **Primary** to use the project's primary workspace on the selected
+connection at each fire. Choosing a specific workspace pins the schedule to it.
+
 **Each fire spawns a new task** with the schedule's config, images and note template, and starts it. Spawned tasks are standalone: they join no tree and have no needs.
 
 ## Skipped and missed fires

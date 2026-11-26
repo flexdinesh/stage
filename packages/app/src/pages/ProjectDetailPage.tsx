@@ -1,5 +1,6 @@
 import { ProjectWorkspace } from "../components/ProjectWorkspace.tsx";
-import { projectWorkspace } from "../lib/projects.ts";
+import { Navigate, useLocation } from "react-router";
+import { WorkspaceDisplay, useWorkspaceConnections } from "../components/WorkspaceDisplay.tsx";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import { isNotFound, useProject, useSchedules, useTasks } from "../api/queries.ts";
 import { TASK_STATES, type TaskListQuery } from "../api/types.ts";
@@ -8,7 +9,7 @@ import { useNewTask } from "../components/NewTask.tsx";
 import { ScheduleRows } from "../components/ScheduleList.tsx";
 import { taskStateLabel } from "../components/StateBadge.tsx";
 import { TaskRows } from "../components/TaskList.tsx";
-import { Button, PageHeader, Panel, QueryState, Segmented, Combobox } from "../components/ui.tsx";
+import { Button, Chip, PageHeader, Panel, QueryState, Segmented, Combobox } from "../components/ui.tsx";
 import { pick } from "../lib/format.ts";
 import { useIdParam, useSearchParam } from "../lib/params.ts";
 import { NotFoundPage, RecordNotFound } from "./NotFoundPage.tsx";
@@ -33,24 +34,27 @@ export function ProjectDetailPage() {
 function ProjectDetail({ id }: { id: number }) {
   const project = useProject(id);
   const projectId = project.data?.id ?? id;
+  const location = useLocation();
+  const connections = useWorkspaceConnections();
   // In the address, so Back from a task keeps the list as it was.
   const [stateFilter, setStateFilter] = useSearchParam("state", ["", ...TASK_STATES], "");
   const [scope, setScope] = useSearchParam("scope", SCOPE_VALUES, "open");
   const state = pick(TASK_STATES, stateFilter);
   const closed: TaskListQuery["closed"] = scope === "closed" ? "true" : scope === "all" ? "all" : undefined;
   const tasks = useTasks({
-    project: id,
+    project: projectId,
     ...(state === undefined ? {} : { state: [state] }),
     ...(closed === undefined ? {} : { closed }),
   });
   const newTask = useNewTask();
   const taskCount = tasks.data?.tasks.length;
-  const schedules = useSchedules({ project: id });
+  const schedules = useSchedules({ project: projectId });
   const scheduleList = schedules.data?.schedules ?? [];
 
   if (isNotFound(project.error)) {
     return <RecordNotFound title="Project not found" meta={`project ${id}`} text="This project was deleted or does not exist." back={{ to: "/projects", label: "Back to projects" }} />;
   }
+  if (projectId !== id) return <Navigate replace to={`/projects/${projectId}${location.search}${location.hash}`} />;
   return (
     <QueryState isPending={project.isPending} error={project.error} hasData={project.data !== undefined}>
       {project.data === undefined ? null : (
@@ -59,9 +63,9 @@ function ProjectDetail({ id }: { id: number }) {
             title={project.data.title}
             trail={[{ label: "Projects", to: "/projects" }, { label: `project ${project.data.id}` }]}
             meta={
-              <span title={`Stage project #${project.data.id}`} className="break-all">
-                {projectWorkspace(project.data)}
-                {project.data.archivedAt === null ? null : " · archived"}
+              <span className="flex min-w-0 flex-wrap items-baseline gap-2">
+                <WorkspaceDisplay bindings={project.data.bindings} connections={connections} />
+                {project.data.archivedAt === null ? null : <Chip tone="idle">Archived</Chip>}
               </span>
             }
             actions={

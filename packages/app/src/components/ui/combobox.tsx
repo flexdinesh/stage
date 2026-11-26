@@ -62,6 +62,7 @@ export function Combobox({
   autoFocus = false,
   leading,
   showTag = false,
+  renderDetail,
   "aria-label": ariaLabel,
 }: {
   id?: string | undefined;
@@ -89,6 +90,7 @@ export function Combobox({
   leading?: ReactNode;
   /** A select-only trigger also shows the selected option's tag (e.g. a connection's machine). */
   showTag?: boolean | undefined;
+  renderDetail?: (option: ComboboxOption) => ReactNode;
   "aria-label"?: string | undefined;
 }) {
   const listId = useId();
@@ -291,11 +293,11 @@ export function Combobox({
                   </span>
                 )}
               </span>
-              {o.detail === undefined ? null : (
+              {renderDetail === undefined ? (o.detail === undefined ? null : (
                 <span className="truncate font-mono text-meta text-muted">
                   <Highlight text={o.detail} range={o.detailMatch} />
                 </span>
-              )}
+              )) : renderDetail(o)}
             </span>
           </div>
         ))}

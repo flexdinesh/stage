@@ -2,7 +2,7 @@
 // branch by `harness`, never by id. Names, closure copy and availability come from the server's harness descriptors
 // (GET /harnesses), never from a list here. Retired connections keep their tasks and bindings as read-only history.
 import type { ExecutionLinks } from "../platform/index.ts";
-import type { Harness, HarnessConnection, HarnessDescriptor, Project, ProjectBinding, Task, Workspace } from "../api/types.ts";
+import type { Harness, HarnessConnection, HarnessDescriptor, Project, Task } from "../api/types.ts";
 
 /** Lookups over GET /connections (every row, active first) and GET /harnesses (descriptors). */
 export interface Harnesses {
@@ -159,33 +159,6 @@ export function forgetPrompt(c: Pick<HarnessConnection, "label">): string {
   return `Forget ${c.label || "this connection"}? Its tasks keep their history and stay read-only. Its project bindings stop asking for repair, and pairing this instance again starts a new connection.`;
 }
 
-/** Projects list chip: current (active-connection) bindings only; replaced ones never ask for repair. */
-export function bindingsSummary(bindings: readonly ProjectBinding[], kindName: (kind: Harness) => string): string {
-  const current = bindings.filter((b) => b.connectionActive);
-  if (current.length === 0) return "not bound";
-  if (current.some((b) => b.status !== "available")) return "check workspace";
-  return [...new Set(current.map((b) => kindName(b.harness)))].join(" · ");
-}
-
-/** The project's bindings on replaced connections of a harness. */
-export const retiredBindings = (project: Pick<Project, "bindings">, h: Harness): ProjectBinding[] =>
-  project.bindings.filter((b) => b.harness === h && !b.connectionActive);
-
 /** Workspace paths of the project's replaced bindings on a harness. */
 export const replacedPaths = (project: Pick<Project, "bindings">, h: Harness): Set<string> =>
-  new Set(retiredBindings(project, h).map((b) => b.workspace));
-
-/**
- * One-click rebind: the active connection's workspace at exactly a replaced binding's path, while the project has
- * no binding on that connection and no other project owns the workspace. Null otherwise (the drawer stays the way).
- */
-export function rebindCandidate(
-  project: Pick<Project, "id" | "bindings">,
-  connection: Pick<HarnessConnection, "id" | "harness">,
-  external: readonly Workspace[],
-): Workspace | null {
-  if (project.bindings.some((b) => b.connectionId === connection.id)) return null;
-  const paths = replacedPaths(project, connection.harness);
-  if (paths.size === 0) return null;
-  return external.find((e) => e.available && e.workspace !== "" && paths.has(e.workspace) && e.projectId === null) ?? null;
-}
+  new Set(project.bindings.filter((b) => b.harness === h && !b.connectionActive).map((b) => b.workspace));

@@ -24,7 +24,7 @@ SELECT s.id, s.project_id, p.title, s.title, s.prompt, s.notes, s.cron, s.tz, s.
   s.created_at, s.updated_at,
   COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
     'sizeBytes', a.size_bytes) ORDER BY a.id) FROM task_attachments a WHERE a.schedule_id = s.id), '[]'::jsonb),s.connection_id,(SELECT jsonb_build_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=s.origin_session_id),s.execution_config,s.created_by_user_id,s.source_machine_id,s.binding_id,
- CASE WHEN b.id IS NOT NULL THEN jsonb_build_object('bindingId',b.id,'path',b.workspace,'source',CASE WHEN s.binding_id IS NULL THEN 'primary' ELSE 'chosen' END) END
+ CASE WHEN b.id IS NOT NULL THEN jsonb_build_object('bindingId',b.id,'path',b.workspace,'externalId',b.external_project_id,'source',CASE WHEN s.binding_id IS NULL THEN 'primary' ELSE 'chosen' END) END
 FROM schedules s
 JOIN projects p ON p.id = s.project_id
 LEFT JOIN project_bindings b ON ` + effectiveBindingSQL("s")

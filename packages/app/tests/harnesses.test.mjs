@@ -3,13 +3,11 @@ import { test } from "node:test";
 import { ApiError } from "../src/api/client.ts";
 import {
   activeOn,
-  bindingsSummary,
   forgetPrompt,
   harnessLookup,
   isDisconnected,
   isRetired,
   linkSchemes,
-  rebindCandidate,
   replacedPaths,
   retiredNotice,
   sessionLinks,
@@ -47,7 +45,6 @@ const list = [t3, openCode, oldT3, forgotten];
 // Names come from the server's descriptors (GET /harnesses).
 const descriptor = (kind, name) => ({ kind, name, localProcesses: false, sessions: "machine", stateReasons: [], closures: [], available: true });
 const descriptors = [descriptor("t3", "T3"), descriptor("opencode", "OpenCode")];
-const kindName = (kind) => harnessLookup([], descriptors).kindName(kind);
 
 test("useHarnesses lookups name and branch by harness, never by id", () => {
   const h = harnessLookup(list, descriptors);
@@ -177,37 +174,10 @@ const binding = (connectionId, harness, workspace, extra = {}) => ({
   connectionLabel: "",
   ...extra,
 });
-const external = (workspace, projectId = null, available = true) => ({ connectionId: 5, externalId: `x-${workspace}`, title: "stage", workspace, projectId, available });
-
-test("one-click rebind offers the active connection's workspace at exactly the replaced path", () => {
-  const project = { id: 7, bindings: [binding(1, "t3", "/home/u/stage", { connectionActive: false, connectionLabel: "desktop" })] };
-  const exact = external("/home/u/stage");
-  assert.equal(rebindCandidate(project, t3, [external("/home/u/stage/sub"), external("/home/u/stag"), exact]), exact);
-  assert.equal(rebindCandidate(project, t3, [external("/home/u/stage/")]), null, "paths match exactly, no normalising");
-  assert.equal(rebindCandidate(project, t3, [external("/home/u/stage", 8)]), null, "another project owns it");
-  assert.equal(rebindCandidate(project, t3, [external("/home/u/stage", null, false)]), null, "the workspace is unavailable");
-  assert.equal(rebindCandidate(project, openCode, [exact]), null, "only the same harness's replaced bindings count");
-});
-
-test("no one-click rebind once the project is bound on the active connection, or without a replaced binding", () => {
-  const bound = { id: 7, bindings: [binding(1, "t3", "/home/u/stage", { connectionActive: false }), binding(5, "t3", "/elsewhere")] };
-  assert.equal(rebindCandidate(bound, t3, [external("/home/u/stage")]), null);
-  assert.equal(rebindCandidate({ id: 7, bindings: [] }, t3, [external("/home/u/stage")]), null);
-  const pathless = { id: 7, bindings: [binding(1, "t3", "", { connectionActive: false })] };
-  assert.equal(rebindCandidate(pathless, t3, [external("")]), null, "two empty paths do not match");
-});
-
 test("the bind drawer marks the replaced binding's path per harness", () => {
   const project = { bindings: [binding(1, "t3", "/a", { connectionActive: false }), binding(5, "t3", "/b"), binding(4, "opencode", "/c", { connectionActive: false })] };
   assert.deepEqual([...replacedPaths(project, "t3")], ["/a"]);
   assert.deepEqual([...replacedPaths(project, "opencode")], ["/c"]);
-});
-
-test("projects list chip reads current bindings only", () => {
-  assert.equal(bindingsSummary([binding(1, "t3", "/a", { connectionActive: false, status: "missing" })], kindName), "not bound");
-  assert.equal(bindingsSummary([binding(1, "t3", "/a", { connectionActive: false, status: "missing" }), binding(2, "opencode", "/b")], kindName), "OpenCode");
-  assert.equal(bindingsSummary([binding(5, "t3", "/a", { status: "changed" })], kindName), "check workspace");
-  assert.equal(bindingsSummary([binding(5, "t3", "/a"), binding(2, "opencode", "/b")], kindName), "T3 · OpenCode");
 });
 
 test("retired connection usage and forget copy", () => {

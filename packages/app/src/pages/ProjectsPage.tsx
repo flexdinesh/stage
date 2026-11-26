@@ -1,12 +1,13 @@
-import { bindingsSummary } from "../lib/harnesses.ts";
-import { importNotice, projectWorkspace } from "../lib/projects.ts";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { importNotice } from "../lib/projects.ts";
+import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import type { PreferenceStorage } from "../platform/index.ts";
-import { keys, useHarnesses, useProjects, useTasks } from "../api/queries.ts";
+import { useInvalidateProjects, useProjects, useTasks } from "../api/queries.ts";
 import type { Project, Task } from "../api/types.ts";
 import { IconPlus } from "../components/icons.tsx";
+import { WorkspaceDisplay, useWorkspaceConnections } from "../components/WorkspaceDisplay.tsx";
+import { DiscoveryReview, useDiscoveryReview } from "../components/DiscoveryReview.tsx";
 import {
   Button,
   Chip,
@@ -34,12 +35,12 @@ const FORM_ID = "new-project-form";
 
 function CreateProjectDrawer({ onClose }: { onClose: () => void }) {
   const api = useApi();
-  const qc = useQueryClient();
+  const refresh = useInvalidateProjects();
   const [title, setTitle] = useState("");
   const create = useMutation({
     mutationFn: () => api.createProject({ title: title.trim() }),
     onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: keys.projects });
+      await refresh();
       onClose();
     },
   });
@@ -104,15 +105,10 @@ const activityMs = (p: Project) => (p.lastActivityAt === null ? 0 : new Date(p.l
 /** Most recent activity first; projects without activity last, by name (server order, stable sort). */
 const byRecent = (projects: Project[]) => projects.toSorted((a, b) => activityMs(b) - activityMs(a));
 
-const ARCHIVED_VALUES = ["active", "all"] as const;
+const FILTERS = ["active", "all", "review"] as const;
+type Filter = (typeof FILTERS)[number];
 
-const ARCHIVED_OPTIONS = [
-  { value: "active", label: "active" },
-  { value: "all", label: "incl. archived" },
-] as const;
-
-/** Project row grid: name over path, harness chip, counts (below the name on phone). Shared with the skeleton. */
-const PROJECT_ROW = "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 md:grid-cols-[minmax(0,1fr)_auto_128px]";
+const PROJECT_ROW = "grid min-w-0 items-center gap-x-3 gap-y-1 md:grid-cols-[minmax(0,1fr)_128px]";
 
 const NAME_WIDTHS = ["w-24", "w-16", "w-28", "w-20", "w-32"];
 
@@ -127,7 +123,6 @@ function ProjectRowsSkeleton({ title }: { title: string }) {
                 <SkeletonBar className={cx("h-4", w)} />
                 <SkeletonBar className="h-3 w-56 max-w-full" />
               </div>
-              <SkeletonBar className="h-[22px] w-9 justify-self-end md:justify-self-start" />
               <div className="flex flex-col gap-1.5 py-0.5">
                 <SkeletonBar className="h-3 w-14" />
                 <SkeletonBar className="h-3 w-20" />
@@ -142,7 +137,14 @@ function ProjectRowsSkeleton({ title }: { title: string }) {
 
 export function ProjectsPage() {
   // In the address, so Back keeps the filter.
-  const [filter, setFilter] = useSearchParam("archived", ARCHIVED_VALUES, "active");
+  const [filter, setFilter] = useSearchParam("archived", FILTERS, "active");
+  const review = useDiscoveryReview();
+  const reviewing = filter === "review";
+  const filterOptions: { value: Filter; label: string; short?: string }[] = [
+    { value: "active", label: "Active" },
+    { value: "all", label: "Incl. archived", short: "All" },
+    { value: "review", label: `Discovery review${review.data === undefined ? "" : ` (${review.data.attention})`}` },
+  ];
   const { storage } = usePlatform();
   const [sort, setSort] = useState<Sort>(() => readSort(storage));
   const [creating, setCreating] = useState(false);
@@ -156,29 +158,29 @@ export function ProjectsPage() {
     storage.set(SORT_KEY, next);
   };
   const counts = tasks.data === undefined ? null : countByProject(tasks.data.tasks);
-  const { kindName } = useHarnesses();
+  const connections = useWorkspaceConnections();
+  const { kindName } = connections.harnesses;
   const notice = importNotice(projects.data?.imports ?? [], kindName);
 
   return (
     <>
       <PageHeader
         title="Projects"
-        meta={[
+        meta={reviewing ? undefined : [
           `${projects.data === undefined ? "…" : list.length} projects`,
-          `archived ${filter === "all" ? "shown" : "hidden"}`,
           ...(notice === null ? [] : [notice]),
         ].join(" · ")}
         actions={
           <>
-            <Segmented label="Sort projects" options={SORT_OPTIONS} value={sort} onChange={changeSort} />
-            <Segmented label="Archived filter" options={ARCHIVED_OPTIONS} value={filter} onChange={setFilter} />
+            <Segmented label="Projects filter" options={filterOptions} value={filter} onChange={setFilter} />
+            {reviewing ? null : <Segmented label="Sort projects" options={SORT_OPTIONS} value={sort} onChange={changeSort} />}
             <Button variant="primary" onClick={() => setCreating(true)}>
               <IconPlus /> New project
             </Button>
           </>
         }
       />
-      <QueryState
+      {reviewing ? <DiscoveryReview review={review} /> : <QueryState
         isPending={projects.isPending}
         error={projects.error}
         hasData={projects.data !== undefined}
@@ -193,17 +195,12 @@ export function ProjectsPage() {
               const c = counts?.get(p.id) ?? { total: 0, active: 0 };
               return (
                 <Row key={p.id} className={PROJECT_ROW}>
-                  <div className="min-w-0">
-                    <TextLink to={`/projects/${p.id}`} className="block truncate text-body font-medium">
-                      {p.title}
-                    </TextLink>
-                    <Meta className="block truncate" title={projectWorkspace(p)}>
-                      {projectWorkspace(p)}
-                    </Meta>
-                  </div>
-                  <div className="flex items-center gap-1.5 justify-self-end md:justify-self-start">
-                    {p.archivedAt === null ? null : <Chip tone="idle">archived</Chip>}
-                    <Chip>{bindingsSummary(p.bindings, kindName)}</Chip>
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <TextLink to={`/projects/${p.id}`} className="wrap-anywhere text-body font-medium">{p.title}</TextLink>
+                      {p.archivedAt === null ? null : <Chip tone="idle">Archived</Chip>}
+                    </div>
+                    <WorkspaceDisplay bindings={p.bindings} connections={connections} />
                   </div>
                   <Meta className="flex flex-col tabular">
                     <span>
@@ -223,7 +220,7 @@ export function ProjectsPage() {
             })}
           </RowList>
         </Panel>
-      </QueryState>
+      </QueryState>}
       {creating ? <CreateProjectDrawer onClose={() => setCreating(false)} /> : null}
     </>
   );

@@ -30,8 +30,9 @@ const ClientName = "stage"
 // turn. An archived thread may complete its task.
 var Descriptor = harness.Descriptor{
 	Kind: Kind, Name: "Codex", Sessions: harness.SessionsMachine, LocalProcesses: true, StableIdentity: true,
-	StateReasons: []string{execution.ReasonOwnerExited},
-	SessionHint:  "A thread ID, or a pasted codex resume command.",
+	StateReasons:  []string{execution.ReasonOwnerExited},
+	SessionHint:   "A thread ID, or a pasted codex resume command.",
+	DiscoveryHint: "Trust the workspace folder in Codex on this machine, then refresh discovery.",
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedArchived, Provenance: "harness_archived",
 		Setting:   "Complete tasks when archived in Codex",
