@@ -11,6 +11,9 @@ Storage engines, ports and adapters: [ADR 0003](adr/0003-storage-adapters.md),
 [storage.md](storage.md).
 Claude Code harness (background sessions, spike evidence):
 [ADR 0005](adr/0005-claude-code-harness.md).
+The Stage and harness boundary (what Stage owns, what a harness owns,
+declared capabilities, project identity):
+[ADR 0007](adr/0007-harness-boundary.md).
 
 ## Ownership
 

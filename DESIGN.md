@@ -649,6 +649,7 @@ The desktop app renders the same UI; its differences are restrained and live in 
 - **Do** open secondary flows in a 580px (or 680px) right drawer that becomes a full-screen sheet below 768px.
 - **Do** keep motion to 150ms color, opacity and border transitions on state change (plus the skeleton pulse, still with reduced motion).
 - **Do** give needs-input rows (and still-waiting needs-input toasts, inbox rows and the Needs input panel) the 2px Waiting Yellow left edge and a primary Open in T3; it is the only colored row edge.
+- **Do** build every harness-dependent control, panel and line from what the harness declares (descriptor, operations, launch options, the links and data it reports), in its own words and order; a harness that declares nothing shows nothing ([ADR 0007](docs/adr/0007-harness-boundary.md)).
 
 ### Don't:
 - **Don't** round any corner.
@@ -662,5 +663,6 @@ The desktop app renders the same UI; its differences are restrained and live in 
 - **Don't** add colored left edges to any row other than needs input.
 - **Don't** add entrance animations or choreography.
 - **Don't** dress it as a neon terminal (glow, green-on-black, scanlines) or as a rounded-card SaaS dashboard.
+- **Don't** branch a view on a harness name, or offer a session control (worktree, branch, base) Stage would have to compute; those belong to the harness.
 
 The inbox includes a Waiting in T3 group for current external sessions with no recorded events. Rows use the same two-line layout (title and needs-input badge, then project and a small primary Open in T3), without unread markers, event times or history controls. They disappear when resolved or replaced by a recorded notification group.

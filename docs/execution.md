@@ -9,16 +9,24 @@ plugin registration or service installation framework.
 
 ## Design rules
 
-- **Lean.** The harness keeps what it owns: model catalog, workspaces and
-  worktrees, archive, its UI. Stage owns something only when the harness
-  cannot, on a best-effort basis.
+The boundary is [ADR 0007](adr/0007-harness-boundary.md); these rules
+apply it.
+
+- **Lean.** The harness keeps what it owns: sessions, model catalog,
+  workspaces, worktrees and branches, archive, harness projects, its UI and
+  its processes. Core code does no harness work (no git for sessions, no
+  worktree naming, no creating harness projects). Stage owns tasks and their
+  launch and observation, plus best-effort project identity across harnesses
+  (ADR 0007 decision 11).
 - **Generic code, explicit policies.** Product code reads the harness
-  descriptor, capabilities and operations, never a harness name. Behavior one
-  harness needs sits behind a typed optional interface or a registered UI
-  slot, so a harness without a feature never limits the app for the others.
-  `internal/harness/boundary_test.go` fails on harness names outside the
-  adapters, their connection setup and the server composition (its pending
-  list only shrinks).
+  descriptor, capabilities, operations and launch options, never a harness
+  name. Behavior one harness needs sits behind a typed optional interface,
+  a declared operation or launch option, or a registered UI slot, so a
+  harness without a feature never limits the app for the others. An adapter
+  may translate its own launch options into harness calls; core code
+  computes nothing from them. `internal/harness/boundary_test.go` fails on
+  harness names outside the adapters, their connection setup and the server
+  composition (its pending list only shrinks, to empty).
 - **Worker-ready placement.** Remote machines run a thin worker with no
   database ([ADR 0002](adr/0002-machines-and-workers.md)). The main server
   keeps the store, coordinator and acceptance, and drives each machine through
