@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -72,6 +73,47 @@ func (s *server) validateSelection(ctx context.Context, id, project int64, c *ex
 		return db.Invalid("%s", err)
 	}
 	return nil
+}
+
+// requireImages refuses images on a connection whose capabilities do not
+// offer the images operation, with the operation's reason (as MCP does;
+// capabilities that can't be read refuse too). Connection 0 has no
+// destination yet: its launch checks.
+func (s *server) requireImages(ctx context.Context, id, project int64) error {
+	if id == 0 {
+		return nil
+	}
+	caps, err := s.capabilities(ctx, id, project)
+	if err != nil {
+		return err
+	}
+	op := caps.Operations["images"]
+	if op.Available {
+		return nil
+	}
+	reason := strings.TrimSpace(op.Reason)
+	if reason == "" {
+		reason = "This connection does not offer images."
+	}
+	return db.Invalid("Images are unavailable on this connection: %s Remove them or choose another connection.", reason)
+}
+
+// requirePatchImages checks the images a patch leaves on a task or schedule
+// when it moves them to another connection or adds one.
+func (s *server) requirePatchImages(ctx context.Context, connection, project int64, moved bool, current []db.Attachment, patch db.Optional[[]int64]) error {
+	ids := make([]int64, 0, len(current))
+	for _, a := range current {
+		ids = append(ids, a.ID)
+	}
+	added := false
+	if patch.Set {
+		added = slices.ContainsFunc(patch.V, func(id int64) bool { return !slices.Contains(ids, id) })
+		ids = patch.V
+	}
+	if len(ids) == 0 || !moved && !added {
+		return nil
+	}
+	return s.requireImages(ctx, connection, project)
 }
 func sameSelection(a, b *execution.Config) bool {
 	return a != nil && b != nil && a.Model == b.Model && a.Permission == b.Permission && a.Mode == b.Mode && slices.Equal(a.Options, b.Options)

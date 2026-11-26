@@ -258,19 +258,6 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 			if err := checkDestinationChange(ctx, tx, e.ConnectionID, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
 				return err
 			}
-			toT3, err := tx.Connections().HarnessIs(ctx, p.ConnectionID.V, HarnessT3)
-			if err != nil {
-				return err
-			}
-			if p.ConnectionID.V != e.ConnectionID && !toT3 {
-				hasImages, err := tx.Tasks().HasAttachments(ctx, id)
-				if err != nil {
-					return err
-				}
-				if hasImages {
-					return Invalid("Remove image attachments before switching to OpenCode.")
-				}
-			}
 		}
 		if p.ProjectID.Set {
 			if err := requireProject(ctx, tx, p.ProjectID.V); err != nil {

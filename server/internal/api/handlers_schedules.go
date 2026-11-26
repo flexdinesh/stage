@@ -90,6 +90,11 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := s.validateSelection(r.Context(), in.ConnectionID, in.ProjectID, in.ExecutionConfig); err != nil {
 		return err
 	}
+	if len(in.AttachmentIDs) > 0 {
+		if err := s.requireImages(r.Context(), in.ConnectionID, in.ProjectID); err != nil {
+			return err
+		}
+	}
 	if in.Workspace.FromPredecessor() {
 		return errSchedulePredecessor
 	}
@@ -159,12 +164,15 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	if !s.Store.IsT3(connection) && (p.ProviderInstanceID.Set || p.Model.Set || p.RuntimeMode.Set || p.ModelOptions.Set || p.InteractionMode.Set || p.AttachmentIDs.Set && len(p.AttachmentIDs.V) > 0) {
-		return db.Invalid("Choose harness-specific configuration and remove unsupported attachments.")
+	if !s.Store.IsT3(connection) && (p.ProviderInstanceID.Set || p.Model.Set || p.RuntimeMode.Set || p.ModelOptions.Set || p.InteractionMode.Set) {
+		return db.Invalid("Choose harness-specific configuration.")
 	}
 	projectID := current.ProjectID
 	if p.ProjectID.Set {
 		projectID = p.ProjectID.V
+	}
+	if err := s.requirePatchImages(r.Context(), connection, projectID, connection != current.ConnectionID, current.Attachments, p.AttachmentIDs); err != nil {
+		return err
 	}
 	if p.ExecutionConfig.Set && (connection != current.ConnectionID || projectID != current.ProjectID || !sameSelection(current.ExecutionConfig, p.ExecutionConfig.Ptr())) {
 		if err := s.validateSelection(r.Context(), connection, projectID, p.ExecutionConfig.Ptr()); err != nil {

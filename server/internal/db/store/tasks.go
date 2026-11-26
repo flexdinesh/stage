@@ -457,7 +457,6 @@ type Tasks interface {
 	InsertAdopted(ctx context.Context, in AdoptedInsert) (int64, error)
 	EditState(ctx context.Context, id int64) (TaskEditState, error)
 	SetStart(ctx context.Context, id int64, at *time.Time, tz *string) error
-	HasAttachments(ctx context.Context, id int64) (bool, error)
 	// Update sets u's columns and updated_at.
 	Update(ctx context.Context, id int64, u TaskUpdate) error
 	// BaseTask is workspace.baseTaskId and whether it names a need.

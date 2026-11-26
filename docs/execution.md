@@ -277,7 +277,9 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   errors. Adapters must validate the requested semantics before dispatch.
   Product code reads policy from these, never a harness name: `images`,
   `predecessorBase` and `worktreeBase` (unavailable when the harness picks the
-  worktree base and branch itself) gate form fields, and `ModeLabel` names the
+  worktree base and branch itself) gate form fields (`images` also gates the
+  API and MCP: images on a connection without it are refused with its
+  reason), and `ModeLabel` names the
   mode choice in the harness's words. The descriptor's static `worktree`
   policy is what the API validates a saved workspace against (it holds
   without the harness reachable): `baseRef` (Stage passes a base ref and

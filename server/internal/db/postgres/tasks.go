@@ -268,12 +268,6 @@ func (r tasks) SetStart(ctx context.Context, id int64, at *time.Time, tz *string
 	return err
 }
 
-func (r tasks) HasAttachments(ctx context.Context, id int64) (bool, error) {
-	var hasImages bool
-	err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM task_attachments WHERE task_id=$1)`, id).Scan(&hasImages)
-	return hasImages, err
-}
-
 func (r tasks) Update(ctx context.Context, id int64, u store.TaskUpdate) error {
 	var w where
 	w.arg(id)
