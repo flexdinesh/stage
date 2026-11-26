@@ -2,7 +2,7 @@
 // branch by `harness`, never by id. Names, closure copy and availability come from the server's harness descriptors
 // (GET /harnesses), never from a list here. Retired connections keep their tasks and bindings as read-only history.
 import type { ExecutionLinks } from "../platform/index.ts";
-import type { Harness, HarnessConnection, HarnessDescriptor, Project, Task } from "../api/types.ts";
+import type { Harness, HarnessConnection, HarnessDescriptor, Task } from "../api/types.ts";
 
 /** Lookups over GET /connections (every row, active first) and GET /harnesses (descriptors). */
 export interface Harnesses {
@@ -158,7 +158,3 @@ export const usageText = (c: Pick<HarnessConnection, "tasks" | "bindings">) =>
 export function forgetPrompt(c: Pick<HarnessConnection, "label">): string {
   return `Forget ${c.label || "this connection"}? Its tasks keep their history and stay read-only. Its project bindings stop asking for repair, and pairing this instance again starts a new connection.`;
 }
-
-/** Workspace paths of the project's replaced bindings on a harness. */
-export const replacedPaths = (project: Pick<Project, "bindings">, h: Harness): Set<string> =>
-  new Set(project.bindings.filter((b) => b.harness === h && !b.connectionActive).map((b) => b.workspace));

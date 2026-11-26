@@ -1,4 +1,4 @@
-import type { Harness, ImportSummary, Project, ProjectBinding } from "../api/types.ts";
+import type { Harness, ImportSummary, Project, ProjectBinding, Workspace } from "../api/types.ts";
 import { relativeTime } from "./format.ts";
 
 /**
@@ -131,6 +131,27 @@ export function primaryWorkspace(ordered: readonly ProjectBinding[], connectionI
   const scoped = connectionId === 0 ? ordered : ordered.filter((b) => b.connectionId === connectionId);
   return scoped.find((b) => b.connectionActive && b.primary) ??
     scoped.find((b) => b.connectionActive) ?? scoped[0];
+}
+
+export function suggestedWorkspaceFor(row: Workspace, projectId: number): boolean {
+  return row.projectId === null && !row.declined && row.resolution.candidates.includes(projectId);
+}
+
+export function filterWorkspaceInventory(
+  rows: readonly Workspace[],
+  { projectId, previousId, repository, query }: { projectId: number; previousId: string | undefined; repository: string; query: string },
+): Workspace[] {
+  const text = query.trim().toLowerCase();
+  const inventoryRank = (row: Workspace): number => {
+    if (row.externalId === previousId) return 0;
+    if (suggestedWorkspaceFor(row, projectId)) return 1;
+    return row.resolution.outcome === "join" ? 2 : 3;
+  };
+  return rows.filter((row) =>
+    (repository === "" || row.remote === repository) &&
+    `${row.title} ${row.externalId} ${row.workspace} ${row.remote}`.toLowerCase().includes(text),
+  ).toSorted((a, b) => inventoryRank(a) - inventoryRank(b) ||
+    (a.workspace || a.externalId).localeCompare(b.workspace || b.externalId) || a.externalId.localeCompare(b.externalId));
 }
 
 /** The explicit choice or the primary on this connection, including when unavailable. */

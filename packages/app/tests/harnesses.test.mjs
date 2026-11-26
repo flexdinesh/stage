@@ -8,7 +8,6 @@ import {
   isDisconnected,
   isRetired,
   linkSchemes,
-  replacedPaths,
   retiredNotice,
   sessionLinks,
   resumeCommand,
@@ -158,26 +157,6 @@ test("retired notice names the harness and the instance Stage no longer uses", (
     retiredNotice(task({ harness: "opencode", connectionLabel: "http://oc:4096" }), "OpenCode"),
     "Ran on OpenCode 'http://oc:4096', which Stage no longer uses. Its history and result stay here.",
   );
-});
-
-const binding = (connectionId, harness, workspace, extra = {}) => ({
-  id: connectionId * 10,
-  projectId: 7,
-  connectionId,
-  harness,
-  externalProjectId: `p-${connectionId}`,
-  workspace,
-  revision: 1,
-  status: "available",
-  observedWorkspace: null,
-  connectionActive: true,
-  connectionLabel: "",
-  ...extra,
-});
-test("the bind drawer marks the replaced binding's path per harness", () => {
-  const project = { bindings: [binding(1, "t3", "/a", { connectionActive: false }), binding(5, "t3", "/b"), binding(4, "opencode", "/c", { connectionActive: false })] };
-  assert.deepEqual([...replacedPaths(project, "t3")], ["/a"]);
-  assert.deepEqual([...replacedPaths(project, "opencode")], ["/c"]);
 });
 
 test("retired connection usage and forget copy", () => {

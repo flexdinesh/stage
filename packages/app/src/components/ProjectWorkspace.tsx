@@ -4,8 +4,7 @@ import { useNavigate } from "react-router";
 import { ApiError } from "../api/client.ts";
 import { keys, useInvalidateProjects, useProjects } from "../api/queries.ts";
 import type { Project, ProjectBinding, Workspace, WorkspaceRef } from "../api/types.ts";
-import { replacedPaths } from "../lib/harnesses.ts";
-import { orderedWorkspaces, repoLabel, workspaceLocation } from "../lib/projects.ts";
+import { filterWorkspaceInventory, repoLabel, suggestedWorkspaceFor, workspaceLocation } from "../lib/projects.ts";
 import { useApi } from "../platform/context.tsx";
 import { DeclaredActions } from "./DeclaredActions.tsx";
 import { ProjectReference, ResolveWorkspacesDrawer } from "./ProjectPreviews.tsx";
@@ -250,18 +249,9 @@ function BindingInventory({ project, target, onSaved }: { project: Project; targ
     retry: false,
   });
   const candidates = inventory.data?.workspaces ?? [];
-  const connectionKind = useWorkspaceConnections().harnesses.harness(target.connectionId);
-  const previousPaths = connectionKind === null ? new Set<string>() : replacedPaths(project, connectionKind);
-  const current = orderedWorkspaces(project.bindings).find((b) => b.id === target.replaces);
-  const isSuggestion = (row: Workspace) => row.projectId === null && (row.resolution.candidates.includes(project.id) ||
-    (row.workspace !== "" && previousPaths.has(row.workspace)) || (current !== undefined && row.externalId === current.externalProjectId));
+  const previousId = project.bindings.find((b) => b.id === target.replaces)?.externalProjectId;
   const repositories = [...new Set(candidates.map((candidate) => candidate.remote).filter(Boolean))].toSorted();
-  const matches = candidates.filter((row) =>
-    (repository === "" || row.remote === repository) &&
-    `${row.title} ${row.externalId} ${row.workspace} ${row.remote}`.toLowerCase().includes(query.trim().toLowerCase()),
-  ).toSorted((a, b) => Number(isSuggestion(b)) - Number(isSuggestion(a)) ||
-    Number(b.resolution.outcome === "join") - Number(a.resolution.outcome === "join") ||
-    (a.workspace || a.externalId).localeCompare(b.workspace || b.externalId) || a.externalId.localeCompare(b.externalId));
+  const matches = filterWorkspaceInventory(candidates, { projectId: project.id, previousId, repository, query });
   const picked = matches.find((row) => row.projectId === null && row.available &&
     selection?.externalId === row.externalId && selection.workspace === row.workspace);
   const bind = useMutation({
@@ -296,7 +286,8 @@ function BindingInventory({ project, target, onSaved }: { project: Project; targ
                   <div className="flex min-w-0 flex-col items-start gap-1 text-small">
                     <span className="wrap-anywhere font-medium">{title}</span>
                     <Meta className="wrap-anywhere">{location}{row.remote ? ` · ${repoLabel(row.remote)}` : ""}</Meta>
-                    {isSuggestion(row) ? <Chip tone="run">Suggested for this project</Chip> : row.resolution.outcome === "join" ? <Chip tone="run">Discovery match</Chip> : null}
+                    {row.externalId === previousId ? <Meta>Recorded workspace ID</Meta> : null}
+                    {suggestedWorkspaceFor(row, project.id) ? <Chip tone="run">Suggested for this project</Chip> : row.resolution.outcome === "join" ? <Chip tone="run">Discovery match</Chip> : null}
                     {row.declined ? <Chip tone="idle">Declined</Chip> : null}
                     {row.projectId === null ? null : <p>Bound to <ProjectReference id={row.projectId} projects={projects.data?.projects ?? []} /></p>}
                     {row.resolution.candidates.length === 0 ? null : <p className="flex flex-wrap gap-x-2">

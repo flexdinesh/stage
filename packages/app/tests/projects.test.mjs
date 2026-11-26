@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  importNotice, matchProjects, orderedWorkspaces, primaryWorkspace, projectDetail,
-  projectsForConnection, projectWorkspace, repoLabel, workspaceLocation,
+  filterWorkspaceInventory, importNotice, matchProjects, orderedWorkspaces, primaryWorkspace, projectDetail,
+  projectsForConnection, projectWorkspace, repoLabel, suggestedWorkspaceFor, workspaceLocation,
 } from "../src/lib/projects.ts";
 import { fakeApi } from "./fake-transport.mjs";
 
@@ -175,6 +175,19 @@ test("preview requests and confirmations keep scope and the reviewed token", asy
     ["/projects/42/merge", { from: 43 }],
     ["/projects/42/merge", { from: 43, confirm: true, previewToken: "changed-merge" }],
   ]);
+});
+
+test("bind inventory ranks resolver suggestions and filters by the recorded repository", () => {
+  const samePath = { title: "App", externalId: "different", workspace: "/work/app", remote: "git.example/fork", projectId: null, resolution: { outcome: "new", candidates: [] } };
+  const suggestion = { ...samePath, externalId: "suggestion", remote: "git.example/app", resolution: { outcome: "review", candidates: [7] } };
+  const owned = { ...suggestion, externalId: "owned", projectId: 8 };
+  const declined = { ...suggestion, externalId: "declined", declined: true };
+  const options = { projectId: 7, previousId: undefined, repository: "", query: "app" };
+  assert.deepEqual(filterWorkspaceInventory([samePath, owned, suggestion], options), [suggestion, samePath, owned]);
+  assert.equal(suggestedWorkspaceFor(samePath, 7), false);
+  assert.equal(suggestedWorkspaceFor(owned, 7), false);
+  assert.equal(suggestedWorkspaceFor(declined, 7), false);
+  assert.deepEqual(filterWorkspaceInventory([samePath, owned, suggestion], { ...options, repository: "git.example/app" }), [suggestion, owned]);
 });
 
 const kindName = (kind) => ({ t3: "T3", opencode: "OpenCode" })[kind] ?? kind;
