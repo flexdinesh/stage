@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/codex"
@@ -80,7 +81,7 @@ func TestConnectCreatesConnectionAndSurvivesRestart(t *testing.T) {
 		t.Fatalf("before connect %+v starts %d", st, r.daemon.Starts())
 	}
 	res, err := r.conn.Run(ctx, codex.ActionConnect, json.RawMessage(`{}`))
-	if err != nil || res.Replaced != 0 {
+	if err != nil || res.Replaced != 0 || res.Message != "Connected to Codex." {
 		t.Fatal(res, err)
 	}
 	id := r.store.ActiveID(db.LocalMachine, codex.Kind)
@@ -95,6 +96,12 @@ func TestConnectCreatesConnectionAndSurvivesRestart(t *testing.T) {
 	d := details(t, st)
 	if st.State != codexsetup.StateConnected || !st.Connected || !st.Configured || st.ConnectionID != id || d.CodexHome != r.srv.CodexHome || d.Account == nil || d.Account.Type != "chatgpt" || d.CLIVersion != "0.171.0" || d.Fix != "" {
 		t.Fatalf("connected %+v %+v", st, d)
+	}
+	if st.Phase != harness.PhaseConnected || st.Fix != nil ||
+		!slices.ContainsFunc(st.Facts, func(f execution.Fact) bool {
+			return f.ID == "codexHome" && f.Value == r.srv.CodexHome && f.Copyable
+		}) {
+		t.Fatalf("connected status metadata: %+v", st)
 	}
 
 	// Restart: the saved connection is installed again without a probe.
@@ -174,6 +181,9 @@ func TestStatusReportsAStoppedDaemonWithItsFix(t *testing.T) {
 	st, _ := composed.Connector.Status(ctx, true)
 	if st.State != codexsetup.StateUnreachable || st.Connected || details(t, st).Fix != "codex app-server daemon start" || details(t, st).Daemon != "stopped" {
 		t.Fatalf("%+v %+v", st, st.Details)
+	}
+	if st.Phase != harness.PhaseUnavailable || st.Fix == nil || st.Fix.Command != details(t, st).Fix {
+		t.Fatalf("unreachable status metadata: %+v", st)
 	}
 }
 

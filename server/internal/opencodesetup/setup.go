@@ -372,8 +372,10 @@ func (s *Service) localStatus(ctx context.Context) LocalStatus {
 	switch {
 	case errors.As(err, &unusable):
 		out.Reason = unusable.Reason
+		out.problem = unusable.Error()
 	case err != nil:
 		out.Reason = "invalid"
+		out.problem = "Check the OpenCode service registration on this machine."
 	default:
 		out.URL, out.Version = reg.URL, reg.Version
 		call, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
@@ -381,6 +383,7 @@ func (s *Service) localStatus(ctx context.Context) LocalStatus {
 		cancel()
 		if err != nil {
 			out.Reason = "unreachable"
+			out.problem = "Start the registered OpenCode service on this machine, then try again."
 			break
 		}
 		out.Available = true

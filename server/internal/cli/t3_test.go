@@ -52,7 +52,7 @@ func TestT3Pair(t *testing.T) {
 	if code, _, errOut := h.run("", "harness", "t3", "run", "auto-pair"); code != 1 || !strings.Contains(errOut, "stage API 409: auto-pair is not available with the fake T3 client") {
 		t.Fatalf("auto pair: %d %q", code, errOut)
 	}
-	if code, _, errOut := h.run("", "harness", "t3", "run", "pair", "code= "); code != 1 || !strings.Contains(errOut, "stage API 400: code is required") {
+	if code, _, errOut := h.run("", "harness", "t3", "run", "pair", "code= "); code != 1 || !strings.Contains(errOut, "stage API 400: Invalid value for action field \"code\"") {
 		t.Fatalf("empty code: %d %q", code, errOut)
 	}
 	if code, _, errOut := h.run("", "harness", "t3", "run", "pair", "ABCD"); code != 2 || !strings.Contains(errOut, `want FIELD=VALUE, got "ABCD"`) {

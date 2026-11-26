@@ -19,8 +19,8 @@ import (
 
 // Two fake hosted harnesses: one offers the images operation, one does not.
 var (
-	imageKit       = harness.Descriptor{Kind: "image-kit", Name: "Image kit", Hosting: harness.Hosted}
-	textKit        = harness.Descriptor{Kind: "text-kit", Name: "Text kit", Hosting: harness.Hosted}
+	imageKit       = harness.Descriptor{Kind: "image-kit", Name: "Image kit", Sessions: harness.SessionsMachine, LocalProcesses: true}
+	textKit        = harness.Descriptor{Kind: "text-kit", Name: "Text kit", Sessions: harness.SessionsMachine, LocalProcesses: true}
 	imageHarnesses = harness.MustRegistry(t3.Descriptor, opencode.Descriptor, imageKit, textKit)
 )
 

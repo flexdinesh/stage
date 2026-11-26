@@ -96,7 +96,7 @@ func TestSetRoutesConnectionsToTheirMachine(t *testing.T) {
 		t.Fatal("machine id 0")
 	}
 
-	reg := harness.MustRegistry(harness.Descriptor{Kind: "doc", Name: "Doc", Hosting: harness.Connected})
+	reg := harness.MustRegistry(harness.Descriptor{Kind: "doc", Name: "Doc", Sessions: harness.SessionsMachine})
 	laptop.SetConnector("doc", connector{})
 	connectors, err := set.Connectors(reg)
 	if err != nil {

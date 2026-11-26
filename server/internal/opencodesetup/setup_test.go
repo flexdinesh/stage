@@ -2,12 +2,14 @@ package opencodesetup
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/opencode/opencodetest"
 )
@@ -31,7 +33,11 @@ func TestStatusNeverEchoesSavedSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := json.Marshal(s.Status(t.Context()))
+	st, err := NewConnector(s).Status(t.Context(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(st)
 	if err != nil || strings.Contains(string(body), "private") {
 		t.Fatalf("public status contains the address or credentials: %s", body)
 	}
@@ -78,6 +84,11 @@ func TestModuleRestoresSavedAdapter(t *testing.T) {
 	st, err := restarted.Connector.Status(ctx, true)
 	if err != nil || !st.Connected || st.ConnectionID != first || st.State != "connected" {
 		t.Fatalf("saved OpenCode connection did not activate: %+v %v", st, err)
+	}
+	if st.Phase != harness.PhaseConnected || !slices.ContainsFunc(st.Facts, func(f execution.Fact) bool {
+		return f.ID == "browserEndpoint" && f.Link == fake.URL && f.Value == fake.URL
+	}) {
+		t.Fatalf("connected status metadata: %+v", st)
 	}
 	if len(in.moves) != 2 || in.moves[1] != [2]int64{first, first} {
 		t.Fatalf("saved adapter moves: %v", in.moves)

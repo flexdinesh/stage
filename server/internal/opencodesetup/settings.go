@@ -53,6 +53,7 @@ type Status struct {
 // server's machine. Reason is "" when available, else missing, invalid,
 // unreachable or environment.
 type LocalStatus struct {
+	problem   string
 	Available bool   `json:"available"`
 	URL       string `json:"url"`
 	Version   string `json:"version"`

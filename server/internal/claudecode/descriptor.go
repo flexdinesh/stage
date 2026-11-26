@@ -15,6 +15,7 @@ const Kind = "claude"
 // ActionConnect is the setup action that checks the CLI and its login and
 // records the connection (claudecodesetup).
 const ActionConnect = "connect"
+const ActionCheck = "check"
 
 // SessionEnv is the variable Claude Code sets to the session id in its
 // agents' processes.
@@ -27,7 +28,8 @@ const SessionEnv = "CLAUDE_CODE_SESSION_ID"
 // Sessions Stage discovers waiting (not launched or adopted) are silent: a
 // waiting row, never an inbox event or push (docs/adr/0005 decision 9).
 var Descriptor = harness.Descriptor{
-	Kind: Kind, Name: "Claude Code", Hosting: harness.Hosted,
+	Kind: Kind, Name: "Claude Code", Sessions: harness.SessionsMachine, LocalProcesses: true,
+	StateReasons:   []string{execution.ReasonOwnerExited},
 	StableIdentity: true,
 	Launch:         harness.LaunchCorrelated,
 	Attention:      harness.AttentionSilent,
@@ -43,7 +45,15 @@ var Descriptor = harness.Descriptor{
 		Fields: []harness.Field{
 			{ID: "binary", Label: "Claude command", Kind: harness.FieldText, Help: "Name or path of the claude executable. Blank: Stage looks on its PATH, then ~/.local/bin."},
 		},
-		Actions:    []harness.Action{{ID: ActionConnect, Label: "Connect"}},
+		Actions: []execution.Action{{
+			ID: ActionConnect, Label: "Connect",
+			Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
+			Availability: execution.Availability{Available: true},
+		}, {
+			ID: ActionCheck, Label: "Check connection",
+			Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
+			Availability: execution.Availability{Available: true},
+		}},
 		Disconnect: true,
 	},
 	Attribution: harness.Attribution{

@@ -4,6 +4,7 @@ package sync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	gosync "sync"
@@ -392,7 +393,7 @@ func (s *Service) apply(ctx context.Context, task db.Task, o execution.Observati
 	if e := s.CheckObservation(task.Harness, o); e != nil {
 		return e
 	}
-	if e := s.store.PutObservation(ctx, o); e != nil {
+	if e := s.putObservation(ctx, o); e != nil {
 		return e
 	}
 	o, e := s.store.Observation(ctx, *task.Session)
@@ -446,17 +447,15 @@ func (s *Service) refusal(kind string, o execution.Observation) error {
 	return nil
 }
 
-// CheckObservation validates o against kind's policies: only a harness that
-// owns its processes may report an execution lost with its owner. An
-// observation passes it before it changes anything.
+// CheckObservation validates o and checks that kind declares its state reason
+// before any observation changes are applied.
 func (s *Service) CheckObservation(kind string, o execution.Observation) error {
 	if err := o.Valid(); err != nil {
 		return err
 	}
-	if o.StateReason == execution.ReasonOwnerExited {
-		if d, ok := s.descriptor(kind); !ok || !d.OwnsProcesses() {
-			return errors.New("malformed observation: only a harness that owns its processes may report " + execution.ReasonOwnerExited)
-		}
+	d, _ := s.descriptor(kind)
+	if o.StateReason != "" && !slices.Contains(d.StateReasons, o.StateReason) {
+		return fmt.Errorf("malformed observation: harness %q did not declare state reason %q", kind, o.StateReason)
 	}
 	return s.refusal(kind, o)
 }
@@ -762,7 +761,7 @@ func (s *Service) resume(ctx context.Context, t db.Task, attempt db.Attempt) (db
 	}
 	// The harness returned a session; a failure to record it keeps the
 	// attempt unconfirmed with the cause, a backoff and the session seen.
-	if e = s.store.PutObservation(record, o); e == nil {
+	if e = s.putObservation(record, o); e == nil {
 		e = s.store.FinishAttempt(record, attempt, o, false)
 	}
 	if e != nil {

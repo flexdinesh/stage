@@ -29,6 +29,11 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 	ref := execution.SessionRef{ConnectionID: 7, ExternalSessionID: "session-1"}
 	avail := execution.Availability{Available: true, Reason: "why"}
 	choice := execution.Choice{ID: "c", Label: "C", Availability: avail}
+	action := execution.Action{
+		ID: "clear", Label: "Clear", Target: execution.TargetSession,
+		Input:   []execution.Field{{ID: "scope", Label: "Scope", Kind: execution.FieldChoice, Help: "Choose what to clear.", Required: true, Choices: []execution.ActionChoice{{ID: "c", Label: "C"}}}},
+		Confirm: "Clear this scope?", Destructive: true, Callers: []execution.Caller{execution.CallerUser}, Availability: avail,
+	}
 	def := execution.BoolValue(true)
 	option := execution.Option{ID: "effort", Kind: execution.OptionChoice, Label: "Effort", Values: []execution.OptionValue{execution.StringValue("high"), execution.BoolValue(false)}, Default: &def,
 		DependsOn: &execution.OptionDependency{Option: "worktree", Value: execution.BoolValue(true)}}
@@ -41,6 +46,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		Reply:  &execution.Reply{ItemID: "i", RunID: "r", Text: "done", Truncated: true, UpdatedAt: at},
 		Usage:  &execution.Usage{Turns: 2, InputTokens: 3, CacheReadTokens: 4, CacheWriteTokens: 5, OutputTokens: 6, WorkingMs: 7, CostUSD: &cost},
 		Closed: &execution.Closure{Signal: execution.ClosedSettled}, StateReason: execution.ReasonOwnerExited, Origin: "cli",
+		Facts: []execution.Fact{{ID: "review", Label: "Review", Value: "Ready", Link: "https://web/review", Copyable: true, Tone: execution.ToneOK}},
 	}
 	binding := db.ProjectBinding{ID: 1, ProjectID: 2, ConnectionID: 7, Harness: "kind", ExternalProjectID: "p", Workspace: "/w", Revision: 3, Status: "available", ObservedWorkspace: &str, ConnectionActive: true, ConnectionLabel: "box", Origin: db.BindingPath}
 	samples := map[string]any{
@@ -56,8 +62,14 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		"Capabilities": execution.Capabilities{
 			Permissions: []execution.Choice{choice}, Options: []execution.Option{option}, ModeLabel: "Agent",
 			Operations: map[execution.Op]execution.Availability{execution.OpLaunch: avail}, Models: []execution.Model{{Choice: choice, Group: "g", Options: []execution.Option{option}, Permissions: []execution.Choice{choice}}},
-			Modes: []execution.Choice{choice},
+			Modes: []execution.Choice{choice}, Actions: []execution.Action{action},
 		},
+		"Action": action,
+		"ActionRequest": execution.ActionRequest{
+			ID: "clear", Target: execution.TargetSession, Session: &ref, Project: &execution.ActionWorkspace{ExternalProjectID: "p", Directory: "/w"},
+			Input: json.RawMessage(`{"scope":"c"}`),
+		},
+		"ActionWorkspace": execution.ActionWorkspace{ExternalProjectID: "p", Directory: "/w"},
 		"Intent": execution.Intent{
 			RequestID: "req-1", ConnectionID: 7, Project: "p", Directory: "/w", Title: "t", Prompt: "do it", Config: cfg,
 			Images: []execution.Image{{Name: "a.png", MimeType: "image/png", Data: []byte{0, 1, 2}}}, Marker: execution.LaunchMarker("req-1"),
@@ -74,12 +86,18 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		"Summary": harness.Summary{ConnectionID: 7, Configured: true, Connected: true, LastError: "e"},
 		"Status": harness.Status{
 			Summary: harness.Summary{ConnectionID: 7, Configured: true, Connected: true, LastError: "e"}, State: "connected", Reason: "r",
+			Phase:   harness.PhaseConnected,
+			Facts:   []execution.Fact{{ID: "publicUrl", Label: "Browser URL", Value: "http://x", Link: "http://x", Copyable: true, Tone: execution.ToneOK}},
+			Fix:     &harness.Fix{Text: "Pair again.", Command: "t3 pair"},
 			Fields:  []harness.FieldState{{ID: "url", Value: "http://x", Set: true, Source: "saved"}},
-			Actions: []harness.ActionState{{ID: "pair", Available: true, Reason: "r"}},
+			Actions: []harness.ActionState{{ID: "pair", Available: true, Reason: "r", Code: "operation_unavailable"}},
 			Details: map[string]any{"state": "connected", "connected": true},
 			Sync:    &harness.SyncStatus{Running: true, StartedAt: &at, LastError: &str, LastFullSyncAt: &later, Projects: 1, Sessions: 2},
 		},
-		"Result":         harness.Result{Replaced: 4},
+		"Result": harness.Result{
+			Message: "Paired.", Facts: []execution.Fact{{ID: "instance", Label: "Instance", Value: "new"}},
+			Link: "http://x", Replaced: 4, JournalError: "journal unavailable",
+		},
 		"T3Details":      t3setup.Details{Connected: true, State: t3.StateConnected, T3URL: "http://t3", PublicURL: "http://pub", T3URLSource: t3setup.SourceSettings, EnvironmentID: &str, ClientID: &str, TokenExpiresAt: &at, AdminTokenConfigured: true, Reachable: true, CheckedAt: &at, ProbeError: &str, T3: &t3setup.IdentityRef{EnvironmentID: "env", Label: "box", ServerVersion: "1"}, AutoPair: t3setup.AutoPairRef{Available: true, Reason: &str}, ConnectionID: 7},
 		"OpenCodeStatus": opencodesetup.Status{ConnectionID: 8, Endpoint: "http://oc", BrowserEndpoint: "http://ocb", WebClient: "http://ocw", HasCredentials: true, State: "connected", Reason: "r", CheckedAt: &at, Auth: opencodesetup.AuthPaired, ExpiresAt: &later, Local: opencodesetup.LocalStatus{Available: true, URL: "http://oc", Version: "2.3.0", Reason: "r"}},
 		// Port payloads (settings, credentials, identity).

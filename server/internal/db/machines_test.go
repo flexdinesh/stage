@@ -68,8 +68,8 @@ func TestMachinesMigrationKeepsConnectionsAndOpensKinds(t *testing.T) {
 
 func TestSwitchInstanceRevivesByIdentityOnlyForStableKinds(t *testing.T) {
 	s, ctx, _ := connectionStore(t)
-	stable := harness.Descriptor{Kind: "stable", Name: "Stable", Hosting: harness.Connected, StableIdentity: true}
-	loose := harness.Descriptor{Kind: "loose", Name: "Loose", Hosting: harness.Connected, ContinuityProof: true}
+	stable := harness.Descriptor{Kind: "stable", Name: "Stable", Sessions: harness.SessionsMachine, StableIdentity: true}
+	loose := harness.Descriptor{Kind: "loose", Name: "Loose", Sessions: harness.SessionsMachine, ContinuityProof: true}
 	for _, d := range []harness.Descriptor{stable, loose} {
 		first, err := s.SwitchInstance(ctx, LocalMachine, d, "id-a", "a", 0)
 		if err != nil || first.New == 0 {

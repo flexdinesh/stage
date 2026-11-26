@@ -16,7 +16,7 @@ import (
 // A hosted harness this machine does not allow: `stage harness` prints the
 // server's reason, not "no connection setup".
 func TestHarnessCommandPrintsWhyAHostedHarnessIsUnavailable(t *testing.T) {
-	kit := stageharness.Descriptor{Kind: "kit", Name: "Kit", Hosting: stageharness.Hosted}
+	kit := stageharness.Descriptor{Kind: "kit", Name: "Kit", Sessions: stageharness.SessionsMachine, LocalProcesses: true}
 	// The test server runs as a foreground server without local harnesses.
 	server := stageharness.Profile{Kind: stageharness.ProfileServer}
 	h := newHarness(t, func(d *api.Deps) {

@@ -12,29 +12,33 @@ import (
 )
 
 func TestRegistryValidatesDescriptors(t *testing.T) {
-	ok := harness.Descriptor{Kind: "a", Name: "A", Hosting: harness.Connected}
+	ok := harness.Descriptor{Kind: "a", Name: "A", Sessions: harness.SessionsMachine}
 	for name, ds := range map[string][]harness.Descriptor{
-		"no kind":            {{Name: "A", Hosting: harness.Connected}},
-		"no name":            {{Kind: "a", Hosting: harness.Connected}},
-		"twice":              {ok, ok},
-		"unknown hosting":    {{Kind: "a", Name: "A", Hosting: "cloud"}},
-		"unknown attention":  {{Kind: "a", Name: "A", Hosting: harness.Connected, Attention: "loud"}},
-		"unknown signal":     {{Kind: "a", Name: "A", Hosting: harness.Connected, Closures: []harness.Closure{{Signal: "merged", Provenance: "harness_merged"}}}},
-		"mismatched closure": {{Kind: "a", Name: "A", Hosting: harness.Connected, Closures: []harness.Closure{{Signal: execution.ClosedSettled, Provenance: "harness_archived"}}}},
-		"duplicate field":    {{Kind: "a", Name: "A", Hosting: harness.Connected, Setup: harness.Setup{Fields: []harness.Field{{ID: "u", Label: "U", Kind: harness.FieldURL}, {ID: "u", Label: "U2", Kind: harness.FieldText}}}}},
-		"unknown field kind": {{Kind: "a", Name: "A", Hosting: harness.Connected, Setup: harness.Setup{Fields: []harness.Field{{ID: "u", Label: "U", Kind: "date"}}}}},
-		"unlabeled action":   {{Kind: "a", Name: "A", Hosting: harness.Connected, Setup: harness.Setup{Actions: []harness.Action{{ID: "go"}}}}},
-		"duplicate input":    {{Kind: "a", Name: "A", Hosting: harness.Connected, Setup: harness.Setup{Actions: []harness.Action{{ID: "go", Label: "Go", Input: []harness.Field{{ID: "x", Label: "X", Kind: harness.FieldText}, {ID: "x", Label: "X", Kind: harness.FieldText}}}}}}},
-		"wraps nothing":      {{Kind: "a", Name: "A", Hosting: harness.Connected, Wraps: &harness.Wraps{}}},
-		"blank origin":       {{Kind: "a", Name: "A", Hosting: harness.Connected, Wraps: &harness.Wraps{Origins: []string{" "}}}},
-		"origin wrapped twice": {{Kind: "a", Name: "A", Hosting: harness.Connected, Wraps: &harness.Wraps{Origins: []string{"x"}}},
-			{Kind: "b", Name: "B", Hosting: harness.Connected, Wraps: &harness.Wraps{Origins: []string{"x"}}}},
+		"no kind":                {{Name: "A", Sessions: harness.SessionsMachine}},
+		"no name":                {{Kind: "a", Sessions: harness.SessionsMachine}},
+		"twice":                  {ok, ok},
+		"missing sessions":       {{Kind: "a", Name: "A"}},
+		"unknown sessions":       {{Kind: "a", Name: "A", Sessions: "connected"}},
+		"empty state reason":     {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, StateReasons: []string{""}}},
+		"padded state reason":    {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, StateReasons: []string{" paused "}}},
+		"duplicate state reason": {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, StateReasons: []string{"paused", "paused"}}},
+		"unknown attention":      {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, Attention: "loud"}},
+		"unknown signal":         {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, Closures: []harness.Closure{{Signal: "merged", Provenance: "harness_merged"}}}},
+		"mismatched closure":     {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, Closures: []harness.Closure{{Signal: execution.ClosedSettled, Provenance: "harness_archived"}}}},
+		"duplicate field":        {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, Setup: harness.Setup{Fields: []harness.Field{{ID: "u", Label: "U", Kind: harness.FieldURL}, {ID: "u", Label: "U2", Kind: harness.FieldText}}}}},
+		"unknown field kind":     {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, Setup: harness.Setup{Fields: []harness.Field{{ID: "u", Label: "U", Kind: "date"}}}}},
+		"unlabeled action":       {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, Setup: harness.Setup{Actions: []harness.Action{{ID: "go"}}}}},
+		"duplicate input":        {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, Setup: harness.Setup{Actions: []harness.Action{{ID: "go", Label: "Go", Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser}, Availability: execution.Availability{Available: true}, Input: []harness.Field{{ID: "x", Label: "X", Kind: harness.FieldText}, {ID: "x", Label: "X", Kind: harness.FieldText}}}}}}},
+		"wraps nothing":          {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, Wraps: &harness.Wraps{}}},
+		"blank origin":           {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, Wraps: &harness.Wraps{Origins: []string{" "}}}},
+		"origin wrapped twice": {{Kind: "a", Name: "A", Sessions: harness.SessionsMachine, Wraps: &harness.Wraps{Origins: []string{"x"}}},
+			{Kind: "b", Name: "B", Sessions: harness.SessionsMachine, Wraps: &harness.Wraps{Origins: []string{"x"}}}},
 	} {
 		if _, err := harness.NewRegistry(ds...); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	b := harness.Descriptor{Kind: "b", Name: "B", Hosting: harness.Hosted, Closures: []harness.Closure{{Signal: execution.ClosedArchived, Provenance: "harness_archived", Via: "via B"}}}
+	b := harness.Descriptor{Kind: "b", Name: "B", Sessions: harness.SessionsCloud, LocalProcesses: true, StateReasons: []string{"paused"}, Closures: []harness.Closure{{Signal: execution.ClosedArchived, Provenance: "harness_archived", Via: "via B"}}}
 	r, err := harness.NewRegistry(b, ok)
 	if err != nil {
 		t.Fatal(err)
@@ -46,8 +50,8 @@ func TestRegistryValidatesDescriptors(t *testing.T) {
 		t.Fatal("names")
 	}
 	// Unset attention notifies (T3 and OpenCode); a harness opts into silent.
-	if d, _ := r.Lookup("a"); d.Attention != harness.AttentionNotify {
-		t.Fatalf("default attention %q", d.Attention)
+	if d, _ := r.Lookup("a"); d.Attention != harness.AttentionNotify || d.StateReasons == nil {
+		t.Fatalf("defaults: attention %q, state reasons %#v", d.Attention, d.StateReasons)
 	}
 	if c, found := b.Closure(execution.ClosedArchived); !found || c.Via != "via B" {
 		t.Fatalf("closure %+v", c)
@@ -58,7 +62,7 @@ func TestRegistryValidatesDescriptors(t *testing.T) {
 }
 
 func TestRegistryValidatesLinkSchemes(t *testing.T) {
-	descriptor := harness.Descriptor{Kind: "test", Name: "Test", Hosting: harness.Connected}
+	descriptor := harness.Descriptor{Kind: "test", Name: "Test", Sessions: harness.SessionsMachine}
 	r, err := harness.NewRegistry(descriptor)
 	if err != nil {
 		t.Fatal(err)
@@ -104,8 +108,8 @@ func TestRegistryValidatesLinkSchemes(t *testing.T) {
 // A session whose origin another registered harness wraps is refused,
 // naming the wrapper; its own origins, an unknown one or none are not.
 func TestRegistryRefusesWrappedSessions(t *testing.T) {
-	w := harness.Descriptor{Kind: "w", Name: "Wrapper", Hosting: harness.Connected, Wraps: &harness.Wraps{Origins: []string{"w-client"}}}
-	r := harness.MustRegistry(w, harness.Descriptor{Kind: "a", Name: "Agent", Hosting: harness.Hosted, Attribution: harness.Attribution{Origin: &harness.Origin{}}})
+	w := harness.Descriptor{Kind: "w", Name: "Wrapper", Sessions: harness.SessionsMachine, Wraps: &harness.Wraps{Origins: []string{"w-client"}}}
+	r := harness.MustRegistry(w, harness.Descriptor{Kind: "a", Name: "Agent", Sessions: harness.SessionsMachine, LocalProcesses: true, Attribution: harness.Attribution{Origin: &harness.Origin{}}})
 	if got := r.Refusal("a", "w-client"); got == nil || got.Reason != "This Agent session was started by Wrapper. Track it through Wrapper." {
 		t.Fatalf("%+v", got)
 	}
@@ -132,17 +136,23 @@ func TestProfilePolicy(t *testing.T) {
 		{"foreground env", harness.ResolveProfile(false, false, env(map[string]string{harness.LocalHarnessesEnv: "1"})), harness.Profile{Kind: harness.ProfileServer, LocalProcesses: true}, true},
 		{"container wins", harness.ResolveProfile(true, true, container), harness.Profile{Kind: harness.ProfileContainer}, false},
 	}
-	hosted := harness.Descriptor{Kind: "h", Name: "H", Hosting: harness.Hosted}
-	connected := harness.Descriptor{Kind: "c", Name: "C", Hosting: harness.Connected}
+	hosted := harness.Descriptor{Kind: "h", Name: "H", Sessions: harness.SessionsMachine, LocalProcesses: true}
+	connected := harness.Descriptor{Kind: "c", Name: "C", Sessions: harness.SessionsMachine}
+	cloud := harness.Descriptor{Kind: "cloud", Name: "Cloud", Sessions: harness.SessionsCloud}
+	cloudWithProcesses := harness.Descriptor{Kind: "cloud-proc", Name: "Cloud proc", Sessions: harness.SessionsCloud, LocalProcesses: true}
 	for _, c := range cases {
 		if c.got != c.want {
 			t.Errorf("%s: %+v, want %+v", c.name, c.got, c.want)
 		}
-		if a := c.got.Allows(hosted); a.Available != c.local || (a.Reason == "") != c.local {
-			t.Errorf("%s: hosted %+v", c.name, a)
+		for _, d := range []harness.Descriptor{hosted, cloudWithProcesses} {
+			if a := c.got.Allows(d); a.Available != c.local || (a.Reason == "") != c.local {
+				t.Errorf("%s: %s %+v", c.name, d.Kind, a)
+			}
 		}
-		if a := c.got.Allows(connected); !a.Available {
-			t.Errorf("%s: connected %+v", c.name, a)
+		for _, d := range []harness.Descriptor{connected, cloud} {
+			if a := c.got.Allows(d); !a.Available {
+				t.Errorf("%s: %s %+v", c.name, d.Kind, a)
+			}
 		}
 	}
 }
@@ -160,8 +170,8 @@ func (c idConnector) Summary(context.Context) harness.Summary {
 }
 
 func TestConnectorsAreCheckedAgainstTheRegistry(t *testing.T) {
-	conn := harness.Descriptor{Kind: "svc", Name: "Svc", Hosting: harness.Connected}
-	hosted := harness.Descriptor{Kind: "proc", Name: "Proc", Hosting: harness.Hosted}
+	conn := harness.Descriptor{Kind: "svc", Name: "Svc", Sessions: harness.SessionsMachine}
+	hosted := harness.Descriptor{Kind: "proc", Name: "Proc", Sessions: harness.SessionsMachine, LocalProcesses: true}
 	reg := harness.MustRegistry(conn, hosted)
 	one := func(kind string) map[int64]map[string]harness.Connector {
 		return map[int64]map[string]harness.Connector{1: {kind: nopConnector{}}}
@@ -197,8 +207,8 @@ func TestConnectorsAreCheckedAgainstTheRegistry(t *testing.T) {
 }
 
 func TestConnectorsServeEachMachinesActiveConnection(t *testing.T) {
-	a := harness.Descriptor{Kind: "a", Name: "A", Hosting: harness.Connected}
-	b := harness.Descriptor{Kind: "b", Name: "B", Hosting: harness.Connected}
+	a := harness.Descriptor{Kind: "a", Name: "A", Sessions: harness.SessionsMachine}
+	b := harness.Descriptor{Kind: "b", Name: "B", Sessions: harness.SessionsMachine}
 	reg := harness.MustRegistry(a, b)
 	cs, err := harness.NewConnectors(reg, map[int64]map[string]harness.Connector{
 		2: {"a": idConnector{id: 21}, "b": idConnector{id: 22}},

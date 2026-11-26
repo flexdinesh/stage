@@ -187,17 +187,19 @@ func (m *Machine) Connectors() map[string]harness.Connector {
 
 func (m *Machine) Ops() machine.Ops { return ops{m} }
 
-// traits are proven only by the current ready snapshot.
-func (m *Machine) traits(connection int64) []string {
+// implements uses the current ready snapshot. Running actions requires both
+// the adapter trait and the worker's action handler.
+func (m *Machine) implements(connection int64, trait string) bool {
 	snapshot, _ := m.hub.Advertisement(m.id)
-	if snapshot != nil {
-		for _, c := range snapshot.Connections {
-			if c.ConnectionID == connection {
-				return c.Traits
-			}
+	if snapshot == nil || trait == execution.TraitOf[execution.Actor]() && !slices.Contains(snapshot.ChannelKinds, KindAct) {
+		return false
+	}
+	for _, c := range snapshot.Connections {
+		if c.ConnectionID == connection {
+			return slices.Contains(c.Traits, trait)
 		}
 	}
-	return nil
+	return false
 }
 
 // ops runs machine.Ops on the worker.

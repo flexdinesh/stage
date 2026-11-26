@@ -15,6 +15,7 @@ type taskJSON struct {
 type taskDetailJSON struct {
 	FinalReply *execution.Reply `json:"finalReply,omitempty"`
 	Usage      *execution.Usage `json:"usage,omitempty"` // the current session's, when its harness reports one
+	Facts      []execution.Fact `json:"facts,omitempty"`
 	// Reported: the branch and directory the current session's harness reports
 	// (its observation); omitted when it reports neither.
 	Reported    *reportedJSON   `json:"reported,omitempty"`

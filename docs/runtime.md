@@ -374,6 +374,11 @@ serving), `server/internal/api` (routes and auth), `server/internal/worker`
   snapshots have no effect. A newer stream replaces its predecessor and
   clears its capabilities. Old advertisements and results are discarded
   with 409 `channel_replaced`.
+- **Harness actions.** Workers advertise `adapter.act` in `channelKinds`
+  and `actor` for the connections that implement it. Scoped setup actions
+  use the existing connector channel with the expected connection ID.
+  A worker that did not advertise `adapter.act` cannot receive scoped setup
+  calls. Stage sends an action once and reports a lost reply as uncertain.
 - **Liveness.** The server writes a `: keepalive` comment every 15s and the
   worker POSTs a heartbeat every 15s. Either side treats 45s of silence as a
   dead channel: the server closes the session, the worker reconnects.

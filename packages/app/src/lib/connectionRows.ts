@@ -47,11 +47,11 @@ export interface AddConnectionOption {
 }
 
 /**
- * Every connectable harness on the machine, plus every hosted one: a hosted harness the machine cannot run is listed
- * disabled with the server's reason, so users learn why it is missing. One it already has a row for is listed disabled.
+ * Connectable harnesses and harnesses that require local processes. Disabled options explain why the machine cannot
+ * run or set up the harness, or why its existing row needs to be used.
  */
 export function addConnectionOptions(
-  descriptors: readonly Pick<HarnessDescriptor, "kind" | "name" | "connectable" | "hosting" | "available" | "reason">[],
+  descriptors: readonly Pick<HarnessDescriptor, "kind" | "name" | "connectable" | "localProcesses" | "available" | "reason">[],
   rows: readonly (Pick<ConnectionRowModel, "harness"> & Partial<Pick<ConnectionRowModel, "disconnected">>)[],
 ): AddConnectionOption[] {
   const option = (d: (typeof descriptors)[number]): AddConnectionOption => {
@@ -61,7 +61,7 @@ export function addConnectionOptions(
     const reason = row === undefined ? null : row.disconnected === true ? "disconnected; reconnect it" : "already connected";
     return { kind: d.kind, name: d.name, reason, detail: null };
   };
-  return descriptors.filter((d) => d.connectable || d.hosting === "hosted").map(option);
+  return descriptors.filter((d) => d.connectable || d.localProcesses).map(option);
 }
 
 /** The empty machine's shortcuts: a Connect button per harness it can add now. */

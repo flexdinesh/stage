@@ -5,12 +5,12 @@ import { addConnectionOptions, addConnectionReason, connectShortcuts, connectedR
 const main = { id: 1, label: "deebox", kind: "local", status: "online", connections: [] };
 const studio = { id: 2, label: "studio", kind: "remote", status: "online", connections: [] };
 const KINDS = [
-  { kind: "t3", name: "T3 Code", hosting: "connected", available: true, connectable: true },
-  { kind: "opencode", name: "OpenCode", hosting: "connected", available: true, connectable: true },
-  { kind: "codex", name: "Codex", hosting: "connected", available: true, connectable: false },
+  { kind: "t3", name: "T3 Code", localProcesses: false, sessions: "machine", available: true, connectable: true },
+  { kind: "opencode", name: "OpenCode", localProcesses: false, sessions: "machine", available: true, connectable: true },
+  { kind: "remote", name: "Remote", localProcesses: false, sessions: "cloud", available: true, connectable: false },
 ];
 const WHY = "Proc runs only where Stage runs on your computer: use the desktop app, or start stage serve with --local-harnesses.";
-const hosted = (over = {}) => ({ kind: "proc", name: "Proc", hosting: "hosted", available: true, connectable: true, ...over });
+const hosted = (over = {}) => ({ kind: "proc", name: "Proc", localProcesses: true, sessions: "machine", available: true, connectable: true, ...over });
 
 test("the main machine is main, every other machine a worker", () => {
   assert.equal(machineRole(main), "main");
@@ -50,7 +50,7 @@ test("rows: set-up connections, and disconnected ones that were set up or hold h
   assert.deepEqual(connectionRows({ connections: [] }, () => undefined), []);
 });
 
-test("add options: connectable harnesses only; connected ones are listed disabled", () => {
+test("add options: connectable harnesses are listed and existing ones are disabled", () => {
   assert.deepEqual(addConnectionOptions(KINDS, [{ harness: "t3" }]), [
     { kind: "t3", name: "T3 Code", reason: "already connected", detail: null },
     { kind: "opencode", name: "OpenCode", reason: null, detail: null },
@@ -71,9 +71,9 @@ test("Add connection is disabled when a machine cannot serve setup or has nothin
   assert.equal(addConnectionReason({ ...studio, status: "needs_update", statusReason: "Update Stage on the main machine." }, some), "Update Stage on the main machine.");
 });
 
-test("add options: hosted harnesses are listed; one the machine cannot run is disabled with its full reason", () => {
+test("add options: harnesses requiring local processes are listed in either session placement", () => {
   assert.deepEqual(addConnectionOptions([hosted()], []), [{ kind: "proc", name: "Proc", reason: null, detail: null }], "allowed and set up: connect it");
-  assert.deepEqual(addConnectionOptions([hosted({ available: false, connectable: false, reason: WHY })], []), [{ kind: "proc", name: "Proc", reason: "unavailable here", detail: WHY }]);
+  assert.deepEqual(addConnectionOptions([hosted({ sessions: "cloud", available: false, connectable: false, reason: WHY })], []), [{ kind: "proc", name: "Proc", reason: "unavailable here", detail: WHY }]);
   assert.deepEqual(
     addConnectionOptions([hosted({ available: false, connectable: false })], [])[0].detail,
     "Proc can't run on this machine.",

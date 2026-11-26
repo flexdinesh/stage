@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
@@ -29,6 +30,9 @@ type Host struct {
 
 	mu         sync.Mutex
 	onAttached func(ctx context.Context, kinds []string) error
+	// Scoped runs must check ownership while other setup calls for the kind
+	// cannot replace the connection.
+	connectorLocks map[string]*sync.Mutex
 }
 
 // OnAttached sets the hook Attached runs (the worker composes its
@@ -58,7 +62,7 @@ func (h *Host) Ready() bool { return h.ready.Load() }
 
 // NewHost serves local's adapters and ops. It takes local's change hook.
 func NewHost(local *machine.Local) *Host {
-	h := &Host{local: local, changes: make(chan struct{}, 1)}
+	h := &Host{local: local, changes: make(chan struct{}, 1), connectorLocks: map[string]*sync.Mutex{}}
 	local.OnChange(func(int64, int64) { h.Notify() })
 	return h
 }
@@ -221,6 +225,7 @@ func (h *Host) Handlers() map[string]workerchan.WorkerHandler {
 			}
 			return Empty{}, in.Send(ctx, r.Session, r.Message)
 		}),
+		KindAct: h.with(act),
 		KindInventory: func(ctx context.Context, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
 			var r InventoryRequest
 			if err := decode(env, &r); err != nil {
@@ -242,9 +247,7 @@ func (h *Host) Handlers() map[string]workerchan.WorkerHandler {
 	}
 }
 
-// connector runs fn on the request's kind's connector, then answers with
-// the connector's status (refreshed only for a status call that asks):
-// refused until the setup is composed, not_hosted for a kind without one.
+// connector answers setup calls once the connector is composed.
 func (h *Host) connector(fn func(ctx context.Context, c harness.Connector, r ConnectorRequest) (harness.Result, error)) workerchan.WorkerHandler {
 	return func(ctx context.Context, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
 		var r ConnectorRequest
@@ -258,9 +261,42 @@ func (h *Host) connector(fn func(ctx context.Context, c harness.Connector, r Con
 		if !ok {
 			return nil, &workerchan.RemoteError{Code: CodeNotHosted, Message: "this machine's worker has no connection setup for " + r.Kind}
 		}
+		if env.Kind != KindConnectorStatus || r.Refresh {
+			h.mu.Lock()
+			lock := h.connectorLocks[r.Kind]
+			if lock == nil {
+				lock = &sync.Mutex{}
+				h.connectorLocks[r.Kind] = lock
+			}
+			h.mu.Unlock()
+			lock.Lock()
+			defer lock.Unlock()
+		}
+		if env.Kind == KindConnectorRun {
+			if err := ctx.Err(); err != nil {
+				return nil, encodeActionError(err)
+			}
+			if r.ConnectionID < 0 {
+				return nil, encodeError(&execution.Invalid{Reason: "Invalid setup action connection ID."})
+			}
+			if r.ConnectionID != 0 && c.Summary(ctx).ConnectionID != r.ConnectionID {
+				return nil, EncodeSetupError(db.ConnectionRetired())
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, encodeActionError(err)
+			}
+		}
 		res, err := fn(ctx, c, r)
 		if err != nil {
+			if env.Kind == KindConnectorRun {
+				err = encodeActionError(err)
+			}
 			return nil, EncodeSetupError(err)
+		}
+		if env.Kind == KindConnectorRun {
+			// A status read can fail independently of the completed mutation.
+			// RefreshCapabilities publishes its summary for the main server.
+			return workerchan.RefreshCapabilities{Value: connectorRunReply{Result: &res}}, nil
 		}
 		st, err := c.Status(ctx, env.Kind == KindConnectorStatus && r.Refresh)
 		if err != nil {

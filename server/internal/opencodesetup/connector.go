@@ -3,8 +3,10 @@ package opencodesetup
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 )
@@ -45,21 +47,79 @@ func (c *Connector) Status(ctx context.Context, _ bool) (harness.Status, error) 
 	creds := field("password", "")
 	creds.Set = st.HasCredentials
 	user := field("username", "")
-	local := harness.ActionState{ID: opencode.ActionConnectLocal, Available: st.Local.Available, Reason: st.Local.Reason}
+	local := harness.ActionState{ID: opencode.ActionConnectLocal, Available: st.Local.Available, Reason: st.Local.problem}
+	if !local.Available {
+		local.Code = CodeLocalUnavailable
+	}
 	pair := harness.ActionState{ID: opencode.ActionPair, Available: true}
+	phase := harness.PhaseNeedsSetup
+	var fix *harness.Fix
+	switch st.State {
+	case "connected":
+		phase = harness.PhaseConnected
+	case "rejected":
+		phase = harness.PhaseDegraded
+		switch st.Auth {
+		case AuthLocal:
+			fix = &harness.Fix{Text: "Connect the local OpenCode service again to refresh its credentials."}
+		case AuthPaired:
+			fix = &harness.Fix{Text: "Generate a fresh pairing link on the OpenCode host and pair again.", Command: "opencode pair"}
+		default:
+			fix = &harness.Fix{Text: "Update the OpenCode credentials or pair with the service again.", Command: "opencode pair"}
+		}
+	case "unavailable":
+		phase = harness.PhaseUnavailable
+		fix = &harness.Fix{Text: "Check that the OpenCode service is running and that its address is correct."}
+	}
 	return harness.Status{
 		Summary: sum,
 		State:   st.State,
 		Reason:  st.Reason,
+		Phase:   phase,
+		Facts:   statusFacts(st),
+		Fix:     fix,
 		Fields: []harness.FieldState{
 			field("endpoint", st.Endpoint),
 			field("browserEndpoint", st.BrowserEndpoint),
 			field("webClient", st.WebClient),
 			user, creds,
 		},
-		Actions: []harness.ActionState{local, pair},
+		Actions: []harness.ActionState{local, pair, {ID: opencode.ActionCheck, Available: true}},
 		Details: st,
 	}, nil
+}
+
+func statusFacts(st Status) []execution.Fact {
+	var facts []execution.Fact
+	browser := st.BrowserEndpoint
+	if browser == "" {
+		browser = st.Endpoint
+	}
+	for _, fact := range []execution.Fact{
+		{ID: "endpoint", Label: "Service URL", Value: st.Endpoint, Copyable: true},
+		{ID: "browserEndpoint", Label: "Browser URL", Value: browser, Link: browser, Copyable: true},
+		{ID: "webClient", Label: "Web client URL", Value: st.WebClient, Link: st.WebClient, Copyable: true},
+		{ID: "localVersion", Label: "Local service version", Value: st.Local.Version},
+	} {
+		if fact.Value != "" {
+			facts = append(facts, fact)
+		}
+	}
+	if st.Endpoint != "" {
+		signIn := map[string]string{
+			AuthNone: "None", AuthLocal: "Local service", AuthPaired: "Paired", AuthBasic: "Password",
+		}[st.Auth]
+		if signIn != "" {
+			facts = append(facts, execution.Fact{ID: "auth", Label: "Sign-in", Value: signIn})
+		}
+	}
+	if st.ExpiresAt != nil {
+		facts = append(facts, execution.Fact{ID: "expiresAt", Label: "Token expires", Value: st.ExpiresAt.Format(time.RFC3339)})
+	}
+	if st.CheckedAt != nil {
+		facts = append(facts, execution.Fact{ID: "checkedAt", Label: "Last checked", Value: st.CheckedAt.Format(time.RFC3339)})
+	}
+	return facts
 }
 
 // Configure takes Edit.
@@ -71,8 +131,10 @@ func (c *Connector) Configure(ctx context.Context, settings json.RawMessage) (ha
 	return harness.Result{}, c.svc.Save(ctx, in)
 }
 
-// Run runs connect-local {"newInstance"} or pair {"link","newInstance"}.
+// Run runs connect-local, pair or check.
 func (c *Connector) Run(ctx context.Context, action string, input json.RawMessage) (harness.Result, error) {
+	old := c.svc.ID()
+	var result harness.Result
 	switch action {
 	case opencode.ActionConnectLocal:
 		var in struct {
@@ -81,7 +143,10 @@ func (c *Connector) Run(ctx context.Context, action string, input json.RawMessag
 		if err := db.DecodeStrict(input, &in); err != nil {
 			return harness.Result{}, err
 		}
-		return harness.Result{}, c.svc.ConnectLocal(ctx, in.NewInstance)
+		if err := c.svc.ConnectLocal(ctx, in.NewInstance); err != nil {
+			return harness.Result{}, err
+		}
+		result.Message = "Connected to the local OpenCode service."
 	case opencode.ActionPair:
 		var in struct {
 			Link        string `json:"link"`
@@ -90,9 +155,23 @@ func (c *Connector) Run(ctx context.Context, action string, input json.RawMessag
 		if err := db.DecodeStrict(input, &in); err != nil {
 			return harness.Result{}, err
 		}
-		return harness.Result{}, c.svc.Pair(ctx, in.Link, in.NewInstance)
+		if err := c.svc.Pair(ctx, in.Link, in.NewInstance); err != nil {
+			return harness.Result{}, err
+		}
+		result.Message = "Paired with OpenCode."
+	case opencode.ActionCheck:
+		if err := db.DecodeStrict(input, &struct{}{}); err != nil {
+			return harness.Result{}, err
+		}
+		status, err := c.Status(ctx, true)
+		return status.CheckResult(), err
+	default:
+		return harness.Result{}, db.Invalid("%s", harness.UnknownAction(opencode.Descriptor, action).Error())
 	}
-	return harness.Result{}, db.Invalid("%s", harness.UnknownAction(opencode.Descriptor, action).Error())
+	if c.svc.ID() != old {
+		result.Replaced = old
+	}
+	return result, nil
 }
 
 // Disconnect forgets the service address and credentials.

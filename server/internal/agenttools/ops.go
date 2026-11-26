@@ -63,27 +63,34 @@ type CallerArgs struct {
 type claimKey struct{}
 
 func (o *Ops) caller(ctx context.Context, a CallerArgs) (agentctx.Caller, error) {
+	c, _, err := o.detectCaller(ctx, a)
+	return c, err
+}
+
+// detectCaller reports harness context even if it cannot resolve a session.
+func (o *Ops) detectCaller(ctx context.Context, a CallerArgs) (agentctx.Caller, bool, error) {
 	claim, _ := ctx.Value(claimKey{}).(*db.SessionRef)
 	c, err := o.Caller.Resolve(a.CallerSession, a.Cwd, claim)
 	if err != nil || c.Session != nil {
-		return c, err
+		return c, c.Session != nil, err
 	}
 	h, err := o.fromHarnessEnv(ctx)
 	if err != nil {
-		return c, err
+		return c, false, err
 	}
 	if h.session != nil {
 		c.Session, c.Source = h.session, h.source
 	}
-	return c, nil
+	return c, h.detected, nil
 }
 
 // harnessCaller is the caller derived from a harness's session variable,
 // or why none was (warning).
 type harnessCaller struct {
-	session *db.SessionRef
-	source  string
-	warning string
+	session  *db.SessionRef
+	source   string
+	warning  string
+	detected bool
 }
 
 // fromHarnessEnv derives the caller from the harness session variable set
@@ -122,28 +129,29 @@ func (o *Ops) fromHarnessEnv(ctx context.Context) (harnessCaller, error) {
 			cands = append(cands, envCandidate{kind: d.Kind, env: d.Attribution.Env, id: id, precedence: d.Attribution.Precedence, origin: d.Attribution.Origin, wraps: d.Wraps != nil})
 		}
 	}
+	detected := len(cands) > 0
 	cands = rankCandidates(cands, wrapped, o.HarnessEnv)
 	switch len(cands) {
 	case 0:
-		return harnessCaller{}, nil
+		return harnessCaller{detected: detected}, nil
 	case 1:
 	default:
 		names := make([]string, len(cands))
 		for i, c := range cands {
 			names[i] = c.env
 		}
-		return harnessCaller{warning: fmt.Sprintf("several harness session variables are set (%s); pass the caller explicitly", strings.Join(names, ", "))}, nil
+		return harnessCaller{detected: true, warning: fmt.Sprintf("several harness session variables are set (%s); pass the caller explicitly", strings.Join(names, ", "))}, nil
 	}
 	w := cands[0]
 	c, err := o.Client.ResolveConnection(ctx, w.kind)
 	var apiErr *client.Error
 	if errors.As(err, &apiErr) && apiErr.Status == 404 {
-		return harnessCaller{warning: fmt.Sprintf("%s is set but there is %s", w.env, apiErr.Msg)}, nil
+		return harnessCaller{detected: true, warning: fmt.Sprintf("%s is set but there is %s", w.env, apiErr.Msg)}, nil
 	}
 	if err != nil {
 		return harnessCaller{}, err
 	}
-	h := harnessCaller{session: &db.SessionRef{ConnectionID: c.ID, ExternalSessionID: w.id}, source: w.env}
+	h := harnessCaller{session: &db.SessionRef{ConnectionID: c.ID, ExternalSessionID: w.id}, source: w.env, detected: true}
 	o.harnessCaller = &h
 	return h, nil
 }
@@ -283,6 +291,7 @@ func (o *Ops) ListModels(ctx context.Context, a ModelsArgs) (ModelsOut, error) {
 		return ModelsOut{}, errors.New("connectionId is required: choose a harness connection from list_projects")
 	}
 	c, err := o.Client.ProjectCapabilities(ctx, a.ConnectionID, a.ProjectID)
+	c.Actions = slices.DeleteFunc(c.Actions, func(a execution.Action) bool { return !a.Allows(execution.CallerAgent) })
 	return ModelsOut{Capabilities: &c}, err
 }
 

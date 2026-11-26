@@ -184,6 +184,9 @@ Usage:
                                       link or #TASK_ID names (with its session/task)
   stage projects ls
   stage models ls --connection ID [--project ID]
+  stage action ls TARGET
+  stage action run ACTION_ID TARGET [--input JSON|-] [--confirm]
+                                      TARGET is --connection ID, --task ID, or --project ID --on-connection ID
   stage task ls [--project P] [--state S,..] [-q TEXT] [--closed true|all] [--limit N]
   stage task show ID
   stage task add --title T --prompt TEXT|- [config] [--needs ID,..] [--after-me] [--tree ID]
@@ -360,6 +363,8 @@ func run(ctx context.Context, args []string, env Env) error {
 		return runProjects(ctx, env, sub)
 	case "models":
 		return runModels(ctx, env, sub)
+	case "action":
+		return runAction(ctx, env, sub)
 	case "task", "tasks":
 		return runTask(ctx, env, sub)
 	case "schedule", "schedules":

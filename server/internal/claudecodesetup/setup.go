@@ -412,12 +412,51 @@ func (s *Service) Status(ctx context.Context, refresh bool) harness.Status {
 	if s.saved.Binary == "" {
 		src = "default"
 	}
+	phase := harness.PhaseDisconnected
+	var fix *harness.Fix
+	switch state {
+	case StateConnected:
+		phase = harness.PhaseConnected
+	case StateLoggedOut:
+		phase = harness.PhaseNeedsSetup
+		if sum.Configured {
+			phase = harness.PhaseDegraded
+		}
+		fix = &harness.Fix{Text: "Sign in to Claude Code, then connect again.", Command: "claude auth login"}
+	case StateNotFound:
+		phase = harness.PhaseUnavailable
+	case StateError:
+		phase = harness.PhaseUnavailable
+		if sum.Configured {
+			phase = harness.PhaseDegraded
+		}
+	}
 	return harness.Status{
 		Summary: sum,
 		State:   state,
 		Reason:  reason,
+		Phase:   phase,
+		Facts:   statusFacts(details),
+		Fix:     fix,
 		Fields:  []harness.FieldState{{ID: "binary", Value: s.saved.Binary, Set: s.saved.Binary != "", Source: src}},
-		Actions: []harness.ActionState{{ID: claudecode.ActionConnect, Available: true}},
+		Actions: []harness.ActionState{{ID: claudecode.ActionConnect, Available: true}, {ID: claudecode.ActionCheck, Available: true}},
 		Details: details,
 	}
+}
+
+func statusFacts(d Details) []execution.Fact {
+	var facts []execution.Fact
+	for _, fact := range []execution.Fact{
+		{ID: "binary", Label: "Claude command", Value: d.Binary, Copyable: true},
+		{ID: "version", Label: "Claude Code version", Value: d.Version},
+		{ID: "configDirectory", Label: "Config directory", Value: d.ConfigDirectory, Copyable: true},
+	} {
+		if fact.Value != "" {
+			facts = append(facts, fact)
+		}
+	}
+	if d.Events != nil {
+		facts = append(facts, execution.Fact{ID: "events", Label: "Updates", Value: d.Events.Mode})
+	}
+	return facts
 }

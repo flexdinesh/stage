@@ -17,12 +17,12 @@ import (
 
 // Two more fake harnesses prove the optional contract without T3 or
 // OpenCode. assigned: the harness assigns session ids and creation is not
-// idempotent, so launches are correlated. hosted: Stage owns the session
-// processes; it pushes events, can lose its owner and answers interaction.
+// idempotent, so launches are correlated. hosted: its sessions require
+// local processes; it pushes events, can lose its owner and answers interaction.
 
 var (
-	assignedDescriptor = harness.Descriptor{Kind: "assigned", Name: "Assigned", Hosting: harness.Connected, Launch: harness.LaunchCorrelated}
-	hostedDescriptor   = harness.Descriptor{Kind: "hosted", Name: "Hosted", Hosting: harness.Hosted}
+	assignedDescriptor = harness.Descriptor{Kind: "assigned", Name: "Assigned", Sessions: harness.SessionsCloud, Launch: harness.LaunchCorrelated, StateReasons: []string{"preempted"}}
+	hostedDescriptor   = harness.Descriptor{Kind: "hosted", Name: "Hosted", Sessions: harness.SessionsMachine, LocalProcesses: true, StateReasons: []string{execution.ReasonOwnerExited}}
 	v2Harnesses        = harness.MustRegistry(assignedDescriptor, hostedDescriptor)
 )
 
@@ -303,7 +303,7 @@ func TestContractPushIngest(t *testing.T) {
 	})
 }
 
-func TestContractOwnerExitedOnlyFromHostedHarness(t *testing.T) {
+func TestContractObservationStateReasons(t *testing.T) {
 	forPlacements(t, func(t *testing.T, p placement) {
 		f := &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}}
 		store, svc, task := v2Setup(t, p, "hosted", f)
@@ -320,7 +320,21 @@ func TestContractOwnerExitedOnlyFromHostedHarness(t *testing.T) {
 			t.Fatal("hosted owner exit", got.State)
 		}
 
-		// A connected harness never owns the process: the claim is malformed.
+		// The coordinator accepts extra declared reasons, with the usual
+		// activity checks. owner_exited always requires interrupted.
+		o := execution.Observation{Session: execution.SessionRef{ConnectionID: 3, ExternalSessionID: "a"}, Project: "proj", State: "failed", StateReason: "preempted"}
+		if err := svc.CheckObservation(assignedDescriptor.Kind, o); err != nil {
+			t.Fatal("declared extra reason", err)
+		}
+		if err := svc.CheckObservation(hostedDescriptor.Kind, o); err == nil || !strings.Contains(err.Error(), o.StateReason) {
+			t.Fatal("undeclared extra reason", err)
+		}
+		o.StateReason = execution.ReasonOwnerExited
+		if err := svc.CheckObservation(hostedDescriptor.Kind, o); err == nil || !strings.Contains(err.Error(), "failed") {
+			t.Fatal("owner_exited must interrupt", err)
+		}
+
+		// The document harness has no declared reasons.
 		dstore, doc, dsvc, dtask := contractSetup(t, p)
 		running, err := dsvc.StartTask(ctx, dtask.ID)
 		if err != nil {
@@ -329,7 +343,7 @@ func TestContractOwnerExitedOnlyFromHostedHarness(t *testing.T) {
 		dsvc2 := p.coordinator(t, dstore, map[int64]execution.Adapter{2: lostOwner{doc}}, nil)
 		dsvc2.Harnesses = documentHarnesses
 		if err := dsvc2.PollTask(ctx, running); err == nil || !strings.Contains(err.Error(), execution.ReasonOwnerExited) {
-			t.Fatal("connected harness reported owner_exited", err)
+			t.Fatal("undeclared owner_exited was accepted", err)
 		}
 		if got, _ := dstore.GetTask(ctx, dtask.ID); got.State != db.StateRunning {
 			t.Fatal("malformed owner exit changed execution", got.State)

@@ -19,7 +19,7 @@ import (
 // documentHarnesses registers the fake harness kind: neither T3 nor OpenCode,
 // so the coordinator can only use what the descriptor declares.
 var documentHarnesses = harness.MustRegistry(harness.Descriptor{
-	Kind: "document", Name: "Document", Hosting: harness.Connected,
+	Kind: "document", Name: "Document", Sessions: harness.SessionsMachine,
 	Closures: []harness.Closure{{Signal: execution.ClosedArchived, Provenance: "harness_archived", Event: "Completed from document archive."}},
 })
 

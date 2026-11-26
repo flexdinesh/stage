@@ -16,6 +16,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/t3"
@@ -367,9 +368,9 @@ func TestPairingAnotherEnvironmentReplacesTheConnection(t *testing.T) {
 		t.Fatalf("unpair changed the connection: %q %d", e.bound(), e.store.ActiveID(db.LocalMachine, "t3"))
 	}
 	e.client.SetProbe(reachable("env-b"))
-	paired, err := e.svc.Pair(ctx, "CODE-2")
-	if err != nil {
-		t.Fatal(err)
+	paired, err := t3setup.NewConnector(e.svc).Run(ctx, t3.ActionPair, json.RawMessage(`{"code":"CODE-2"}`))
+	if err != nil || paired.Message != "Paired with T3." {
+		t.Fatal(paired, err)
 	}
 	second := e.store.ActiveID(db.LocalMachine, "t3")
 	if second == first || e.bound() != "env-b" {
@@ -391,7 +392,7 @@ func TestPairingAnotherEnvironmentReplacesTheConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.client.SetProbe(reachable("env-a"))
-	paired, err = e.svc.Pair(ctx, "CODE-3")
+	revived, err := e.svc.Pair(ctx, "CODE-3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,8 +400,8 @@ func TestPairingAnotherEnvironmentReplacesTheConnection(t *testing.T) {
 		t.Fatalf("not revived: %d %+v", e.store.ActiveID(db.LocalMachine, "t3"), e.switches)
 	}
 	// env-b held nothing: deleted rather than kept as a replaced connection.
-	if paired.Replaced != 0 {
-		t.Fatalf("empty connection reported as replaced: %+v", paired.Replaced)
+	if revived.Replaced != 0 {
+		t.Fatalf("empty connection reported as replaced: %+v", revived.Replaced)
 	}
 	if p, _ := e.store.ListProjects(ctx, "all"); !p[0].Bindings[0].ConnectionActive {
 		t.Fatal("revived binding still inactive")
@@ -498,6 +499,13 @@ func TestSetPublicURL(t *testing.T) {
 	}
 	if ep := e.svc.Endpoint(); ep.PublicURL != "https://t3.example" || !ep.PublicSet || e.client.PublicURL != ep.PublicURL || ep.URL != t3setup.DefaultT3URL {
 		t.Fatalf("endpoint %+v", ep)
+	}
+	st, err := t3setup.NewConnector(e.svc).Status(ctx, false)
+	if err != nil || st.Phase != harness.PhaseNeedsSetup || st.Fix == nil || st.Fix.Command != "t3 pair" ||
+		!slices.ContainsFunc(st.Facts, func(f execution.Fact) bool {
+			return f.ID == "publicUrl" && f.Link == "https://t3.example"
+		}) {
+		t.Fatalf("unpaired status metadata: %+v, %v", st, err)
 	}
 	// A URL change keeps the saved browser URL.
 	if err := e.svc.SetURL(ctx, ptr("http://127.0.0.1:4000")); err != nil {

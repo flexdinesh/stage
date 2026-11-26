@@ -23,10 +23,10 @@ const ProfileEnv = "STAGE_MACHINE_PROFILE"
 // like --local-harnesses.
 const LocalHarnessesEnv = "STAGE_LOCAL_HARNESSES"
 
-// Profile is the machine this server runs on, as hosting policy sees it.
+// Profile controls which harnesses the server or worker can run.
 type Profile struct {
 	Kind string `json:"kind"`
-	// LocalProcesses: hosted harnesses may run here.
+	// LocalProcesses permits harnesses that require local processes.
 	LocalProcesses bool `json:"localProcesses"`
 }
 
@@ -44,7 +44,7 @@ func ResolveProfile(managed, localFlag bool, getenv func(string) string) Profile
 
 // Allows reports whether d can run on this machine, with the reason when not.
 func (p Profile) Allows(d Descriptor) execution.Availability {
-	if d.Hosting != Hosted || p.LocalProcesses {
+	if !d.LocalProcesses || p.LocalProcesses {
 		return execution.Availability{Available: true}
 	}
 	if p.Kind == ProfileContainer {

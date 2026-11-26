@@ -12,6 +12,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -103,6 +104,13 @@ func TestWorkerGatewayScope(t *testing.T) {
 	}
 	if rec := e.gw(j.Token, "GET", "/api/machines", nil, nil); rec.Code != 200 {
 		t.Fatalf("read machines: %d", rec.Code)
+	}
+	var actions []execution.Action
+	if rec := e.gw(j.Token, "GET", "/api/connections/1/actions", nil, &actions); rec.Code != 200 || len(actions) != 0 {
+		t.Fatalf("action discovery through gateway: %d %s", rec.Code, rec.Body)
+	}
+	if rec := e.gw(j.Token, "POST", "/api/connections/1/actions/pair", map[string]string{"code": "fake"}, &out); rec.Code != 403 || out.Code != "action_forbidden" {
+		t.Fatalf("setup action through gateway: %d %s", rec.Code, rec.Body)
 	}
 	// Machine management is refused.
 	for _, c := range []struct{ method, path string }{

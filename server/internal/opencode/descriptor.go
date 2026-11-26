@@ -12,13 +12,14 @@ const Kind = "opencode"
 const (
 	ActionConnectLocal = "connect-local" // {"newInstance"}: the service registered on the server's machine
 	ActionPair         = "pair"          // {"link","newInstance"}: an `opencode pair` link
+	ActionCheck        = "check"
 )
 
 // Descriptor: OpenCode is a connected service. Its address is not a lasting
 // identity (the connector proves continuity); an archived session may
 // complete its task.
 var Descriptor = harness.Descriptor{
-	Kind: Kind, Name: "OpenCode", Hosting: harness.Connected, ContinuityProof: true,
+	Kind: Kind, Name: "OpenCode", Sessions: harness.SessionsMachine, ContinuityProof: true,
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedArchived, Provenance: "harness_archived",
 		Setting:   "Complete tasks when archived in OpenCode",
@@ -35,9 +36,27 @@ var Descriptor = harness.Descriptor{
 			{ID: "password", Label: "Password", Kind: harness.FieldSecret},
 			{ID: "newInstance", Label: "Connect as a new instance", Kind: harness.FieldBool, Help: "Confirms a different OpenCode service; the current connection retires."},
 		},
-		Actions: []harness.Action{
-			{ID: ActionConnectLocal, Label: "Connect local service", Input: []harness.Field{newInstance}},
-			{ID: ActionPair, Label: "Pair with link", Input: []harness.Field{{ID: "link", Label: "Pairing link", Kind: harness.FieldSecret, Help: "Printed by `opencode pair`."}, newInstance}},
+		Actions: []execution.Action{
+			{
+				ID: ActionConnectLocal, Label: "Connect local service",
+				Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
+				Input:        []execution.Field{newInstance},
+				Availability: execution.Availability{Available: true},
+			},
+			{
+				ID: ActionPair, Label: "Pair with link",
+				Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
+				Input: []execution.Field{
+					{ID: "link", Label: "Pairing link", Kind: execution.FieldSecret, Required: true, Help: "Printed by `opencode pair`."},
+					newInstance,
+				},
+				Availability: execution.Availability{Available: true},
+			},
+			{
+				ID: ActionCheck, Label: "Check connection",
+				Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
+				Availability: execution.Availability{Available: true},
+			},
 		},
 		Disconnect: true,
 	},
@@ -48,4 +67,4 @@ var Descriptor = harness.Descriptor{
 	},
 }
 
-var newInstance = harness.Field{ID: "newInstance", Label: "Connect as a new instance", Kind: harness.FieldBool}
+var newInstance = execution.Field{ID: "newInstance", Label: "Connect as a new instance", Kind: execution.FieldBool}

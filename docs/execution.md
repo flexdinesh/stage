@@ -19,12 +19,11 @@ apply it.
   launch and observation, plus best-effort project identity across harnesses
   (ADR 0007 decision 11).
 - **Generic code, explicit policies.** Product code reads the harness
-  descriptor, capabilities, operations and launch options, never a harness
-  name. Behavior one harness needs sits behind a typed optional interface,
-  a declared operation or launch option, or a registered UI slot, so a
-  harness without a feature never limits the app for the others. An adapter
-  may translate its own launch options into harness calls; core code
-  computes nothing from them. `internal/harness/boundary_test.go` fails on
+  descriptor, capabilities, operations and launch options. Harness-specific
+  actions and facts travel through the extension declarations. Typed
+  operations describe decisions Stage makes itself.
+  An adapter translates its own launch options into harness calls.
+  `internal/harness/boundary_test.go` fails on
   harness names outside the adapters, their connection setup and the server
   composition (its pending list only shrinks, to empty).
 - **Worker-ready placement.** Remote machines run a thin worker with no
@@ -234,11 +233,11 @@ automatic-completion preference after the harness first connects because
 the preference belongs to that connection. Existing connection preferences
 survive the settings migration.
 
-- **Hosting.** `connected`: Stage connects to a service (T3, OpenCode), on any
-  machine profile. `hosted` (Claude Code, Codex): the harness runs as processes on its machine
-  (the server's or a worker's) and is available only where that machine's profile allows local processes
-  ([runtime.md](runtime.md#machine-profile-and-hosted-harnesses)); elsewhere
-  `GET /api/harnesses` reports it unavailable with the reason.
+- **Placement.** `localProcesses` requires a profile that allows local
+  processes (Claude Code and Codex). T3 and OpenCode connect to a service.
+  All four declare machine-local sessions. A module may independently
+  declare cloud sessions. `GET /api/harnesses` reports the machine's
+  availability and reason. [Machine profiles](runtime.md#machine-profile-and-hosted-harnesses)
 - **Stable identity.** When the identity names one instance for good (a T3
   environment id), pairing a retired connection's identity revives it, and
   identities are unique per machine and kind. Otherwise (an OpenCode address)
@@ -246,9 +245,9 @@ survive the settings migration.
   A stable-identity module may also declare a moved-retire predicate. Stage
   evaluates it against the old and new connector summaries when the old
   machine is reachable.
-- **Connection setup.** A harness's descriptor, connected or hosted,
-  carries a setup schema (settings fields with their locking environment
-  variable, typed actions, disconnect). Its setup package implements `harness.Connector`
+- **Connection setup.** A harness's descriptor carries settings fields,
+  declared connection actions and disconnect availability. Its setup
+  package implements `harness.Connector`
   (memory-only summary, status with harness details, configure, run,
   disconnect) over narrow ports ([machine-runtime seam](#machine-runtime-seam));
   each machine hosts one per kind (`harness.Connectors`, built from the
@@ -395,6 +394,35 @@ Agent transports use the same session ref for per-call metadata, ownership, adop
 
 <a id="execution-contract-v2"></a>
 
+## Declared actions and facts
+
+An operation is typed in core only when Stage's own logic branches on it.
+Launch, stop, adopt, reply, opening, attention, images, respond and send
+remain typed operations. Harness-owned operations Stage relays are
+declared actions. Extra harness data for display is a declared fact.
+Trees, acceptance, handoff, journals, schedules and projects work
+independently of any action or fact a harness declares.
+
+- `execution.Action` defines a stable ID, target, caller policy, availability
+  and input schema. A connector owns connection actions including initial
+  setup. `execution.Capabilities.Actions` describes session and project
+  actions. `execution.As[execution.Actor]` reaches the owner with the same
+  request in process or on the worker.
+- Stage resolves the scoped target and checks policy and schema. The action
+  owner validates semantic input. `adapter.act` is the generic worker
+  request kind and `actor` the advertised optional trait. A lost reply
+  leaves the outcome uncertain and does not trigger a replay.
+- A successful session action records a redacted journal event. Dispatch
+  runs outside the journal transaction so a storage retry cannot re-run the
+  action. Clients can distinguish a journal failure from dispatch failure.
+- `execution.Fact` is display metadata on connection status, observations
+  or action results. Stage filters duplicate or malformed facts and clears
+  unsafe links at the relay boundary. Session observations persist in the
+  existing JSON column. `harness.Status` supplies a common phase and
+  optional fix while retaining the harness's own details.
+
+See [the action API](api.md#declared-actions-and-facts) for wire shapes.
+
 ## Optional adapter interfaces
 
 Optional parts of the adapter contract (`internal/execution/optional.go`).
@@ -415,10 +443,10 @@ interaction).
   marker (`execution.Correlator`). Not found keeps the attempt **Launch
   unconfirmed** until the user links the session; Stage never launches it
   again. A correlated harness without a correlator cannot launch.
-- **Lost outcome.** `Observation.stateReason` qualifies the state. Only a
-  harness that owns its processes (`hosted`) may report `interrupted` with
-  `owner_exited`: its process died without an outcome. The coordinator rejects
-  the reason from any other harness as malformed (nothing changes).
+- **State reasons.** `Observation.stateReason` qualifies a common state.
+  The coordinator requires the module to declare the reason in `stateReasons`.
+  `owner_exited` means an execution owner died without reporting an outcome
+  and requires `interrupted`.
 - **Push.** An adapter implementing `execution.EventSource` streams
   observations of its connection; the coordinator runs the stream per
   connection and ingests each through the same path as polling (validation,
@@ -608,7 +636,7 @@ acceptance. No provider account or production service is required.
 
 `internal/claudecode` drives the `claude` CLI; Claude's per-user daemon owns
 the sessions, worktrees, models and login ([ADR 0005](adr/0005-claude-code-harness.md)).
-Claude Code has no HTTP API. Kind `claude`, hosting `hosted`, stable identity
+Claude Code has no HTTP API. Kind `claude`, local processes required, machine sessions, stable identity
 (the `configDirectory` from `claude auth status --json`), launch
 `correlated`, closure `archived` (`claude rm`). Setup (`internal/claudecodesetup`): the command
 setting, a connect action and disconnect ([api.md](api.md#harness-connections-api-v6)),

@@ -167,17 +167,49 @@ export interface HarnessClosure { signal: string; provenance: Provenance; settin
 export interface SetupField {
   id: string;
   label: string;
-  kind: "text" | "url" | "secret" | "bool";
+  kind: "text" | "url" | "secret" | "bool" | "choice";
   help?: string;
+  required?: boolean;
+  choices?: { id: string; label: string }[];
 }
-export interface SetupAction { id: string; label: string; input?: SetupField[] }
+export type ActionTarget = "connection" | "session" | "project";
+export type ActionCaller = "user" | "agent";
+export interface HarnessAction {
+  id: string;
+  label: string;
+  target: ActionTarget;
+  input?: SetupField[];
+  confirm?: string;
+  destructive: boolean;
+  callers: ActionCaller[];
+  availability: { available: boolean; reason?: string };
+}
+export type SetupAction = HarnessAction;
+export interface HarnessFact {
+  id: string;
+  label: string;
+  value: string;
+  tone?: "neutral" | "ok" | "warn" | "bad";
+  link?: string;
+  copyable?: boolean;
+}
+export type ConnectionPhase = "disconnected" | "needs_setup" | "connecting" | "connected" | "degraded" | "unavailable";
+export interface ActionResult {
+  message: string;
+  facts?: HarnessFact[];
+  link?: string;
+  replaced?: number;
+  journalError?: string;
+}
 /** A harness's connection setup schema; hosts render it unless they register a panel for the kind. */
 export interface HarnessSetup { fields: SetupField[]; actions: SetupAction[]; disconnect: boolean }
 export interface HarnessDescriptor {
   kind: Harness;
   name: string;
-  /** connected: Stage connects to its service; hosted: it runs as processes on Stage's machine. */
-  hosting: "connected" | "hosted";
+  /** Requires a machine profile that permits local harness processes. */
+  localProcesses: boolean;
+  sessions: "machine" | "cloud";
+  stateReasons: string[];
   closures: HarnessClosure[];
   linkSchemes: string[];
   setup: HarnessSetup;
@@ -224,12 +256,17 @@ export interface HarnessStatus<D = unknown> {
   /** A harness-defined word: connected, unpaired, unavailable... */
   state: string;
   reason?: string;
+  phase: ConnectionPhase;
+  facts?: HarnessFact[];
+  fix?: { text: string; command?: string };
   fields: { id: string; value: string; set: boolean; source: "saved" | "default" }[];
-  actions: { id: string; available: boolean; reason?: string }[];
+  actions: { id: string; available: boolean; reason?: string; code?: string }[];
   details?: D;
   sync?: HarnessSyncStatus;
   /** The connection a setting change or action just retired. */
   replaced?: ReplacedConnection | null;
+  message?: string;
+  link?: string;
 }
 /** How this machine runs Stage: desktop (managed service), server (foreground) or container. */
 export interface MachineProfile { kind: "desktop" | "server" | "container"; localProcesses: boolean }
@@ -341,6 +378,7 @@ export interface Capabilities {
   operations: Partial<Record<OperationId, {available: boolean; reason?: string}>>;
   models: HarnessModel[] | null;
   modes: HarnessChoice[] | null;
+  actions?: HarnessAction[];
 }
 export interface ExecutionConfig {
   model: string;
@@ -360,6 +398,7 @@ export interface LaunchLinkPreview {
     project: string;
     branch: string;
     directory: string;
+    facts?: HarnessFact[];
   };
 }
 export interface Task {
@@ -470,6 +509,7 @@ export interface TaskDetail extends Task {
   finalReply?: { text: string; truncated: boolean; updatedAt: string; runId: string };
   /** The current session's usage, when its harness reports one. */
   usage?: Usage;
+  facts?: HarnessFact[];
   /** Where the current session's harness says it works; absent when it reports neither. */
   reported?: { branch?: string; directory?: string };
   acceptances: Acceptance[];

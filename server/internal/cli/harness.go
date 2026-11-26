@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/client"
 )
 
@@ -37,8 +38,11 @@ func runHarness(ctx context.Context, env Env, args []string) error {
 	v, rest := verb(rest, "status")
 	c := newCmd(env, "harness "+kind+" "+v)
 	var reset listFlag
+	var confirm bool
 	switch v {
-	case "status", "disconnect", "run":
+	case "status", "disconnect":
+	case "run":
+		c.fs.BoolVar(&confirm, "confirm", false, "confirm the action")
 	case "set":
 		c.fs.Var(&reset, "reset", "reset FIELD to its default (repeatable)")
 	default:
@@ -105,7 +109,12 @@ func runHarness(ctx context.Context, env Env, args []string) error {
 		if perr != nil {
 			return usagef("harness %s run %s: %v", kind, a.ID, perr)
 		}
-		st, err = cl.RunHarnessAction(ctx, kind, a.ID, input)
+		caller, callerErr := c.ops().ActionCaller(ctx, agenttools.CallerArgs{})
+		if callerErr != nil {
+			return callerErr
+		}
+		caller.Confirmed = confirm
+		st, err = cl.RunHarnessAction(ctx, kind, a.ID, input, caller)
 	}
 	if err != nil {
 		return err
@@ -197,7 +206,11 @@ func printHarnesses(w io.Writer, hs client.Harnesses, cli string) {
 		if d.Connectable {
 			setup = dim("; " + cli + " harness " + d.Kind + " status")
 		}
-		kv(w, d.Kind, "%s, %s, %s%s", d.Name, d.Hosting, state, setup)
+		placement := string(d.Sessions) + " sessions"
+		if d.LocalProcesses {
+			placement += ", requires local processes"
+		}
+		kv(w, d.Kind, "%s, %s, %s%s", d.Name, placement, state, setup)
 	}
 }
 

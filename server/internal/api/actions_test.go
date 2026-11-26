@@ -1,0 +1,287 @@
+package api_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"slices"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/api"
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/machine"
+	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
+	coordinator "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/t3"
+)
+
+var displayFact = execution.Fact{
+	ID: "label", Label: "Label", Value: "<script>text</script>", Tone: execution.ToneOK, Copyable: true,
+}
+
+type actionHarness struct {
+	hostedAdapter
+	calls   chan execution.ActionRequest
+	gone    atomic.Bool
+	onClear func(context.Context, execution.SessionRef) error
+}
+
+func (*actionHarness) Workspaces(context.Context) ([]execution.WorkspaceInfo, error) {
+	return []execution.WorkspaceInfo{
+		{ID: "repo", Title: "repo", WorkspaceRoot: hostedWorkspace},
+		{ID: "other", Title: "other", WorkspaceRoot: "/work/other"},
+	}, nil
+}
+
+func (*actionHarness) Features(ctx context.Context) (execution.Capabilities, error) {
+	c, err := (hostedAdapter{}).Features(ctx)
+	available := execution.Availability{Available: true}
+	users := []execution.Caller{execution.CallerUser}
+	both := []execution.Caller{execution.CallerUser, execution.CallerAgent}
+	c.Actions = []execution.Action{
+		{ID: "label", Label: "Label", Target: execution.TargetSession, Callers: both, Availability: available, Input: []execution.Field{
+			{ID: "name", Label: "Name", Kind: execution.FieldSecret, Required: true},
+			{ID: "scope", Label: "Scope", Kind: execution.FieldChoice, Required: true, Choices: []execution.ActionChoice{{ID: "brief", Label: "Brief"}}},
+			{ID: "pinned", Label: "Pinned", Kind: execution.FieldBool, Required: true},
+		}},
+		{ID: "clear", Label: "Clear", Target: execution.TargetSession, Callers: users, Availability: available, Destructive: true, Confirm: "Clear the label?"},
+		{ID: "busy", Label: "Busy", Target: execution.TargetSession, Callers: both, Availability: available},
+		{ID: "later", Label: "Later", Target: execution.TargetSession, Callers: both, Availability: execution.Availability{Reason: "Connect first."}},
+		{ID: "open-workspace", Label: "Open workspace", Target: execution.TargetProject, Callers: both, Availability: available},
+	}
+	return c, err
+}
+
+func (a *actionHarness) Launch(ctx context.Context, in execution.Intent, cp execution.Checkpoint, save execution.SaveCheckpoint) (execution.Observation, error) {
+	o, err := a.hostedAdapter.Launch(ctx, in, cp, save)
+	withUnsafeLink := displayFact
+	withUnsafeLink.Link = "javascript:bad"
+	o.Facts = []execution.Fact{withUnsafeLink, displayFact}
+	return o, err
+}
+
+func (a *actionHarness) Observe(ctx context.Context, ref execution.SessionRef) (execution.Observation, error) {
+	if a.gone.Load() {
+		return execution.Observation{}, execution.ErrNotFound
+	}
+	return a.hostedAdapter.Observe(ctx, ref)
+}
+
+func (a *actionHarness) Act(ctx context.Context, req execution.ActionRequest) (execution.ActionResult, error) {
+	if req.ID == "busy" {
+		return execution.ActionResult{}, &execution.Busy{Reason: "The harness is processing another request."}
+	}
+	a.calls <- req
+	if req.ID == "clear" && req.Session != nil && a.onClear != nil {
+		if err := a.onClear(ctx, *req.Session); err != nil {
+			return execution.ActionResult{}, err
+		}
+	}
+	return execution.ActionResult{Message: "Action completed.", Facts: []execution.Fact{displayFact},
+		Link: "javascript:bad", JournalError: "forged journal failure"}, nil
+}
+
+type actionDeclarationsOnly struct {
+	execution.Adapter
+}
+
+func TestDeclaredActionsLocalAndWorker(t *testing.T) {
+	for _, placement := range []string{"local", "worker"} {
+		t.Run(placement, func(t *testing.T) {
+			ctx := t.Context()
+			actor := &actionHarness{calls: make(chan execution.ActionRequest, 8)}
+			actor.onClear = func(ctx context.Context, ref execution.SessionRef) error {
+				_, err := testDB.Pool.ExecContext(ctx, `UPDATE tasks SET session_id=NULL WHERE session_id=
+					(SELECT id FROM session_identities WHERE connection_id=$1 AND external_id=$2)`, ref.ConnectionID, ref.ExternalSessionID)
+				return err
+			}
+			withoutActor := hostedKit
+			withoutActor.Kind, withoutActor.Name = "declarations-only", "Declarations only"
+			reg := harness.MustRegistry(t3.Descriptor, hostedKit, withoutActor)
+			var conn, noActor int64
+			var svc *coordinator.Service
+			e := newEnv(t, func(d *api.Deps) {
+				const remoteID = 2
+				machineID := db.LocalMachine
+				if placement == "worker" {
+					machineID = remoteID
+					if _, err := testDB.Pool.ExecContext(ctx, `INSERT INTO machines(id,label) VALUES(2,'Worker')`); err != nil {
+						t.Fatal(err)
+					}
+				}
+				add := func(desc harness.Descriptor) int64 {
+					t.Helper()
+					sw, err := d.Store.SwitchInstance(ctx, machineID, desc, "new", desc.Name, 0)
+					if err != nil {
+						t.Fatal(err)
+					}
+					return sw.New
+				}
+				conn, noActor = add(hostedKit), add(withoutActor)
+				adapters := map[int64]execution.Adapter{conn: actor, noActor: actionDeclarationsOnly{actor}}
+				connectors := map[string]harness.Connector{
+					hostedKit.Kind:    streamStatusConnector{summary: harness.Summary{ConnectionID: conn}},
+					withoutActor.Kind: streamStatusConnector{summary: harness.Summary{ConnectionID: noActor}},
+				}
+				var set *machine.Set
+				if placement == "worker" {
+					set = remotetest.NewWithConnectors(t, machineID, adapters, connectors).Set()
+				} else {
+					local := machine.NewLocal(machineID, harness.Profile{LocalProcesses: true}, nil)
+					for id, adapter := range adapters {
+						local.Install(id, id, adapter)
+					}
+					for kind, connector := range connectors {
+						local.SetConnector(kind, connector)
+					}
+					set = machine.MustSet(local)
+				}
+				svc = coordinator.NewForMachines(d.Store, set, slog.Default())
+				svc.Harnesses = reg
+				d.Sync, d.Harnesses = svc, reg
+				d.LiveConnectors = func() harness.Connectors {
+					out, err := set.Connectors(reg)
+					if err != nil {
+						t.Fatal(err)
+					}
+					return out
+				}
+			})
+			project := func(connection int64, id, directory string) db.Project {
+				t.Helper()
+				p, err := e.store.InsertProject(ctx, db.Project{Title: id, Bindings: []db.ProjectBinding{{ConnectionID: connection, ExternalProjectID: id, Workspace: directory}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return p
+			}
+			first := project(conn, "repo", hostedWorkspace)
+			second := project(conn, "other", "/work/other")
+			third := project(noActor, "third", "/work/third")
+			for id, projects := range map[int64][]db.Project{conn: {first, second}, noActor: {third}} {
+				var workspaces []execution.WorkspaceInfo
+				for _, p := range projects {
+					workspaces = append(workspaces, execution.WorkspaceInfo{
+						ID: p.Title, Title: p.Title, WorkspaceRoot: p.Bindings[0].Workspace,
+					})
+				}
+				if _, err := e.store.RefreshWorkspaces(ctx, id, workspaces); err != nil {
+					t.Fatal(err)
+				}
+			}
+			task, err := e.store.CreateTask(ctx, db.NewTask{ProjectID: first.ID, ConnectionID: conn, Title: "Task", Prompt: "Start"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := fmt.Sprintf("/api/tasks/%d/actions", task.ID)
+			e.must("GET", path, nil, http.StatusNotFound, nil)
+			task, err = svc.StartTask(ctx, task.ID)
+			if err != nil || task.Session == nil {
+				t.Fatalf("launch: %+v %v", task, err)
+			}
+			agent := map[string]string{"Stage-Action-Agent": "1", "Stage-Caller-Session": fmt.Sprintf("%d:agent-session", conn)}
+			var actions []execution.Action
+			e.must("GET", path, nil, http.StatusOK, &actions)
+			if len(actions) != 4 || !slices.ContainsFunc(actions, func(a execution.Action) bool {
+				return a.ID == "later" && !a.Availability.Available && a.Availability.Reason == "Connect first."
+			}) {
+				t.Fatalf("user actions %+v", actions)
+			}
+			if rec := raw(t, e.h, "GET", path, agent, nil, &actions); rec.Code != 200 || len(actions) != 3 ||
+				slices.ContainsFunc(actions, func(a execution.Action) bool { return a.ID == "clear" }) {
+				t.Fatalf("agent actions %s", rec.Body)
+			}
+			if rec := raw(t, e.h, "POST", path+"/clear", agent, map[string]any{"caller": "user", "permission": "all"}, nil); rec.Code != 403 {
+				t.Fatalf("bypass attempt %d %s", rec.Code, rec.Body)
+			}
+			e.must("POST", path+"/clear", json.RawMessage(`{}`), http.StatusBadRequest, nil)
+			e.must("POST", path+"/later", json.RawMessage(`{}`), http.StatusConflict, nil)
+			e.must("POST", path+"/open-workspace", json.RawMessage(`{}`), http.StatusNotFound, nil)
+			e.must("POST", path+"/busy", json.RawMessage(`{}`), http.StatusConflict, nil)
+			for _, bad := range []string{
+				`{"name":"fake-secret","scope":"missing","pinned":false}`,
+				`{"name":"fake-secret","scope":"brief"}`,
+				`{"name":"fake-secret","scope":"brief","pinned":null}`,
+				`{"name":"fake-secret","scope":"brief","pinned":"false"}`,
+				`{"name":"fake-secret","scope":"brief","pinned":false,"caller":"user"}`,
+				`{"name":"fake-secret","scope":"brief","pinned":true,"pinned":false}`,
+			} {
+				rec := raw(t, e.h, "POST", path+"/label", agent, json.RawMessage(bad), nil)
+				if rec.Code != 400 || strings.Contains(rec.Body.String(), "fake-secret") {
+					t.Fatalf("invalid input %d %s", rec.Code, rec.Body)
+				}
+			}
+			actor.gone.Store(true)
+			input := json.RawMessage(`{"name":"fake-secret","scope":"brief","pinned":false}`)
+			e.must("POST", path+"/label", input, http.StatusNotFound, nil)
+			actor.gone.Store(false)
+			if len(actor.calls) != 0 {
+				t.Fatal("a refused action reached the actor")
+			}
+			var result execution.ActionResult
+			if rec := raw(t, e.h, "POST", path+"/label", agent, input, &result); rec.Code != 200 {
+				t.Fatalf("run %d %s", rec.Code, rec.Body)
+			}
+			req := <-actor.calls
+			if req.Session == nil || *req.Session != *task.Session || string(req.Input) != string(input) || result.Link != "" ||
+				result.JournalError != "" || !slices.Equal(result.Facts, []execution.Fact{displayFact}) {
+				t.Fatalf("dispatch or result wrong: %+v %+v", req, result)
+			}
+			var detail struct{ Facts []execution.Fact }
+			e.must("GET", fmt.Sprintf("/api/tasks/%d", task.ID), nil, 200, &detail)
+			if !slices.Equal(detail.Facts, []execution.Fact{displayFact}) {
+				t.Fatalf("stored facts %+v", detail.Facts)
+			}
+			journal := e.journal(fmt.Sprintf("/api/tasks/%d/journal?kind=events", task.ID))
+			var eventCount int
+			for _, entry := range journal.Entries {
+				if entry.EventType == "session_action" {
+					eventCount++
+					if strings.Contains(entry.Text, "fake-secret") || strings.Contains(entry.Text, displayFact.Value) ||
+						!strings.Contains(entry.Text, "label") || !strings.Contains(entry.Text, task.Session.ExternalSessionID) ||
+						!strings.Contains(entry.Text, "called by agent") || entry.SourceSession == nil ||
+						entry.SourceSession.ExternalSessionID != "agent-session" {
+						t.Fatalf("journal event %+v", entry)
+					}
+				}
+			}
+			if eventCount != 1 {
+				t.Fatalf("session actions in journal = %d", eventCount)
+			}
+			actionPath := func(projectID, connectionID int64) string {
+				return fmt.Sprintf("/api/projects/%d/actions/open-workspace?connectionId=%d", projectID, connectionID)
+			}
+			for _, p := range []db.Project{first, second} {
+				e.must("POST", actionPath(p.ID, conn), json.RawMessage(`{}`), http.StatusOK, &result)
+				req := <-actor.calls
+				if req.Session != nil || req.Project == nil || req.Project.ExternalProjectID != p.Title || req.Project.Directory != p.Bindings[0].Workspace {
+					t.Fatalf("project action went to the wrong workspace: %+v", req)
+				}
+			}
+			e.must("POST", actionPath(first.ID, noActor), json.RawMessage(`{}`), http.StatusNotFound, nil)
+			e.must("POST", actionPath(third.ID, noActor), json.RawMessage(`{}`), http.StatusConflict, nil)
+			if rec := raw(t, e.h, "POST", path+"/clear", map[string]string{"Stage-Action-Confirmed": "1"}, json.RawMessage(`{}`), &result); rec.Code != 200 ||
+				!strings.Contains(result.JournalError, "action ran") || len(actor.calls) != 1 {
+				t.Fatalf("journal failure %d %s, calls %d", rec.Code, rec.Body, len(actor.calls))
+			}
+			<-actor.calls
+			if _, err := testDB.Pool.ExecContext(ctx, `UPDATE tasks SET session_id=$1 WHERE id=$2`, task.SessionIdentityID, task.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.store.RetireConnection(ctx, conn, 0); err != nil {
+				t.Fatal(err)
+			}
+			e.must("POST", path+"/label", input, http.StatusConflict, nil)
+			e.must("POST", actionPath(second.ID, conn), json.RawMessage(`{}`), http.StatusConflict, nil)
+			if len(actor.calls) != 0 {
+				t.Fatal("an unrelated or retired target reached the actor")
+			}
+		})
+	}
+}

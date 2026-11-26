@@ -26,5 +26,12 @@ func (s *Service) RefreshScopedSession(ctx context.Context, ref execution.Sessio
 	if e := s.refusal(s.store.Harness(ref.ConnectionID), o); e != nil {
 		return e
 	}
+	return s.putObservation(ctx, o)
+}
+
+// putObservation filters display metadata without interfering with execution state.
+func (s *Service) putObservation(ctx context.Context, o execution.Observation) error {
+	d, _ := s.descriptor(s.store.Harness(o.Session.ConnectionID))
+	o.Facts = d.DisplayFacts(o.Facts)
 	return s.store.PutObservation(ctx, o)
 }

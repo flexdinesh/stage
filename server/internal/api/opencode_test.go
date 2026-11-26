@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencode"
@@ -88,6 +90,11 @@ func TestOpenCodeConnectionEndpoints(t *testing.T) {
 		t.Fatalf("pair %d %v", code, body)
 	}
 	connection := e.store.ActiveID(db.LocalMachine, opencode.Kind)
+	var checked execution.ActionResult
+	e.must("POST", fmt.Sprintf("/api/connections/%d/actions/check", connection), json.RawMessage(`{}`), http.StatusOK, &checked)
+	if checked.Message == "" || len(checked.Facts) == 0 {
+		t.Fatalf("check result %+v", checked)
+	}
 	if _, err := e.sync.Adapter(connection); err != nil {
 		t.Fatalf("adapter not installed: %v", err)
 	}

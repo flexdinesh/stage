@@ -48,11 +48,12 @@ type Rig struct {
 	profile      harness.Profile
 	missingKinds []string
 
-	mu    sync.Mutex
-	kinds map[string]string // request id -> kind, from the down stream
-	drop  map[string]int    // kind -> results still to lose
-	stop  context.CancelFunc
-	done  chan error
+	mu      sync.Mutex
+	kinds   map[string]string          // request id -> kind, from the down stream
+	drop    map[string]int             // kind -> results still to lose
+	replace map[string]json.RawMessage // kind -> replacement for the next result body
+	stop    context.CancelFunc
+	done    chan error
 }
 
 // New hosts adapters (by connection) on remote machine machineID, beside
@@ -68,7 +69,7 @@ func NewWithConnectors(t *testing.T, machineID int64, adapters map[int64]executi
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &Rig{t: t, machineID: machineID, adapters: adapters, kinds: map[string]string{}, drop: map[string]int{},
-		profile: harness.Profile{Kind: harness.ProfileServer, LocalProcesses: true}, connectors: connectors}
+		replace: map[string]json.RawMessage{}, profile: harness.Profile{Kind: harness.ProfileServer, LocalProcesses: true}, connectors: connectors}
 	r.hub = workerchan.NewHub(ctx, workerchan.Options{Version: "test"})
 	r.set = machine.MustSet(machine.NewLocal(1, harness.Profile{}, nil))
 	conns := func(id int64) []int64 {
@@ -89,9 +90,16 @@ func NewWithConnectors(t *testing.T, machineID int64, adapters map[int64]executi
 	mux.HandleFunc("POST /api/worker/channel", func(w http.ResponseWriter, req *http.Request) {
 		body, _ := io.ReadAll(req.Body)
 		var env workerchan.Envelope
-		if json.Unmarshal(body, &env) == nil && env.Kind == workerchan.KindResult && r.lose(env.ID) {
-			w.WriteHeader(http.StatusNoContent) // lost in transit
-			return
+		if json.Unmarshal(body, &env) == nil && env.Kind == workerchan.KindResult {
+			drop, replacement := r.result(env.ID)
+			if drop {
+				w.WriteHeader(http.StatusNoContent) // lost in transit
+				return
+			}
+			if replacement != nil {
+				env.Body = replacement
+				body, _ = json.Marshal(env)
+			}
 		}
 		req.Body = io.NopCloser(bytes.NewReader(body))
 		r.hub.ServePost(w, req, machineID)
@@ -221,15 +229,28 @@ func (r *Rig) LoseResult(kind string, n int) {
 	r.mu.Unlock()
 }
 
-func (r *Rig) lose(id string) bool {
+// ReplaceResult replaces the next result body of calls of kind in transit.
+func (r *Rig) ReplaceResult(kind string, body json.RawMessage) {
+	r.t.Helper()
+	if !json.Valid(body) {
+		r.t.Fatal("replacement body must be JSON")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.replace[kind] = body
+}
+
+func (r *Rig) result(id string) (bool, json.RawMessage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	kind := r.kinds[id]
-	if r.drop[kind] <= 0 {
-		return false
+	if r.drop[kind] > 0 {
+		r.drop[kind]--
+		return true, nil
 	}
-	r.drop[kind]--
-	return true
+	replacement := r.replace[kind]
+	delete(r.replace, kind)
+	return false, replacement
 }
 
 func (r *Rig) wait(what string, ok func() bool) {

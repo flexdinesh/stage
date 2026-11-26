@@ -516,6 +516,16 @@ func (h *Hub) CallWith(ctx context.Context, machineID int64, kind string, connec
 
 // CallWithTrait requires the current ready snapshot to declare trait for the connection.
 func (h *Hub) CallWithTrait(ctx context.Context, machineID int64, kind string, connectionID int64, body any, timeout time.Duration, callback Callback, trait string) (json.RawMessage, error) {
+	return h.call(ctx, machineID, kind, connectionID, body, timeout, callback, trait, "")
+}
+
+// CallRequiringKind requires a capability added alongside the call's request semantics.
+// Both kinds are checked on the same session so a reconnect cannot select an older peer.
+func (h *Hub) CallRequiringKind(ctx context.Context, machineID int64, kind, requiredKind string, body any, timeout time.Duration) (json.RawMessage, error) {
+	return h.call(ctx, machineID, kind, 0, body, timeout, nil, "", requiredKind)
+}
+
+func (h *Hub) call(ctx context.Context, machineID int64, kind string, connectionID int64, body any, timeout time.Duration, callback Callback, trait, requiredKind string) (json.RawMessage, error) {
 	h.mu.Lock()
 	s := h.sessions[machineID]
 	var ready *Ready
@@ -529,7 +539,7 @@ func (h *Hub) CallWithTrait(ctx context.Context, machineID int64, kind string, c
 	if ready == nil {
 		return nil, ErrNegotiating
 	}
-	if !slices.Contains(ready.ChannelKinds, kind) {
+	if !slices.Contains(ready.ChannelKinds, kind) || requiredKind != "" && !slices.Contains(ready.ChannelKinds, requiredKind) {
 		return nil, &RemoteError{Code: CodeOperationUnavailable, Message: "Update Stage on the worker machine to use " + kind + "."}
 	}
 	if connectionID != 0 {

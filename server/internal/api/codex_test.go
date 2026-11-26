@@ -72,7 +72,7 @@ func TestCodexSetupEndpoints(t *testing.T) {
 	if code != 200 || st["state"] != codexsetup.StateNotConnected || d["daemon"] != "running" || d["cliVersion"] != "0.171.0" {
 		t.Fatalf("initial status %d %v", code, st)
 	}
-	if acts, _ := st["actions"].([]any); len(acts) != 1 {
+	if acts, _ := st["actions"].([]any); len(acts) != 2 {
 		t.Fatalf("actions %v", st["actions"])
 	}
 
