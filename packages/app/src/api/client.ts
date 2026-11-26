@@ -205,7 +205,7 @@ export function createApi(transport: Transport) {
 
     tasks: (q: TaskListQuery = {}) =>
       apiFetch<TaskList>(
-        `/tasks${toQuery({ project: q.project, state: q.state, q: q.q, from: q.from, to: q.to, settledFrom: q.settledFrom, closed: q.closed })}`,
+        `/tasks${toQuery({ project: q.project, state: q.state, q: q.q, from: q.from, to: q.to, completedFrom: q.completedFrom, closed: q.closed })}`,
       ),
     previewLaunchLink: (id: number, link: string) => apiFetch<LaunchLinkPreview>(`/tasks/${id}/launch-link/preview`, { method: "POST", body: { link } }),
     attachLaunchLink: (id: number, link: string, preview: LaunchLinkPreview) => apiFetch<Task>(`/tasks/${id}/launch-link`, { method: "POST", body: { link, attempt: preview.attempt, revision: preview.revision, environment: preview.environment } }),
@@ -237,7 +237,7 @@ export function createApi(transport: Transport) {
     setNeeds: (id: number, needs: number[]) => apiFetch<Task>(`/tasks/${id}/needs`, { method: "PUT", body: { needs } }),
 
     trees: (q: TreeListQuery = {}) =>
-      apiFetch<TreeList>(`/trees${toQuery({ status: q.status, settledFrom: q.settledFrom, project: q.project })}`),
+      apiFetch<TreeList>(`/trees${toQuery({ status: q.status, completedFrom: q.completedFrom, project: q.project })}`),
     tree: (id: number) => apiFetch<TreeDetail>(`/trees/${id}`),
     createTree: (body: CreateTreeRequest) => apiFetch<TreeDetail>("/trees", post(body)),
     updateTree: (id: number, body: UpdateTreeRequest) => apiFetch<TreeDetail>(`/trees/${id}`, patch(body)),

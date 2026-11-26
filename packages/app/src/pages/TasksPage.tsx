@@ -7,7 +7,7 @@ import { useNewTask } from "../components/NewTask.tsx";
 import { CompleteAllActions, CompleteAllFailures, CompletionLinger, useCompleteAll, useCompletionLinger } from "../components/QuickComplete.tsx";
 import { useScope } from "../components/Scope.tsx";
 import { GROUP_META, GroupPanel, GroupPanelSkeleton, ScheduledRows, StatStrip, useGroupFold } from "../components/TaskGroups.tsx";
-import { SettledRows, TaskRows, TaskRowsSkeleton } from "../components/TaskList.tsx";
+import { CompletedRows, TaskRows, TaskRowsSkeleton } from "../components/TaskList.tsx";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import { Button, EmptyState, PageHeader, Panel, QueryState, Segmented, Skeleton, buttonClass } from "../components/ui.tsx";
 import {
@@ -23,7 +23,7 @@ import {
 import { scopedPageName } from "../lib/history.ts";
 import { projectWorkspace } from "../lib/projects.ts";
 import { LIVE_STATES } from "../lib/scope.ts";
-import { mergeSettled, settledSince } from "../lib/settled.ts";
+import { mergeCompleted, completedWindowStart } from "../lib/completed.ts";
 
 /** Open: work not yet closed (with the last 7 days completed); Closed: archived tasks and members of closed trees. */
 type View = "open" | "closed" | "all";
@@ -104,20 +104,20 @@ export function TasksPage() {
 function OpenTasks({ tree, selected, onSelect }: { tree: TreeFilter; selected: GroupKey | null; onSelect: (key: string | null) => void }) {
   const scope = useScope();
   const scoped = scope.projectId !== null;
-  const [since] = useState(() => settledSince());
+  const [since] = useState(() => completedWindowStart());
   const live = useTasks({ state: [...LIVE_STATES], ...scope.query });
-  const settled = useTasks({ settledFrom: since, ...scope.query });
+  const completed = useTasks({ completedFrom: since, ...scope.query });
   const due = useSchedules({ dueWithin: "24h", ...scope.query });
   const schedules = due.data?.schedules ?? [];
   const fold = useGroupFold(FOLD_KEY);
   const { lingering } = useCompletionLinger();
 
-  const merged = [...new Map([...(live.data?.tasks ?? []), ...(settled.data?.tasks ?? [])].map((t) => [t.id, t])).values()];
+  const merged = [...new Map([...(live.data?.tasks ?? []), ...(completed.data?.tasks ?? [])].map((t) => [t.id, t])).values()];
   const all = filterByTree(merged, tree);
   const of = (key: GroupKey, tasks: readonly Task[]) => tasks.filter((t) => inGroup(key, t, since, lingering));
   const completeAll = useCompleteAll(of("done", all).filter((t) => !lingering.has(t.id) && awaitingReview(t, lingering)));
 
-  const counts: Record<GroupKey, number> = { needs: 0, done: 0, ready: 0, failed: 0, running: 0, backlog: 0, scheduled: 0, settled: 0 };
+  const counts: Record<GroupKey, number> = { needs: 0, done: 0, ready: 0, failed: 0, running: 0, backlog: 0, scheduled: 0, completed: 0 };
   for (const k of GROUP_KEYS) counts[k] = of(k, all).length + (k === "scheduled" ? schedules.length : 0);
 
   const groups = (selected === null ? GROUP_KEYS : [selected])
@@ -125,7 +125,7 @@ function OpenTasks({ tree, selected, onSelect }: { tree: TreeFilter; selected: G
     .filter(({ key, list }) => selected === key || list.length > 0 || (key === "scheduled" && schedules.length > 0));
 
   const body = (key: GroupKey, list: Task[]) => {
-    if (key === "settled") return <SettledRows items={mergeSettled(list)} emptyText={GROUP_META.settled.empty} showProject={!scoped} />;
+    if (key === "completed") return <CompletedRows items={mergeCompleted(list)} emptyText={GROUP_META.completed.empty} showProject={!scoped} />;
     if (key === "scheduled") return <ScheduledRows tasks={list} schedules={schedules} emptyText={GROUP_META.scheduled.empty} showProject={!scoped} />;
     return (
       <>
@@ -137,10 +137,10 @@ function OpenTasks({ tree, selected, onSelect }: { tree: TreeFilter; selected: G
 
   return (
     <QueryState
-      isPending={live.isPending || settled.isPending}
-      error={live.error ?? settled.error}
-      hasData={live.data !== undefined && settled.data !== undefined}
-      stale={live.isPlaceholderData || settled.isPlaceholderData}
+      isPending={live.isPending || completed.isPending}
+      error={live.error ?? completed.error}
+      hasData={live.data !== undefined && completed.data !== undefined}
+      stale={live.isPlaceholderData || completed.isPlaceholderData}
       skeleton={
         <>
           <StatStrip groups={STAT_GROUPS} meta={GROUP_META} counts={null} selected={selected} onToggle={(k) => onSelect(selected === k ? null : k)} />

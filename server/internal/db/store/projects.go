@@ -17,7 +17,7 @@ type Project struct {
 	// (nil: not through a gateway).
 	SourceMachineID *int64    `json:"sourceMachineId"`
 	UpdatedAt       time.Time `json:"updatedAt"`
-	// LastActivityAt: latest thread update/settle or task update; nil when none.
+	// LastActivityAt: latest task or journal activity (nil when none).
 	LastActivityAt *time.Time `json:"lastActivityAt"`
 	// Origin is "discovered" for a project discovery imported, else nil.
 	Origin     *string    `json:"origin"`

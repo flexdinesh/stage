@@ -12,11 +12,11 @@ import (
 )
 
 func init() {
-	register("AdoptThread", caseAdoptThread)
+	register("AdoptSession", caseAdoptSession)
 	register("CreateTaskNeedsSession", caseCreateTaskNeedsSession)
 }
 
-func caseAdoptThread(t *testing.T, open Factory) {
+func caseAdoptSession(t *testing.T, open Factory) {
 	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	now := time.Now().UTC().Truncate(time.Second)
@@ -27,18 +27,18 @@ func caseAdoptThread(t *testing.T, open Factory) {
 		if edit != nil {
 			edit(&d)
 		}
-		if err := s.UpsertThreadDetail(ctx, d); err != nil {
+		if err := s.PutObservation(ctx, d.Observation()); err != nil {
 			t.Fatal(err)
 		}
 	}
 	thread("planner-1", func(d *t3.ThreadDetail) { d.Title = "Planner" })
 
-	task, created, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("planner-1")})
+	task, created, err := s.AdoptSession(ctx, db.AdoptInput{Session: session("planner-1")})
 	if err != nil || !created {
 		t.Fatalf("adopt: %+v %v %v", task, created, err)
 	}
 	if !task.Adopted || task.Prompt != "" || task.Title != "Planner" || task.State != db.StateRunning || task.ProjectID != p.ID ||
-		task.T3ThreadID == nil || *task.T3ThreadID != "planner-1" || task.LaunchAttempt != 1 || task.LaunchedAt == nil ||
+		task.ExternalSessionID == nil || *task.ExternalSessionID != "planner-1" || task.LaunchAttempt != 1 || task.LaunchedAt == nil ||
 		task.ExecutionConfig == nil || task.ExecutionConfig.Model != t3.ModelKey("codex", "gpt") || task.ExecutionConfig.Permission != "auto" || task.ExecutionConfig.Mode != "plan" ||
 		task.TreeID != nil {
 		t.Fatalf("adopted task %+v", task)
@@ -51,47 +51,47 @@ func caseAdoptThread(t *testing.T, open Factory) {
 		t.Fatalf("session now owned: %+v %v", owner, err)
 	}
 	// Adopting again returns the owner.
-	again, created, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("planner-1"), Title: ptr("ignored")})
+	again, created, err := s.AdoptSession(ctx, db.AdoptInput{Session: session("planner-1"), Title: ptr("ignored")})
 	if err != nil || created || again.ID != task.ID || again.Title != "Planner" {
 		t.Fatalf("adopt again: %+v %v %v", again, created, err)
 	}
 
-	// Title and notes override; a settled session reads settled with timestamps.
+	// Title and notes override; a closed session reads done with a finish timestamp.
 	thread("done-1", func(d *t3.ThreadDetail) { d.Settled, d.Status = true, t3.StatusIdle })
-	settled, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("done-1"), Title: ptr(" Review "), InitialNote: ptr("n")})
-	if err != nil || settled.Title != "Review" || settled.State != db.StateDone ||
-		settled.SettledAt != nil || settled.FinishedAt == nil {
-		t.Fatalf("settled adopt %+v %v", settled, err)
+	done, _, err := s.AdoptSession(ctx, db.AdoptInput{Session: session("done-1"), Title: ptr(" Review "), InitialNote: ptr("n")})
+	if err != nil || done.Title != "Review" || done.State != db.StateDone ||
+		done.FinishedAt == nil {
+		t.Fatalf("done adoption %+v %v", done, err)
 	}
-	notes := journal(t, s, ctx, db.JournalOwner{TaskID: &settled.ID}, db.JournalQuery{})
-	if len(notes.Entries) != 1 || notes.Entries[0].Text != "n" || notes.Entries[0].SourceSession != nil || notes.Entries[0].SourceThreadID != nil {
+	notes := journal(t, s, ctx, db.JournalOwner{TaskID: &done.ID}, db.JournalQuery{})
+	if len(notes.Entries) != 1 || notes.Entries[0].Text != "n" || notes.Entries[0].SourceSession != nil {
 		t.Fatalf("adoption initial note: %+v", notes)
 	}
 	// A blank title falls back to "Session <id8>"; a joined tree is kept.
 	thread("abcdefghij", func(d *t3.ThreadDetail) { d.Title = "  " })
-	tree := mustTree(t, s, ctx, "T", "", db.TreeMember{TaskID: settled.ID})
-	untitled, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("abcdefghij"), TreeID: &tree.ID})
+	tree := mustTree(t, s, ctx, "T", "", db.TreeMember{TaskID: done.ID})
+	untitled, _, err := s.AdoptSession(ctx, db.AdoptInput{Session: session("abcdefghij"), TreeID: &tree.ID})
 	if err != nil || untitled.Title != "Session abcdefgh" || untitled.TreeID == nil || *untitled.TreeID != tree.ID {
 		t.Fatalf("untitled adopt %+v %v", untitled, err)
 	}
 
 	var conflict *db.ConflictError
-	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("nope")}); !errors.Is(err, db.ErrNotFound) {
+	if _, _, err := s.AdoptSession(ctx, db.AdoptInput{Session: session("nope")}); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("unknown session: %v", err)
 	}
 	thread("sub-1", func(d *t3.ThreadDetail) { d.ParentThreadID, d.RelationshipToParent = "planner-1", "subagent" })
-	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("sub-1")}); !errors.As(err, &conflict) {
+	if _, _, err := s.AdoptSession(ctx, db.AdoptInput{Session: session("sub-1")}); !errors.As(err, &conflict) {
 		t.Fatalf("subagent: %v", err)
 	}
 	thread("arch-1", func(d *t3.ThreadDetail) { d.Archived = true })
-	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("arch-1")}); !errors.As(err, &conflict) {
+	if _, _, err := s.AdoptSession(ctx, db.AdoptInput{Session: session("arch-1")}); !errors.As(err, &conflict) {
 		t.Fatalf("archived: %v", err)
 	}
 	thread("foreign-1", func(d *t3.ThreadDetail) { d.ProjectID = "not-in-stage" })
-	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("foreign-1")}); !errors.As(err, &conflict) {
+	if _, _, err := s.AdoptSession(ctx, db.AdoptInput{Session: session("foreign-1")}); !errors.As(err, &conflict) {
 		t.Fatalf("no stage project: %v", err)
 	}
-	if _, _, err := s.AdoptThread(ctx, db.AdoptInput{Session: session("sub-1"), TreeID: ptr[int64](9999)}); !errors.As(err, &conflict) {
+	if _, _, err := s.AdoptSession(ctx, db.AdoptInput{Session: session("sub-1"), TreeID: ptr[int64](9999)}); !errors.As(err, &conflict) {
 		t.Fatalf("refusal comes before the tree check: %v", err)
 	}
 
@@ -109,8 +109,9 @@ func caseCreateTaskNeedsSession(t *testing.T, open Factory) {
 	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
 	now := time.Now().UTC()
-	if err := s.UpsertThreadDetail(ctx, t3.ThreadDetail{Thread: t3.Thread{ThreadID: "caller", ProjectID: "proj-1", Title: "Caller",
-		Status: t3.StatusRunning, CreatedAt: now, UpdatedAt: now}}); err != nil {
+	detail := t3.ThreadDetail{Thread: t3.Thread{ThreadID: "caller", ProjectID: "proj-1", Title: "Caller",
+		Status: t3.StatusRunning, CreatedAt: now, UpdatedAt: now}}
+	if err := s.PutObservation(ctx, detail.Observation()); err != nil {
 		t.Fatal(err)
 	}
 	other := mustTask(t, s, ctx, p.ID, "other", nil)

@@ -80,7 +80,7 @@ func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 	// A retired connection is never reached again: its links are the stored
 	// observation's, naming the old environment, never the new T3's.
 	if got.Links != started.Links || strings.Contains(got.Links.Web, "env-b") || strings.Contains(got.Links.Native, "env-b") ||
-		got.Links.Native != t3.AppThreadURL(t3.FakeEnvironmentID, *started.T3ThreadID) {
+		got.Links.Native != t3.AppThreadURL(t3.FakeEnvironmentID, *started.ExternalSessionID) {
 		t.Fatalf("retired links %+v, want the old environment's %+v", got.Links, started.Links)
 	}
 

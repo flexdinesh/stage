@@ -200,7 +200,7 @@ func withT3Setup(d *api.Deps, setup *t3setup.Service) {
 	svc := d.Sync
 	connectors := map[string]harness.Connector{t3.Kind: t3setup.NewConnector(setup, func(connection int64) t3setup.SyncProgress {
 		p := svc.Progress(connection)
-		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Threads}
+		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Sessions}
 	})}
 	if c, ok := d.Connectors.Get(db.LocalMachine, opencode.Kind); ok {
 		connectors[opencode.Kind] = c
@@ -269,31 +269,31 @@ type project struct {
 }
 
 type task struct {
-	ID            int64       `json:"id"`
-	ProjectID     int64       `json:"projectId"`
-	ProjectTitle  string      `json:"projectTitle"`
-	Title         string      `json:"title"`
-	Prompt        string      `json:"prompt"`
-	Config        *execConfig `json:"executionConfig"`
-	State         string      `json:"state"`
-	T3ThreadID    *string     `json:"externalSessionId"`
-	TreeID        *int64      `json:"treeId"`
-	Needs         []int64     `json:"needs"`
-	Dependents    []int64     `json:"dependents"`
-	Readiness     *string     `json:"readiness"`
-	StartMode     *string     `json:"startMode"`
-	EffStartMode  *string     `json:"effectiveStartMode"`
-	Adopted       bool        `json:"adopted"`
-	LaunchAttempt int         `json:"launchAttempt"`
-	LastError     *string     `json:"lastError"`
-	Links         links       `json:"links"`
-	LaunchedAt    *string     `json:"launchedAt"`
-	FinishedAt    *string     `json:"finishedAt"`
-	SettledAt     *string     `json:"settledAt"`
-	RunStartedAt  *string     `json:"runStartedAt"`
-	RunEndedAt    *string     `json:"runEndedAt"`
-	CreatedAt     string      `json:"createdAt"`
-	Events        []struct {
+	ID                int64       `json:"id"`
+	ProjectID         int64       `json:"projectId"`
+	ProjectTitle      string      `json:"projectTitle"`
+	Title             string      `json:"title"`
+	Prompt            string      `json:"prompt"`
+	Config            *execConfig `json:"executionConfig"`
+	State             string      `json:"state"`
+	ExternalSessionID *string     `json:"externalSessionId"`
+	TreeID            *int64      `json:"treeId"`
+	Needs             []int64     `json:"needs"`
+	Dependents        []int64     `json:"dependents"`
+	Readiness         *string     `json:"readiness"`
+	StartMode         *string     `json:"startMode"`
+	EffStartMode      *string     `json:"effectiveStartMode"`
+	Adopted           bool        `json:"adopted"`
+	LaunchAttempt     int         `json:"launchAttempt"`
+	LastError         *string     `json:"lastError"`
+	Links             links       `json:"links"`
+	LaunchedAt        *string     `json:"launchedAt"`
+	FinishedAt        *string     `json:"finishedAt"`
+	CompletedAt       *string     `json:"completedAt"`
+	RunStartedAt      *string     `json:"runStartedAt"`
+	RunEndedAt        *string     `json:"runEndedAt"`
+	CreatedAt         string      `json:"createdAt"`
+	Events            []struct {
 		FromState *string `json:"fromState"`
 		ToState   string  `json:"toState"`
 		Detail    string  `json:"detail"`
@@ -357,12 +357,12 @@ func TestHealthAndNotFound(t *testing.T) {
 	e := newEnv(t)
 	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 8 || h.Version == "" || len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || !h.Harnesses[0].Connected || !h.Harnesses[0].Configured || h.Schema != sqlite.MaxVersion() || h.Engine != "sqlite" {
+	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 9 || h.Version == "" || len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || !h.Harnesses[0].Connected || !h.Harnesses[0].Configured || h.Schema != sqlite.MaxVersion() || h.Engine != "sqlite" {
 		t.Fatalf("health %+v", h)
 	}
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/nope", nil))
-	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "8" {
+	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "9" {
 		t.Fatalf("404 with API version header %q", rec.Header().Get("Stage-Api-Version"))
 	}
 	// T3 offline: still a healthy Stage server, with T3 reported down.
@@ -397,7 +397,7 @@ func TestTaskLifecycle(t *testing.T) {
 	tk := e.task(p.ID, "Say OK", map[string]any{"executionConfig": map[string]any{
 		"model": t3.ModelKey("claude", "claude-haiku-5-5"), "options": []map[string]any{{"id": "effort", "value": "low"}},
 	}})
-	if tk.State != "backlog" || tk.T3ThreadID != nil || tk.Links != (links{}) || tk.ProjectTitle != p.Title {
+	if tk.State != "backlog" || tk.ExternalSessionID != nil || tk.Links != (links{}) || tk.ProjectTitle != p.Title {
 		t.Fatalf("created %+v", tk)
 	}
 	if c := tk.Config; c == nil || c.Model != t3.ModelKey("claude", "claude-haiku-5-5") || len(c.Options) != 1 {
@@ -416,10 +416,10 @@ func TestTaskLifecycle(t *testing.T) {
 
 	var started task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
-	if started.State != "running" || started.T3ThreadID == nil || started.LaunchAttempt != 1 || started.LaunchedAt == nil {
+	if started.State != "running" || started.ExternalSessionID == nil || started.LaunchAttempt != 1 || started.LaunchedAt == nil {
 		t.Fatalf("started %+v", started)
 	}
-	threadID := *started.T3ThreadID
+	threadID := *started.ExternalSessionID
 	if started.Links.Web != publicURL+"/fake-env/"+url.PathEscape(threadID) {
 		t.Fatalf("web url %q", started.Links.Web)
 	}
@@ -453,28 +453,36 @@ func TestTaskLifecycle(t *testing.T) {
 	_ = e.fake.SetStatus(threadID, t3.StatusCompleted)
 	e.poll()
 	got := e.getTask(tk.ID)
-	if got.State != "done" || got.FinishedAt == nil || got.SettledAt != nil {
+	if got.State != "done" || got.FinishedAt == nil || got.CompletedAt != nil {
 		t.Fatalf("done %+v", got)
 	}
 	_ = e.fake.Settle(threadID)
 	e.poll()
 	got = e.getTask(tk.ID)
-	if got.State != "done" || got.SettledAt != nil {
+	if got.State != "done" || got.CompletedAt != nil {
 		t.Fatalf("settled %+v", got)
 	}
-	e.complete(tk.ID)
-	var settledList struct {
+	var completedList struct {
 		Tasks []task `json:"tasks"`
 	}
-	e.must("GET", "/api/tasks?state=settled&settledFrom=2000-01-01", nil, 200, &settledList)
-	if len(settledList.Tasks) != 0 {
-		t.Fatalf("settledFrom past %+v", settledList.Tasks)
+	e.must("GET", "/api/tasks?state=done&completedFrom=2000-01-01", nil, 200, &completedList)
+	if len(completedList.Tasks) != 0 {
+		t.Fatalf("unaccepted task in completion filter: %+v", completedList.Tasks)
 	}
-	e.must("GET", "/api/tasks?state=settled&settledFrom=2999-01-01", nil, 200, &settledList)
-	if len(settledList.Tasks) != 0 {
-		t.Fatalf("settledFrom future %+v", settledList.Tasks)
+	e.complete(tk.ID)
+	got = e.getTask(tk.ID)
+	if got.State != "done" || got.CompletedAt == nil {
+		t.Fatalf("completed task %+v", got)
 	}
-	e.must("GET", "/api/tasks?settledFrom=nope", nil, 400, nil)
+	e.must("GET", "/api/tasks?state=done&completedFrom=2000-01-01", nil, 200, &completedList)
+	if len(completedList.Tasks) != 1 || completedList.Tasks[0].ID != tk.ID {
+		t.Fatalf("completedFrom past %+v", completedList.Tasks)
+	}
+	e.must("GET", "/api/tasks?state=done&completedFrom=2999-01-01", nil, 200, &completedList)
+	if len(completedList.Tasks) != 0 {
+		t.Fatalf("completedFrom future %+v", completedList.Tasks)
+	}
+	e.must("GET", "/api/tasks?completedFrom=nope", nil, 400, nil)
 	var states []string
 	for _, ev := range got.Events {
 		states = append(states, ev.ToState)
@@ -492,8 +500,8 @@ func TestTaskLifecycle(t *testing.T) {
 	if _, ok := detail["thread"]; ok {
 		t.Fatal("task detail still has thread")
 	}
-	if got.T3ThreadID == nil || got.Links.Native != "t3code://threads/fake-env/"+url.PathEscape(*got.T3ThreadID) {
-		t.Fatalf("settled task native link %q", got.Links.Native)
+	if got.ExternalSessionID == nil || got.Links.Native != "t3code://threads/fake-env/"+url.PathEscape(*got.ExternalSessionID) {
+		t.Fatalf("completed task native link %q", got.Links.Native)
 	}
 	// Accepted tasks remain observable.
 	tasks, _ := e.store.PollableTasks(context.Background(), true)
@@ -525,7 +533,7 @@ func TestTaskActions(t *testing.T) {
 
 	var started task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
-	threadID := *started.T3ThreadID
+	threadID := *started.ExternalSessionID
 	if d, _ := e.fake.ReadThread(context.Background(), threadID); d.Branch != "" {
 		t.Fatalf("branch %q", d.Branch)
 	}
@@ -556,7 +564,7 @@ func TestTaskActions(t *testing.T) {
 
 	var dup task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/duplicate", tk.ID), nil, 201, &dup)
-	if dup.State != "backlog" || dup.Title != "B" || dup.ID == tk.ID || dup.T3ThreadID != nil || len(dup.Needs) != 0 {
+	if dup.State != "backlog" || dup.Title != "B" || dup.ID == tk.ID || dup.ExternalSessionID != nil || len(dup.Needs) != 0 {
 		t.Fatalf("duplicate %+v", dup)
 	}
 	e.must("DELETE", fmt.Sprintf("/api/tasks/%d", dup.ID), nil, 204, nil)
@@ -575,10 +583,6 @@ func TestTaskActions(t *testing.T) {
 	e.must("GET", "/api/tasks?state=running,backlog&q=b", nil, 200, &list)
 	if len(list.Tasks) != 1 || list.Tasks[0].ID != tk.ID {
 		t.Fatalf("filtered %+v", list.Tasks)
-	}
-	e.must("GET", "/api/tasks?state=settled", nil, 200, &list)
-	if len(list.Tasks) != 0 {
-		t.Fatalf("state filter %d", len(list.Tasks))
 	}
 	e.must("GET", "/api/tasks?state=nope", nil, 400, nil)
 	e.must("GET", fmt.Sprintf("/api/tasks?project=%d&from=2000-01-01&to=2999-01-01", p.ID), nil, 200, &list)
@@ -628,7 +632,7 @@ func TestLaunchTransportFailureReusesClientRequestID(t *testing.T) {
 	e.t3.lostLaunches.Store(1)
 	var started task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 200, &started)
-	if started.State != "running" || started.LaunchAttempt != 1 || started.T3ThreadID == nil {
+	if started.State != "running" || started.LaunchAttempt != 1 || started.ExternalSessionID == nil {
 		t.Fatalf("after one lost response %+v", started)
 	}
 	want := e.t3.launchRequestIDs()[0]
@@ -642,7 +646,7 @@ func TestLaunchTransportFailureReusesClientRequestID(t *testing.T) {
 	e.t3.lostLaunches.Store(2)
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 502, nil)
 	failed := e.getTask(b.ID)
-	if failed.State != "launching" || failed.LastError == nil || failed.LaunchAttempt != 1 || failed.T3ThreadID != nil {
+	if failed.State != "launching" || failed.LastError == nil || failed.LaunchAttempt != 1 || failed.ExternalSessionID != nil {
 		t.Fatalf("after two lost responses %+v", failed)
 	}
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 200, &started)
@@ -659,7 +663,7 @@ func TestLaunchTransportFailureReusesClientRequestID(t *testing.T) {
 		t.Fatalf("threads %d, want 2 (no duplicate launch)", page.Total)
 	}
 	// After a successful launch, the next start is a new attempt.
-	_ = e.fake.SetStatus(*started.T3ThreadID, t3.StatusFailed)
+	_ = e.fake.SetStatus(*started.ExternalSessionID, t3.StatusFailed)
 	e.poll()
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 200, &started)
 	if started.LaunchAttempt != 2 {
@@ -696,7 +700,7 @@ func TestBindingChangeDoesNotRedirectUncertainLaunch(t *testing.T) {
 	if len(inputs) != 3 || inputs[2].ProjectID != p.T3ProjectID || inputs[2].ClientRequestID != inputs[0].ClientRequestID || started.LaunchAttempt != 1 {
 		t.Fatalf("redirected retry %+v", inputs)
 	}
-	if err := e.fake.SetStatus(*started.T3ThreadID, t3.StatusFailed); err != nil {
+	if err := e.fake.SetStatus(*started.ExternalSessionID, t3.StatusFailed); err != nil {
 		t.Fatal(err)
 	}
 	e.poll()
@@ -741,7 +745,7 @@ func TestLaunchClientRequestIDCollision(t *testing.T) {
 	e.t3.foreignProject.Store(&other)
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", a.ID), nil, 502, nil)
 	got := e.getTask(a.ID)
-	if got.State != "launching" || got.T3ThreadID != nil || got.LastError == nil || !strings.Contains(*got.LastError, "conflicting") {
+	if got.State != "launching" || got.ExternalSessionID != nil || got.LastError == nil || !strings.Contains(*got.LastError, "conflicting") {
 		t.Fatalf("collision adopted %+v", got)
 	}
 	// A conflicting reply never authorizes a fresh attempt.
@@ -844,8 +848,8 @@ func TestReleaseRunLoopProcessesKicks(t *testing.T) {
 	go func() { e.runner.Run(ctx); close(done) }()
 	defer func() { cancel(); <-done }()
 
-	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCompleted)
-	_ = e.fake.Settle(*a.T3ThreadID)
+	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusCompleted)
+	_ = e.fake.Settle(*a.ExternalSessionID)
 	e.poll()
 	e.complete(a.ID)
 	e.runner.Kick() // user completion wakes release
@@ -868,7 +872,7 @@ func TestCancelledTaskReopens(t *testing.T) {
 
 	// A cancelled turn (e.g. denied permission) and the thread runs on.
 	a := e.task(p.ID, "a", map[string]any{"start": true})
-	threadA := *a.T3ThreadID
+	threadA := *a.ExternalSessionID
 	_ = e.fake.SetStatus(threadA, t3.StatusCancelled)
 	e.poll()
 	if got := e.getTask(a.ID); got.State != "cancelled" {
@@ -904,13 +908,13 @@ func TestCancelledTaskReopens(t *testing.T) {
 	// following T3 and the dependent starts once it settles.
 	b := e.task(p.ID, "b", map[string]any{"start": true})
 	c := e.task(p.ID, "c", map[string]any{"needs": []int64{b.ID}, "startMode": "auto"})
-	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusCancelled)
+	_ = e.fake.SetStatus(*b.ExternalSessionID, t3.StatusCancelled)
 	e.poll()
 	e.reconcile()
 	if got := e.getTask(c.ID); got.State != "backlog" {
 		t.Fatalf("dependent of cancelled task %s", got.State)
 	}
-	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusRunning)
+	_ = e.fake.SetStatus(*b.ExternalSessionID, t3.StatusRunning)
 	if _, err := e.sync.FullSync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -918,8 +922,8 @@ func TestCancelledTaskReopens(t *testing.T) {
 	if got := e.getTask(b.ID); got.State != "running" {
 		t.Fatalf("cancelled task with a dependent did not reopen: %s", got.State)
 	}
-	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusCompleted)
-	_ = e.fake.Settle(*b.T3ThreadID)
+	_ = e.fake.SetStatus(*b.ExternalSessionID, t3.StatusCompleted)
+	_ = e.fake.Settle(*b.ExternalSessionID)
 	e.poll()
 	e.complete(b.ID)
 	e.reconcile()
@@ -952,11 +956,12 @@ func TestTargetedSyncProjectsAndTasks(t *testing.T) {
 
 	var res struct {
 		Projects   int    `json:"projects"`
-		Threads    int    `json:"threads"`
+		Sessions   int    `json:"sessions"`
+		Threads    *int   `json:"threads"`
 		FinishedAt string `json:"finishedAt"`
 	}
 	e.must("POST", "/api/sync", nil, 200, &res)
-	if res.Projects != 2 || res.Threads != 1 || res.FinishedAt == "" {
+	if res.Projects != 2 || res.Sessions != 1 || res.Threads != nil || res.FinishedAt == "" {
 		t.Fatalf("sync %+v", res)
 	}
 	var reply struct {
@@ -1108,11 +1113,11 @@ func TestPreferences(t *testing.T) {
 	}
 
 	// Notification filter: default all; set; validate.
-	if strings.Join(p.NotifyEvents, ",") != "needs_input,failed,ready,done,settled" {
+	if strings.Join(p.NotifyEvents, ",") != "needs_input,failed,ready,done" {
 		t.Fatalf("default notifyEvents %v", p.NotifyEvents)
 	}
-	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{"settled", "ready", "done", "needs_input"}}, 200, &p)
-	if strings.Join(p.NotifyEvents, ",") != "needs_input,ready,done,settled" {
+	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{"ready", "done", "needs_input"}}, 200, &p)
+	if strings.Join(p.NotifyEvents, ",") != "needs_input,ready,done" {
 		t.Fatalf("notifyEvents %+v", p)
 	}
 	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{}}, 200, &p)
@@ -1309,16 +1314,16 @@ func TestPushSubscriptionsAndConfig(t *testing.T) {
 	}
 }
 
-func TestBadgeAndNeedsInputThreads(t *testing.T) {
+func TestBadgeAndNeedsInputSessions(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	p := e.project("/w/badge")
 
-	// Task in needs_input; its thread also observed needs_input (task-owned: not counted twice).
+	// The task and its session are both waiting and count once.
 	tk := e.task(p.ID, "needs me", nil)
 	var started task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
-	if err := e.fake.SetThread(*started.T3ThreadID, func(d *t3.ThreadDetail) { d.PendingRequestCount = 1 }); err != nil {
+	if err := e.fake.SetThread(*started.ExternalSessionID, func(d *t3.ThreadDetail) { d.PendingRequestCount = 1 }); err != nil {
 		t.Fatal(err)
 	}
 	e.poll()
@@ -1327,7 +1332,7 @@ func TestBadgeAndNeedsInputThreads(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	if err := e.store.UpsertThreads(ctx, t3.Observations([]t3.Thread{
+	for _, fixture := range []t3.Thread{
 		{ThreadID: "ext-wait", ProjectID: p.T3ProjectID, Title: "external", Status: t3.StatusWaiting, CreatedAt: now},
 		{ThreadID: "ext-sub", ProjectID: p.T3ProjectID, Title: "sub", Status: t3.StatusWaiting, CreatedAt: now,
 			ParentThreadID: "ext-wait", RelationshipToParent: "subagent"},
@@ -1335,12 +1340,14 @@ func TestBadgeAndNeedsInputThreads(t *testing.T) {
 			ParentThreadID: "ext-wait", RelationshipToParent: "fork"},
 		{ThreadID: "ext-settled", ProjectID: p.T3ProjectID, Title: "settled", Status: t3.StatusWaiting, Settled: true, CreatedAt: now},
 		{ThreadID: "ext-running", ProjectID: p.T3ProjectID, Title: "running", Status: t3.StatusRunning, CreatedAt: now},
-	})); err != nil {
-		t.Fatal(err)
+	} {
+		if err := e.store.PutObservation(ctx, fixture.Observation()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for id, st := range map[string]db.TaskState{
 		"ext-wait": db.StateNeedsInput, "ext-sub": db.StateNeedsInput, "ext-fork": db.StateNeedsInput, "ext-settled": db.StateNeedsInput,
-		"ext-running": db.StateRunning, *started.T3ThreadID: db.StateNeedsInput,
+		"ext-running": db.StateRunning, *started.ExternalSessionID: db.StateNeedsInput,
 	} {
 		o, err := e.store.Observation(ctx, db.SessionRef{ConnectionID: 1, ExternalSessionID: id})
 		if err != nil {
@@ -1426,22 +1433,28 @@ func TestNotificationGroupRead(t *testing.T) {
 		Tags []string `json:"tags"`
 	}
 	e.must("GET", "/api/notifications/unread-tags", nil, 200, &tags)
-	if fmt.Sprint(tags.Tags) != "[thread-1:ext-1 thread-1:ext-2]" {
+	if fmt.Sprint(tags.Tags) != "[session-1:ext-1 session-1:ext-2]" {
 		t.Fatalf("unread tags %v", tags.Tags)
 	}
 
-	e.must("POST", "/api/notifications/read", map[string]any{"upTo": 1, "groups": []string{"thread:1:ext-1"}}, 400, nil)
+	e.must("POST", "/api/notifications/read", map[string]any{"upTo": 1, "groups": []string{"session:1:ext-1"}}, 400, nil)
 	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{}}, 400, nil)
 	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{" "}}, 400, nil)
 	many := make([]string, 21)
 	for i := range many {
-		many[i] = fmt.Sprintf("thread:1:x%d", i)
+		many[i] = fmt.Sprintf("session:1:x%d", i)
 	}
 	e.must("POST", "/api/notifications/read", map[string]any{"groups": many}, 400, nil)
 
-	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{"thread:1:ext-1"}}, 204, nil)
+	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{"session:1:ext-2", "thread:1:ext-1"}}, 400, nil)
 	e.must("GET", "/api/notifications/unread-tags", nil, 200, &tags)
-	if fmt.Sprint(tags.Tags) != "[thread-1:ext-2]" {
+	if fmt.Sprint(tags.Tags) != "[session-1:ext-1 session-1:ext-2]" {
+		t.Fatalf("removed group key changed unread tags %v", tags.Tags)
+	}
+
+	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{"session:1:ext-1"}}, 204, nil)
+	e.must("GET", "/api/notifications/unread-tags", nil, 200, &tags)
+	if fmt.Sprint(tags.Tags) != "[session-1:ext-2]" {
 		t.Fatalf("unread tags after group read %v", tags.Tags)
 	}
 }
@@ -1471,7 +1484,7 @@ func TestNotificationGroups(t *testing.T) {
 		NextCursor *string `json:"nextCursor"`
 	}
 	e.must("GET", "/api/notifications/groups?limit=1", nil, 200, &pg)
-	if len(pg.Groups) != 1 || pg.Groups[0].Key != "thread:1:ext-1" || pg.Groups[0].EventCount != 2 ||
+	if len(pg.Groups) != 1 || pg.Groups[0].Key != "session:1:ext-1" || pg.Groups[0].EventCount != 2 ||
 		pg.Groups[0].UnreadCount != 2 || pg.LatestID != latest || pg.Unread != 3 || pg.NextCursor == nil {
 		t.Fatalf("first group page: %+v", pg)
 	}
@@ -1479,19 +1492,19 @@ func TestNotificationGroups(t *testing.T) {
 		t.Fatalf("group links: %+v", l)
 	}
 	e.must("GET", "/api/notifications/groups?limit=1&cursor="+url.QueryEscape(*pg.NextCursor), nil, 200, &pg)
-	if len(pg.Groups) != 1 || pg.Groups[0].Key != "thread:1:ext-2" || pg.NextCursor != nil {
+	if len(pg.Groups) != 1 || pg.Groups[0].Key != "session:1:ext-2" || pg.NextCursor != nil {
 		t.Fatalf("next group page: %+v", pg)
 	}
 	var history struct {
 		Notifications []db.Notification `json:"notifications"`
 		NextBefore    *int64            `json:"nextBefore"`
 	}
-	e.must("GET", "/api/notifications?group=thread%3A1%3Aext-1&limit=1", nil, 200, &history)
+	e.must("GET", "/api/notifications?group=session%3A1%3Aext-1&limit=1", nil, 200, &history)
 	if len(history.Notifications) != 1 || history.Notifications[0].ID != latest || history.NextBefore == nil {
 		t.Fatalf("first history page: %+v", history)
 	}
-	e.must("GET", fmt.Sprintf("/api/notifications?group=thread%%3A1%%3Aext-1&limit=1&before=%d", *history.NextBefore), nil, 200, &history)
-	if len(history.Notifications) != 1 || *history.Notifications[0].T3ThreadID != "ext-1" || history.NextBefore != nil {
+	e.must("GET", fmt.Sprintf("/api/notifications?group=session%%3A1%%3Aext-1&limit=1&before=%d", *history.NextBefore), nil, 200, &history)
+	if len(history.Notifications) != 1 || *history.Notifications[0].ExternalSessionID != "ext-1" || history.NextBefore != nil {
 		t.Fatalf("next history page: %+v", history)
 	}
 	for _, query := range []string{"limit=0", "cursor=x", "cursor=recent:0", "cursor=waiting:no", "cursor=other:1"} {
@@ -1519,7 +1532,7 @@ func TestTaskDetailReportsHarnessWorkspace(t *testing.T) {
 	var started task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
 	e.poll()
-	ref := db.SessionRef{ConnectionID: 1, ExternalSessionID: *started.T3ThreadID}
+	ref := db.SessionRef{ConnectionID: 1, ExternalSessionID: *started.ExternalSessionID}
 	o, err := e.store.Observation(ctx, ref)
 	if err != nil {
 		t.Fatal(err)

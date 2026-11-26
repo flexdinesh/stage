@@ -405,10 +405,8 @@ func (a *Adapter) observation(s session) (execution.Observation, error) {
 		State:       state,
 		Active:      state == "running" || state == "needs_input",
 		Branch:      t.Branch,
-		ModelLabel:  t.Model,
 		ExecutionID: t.LastPromptID,
 		Links:       a.links(s),
-		Artifacts:   []execution.Artifact{},
 		Config:      execution.Config{Options: []execution.ModelOption{}},
 		Origin:      t.Entrypoint,
 	}
@@ -437,7 +435,7 @@ func (a *Adapter) observation(s session) (execution.Observation, error) {
 	}
 	if s.hasLog && t.Reply != "" && state != "running" {
 		text, cut := truncate(t.Reply, maxReply)
-		o.Reply = &execution.Reply{ItemID: t.ReplyID, RunID: t.LastPromptID, MessageID: t.ReplyID, Text: text, Truncated: cut, UpdatedAt: t.ReplyAt.UTC()}
+		o.Reply = &execution.Reply{ItemID: t.ReplyID, RunID: t.LastPromptID, Text: text, Truncated: cut, UpdatedAt: t.ReplyAt.UTC()}
 	}
 	o.Usage = a.usage(s)
 	if o.Project == "" {

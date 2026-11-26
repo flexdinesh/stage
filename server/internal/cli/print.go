@@ -166,7 +166,7 @@ func printTask(w io.Writer, t client.Task) {
 		fmt.Fprintln(w, "  adopted  tracks an existing session (stage never starts it)")
 	}
 	if t.OriginSession != nil {
-		fmt.Fprintf(w, "  created by connection %d session %s %s\n", t.OriginSession.ConnectionID, t.OriginSession.ExternalSessionID, orDash(t.OriginThreadTitle))
+		fmt.Fprintf(w, "  created by connection %d session %s %s\n", t.OriginSession.ConnectionID, t.OriginSession.ExternalSessionID, orDash(t.OriginSessionTitle))
 	}
 	if t.Session != nil {
 		fmt.Fprintf(w, "  session  %s\n", t.Session.ExternalSessionID)
@@ -191,9 +191,6 @@ func printAnyTask(w io.Writer, v any) {
 }
 
 func printTaskDetail(w io.Writer, d client.TaskDetail) {
-	for _, link := range d.ArtifactLinks {
-		fmt.Fprintf(w, "artifact  %s %s\n", link.Label, link.URL)
-	}
 	printTask(w, d.Task)
 	printUsage(w, d.Usage)
 	printHandoff(w, d)
@@ -262,7 +259,7 @@ func printTreeRows(w io.Writer, res agenttools.TreesOut) {
 // stateCounts is "running 1, ready 2" in lifecycle order.
 func stateCounts(m map[string]int) string {
 	var parts []string
-	for _, k := range []string{"needs_input", "ready", "running", "launching", "blocked", "backlog", "done", "failed", "interrupted", "cancelled", "settled"} {
+	for _, k := range []string{"needs_input", "ready", "running", "launching", "blocked", "backlog", "done", "failed", "interrupted", "cancelled", "completed"} {
 		if n := m[k]; n > 0 {
 			parts = append(parts, fmt.Sprintf("%s %d", k, n))
 		}
@@ -381,7 +378,7 @@ func printRef(w io.Writer, r agenttools.RefOut) {
 	if r.SessionRef != nil && r.Session == nil {
 		fmt.Fprintf(w, "session %s (connection %d)  %s\n", r.SessionRef.ExternalSessionID, r.SessionRef.ConnectionID, r.SessionTitle)
 	}
-	for _, link := range []string{r.Links.Web, r.Links.App, r.Links.Native} {
+	for _, link := range []string{r.Links.Web, r.Links.Native} {
 		if link != "" {
 			fmt.Fprintln(w, link)
 		}

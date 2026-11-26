@@ -168,7 +168,7 @@ export function JournalRow({ entry, anchored = false }: { entry: JournalEntry; a
       ) : null}
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-meta-sm text-muted empty:hidden">
         {entry.sourceTaskId === null ? null : <TextLink to={`/tasks/${entry.sourceTaskId}`} variant="rest">source task #{entry.sourceTaskId}</TextLink>}
-        {entry.sourceSession ? <SourceSessionLink id={entry.sourceSession.externalSessionId} connectionId={entry.sourceSession.connectionId}/> : entry.sourceThreadId ? <SourceSessionLink id={entry.sourceThreadId}/> : null}
+        {entry.sourceSession ? <SourceSessionLink id={entry.sourceSession.externalSessionId} connectionId={entry.sourceSession.connectionId} /> : null}
         {entry.fromTreeId === null ? null : <TextLink to={`/trees/${entry.fromTreeId}`} variant="rest">from tree #{entry.fromTreeId}</TextLink>}
         {entry.toTreeId === null ? null : <TextLink to={`/trees/${entry.toTreeId}`} variant="rest">to tree #{entry.toTreeId}</TextLink>}
       </div>

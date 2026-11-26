@@ -597,7 +597,7 @@ func TestCatchUp(t *testing.T) {
 		row(12, "task-2", 10*min),
 		readRow,
 		row(14, "", 5*min),
-		row(15, "thread-a", 9*min),
+		row(15, "session-a", 9*min),
 		row(16, "task-6", 8*min),
 		row(17, "task-2", 7*min),
 		row(18, "task-8", 6*min),
@@ -606,7 +606,7 @@ func TestCatchUp(t *testing.T) {
 	} {
 		c.note(n)
 	}
-	all := []string{"task-1", "task-2", "thread-a", "task-6", "task-8", "task-9", "task-10"}
+	all := []string{"task-1", "task-2", "session-a", "task-6", "task-8", "task-9", "task-10"}
 	f.barrier(c, 6, all...)
 	f.idle()
 	if got := f.sink.showIDs(); !slices.Equal(got, []string{"local/task-8", "local/task-9", "local/task-10", "local/summary"}) {
@@ -869,44 +869,44 @@ func TestUnsupportedEvaluatedOnce(t *testing.T) {
 
 func TestReconcile(t *testing.T) {
 	p := cursorPrefs(5)
-	p.server(target.LocalID).Shown = local("task-90", "thread-old", "summary", "task-5")
+	p.server(target.LocalID).Shown = local("task-90", "session-old", "summary", "task-5")
 	f := newFixture(t, p)
 	c := f.srv.next(t)
 	c.hello(5, false)
 	// First snapshot closes earlier runs' notifications of read groups.
 	f.barrier(c, 1, "task-5")
-	if got := f.sink.closed(); !slices.Equal(got, []string{"local/task-90", "local/thread-old"}) {
+	if got := f.sink.closed(); !slices.Equal(got, []string{"local/session-old", "local/task-90"}) {
 		t.Fatalf("first snapshot closes = %v", got)
 	}
 	c.note(row(6, "task-6", 0))
-	n7 := row(7, "thread-a", 0)
+	n7 := row(7, "session-a", 0)
 	n7.URL = "/sessions/a#answer"
 	c.note(n7)
-	f.barrier(c, 3, "task-5", "task-6", "thread-a")
+	f.barrier(c, 3, "task-5", "task-6", "session-a")
 	f.idle()
-	if got := shownOf(f.saved()); !slices.Equal(got, []string{"local/summary", "local/task-5", "local/task-6", "local/thread-a"}) {
+	if got := shownOf(f.saved()); !slices.Equal(got, []string{"local/summary", "local/task-5", "local/task-6", "local/session-a"}) {
 		t.Errorf("shown = %v", got)
 	}
 	// Read on another device: closed here.
-	f.barrier(c, 1, "thread-a")
-	if got := f.sink.closed(); !slices.Equal(got, []string{"local/task-90", "local/thread-old", "local/task-5", "local/task-6"}) {
+	f.barrier(c, 1, "session-a")
+	if got := f.sink.closed(); !slices.Equal(got, []string{"local/session-old", "local/task-90", "local/task-5", "local/task-6"}) {
 		t.Errorf("closes = %v", got)
 	}
-	if got := shownOf(f.saved()); !slices.Equal(got, []string{"local/summary", "local/thread-a"}) {
+	if got := shownOf(f.saved()); !slices.Equal(got, []string{"local/summary", "local/session-a"}) {
 		t.Errorf("shown = %v", got)
 	}
 	f.svc.Sync("") // nothing left to close
 	if got := len(f.sink.closed()); got != 4 {
 		t.Errorf("Sync closed more: %v", f.sink.closed())
 	}
-	if got := f.targetPath("thread-a"); got != "/?inbox" {
+	if got := f.targetPath("session-a"); got != "/?inbox" {
 		t.Errorf("target = %q", got)
 	}
-	f.svc.CloseShown(target.LocalID, "thread-a")
-	if got := f.sink.closed(); got[len(got)-1] != "local/thread-a" {
+	f.svc.CloseShown(target.LocalID, "session-a")
+	if got := f.sink.closed(); got[len(got)-1] != "local/session-a" {
 		t.Errorf("CloseShown: %v", got)
 	}
-	if got := f.targetPath("thread-a"); got != "/?inbox" {
+	if got := f.targetPath("session-a"); got != "/?inbox" {
 		t.Errorf("target after close = %q", got)
 	}
 	f.svc.CloseShown(target.LocalID, "")

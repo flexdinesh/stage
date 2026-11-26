@@ -45,7 +45,7 @@ type change struct {
 	to   db.TaskState
 }
 
-func TestWatchThreads(t *testing.T) {
+func TestWatchAttention(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	ctx := context.Background()
 	fake := t3.NewFake()
@@ -100,17 +100,17 @@ func TestWatchThreads(t *testing.T) {
 	svc := t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	svc.Harnesses = t3Harnesses
 	var got []change
-	svc.OnThreadChange = func(_ context.Context, c t3sync.ThreadChange) {
+	svc.OnSessionChange = func(_ context.Context, c t3sync.SessionChange) {
 		from := ""
 		if c.From != nil {
 			from = string(*c.From)
 		}
-		got = append(got, change{c.ThreadID, from, c.To})
+		got = append(got, change{c.Session.ExternalSessionID, from, c.To})
 	}
 	pass := func(want ...change) {
 		t.Helper()
 		got = nil
-		if err := svc.WatchThreads(ctx); err != nil {
+		if err := svc.WatchAttention(ctx); err != nil {
 			t.Fatal(err)
 		}
 		byID := func(a, b change) int { return strings.Compare(a.id, b.id) }
@@ -144,10 +144,10 @@ func TestWatchThreads(t *testing.T) {
 		t.Fatal(err)
 	}
 	started, err := svc.StartTask(ctx, task.ID)
-	if err != nil || started.T3ThreadID == nil {
+	if err != nil || started.ExternalSessionID == nil {
 		t.Fatalf("start task: %+v %v", started, err)
 	}
-	taskThread := *started.T3ThreadID
+	taskThread := *started.ExternalSessionID
 	sub := launch("subagent")
 	if err := fake.SetThread(sub, func(d *t3.ThreadDetail) {
 		d.ParentThreadID, d.RelationshipToParent = ext, "subagent"
@@ -185,12 +185,14 @@ func TestWatchThreads(t *testing.T) {
 	pass(change{ext, "needs_input", db.StateDone}, change{extNeeds, "needs_input", db.StateFailed})
 	pass() // stable
 
-	// done → settled notifies (done stays watched until settled).
+	// T3 settlement leaves the Stage execution state unchanged.
 	if err := fake.SetThread(ext, func(d *t3.ThreadDetail) { d.Settled = true }); err != nil {
 		t.Fatal(err)
 	}
-	pass() // Harness settlement does not change Stage execution or acceptance.
-	pass() // settled: no longer watched
+	pass()
+	if o := observed(ext); o != string(db.StateDone) {
+		t.Fatalf("closed session observed %q", o)
+	}
 
 	// A thread created before start, first seen now: recorded silently.
 	needInput(oldIdle)

@@ -34,7 +34,6 @@ import {
   Details,
   EmptyState,
   ErrorText,
-  ExternalLink,
   Meta,
   Muted,
   PageHeader,
@@ -217,12 +216,12 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const action = useSessionAction()(task);
   const phoneBar = action !== null || stoppable;
   // Requests the harness lets Stage answer: the panel below leads, the harness's own client stays as the alternative.
-  const { requests, settled: requestsSettled } = useSessionRequests({ taskId: task.id, connectionId: task.connectionId, needsInput: task.state === "needs_input" });
+  const { requests, ready: requestsReady } = useSessionRequests({ taskId: task.id, connectionId: task.connectionId, needsInput: task.state === "needs_input" });
   const answerable = requests.length > 0;
   // A follow-up into the session: leads under the alert when its turn ended asking you, else sits under Last word.
   // The draft and the send live here so both survive the panel moving and the session working.
   const sendOp = useConnectionOperation(task.connectionId, "send", task.externalSessionId !== null && mayFollowUp(task.state));
-  const followUp = followUpView(task, { offered: sendOp.offered, requestsSettled, requestCount: requests.length });
+  const followUp = followUpView(task, { offered: sendOp.offered, requestsReady, requestCount: requests.length });
   const replyLeads = followUp?.placement === "lead";
   const sendMessage = useSendMessage(task.id);
   const [draft, setDraft] = useState("");
@@ -392,14 +391,13 @@ function TaskBody({ task }: { task: TaskDetail }) {
                 )}
                 <ImageStrip attachments={task.attachments} label="Prompt images" />
                 {task.currentHandoffs.map((h) => (
-                  <HandoffRecord key={`${h.attempt}:${h.sourceTaskId ?? h.sourceThreadId}`} handoff={h} />
+                  <HandoffRecord key={`${h.attempt}:${h.sourceTaskId ?? h.session?.externalSessionId}`} handoff={h} />
                 ))}
               </PromptPanel>
             )}
             {task.acceptances.map((acceptance) => <AcceptedResult key={acceptance.id} acceptance={acceptance} current={acceptance.id === task.acceptanceId} harness={task.harness} />)}
             <LastWordPanel task={task} />
             {replyLeads ? null : composer}
-            {task.artifactLinks.length === 0 ? null : <Panel title="Artifacts"><ul className="space-y-2">{task.artifactLinks.map((artifact) => <li key={artifact.url}><ExternalLink href={artifact.url} className="text-small">{artifact.label}</ExternalLink></li>)}</ul></Panel>}
             <JournalPanel owner={{ taskId: task.id }} projectId={task.projectId} />
             <TimelinePanel events={task.events} />
           </div>
@@ -407,7 +405,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
             <StatePanel task={task} className="max-lg:hidden" />
             {task.tree === null ? <NoTreePanel task={task} /> : <TreePanel task={task} tree={task.tree} />}
             <BatchPanel task={task} />
-            <ThreadPanel task={task} />
+            <SessionPanel task={task} />
             <UsagePanel task={task} />
             <ConfigPanel task={task} />
           </div>
@@ -435,7 +433,7 @@ function StatePanel({ task, className }: { task: TaskDetail; className: string }
   );
 }
 
-function ThreadPanel({ task }: { task: TaskDetail }) {
+function SessionPanel({ task }: { task: TaskDetail }) {
   const destination = useSessionDestination();
   const name = useHarnesses().kindName(task.harness);
   const title = `${name} session`;
@@ -534,8 +532,8 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
         <Detail label="Finished">
           <RelTime at={task.finishedAt} />
         </Detail>
-        <Detail label="Settled">
-          <RelTime at={task.settledAt} />
+        <Detail label="Completed">
+          <RelTime at={task.completedAt} />
         </Detail>
       </Details>
     </Panel>

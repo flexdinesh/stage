@@ -23,7 +23,7 @@ import {
   toggleFold,
 } from "../src/lib/dashboard.ts";
 
-const task = (id, state, extra = {}) => ({ id, state, acceptanceId: state === "settled" ? id : null, treeId: null, readiness: null, ...extra });
+const task = (id, state, extra = {}) => ({ id, state, acceptanceId: null, completedAt: null, treeId: null, readiness: null, ...extra });
 const ids = (list) => list.map((t) => t.id);
 
 const SINCE = "2026-11-13T00:00:00Z";
@@ -37,15 +37,15 @@ test("each open task lists in exactly one group", () => {
   assert.deepEqual(groupsOf(task(1, "launching")), ["running"]);
   assert.deepEqual(groupsOf(task(1, "backlog", { startAt: null })), ["backlog"]);
   assert.deepEqual(groupsOf(task(1, "backlog", { startAt: "2026-11-20T09:00:00Z" })), ["scheduled"]);
-  assert.deepEqual(groupsOf(task(1, "settled", { completedAt: "2026-11-15T00:00:00Z" })), ["settled"]);
-  assert.deepEqual(groupsOf(task(1, "settled", { completedAt: "2026-11-01T00:00:00Z" })), [], "completed before the window");
+  assert.deepEqual(groupsOf(task(1, "done", { acceptanceId: 1, completedAt: "2026-11-15T00:00:00Z" })), ["completed"]);
+  assert.deepEqual(groupsOf(task(1, "done", { acceptanceId: 1, completedAt: "2026-11-01T00:00:00Z" })), [], "completed before the window");
   assert.deepEqual(groupsOf(task(1, "failed", { acceptanceId: 4 })), [], "completed failures ask nothing");
 });
 
 test("a task completed here lingers in Awaiting review, not Completed", () => {
   const t = task(1, "done", { acceptanceId: 9, completedAt: "2026-11-15T00:00:00Z" });
   assert.deepEqual(groupsOf(t, new Set([1])), ["done"]);
-  assert.deepEqual(groupsOf(t), ["settled"]);
+  assert.deepEqual(groupsOf(t), ["completed"]);
 });
 
 test("the Dashboard lists only what asks for the user", () => {
@@ -56,7 +56,7 @@ test("the Dashboard lists only what asks for the user", () => {
 });
 
 test("tree filter: any keeps tree members; none keeps only tasks outside trees, in order", () => {
-  const tasks = [task(1, "running", { treeId: 10 }), task(2, "backlog"), task(3, "settled", { treeId: 20 }), task(4, "done")];
+  const tasks = [task(1, "running", { treeId: 10 }), task(2, "backlog"), task(3, "done", { treeId: 20, acceptanceId: 3 }), task(4, "done")];
   assert.deepEqual(ids(filterByTree(tasks, "any")), [1, 2, 3, 4]);
   assert.deepEqual(ids(filterByTree(tasks, "none")), [2, 4]);
   assert.equal(parseTreeFilter("none"), "none");
@@ -67,7 +67,7 @@ test("tree filter: any keeps tree members; none keeps only tasks outside trees, 
 test("a lingering task stays in Awaiting review and out of Completed until its linger ends", () => {
   const since = "2026-11-12T00:00:00Z";
   const completed = task(5, "done", { acceptanceId: 9, completedAt: "2026-11-19T10:00:00Z" });
-  const review = task(6, "settled", { acceptanceId: null, completedAt: null });
+  const review = task(6, "done");
   const none = new Set();
   const linger = new Set([5]);
   assert.equal(awaitingReview(completed, none), false);
@@ -77,7 +77,7 @@ test("a lingering task stays in Awaiting review and out of Completed until its l
   assert.equal(awaitingReview(review, none), true);
   // A lingering id never pulls in other states.
   assert.equal(awaitingReview(task(5, "running", { acceptanceId: 9 }), linger), false);
-  assert.equal(completedSince(task(7, "settled", { completedAt: "2026-11-01T00:00:00Z" }), since, none), false);
+  assert.equal(completedSince(task(7, "done", { acceptanceId: 7, completedAt: "2026-11-01T00:00:00Z" }), since, none), false);
 });
 
 test("lingers start at LINGER_MS, end on undo, and prune when expired", () => {
@@ -95,17 +95,23 @@ test("lingers start at LINGER_MS, end on undo, and prune when expired", () => {
 
 test("only Completed starts collapsed; bad storage reads as the default", () => {
   for (const raw of [null, "", "{", "null", "[]", '{"collapsed":3}']) assert.deepEqual(parseFold(raw), DEFAULT_FOLD, String(raw));
-  assert.equal(isFolded(DEFAULT_FOLD, "settled"), true);
+  assert.equal(isFolded(DEFAULT_FOLD, "completed"), true);
   assert.equal(isFolded(DEFAULT_FOLD, "running"), false);
   assert.deepEqual(parseFold('{"collapsed":["running",1],"seen":"x"}'), { collapsed: ["running"], seen: [] });
 });
 
+test("stored legacy completion folds stay collapsed", () => {
+  const fold = parseFold('{"collapsed":["settled","running"],"seen":["12:now"]}');
+  assert.deepEqual(fold, { collapsed: ["completed", "running"], seen: ["12:now"] });
+  assert.equal(isFolded(fold, "completed"), true);
+});
+
 test("toggling round-trips through storage", () => {
-  const opened = toggleFold(DEFAULT_FOLD, "settled");
-  assert.equal(isFolded(opened, "settled"), false);
+  const opened = toggleFold(DEFAULT_FOLD, "completed");
+  assert.equal(isFolded(opened, "completed"), false);
   const both = toggleFold(opened, "backlog");
   assert.equal(isFolded(parseFold(JSON.stringify(both)), "backlog"), true);
-  assert.equal(isFolded(parseFold(JSON.stringify(both)), "settled"), false);
+  assert.equal(isFolded(parseFold(JSON.stringify(both)), "completed"), false);
   assert.equal(isFolded(toggleFold(both, "backlog"), "backlog"), false);
 });
 

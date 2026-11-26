@@ -3,7 +3,7 @@ import type { Notification } from "../api/types.ts";
 const entityKey = (n: Notification) => {
   if (n.taskId !== null) return `task:${n.taskId}`;
   // Older payloads may omit the connection: they key by session alone (never assume a fixed connection id).
-  if (n.externalSessionId !== null) return `thread:${n.connectionId ?? ""}:${n.externalSessionId}`;
+  if (n.externalSessionId !== null) return `session:${n.connectionId ?? ""}:${n.externalSessionId}`;
   return `notification:${n.id}`;
 };
 

@@ -87,10 +87,10 @@ func TestFullSyncDoesNotEnumerateHistory(t *testing.T) {
 	}
 	svc := t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	r, err := svc.FullSync(t.Context())
-	if err != nil || r.Threads != 0 || r.Projects != 1 || client.pages.Load() != 0 {
+	if err != nil || r.Sessions != 0 || r.Projects != 1 || client.pages.Load() != 0 {
 		t.Fatalf("sync=%+v pages=%d err=%v", r, client.pages.Load(), err)
 	}
-	if pr := svc.Progress(store.ActiveID(db.LocalMachine, "t3")); pr.Running || pr.Threads != 0 {
+	if pr := svc.Progress(store.ActiveID(db.LocalMachine, "t3")); pr.Running || pr.Sessions != 0 {
 		t.Fatalf("after sync %+v", pr)
 	}
 	// The sync pass imports the discovered project once.

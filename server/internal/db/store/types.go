@@ -11,7 +11,6 @@ const (
 	StateRunning     TaskState = "running"
 	StateNeedsInput  TaskState = "needs_input"
 	StateDone        TaskState = "done"
-	StateSettled     TaskState = "settled"
 	StateFailed      TaskState = "failed"
 	StateInterrupted TaskState = "interrupted"
 	StateCancelled   TaskState = "cancelled"
@@ -19,7 +18,7 @@ const (
 
 var TaskStates = []TaskState{
 	StateBacklog, StateLaunching, StateRunning, StateNeedsInput, StateDone,
-	StateSettled, StateFailed, StateInterrupted, StateCancelled,
+	StateFailed, StateInterrupted, StateCancelled,
 }
 
 func (s TaskState) Valid() bool { return slices.Contains(TaskStates, s) }
@@ -33,7 +32,7 @@ func (s TaskState) Finished() bool {
 	return false
 }
 
-// Active: a thread is (or is about to be) working; delete/edit restricted.
+// Active: a session is working or about to start; delete/edit restricted.
 func (s TaskState) Active() bool {
 	switch s {
 	case StateLaunching, StateRunning, StateNeedsInput:

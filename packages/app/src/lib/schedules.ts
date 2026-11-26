@@ -256,7 +256,6 @@ export function lastRun(taskId: number, state: TaskState): LastRun {
       return { kind: "quiet", word: "finished" };
     case "backlog":
       return { kind: "quiet", word: "pending" };
-    case "settled":
     case "cancelled":
       return { kind: "quiet", word: state };
   }

@@ -17,7 +17,7 @@ import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
 import { Alert, Button, Chip, ConfirmInline, EmptyState, ErrorText, Hint, Input, Menu, MenuItem, MenuSeparator, Muted, PageHeader, Panel, PickerButton, Segmented, SkeletonBar, buttonClass, cx, useMenu } from "../components/ui.tsx";
 import { useIdParam } from "../lib/params.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
-import { closeBlocker, closedLabel, countMembers, pickedTask, treeClosed, treeMeta, treeProjectLabel, treeSettled } from "../lib/trees.ts";
+import { closeBlocker, closedLabel, countMembers, pickedTask, treeClosed, treeMeta, treeProjectLabel, treeCompleted } from "../lib/trees.ts";
 import { CopyLinkPair, type LinkSubject } from "../components/StageLinks.tsx";
 import { NotFoundPage } from "./NotFoundPage.tsx";
 
@@ -190,7 +190,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
   const [confirming, setConfirming] = useState<"dissolve" | "delete" | null>(null);
   const selected = tree.tasks.find((t) => t.id === picked) ?? null;
   const readyCount = tree.tasks.filter((t) => t.readiness === "ready" && !t.adopted).length;
-  const settled = treeSettled(tree.tasks);
+  const completed = treeCompleted(tree.tasks);
   const closed = treeClosed(tree);
   const closedChip = closedLabel(tree, countMembers(tree.tasks));
   const linkSubject: LinkSubject = { kind: "tree", id: tree.id, title: tree.title };
@@ -249,7 +249,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
               <span title={`Last activity ${dateTime(tree.lastActivityAt)}`} className="text-fg">
                 active {relativeTime(tree.lastActivityAt)}
               </span>
-              {settled ? (
+              {completed ? (
                 <Chip tone="ok" dot className="ml-2">
                   completed
                 </Chip>

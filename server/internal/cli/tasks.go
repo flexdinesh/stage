@@ -183,7 +183,7 @@ func (w *waitFlags) register(c *cmd) {
 	c.fs.StringVar(&w.startMode, "start-mode", "", "inherit (default)|auto|manual; set shared policy on the tree, override only for a task exception")
 	removeWorkspaceFlags(c, "base-task")
 	c.fs.BoolVar(&w.afterMe, "after-me", false, "also need your own session (adopted as a task)")
-	c.fs.BoolVar(&w.handoff, "handoff", true, "append each need's final reply, PRs, branch and thread link at launch (--handoff=false to skip)")
+	c.fs.BoolVar(&w.handoff, "handoff", true, "append each need's final reply, branch and session link at launch (--handoff=false to skip)")
 	c.fs.StringVar(&w.startAt, "start-at", "", "one-shot start YYYY-MM-DDTHH:mm")
 	c.fs.StringVar(&w.startTz, "tz", "", "IANA zone for --start-at")
 }
@@ -301,7 +301,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		f.register(c)
 		c.fs.StringVar(&startAt, "start-at", "", "one-shot start (empty clears)")
 		c.fs.StringVar(&tz, "tz", "", "zone for --start-at")
-		c.fs.BoolVar(&handoff, "handoff", true, "append the needs' handoff at launch (true|false)")
+		c.fs.BoolVar(&handoff, "handoff", true, "append each need's final reply, branch and session link at launch (true|false)")
 		c.fs.StringVar(&startMode, "start-mode", "", "auto|manual|inherit")
 		removeWorkspaceFlags(c, "base-task")
 		if err := c.parse(rest); err != nil {
@@ -400,7 +400,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 	case "wait":
 		var until string
 		var timeout time.Duration
-		c.fs.StringVar(&until, "until", "", "states")
+		c.fs.StringVar(&until, "until", "", "comma-separated states (default: needs_input,done,failed,interrupted,cancelled)")
 		c.fs.DurationVar(&timeout, "timeout", 10*time.Minute, "timeout")
 		if err := c.parse(rest); err != nil {
 			return err

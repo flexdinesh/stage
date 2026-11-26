@@ -12,10 +12,10 @@ import (
 
 // ---- explicit session lookup and adoption ----
 
-// adoptThread: POST /api/connections/{connectionId}/sessions/{id}/adopt {title?, initialNote?,
+// adoptSession: POST /api/connections/{connectionId}/sessions/{id}/adopt {title?, initialNote?,
 // treeId?} makes the session a task ("Track as task"): 201 new, 200 when a
 // task already owns it.
-func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
+func (s *server) adoptSession(w http.ResponseWriter, r *http.Request) error {
 	ref, err := requestSession(r)
 	if err != nil {
 		return err
@@ -38,7 +38,7 @@ func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	task, created, err := s.Store.AdoptThread(r.Context(), db.AdoptInput{
+	task, created, err := s.Store.AdoptSession(r.Context(), db.AdoptInput{
 		ProjectID: req.ProjectID, NewProjectTitle: req.NewProjectTitle, Binding: binding,
 		Session: ref, CallerSession: req.CallerSession, Title: req.Title, InitialNote: req.InitialNote, TreeID: req.TreeID,
 	})

@@ -103,7 +103,7 @@ func TestConnectionAndExecutionConfigOnT3(t *testing.T) {
 	}
 	var started task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
-	d, err := e.fake.ReadThread(t.Context(), *started.T3ThreadID)
+	d, err := e.fake.ReadThread(t.Context(), *started.ExternalSessionID)
 	if err != nil || d.ProviderInstanceID != "claude" || d.Model != "claude-haiku-5-5" {
 		t.Fatalf("launched %+v %v", d, err)
 	}

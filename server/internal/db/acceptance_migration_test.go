@@ -40,7 +40,7 @@ func TestAcceptanceMigrationPreservesHistoryAndPolicies(t *testing.T) {
 	s := NewStore(pool)
 	ctx := context.Background()
 	a, err := s.GetTask(ctx, 1)
-	if err != nil || a.AcceptanceID == nil || a.CompletedAt == nil || a.State != StateSettled {
+	if err != nil || a.AcceptanceID == nil || a.CompletedAt == nil || a.State != StateDone {
 		t.Fatalf("migration: %+v %v", a, err)
 	}
 	for _, id := range []int64{2, 3} {
@@ -124,4 +124,33 @@ func TestAutoCompleteMigrationKeepsAcceptances(t *testing.T) {
 	if err != nil || len(inputs) != 1 || inputs[0].ID != 7 || inputs[0].Evidence.Session == nil || inputs[0].Evidence.Session.ExternalSessionID != "thread" {
 		t.Fatalf("launch inputs %+v %v", inputs, err)
 	}
+}
+
+func TestSettledMigrationKeepsEvidenceBytes(t *testing.T) {
+	pool := openUnmigrated(t)
+	migrateTo(t, pool, 34)
+	seedV0035DropSettled(t, pool)
+	migrateTo(t, pool, sqlite.MaxVersion())
+	s := NewStore(pool)
+	ctx := t.Context()
+
+	accepted, err := s.GetTask(ctx, 7)
+	if err != nil || accepted.State != StateDone || accepted.AcceptanceID == nil || *accepted.AcceptanceID != 11 || accepted.CompletedAt == nil {
+		t.Fatalf("accepted task: %+v %v", accepted, err)
+	}
+	reopened, err := s.GetTask(ctx, 8)
+	if err != nil || reopened.State != StateDone || reopened.AcceptanceID != nil || reopened.CompletedAt != nil || reopened.FinishedAt == nil {
+		t.Fatalf("reopened task: %+v %v", reopened, err)
+	}
+	history, err := s.Acceptances(ctx, 7)
+	if err != nil || len(history) != 1 || history[0].Provenance != "historical_settlement" {
+		t.Fatalf("acceptance history: %+v %v", history, err)
+	}
+	e := history[0].Evidence
+	if e.ExecutionState != StateDone || e.ExternalSessionID == nil || *e.ExternalSessionID != "legacy-1" ||
+		e.SessionLink == nil || *e.SessionLink != "https://example.com/session" || e.Reply == nil || *e.Reply != "kept" {
+		t.Fatalf("evidence: %+v", e)
+	}
+	wantRows(t, pool, `SELECT evidence FROM task_acceptances WHERE id=11`, v0035Evidence)
+	wantRows(t, pool, `SELECT input FROM acceptance_requests WHERE request_id='original'`, v0035Request)
 }

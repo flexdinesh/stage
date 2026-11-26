@@ -170,7 +170,7 @@ func TestScopedHistoryNeverReadsAnotherConnection(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, key := range []string{"thread:1:same", "thread:2:same"} {
+	for _, key := range []string{"session:1:same", "session:2:same"} {
 		events, err := s.ListNotificationHistory(ctx, key, 10, nil)
 		if err != nil || len(events) != 1 || NotificationKey(events[0]) != key {
 			t.Fatalf("history %s %+v %v", key, events, err)

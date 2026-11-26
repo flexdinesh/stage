@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ALLOWED_URI, markdownToHtml } from "../src/lib/markdown.ts";
+import { allowedUri, markdownToHtml } from "../src/lib/markdown.ts";
 
 test("markdownToHtml renders GFM blocks", () => {
   const html = markdownToHtml("## Done\n\n- one\n- two\n\n```go\nx := 1\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n");
@@ -31,11 +31,23 @@ test("markdownToHtml autolinks bare stage deep links", () => {
   assert.match(html, /<a href="stage:\/\/tasks\/3">s<\/a>/);
 });
 
-test("sanitizer keeps web, T3 app and stage links, drops script URLs", () => {
-  for (const ok of ["https://x.dev/a", "mailto:a@b.c", "t3code://threads/e/t", "stage://tasks/1", "stage-dev://sessions/x", "/tasks/1", "#top"]) {
-    assert.ok(ALLOWED_URI.test(ok), ok);
+
+test("sanitizer enables declared harness links and keeps web and Stage links", () => {
+  const base = allowedUri();
+  const declared = allowedUri(["t3code", "desktop+links", "app.code"]);
+  for (const ok of ["https://x.dev/a", "mailto:a@b.c", "tel:12", "stage://tasks/1", "stage-dev://sessions/x", "/tasks/1", "#top", "issue1/log"]) {
+    assert.ok(base.test(ok), ok);
+    assert.ok(declared.test(ok), ok);
   }
-  for (const bad of ["javascript:alert(1)", "data:text/html,x", "vbscript:x", "mygo://localhost/x", "file:///etc/passwd"]) {
-    assert.ok(!ALLOWED_URI.test(bad), bad);
+  for (const app of ["t3code://threads/e/t", "desktop+links://x", "app.code://x"]) {
+    assert.equal(base.test(app), false, app);
+    assert.equal(declared.test(app), true, app);
+  }
+  assert.equal(declared.test("appxcode://x"), false);
+});
+
+test("sanitizer rejects script URLs even when a scheme is supplied", () => {
+  for (const bad of ["javascript:alert(1)", " Javascript:x", "data:text/html,x", "vbscript:x", "mygo://localhost/x", "file:///etc/passwd", "about:blank", "blob:x", "other2:x"]) {
+    assert.equal(allowedUri(["javascript", "data", "vbscript", "file", "about", "blob"]).test(bad), false, bad);
   }
 });

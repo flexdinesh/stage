@@ -44,8 +44,7 @@ func completionPreview(ctx context.Context, tx store.Tx, id int64) (CompletionPr
 	e := &p.Evidence
 	e.Session = task.Session
 	e.TaskID, e.Title, e.TreeID, e.TreeTitle, e.ProjectID = id, task.Title, task.TreeID, task.TreeTitle, task.ProjectID
-	e.ThreadID, e.ExecutionState = task.T3ThreadID, task.State
-	e.Artifacts = []execution.Artifact{}
+	e.ExternalSessionID, e.ExecutionState = task.ExternalSessionID, task.State
 	if task.State.Active() {
 		p.BlockedReason = "Stop execution in its harness before completing this task."
 	}
@@ -67,13 +66,9 @@ func completionPreview(ctx context.Context, tx store.Tx, id int64) (CompletionPr
 			e.WorktreePath = nullIfEmpty(observed.Directory)
 			e.RunID = nullIfEmpty(observed.ExecutionID)
 			e.ObservedAt = &observed.UpdatedAt
-			if observed.Links.App != "" {
-				e.ThreadLink = &observed.Links.App
-			} else if observed.Links.Web != "" {
-				e.ThreadLink = &observed.Links.Web
-			}
-			if len(observed.Artifacts) > 0 {
-				e.Artifacts = observed.Artifacts
+			e.SessionLink = nullIfEmpty(observed.Links.Web)
+			if e.SessionLink == nil {
+				e.SessionLink = nullIfEmpty(observed.Links.Native)
 			}
 			if observed.Reply != nil {
 				r := observed.Reply

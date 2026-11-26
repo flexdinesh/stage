@@ -88,7 +88,6 @@ test("until formats remaining time", () => {
 
 test("lastRun flags only failed or fire-blocking runs", () => {
   assert.deepEqual(lastRun(131, "done"), { kind: "quiet", word: "finished" });
-  assert.deepEqual(lastRun(7, "settled"), { kind: "quiet", word: "settled" });
   assert.deepEqual(lastRun(7, "cancelled"), { kind: "quiet", word: "cancelled" });
   assert.deepEqual(lastRun(7, "backlog"), { kind: "quiet", word: "pending" });
   assert.deepEqual(lastRun(208, "running"), { kind: "flag", skip: "skips while #208 runs" });

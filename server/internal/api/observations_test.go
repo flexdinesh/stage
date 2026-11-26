@@ -45,10 +45,10 @@ func TestPushObservationsIngest(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/push")
 	tk := e.task(p.ID, "Pushed", map[string]any{"start": true})
-	if tk.State != "running" || tk.T3ThreadID == nil {
+	if tk.State != "running" || tk.ExternalSessionID == nil {
 		t.Fatalf("started %+v", tk)
 	}
-	session := *tk.T3ThreadID
+	session := *tk.ExternalSessionID
 	path := "/api/connections/1/observations"
 	at := time.Now().UTC().Add(time.Minute)
 
@@ -119,7 +119,7 @@ func TestPushObservationsRefused(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/push-refused")
 	tk := e.task(p.ID, "Pushed", map[string]any{"start": true})
-	session := *tk.T3ThreadID
+	session := *tk.ExternalSessionID
 	at := time.Now().UTC().Add(time.Minute)
 
 	// A session of another connection fails the whole batch: nothing is ingested.
@@ -172,7 +172,7 @@ func TestPushObservationsThroughGateway(t *testing.T) {
 	p := e.project("/w/push-gw")
 	tk := e.task(p.ID, "Pushed", map[string]any{"start": true})
 	var refused errOut
-	rec := e.gw(j.Token, "POST", "/api/connections/1/observations", pushBody(pushed(1, *tk.T3ThreadID, p.T3ProjectID, "done", time.Now().UTC().Add(time.Minute))), &refused)
+	rec := e.gw(j.Token, "POST", "/api/connections/1/observations", pushBody(pushed(1, *tk.ExternalSessionID, p.T3ProjectID, "done", time.Now().UTC().Add(time.Minute))), &refused)
 	if rec.Code != 403 || refused.Code != "gateway_forbidden" {
 		t.Fatalf("gateway push for another machine: %d %s", rec.Code, rec.Body)
 	}

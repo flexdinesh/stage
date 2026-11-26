@@ -441,7 +441,7 @@ export function DevUiPage() {
           <RequestCard request={SAMPLE_ALWAYS} harness="Claude Code" onRespond={noop} />
           <RequestCard request={SAMPLE_QUESTION} harness="Claude Code" onRespond={noop} />
         </Panel>
-        <Panel title="Settled" flush>
+        <Panel title="Completed" flush>
           <RequestCard request={SAMPLE_APPROVAL} harness="Claude Code" outcome="answered" onRespond={noop} />
           <RequestCard request={{ ...SAMPLE_APPROVAL, id: "r4" }} harness="Claude Code" outcome="expired" onRespond={noop} />
           <RequestCard request={{ ...SAMPLE_APPROVAL, id: "r5" }} harness="Claude Code" busy onRespond={noop} />
@@ -517,7 +517,7 @@ export function DevUiPage() {
           <div className="flex flex-col gap-2 text-small">
             <Meta>octo · claude-opus-5-5 · 14m ago</Meta>
             <MetaLine>
-              {"settled 3h ago"}
+              {"completed 3h ago"}
               {"ran 35m"}
               {""}
               <TextLink to="/trees" variant="rest">

@@ -127,7 +127,7 @@ func TestDerivedWritesOnceAndRollBack(t *testing.T) {
 			return err
 		}},
 		{"handoff", 0, func(ctx context.Context, tx store.Tx, f derivedFixture) error {
-			return recordHandoff(ctx, tx, f.l, Handoff{Attempt: 1, Status: HandoffSent, SourceTaskID: &f.a, SourceThreadID: "legacy", Text: "x"})
+			return recordHandoff(ctx, tx, f.l, Handoff{Attempt: 1, Status: HandoffSent, SourceTaskID: &f.a, Text: "x"})
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -159,15 +159,14 @@ func TestDerivedWritesOnceAndRollBack(t *testing.T) {
 	}
 }
 
-// Without an active local T3, a legacy handoff (thread id, no session)
-// records no source session instead of failing the write.
-func TestLegacyHandoffWithoutLocalT3(t *testing.T) {
+// A handoff can omit its source session when none was recorded.
+func TestHandoffWithoutSourceSession(t *testing.T) {
 	s, pool, moved := movedT3(t)
 	ctx := t.Context()
 	project := projectWithBinding(t, s, moved, "/w/a")
 	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,launch_attempt,connection_id) VALUES(7,$1,'dst','p','launching',1,$2)`, project, moved)
 	src := int64(7)
-	if err := s.RecordHandoff(ctx, 7, Handoff{Attempt: 1, Status: HandoffSent, SourceTaskID: &src, SourceThreadID: "legacy-thr", Text: "x"}); err != nil {
+	if err := s.RecordHandoff(ctx, 7, Handoff{Attempt: 1, Status: HandoffSent, SourceTaskID: &src, Text: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := handoffSession(t, pool, 7); got != "-" {

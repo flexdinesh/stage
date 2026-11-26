@@ -80,7 +80,7 @@ async function closeSystemNotifications(tag?: string): Promise<void> {
 export function staleTags(shown: readonly (string | null)[], unread: ReadonlySet<string>): Set<string> {
   const stale = new Set<string>();
   for (const tag of shown) {
-    if (tag !== null && (tag.startsWith("task-") || tag.startsWith("thread-")) && !unread.has(tag)) stale.add(tag);
+    if (tag !== null && (tag.startsWith("task-") || tag.startsWith("session-")) && !unread.has(tag)) stale.add(tag);
   }
   return stale;
 }

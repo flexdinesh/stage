@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -71,7 +72,14 @@ func (s *server) pushObservations(w http.ResponseWriter, r *http.Request) error 
 	var in struct {
 		Observations []execution.Observation `json:"observations"`
 	}
-	if err := decodeStrict(r, &in); err != nil {
+	body, err := rawBody(r)
+	if err != nil {
+		return err
+	}
+	if err := rejectRemovedObservationFields(body); err != nil {
+		return err
+	}
+	if err := db.DecodeStrict(body, &in); err != nil {
 		return err
 	}
 	if n := len(in.Observations); n == 0 || n > maxPushedObservations {
@@ -93,6 +101,44 @@ func (s *server) pushObservations(w http.ResponseWriter, r *http.Request) error 
 		results = append(results, res)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+	return nil
+}
+
+func rejectRemovedObservationFields(body []byte) error {
+	var in struct {
+		Observations []json.RawMessage `json:"observations"`
+	}
+	if json.Unmarshal(body, &in) != nil {
+		return nil // The strict decoder reports malformed bodies.
+	}
+	for i, raw := range in.Observations {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) != nil {
+			continue
+		}
+		for _, field := range []string{"artifacts", "modelLabel"} {
+			if _, ok := fields[field]; ok {
+				return db.Invalid("observations[%d].%s was removed in API v9", i, field)
+			}
+		}
+		for _, group := range []struct {
+			name   string
+			fields []string
+		}{
+			{"links", []string{"service", "app"}},
+			{"reply", []string{"messageId", "position"}},
+		} {
+			var nested map[string]json.RawMessage
+			if json.Unmarshal(fields[group.name], &nested) != nil {
+				continue
+			}
+			for _, field := range group.fields {
+				if _, ok := nested[field]; ok {
+					return db.Invalid("observations[%d].%s.%s was removed in API v9", i, group.name, field)
+				}
+			}
+		}
+	}
 	return nil
 }
 

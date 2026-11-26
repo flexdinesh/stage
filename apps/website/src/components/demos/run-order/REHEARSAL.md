@@ -7,7 +7,7 @@ Changed from the gold: stage's Ink Workbench throughout (0 radius, hairlines, mo
 Beats (loop ~16s):
 1. Cursor opens the "Needs" picker ("Add a need…"), picks `#12 Retry failed webhooks`, presses Add. Picker folds away; levels join (cell 1, connector draws, cell 2 dashed with ink outline); rows get `then #13` / `needs #12`; "Hand off context" row appears.
 2.  #12 `running` -> `done` (teal); cursor selects Complete #12 -> `completed` (green), meta rolls to `completed just now`; level cell and "Needs" meta follow.
-3. #13 `backlog` -> `launching` -> `running` (sky), its `needs #12` chip leaves (no longer waiting), cell 2 tints; the toggle slot crossfades to `HANDOFF FROM #12 · sent 14:02`, reply excerpt, `billing-api#41` (open, sky), branch `feat/webhook-retries`.
+3. #13 `backlog` -> `launching` -> `running` (sky), its `needs #12` chip leaves (no longer waiting), cell 2 tints; the toggle slot crossfades to `HANDOFF FROM #12 · sent 14:02`, reply excerpt, `Session link`, branch `feat/webhook-retries`.
 Payoff holds 3.2s; reset: #12/#13 rows and the satellite fade (300ms), snap to start while hidden, fade back; panel header, skeleton rows and window chrome stay.
 Poster: #12 completed, #13 running, handoff shown.
 

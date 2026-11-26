@@ -147,7 +147,7 @@ func subscribed(t *testing.T, f *claudetest.Fake, a *claudecode.Adapter) (string
 // Claude may post Stop a moment before its list shows the turn over:
 // Events reads again until it does. A list that never changes still
 // pushes what was read last (as a poll would).
-func TestEventsSettleOnTheList(t *testing.T) {
+func TestEventsReadUntilTheListReflectsTheHook(t *testing.T) {
 	f := claudetest.New(t)
 	a := f.HookedAdapter(conn, f.Hooks())
 	id, ch, _, _ := subscribed(t, f, a)
@@ -155,12 +155,12 @@ func TestEventsSettleOnTheList(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	f.SetState(id, "done", "idle", "")
 	if o := next(t, ch); o.State != "done" {
-		t.Fatalf("settled %+v", o)
+		t.Fatalf("state after the list updates: %+v", o)
 	}
 	f.SetState(id, "working", "busy", "")
 	f.Hook(id, "Stop", nil)
 	if o := next(t, ch); o.State != "running" {
-		t.Fatalf("never settled %+v", o)
+		t.Fatalf("state when the list stays unchanged: %+v", o)
 	}
 	none(t, ch, 200*time.Millisecond)
 }

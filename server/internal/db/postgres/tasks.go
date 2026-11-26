@@ -42,7 +42,7 @@ SELECT t.id, t.project_id, p.title, COALESCE((SELECT external_project_id FROM ta
   COALESCE((SELECT jsonb_agg(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'::jsonb),
   COALESCE((SELECT jsonb_agg(n.task_id ORDER BY n.task_id) FROM task_needs n WHERE n.need_id = t.id), '[]'::jsonb),
   t.adopted, t.ready_at, t.launch_attempt, t.last_error,
-  t.launched_at, t.finished_at, t.settled_at, (obs.observation->>'startedAt')::timestamptz, (obs.observation->>'endedAt')::timestamptz, substr(obs.observation #>> '{reply,text}',1,1000), (obs.observation #>> '{reply,updatedAt}')::timestamptz,
+  t.launched_at, t.finished_at, (obs.observation->>'startedAt')::timestamptz, (obs.observation->>'endedAt')::timestamptz, substr(obs.observation #>> '{reply,text}',1,1000), (obs.observation #>> '{reply,updatedAt}')::timestamptz,
   t.created_at, t.updated_at,
   t.start_at, t.start_tz, t.schedule_id, sc.title, (SELECT observation->>'title' FROM execution_observations WHERE session_id=t.origin_session_id), t.handoff,
   COALESCE((SELECT jsonb_agg(jsonb_build_object('id', a.id, 'name', a.name, 'mimeType', a.mime_type,
@@ -65,17 +65,17 @@ func scanTask(row rowScanner) (store.Task, error) {
 	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.T3ProjectID, &t.Title, &t.Prompt,
 		&t.State, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
 		&t.StartMode, &t.EffectiveStartMode, &t.Readiness, &t.Needs, &t.Dependents, &t.Adopted, &t.ReadyAt,
-		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.SettledAt, &t.RunStartedAt, &t.RunEndedAt,
+		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.RunStartedAt, &t.RunEndedAt,
 		&t.LastWordPreview, &t.LastWordAt, &t.CreatedAt,
 		&t.UpdatedAt, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
-		&t.OriginThreadTitle, &t.Handoff, &t.Attachments,
-		&t.StateSince, &t.ThreadUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
+		&t.OriginSessionTitle, &t.Handoff, &t.Attachments,
+		&t.StateSince, &t.SessionUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
 		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID)
 	if err != nil {
 		return store.Task{}, notFound(err)
 	}
 	if t.Session != nil {
-		t.T3ThreadID = &t.Session.ExternalSessionID
+		t.ExternalSessionID = &t.Session.ExternalSessionID
 	}
 	t.LastWordPreview = store.Preview(t.LastWordPreview)
 	t.Needs = nonNilIDs(t.Needs)
@@ -134,8 +134,8 @@ func (r tasks) List(ctx context.Context, f store.TaskFilter) ([]store.Task, erro
 	if f.To != nil {
 		w.add("t.created_at < " + w.arg(*f.To))
 	}
-	if f.SettledFrom != nil {
-		w.add("(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id) >= " + w.arg(*f.SettledFrom))
+	if f.CompletedFrom != nil {
+		w.add("(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id) >= " + w.arg(*f.CompletedFrom))
 	}
 	switch f.Closed {
 	case "all":
@@ -149,15 +149,14 @@ func (r tasks) List(ctx context.Context, f store.TaskFilter) ([]store.Task, erro
 }
 
 func (r tasks) Pollable(ctx context.Context, includeStale bool) ([]store.Task, error) {
-	// failed|interrupted|cancelled are not final: T3 keeps the thread and it
-	// can run again (a cancelled turn, a follow-up sent in T3). Polled for 10
-	// minutes after the last change, then whenever the thread mirror (full
-	// sync) shows it active again.
+	// failed|interrupted|cancelled sessions may receive follow-ups and
+	// can run again. Poll them for 10 minutes after the last change, then
+	// whenever the stored observation shows activity.
 	rows, err := r.Query(ctx, taskSelect+`
 WHERE (t.session_id IS NOT NULL OR t.state='launching') AND (
   t.state IN ('launching', 'running', 'needs_input')
   OR (t.state='backlog' AND t.adopted)
-  OR (t.state IN ('done','settled') AND ((t.acceptance_id IS NULL AND $1::boolean) OR t.updated_at > `+nowPlusSQL("-1 hour")+`))
+  OR (t.state = 'done' AND ((t.acceptance_id IS NULL AND $1::boolean) OR t.updated_at > `+nowPlusSQL("-1 hour")+`))
   OR (t.state IN ('failed', 'interrupted', 'cancelled') AND (
     t.updated_at > `+nowPlusSQL("-10 minutes")+`
     OR COALESCE((SELECT observation->'active' IN ('true'::jsonb, '1'::jsonb) FROM execution_observations WHERE session_id=t.session_id), false)))
@@ -353,7 +352,6 @@ UPDATE tasks SET
   last_error = CASE WHEN $3::boolean THEN NULL WHEN $5::text IS NOT NULL THEN $5::text ELSE last_error END,
   finished_at = CASE WHEN $3::boolean THEN NULL
                      WHEN $6::boolean AND finished_at IS NULL THEN `+nowSQL+` ELSE finished_at END,
-  settled_at = CASE WHEN $3::boolean THEN NULL WHEN $2::text = 'settled' THEN `+nowSQL+` ELSE settled_at END,
   start_at = CASE WHEN $3::boolean THEN NULL ELSE start_at END,
   start_tz = CASE WHEN $3::boolean THEN NULL ELSE start_tz END,
   ready_at = CASE WHEN $3::boolean THEN NULL ELSE ready_at END,

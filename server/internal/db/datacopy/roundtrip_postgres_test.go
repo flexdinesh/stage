@@ -21,6 +21,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/store"
 )
 
+const legacyEvidence = `{"threadId":"thread-1", "executionState":"settled",  "a" : "x" }`
+
 // seedSQL fills every Stage table of a SQLite database at the head with
 // edge values: non-ASCII and metacharacter text, evidence JSON with odd key
 // order and whitespace, queried JSON with number forms jsonb normalizes,
@@ -56,7 +58,7 @@ var seedSQL = []string{
 newline and 日本語', 1)`,
 	`INSERT INTO task_needs (task_id, need_id) VALUES (2, 1)`,
 	`INSERT INTO task_events (task_id, from_state, to_state, detail, at) VALUES (1, NULL, 'backlog', 'created', '2026-11-09T00:00:00.000000Z'), (1, 'backlog', 'done', '', '2026-11-09T01:00:00.000000Z')`,
-	`INSERT INTO task_acceptances (id, task_id, provenance, evidence, note, source_session_id) VALUES (1, 1, 'user', '{"z":1,  "a" : "x" }', 'n', 1)`,
+	`INSERT INTO task_acceptances (id, task_id, provenance, evidence, note, source_session_id) VALUES (1, 1, 'user', '` + legacyEvidence + `', 'n', 1)`,
 	`INSERT INTO acceptance_requests (task_id, request_id, input, result) VALUES (1, 'r1', '{"b":2, "a":1}', '{"ok": true, "n": 10}')`,
 	`INSERT INTO completion_inferences (task_id, execution_id, signal, acceptance_id) VALUES (1, 'e1', 'settled', 1)`,
 	`INSERT INTO execution_attempts (task_id, attempt, intent, checkpoint, phase, revision, observed_session) VALUES (1, 1, '{"i":1}', '{"version":1,"data":{"k":"v"}}', 'confirmed', 2, '{"s":"x"}')`,
@@ -247,7 +249,7 @@ func TestRoundTrip(t *testing.T) {
 	if err := dst.Pool().QueryRow(ctx, `SELECT evidence FROM task_acceptances WHERE id = 1`).Scan(&evidence); err != nil {
 		t.Fatal(err)
 	}
-	if evidence != `{"z":1,  "a" : "x" }` {
+	if evidence != legacyEvidence {
 		t.Fatalf("evidence bytes changed: %q", evidence)
 	}
 	for table, want := range map[string]int64{"snippets": 4, "users": 3, "machines": 3, "harness_connections": 4, "tasks": 3, "push_subscriptions": 2} {

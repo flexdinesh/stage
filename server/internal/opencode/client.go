@@ -280,12 +280,7 @@ func (a *Adapter) Destinations(_ context.Context, ref execution.SessionRef) exec
 	if !a.valid(ref) {
 		return execution.Links{}
 	}
-	path := a.sessionPath() + ref.ExternalSessionID
-	links := execution.Links{Web: a.web + path}
-	if a.web != a.browserEndpoint {
-		links.Service = a.browserEndpoint + path
-	}
-	return links
+	return execution.Links{Web: a.web + a.sessionPath() + ref.ExternalSessionID}
 }
 func (a *Adapter) ResolveLink(_ context.Context, s string) (execution.SessionRef, error) {
 	id := strings.TrimSpace(s)

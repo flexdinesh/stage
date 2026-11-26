@@ -19,12 +19,8 @@ func TestNotificationsInbox(t *testing.T) {
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{
-		{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Ext", Status: t3.StatusWaiting, CreatedAt: time.Now().UTC()},
-	})); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.UpsertThreadDetail(ctx, t3.ThreadDetail{Thread: t3.Thread{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Fix bug & test", Status: t3.StatusWaiting, UpdatedAt: time.Now().UTC()}, PendingRequestCount: 1}); err != nil {
+	detail := t3.ThreadDetail{Thread: t3.Thread{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Fix bug & test", Status: t3.StatusWaiting, UpdatedAt: time.Now().UTC()}, PendingRequestCount: 1}
+	if err := s.PutObservation(ctx, detail.Observation()); err != nil {
 		t.Fatal(err)
 	}
 	proj := "proj-1"
@@ -162,7 +158,7 @@ func TestNotificationGroups(t *testing.T) {
 	}
 	cursor := &db.NotificationCursor{Waiting: false, ID: groups[1].ID}
 	older, err := s.ListNotificationGroups(ctx, 2, cursor, latest)
-	if err != nil || len(older) != 2 || older[0].Key != "thread:1:ext-2" || older[1].Key != "thread:1:ext-1" {
+	if err != nil || len(older) != 2 || older[0].Key != "session:1:ext-2" || older[1].Key != "session:1:ext-1" {
 		t.Fatalf("group pagination/identity: %+v %v", older, err)
 	}
 	waitingCursor := &db.NotificationCursor{Waiting: true, ID: waitingID}
@@ -234,8 +230,8 @@ func TestNotificationGroupReadAndTags(t *testing.T) {
 		return got
 	}
 	taskTag := fmt.Sprintf("task-%d", task.ID)
-	// A task-owned thread notification is tagged by its task, never its thread.
-	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{taskTag, "task-99", "thread-1:ext-1"}) {
+	// A session notification owned by a task uses the task tag.
+	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{"session-1:ext-1", taskTag, "task-99"}) {
 		t.Fatalf("unread tags %s", got)
 	}
 
@@ -243,7 +239,7 @@ func TestNotificationGroupReadAndTags(t *testing.T) {
 	if err := s.MarkNotificationGroupsRead(ctx, []string{fmt.Sprintf("task:%d", task.ID), "task:99"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{"thread-1:ext-1"}) {
+	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{"session-1:ext-1"}) {
 		t.Fatalf("tags after group read %s", got)
 	}
 	if n, err := s.UnreadNotificationCount(ctx); err != nil || n != 2 {
@@ -252,7 +248,7 @@ func TestNotificationGroupReadAndTags(t *testing.T) {
 
 	// A new event makes a read group unread again.
 	insert(db.NewNotification{Event: db.StateFailed, TaskID: &task.ID, Title: "Say OK", URL: taskURL})
-	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{taskTag, "thread-1:ext-1"}) {
+	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{"session-1:ext-1", taskTag}) {
 		t.Fatalf("tags after new event %s", got)
 	}
 }
@@ -290,7 +286,7 @@ func TestNotificationKeyParity(t *testing.T) {
 	}
 	want := map[string]bool{
 		fmt.Sprintf("task:%d", task.ID): true, fmt.Sprintf("task:%d", deleted.ID): true, "task:007": true,
-		"thread:1:ext-1": true,
+		"session:1:ext-1": true,
 	}
 	identityless := 0
 	for _, g := range groups {
@@ -356,9 +352,9 @@ func TestNotificationsAfter(t *testing.T) {
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("row: %+v %v", rows, err)
 	}
-	// The task's current thread, live state and stored fields.
+	// The task's current session, live state and stored fields.
 	n := rows[0]
-	if n.T3ThreadID == nil || *n.T3ThreadID != thread || n.CurrentState == nil || *n.CurrentState != db.StateNeedsInput ||
+	if n.ExternalSessionID == nil || *n.ExternalSessionID != thread || n.CurrentState == nil || *n.CurrentState != db.StateNeedsInput ||
 		n.Title != "n4" || n.URL != fmt.Sprintf("/tasks/%d", task.ID) || n.ReadAt != nil || n.CreatedAt.IsZero() {
 		t.Fatalf("row %+v", n)
 	}

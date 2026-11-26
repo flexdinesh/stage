@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -166,6 +167,49 @@ func TestTreesLifecycle(t *testing.T) {
 	}
 }
 
+func TestTreeCompletionFilterAndSummary(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/completed-tree")
+	a := e.task(p.ID, "a", map[string]any{"start": true})
+	var tree treeDetail
+	e.must("POST", "/api/trees", map[string]any{
+		"title": "T", "tasks": []map[string]any{{"taskId": a.ID}},
+	}, 201, &tree)
+	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusCompleted)
+	e.poll()
+
+	var list struct {
+		Trees []struct {
+			ID          int64           `json:"id"`
+			CompletedAt *string         `json:"completedAt"`
+			SettledAt   json.RawMessage `json:"settledAt"`
+			Counts      map[string]int  `json:"counts"`
+		} `json:"trees"`
+	}
+	e.must("GET", "/api/trees?completedFrom=2999-01-01", nil, 200, &list)
+	if len(list.Trees) != 1 || list.Trees[0].CompletedAt != nil || list.Trees[0].Counts["done"] != 1 || list.Trees[0].Counts["completed"] != 0 {
+		t.Fatalf("unaccepted tree summary %+v", list)
+	}
+	e.complete(a.ID)
+	e.must("GET", "/api/trees", nil, 200, &list)
+	if len(list.Trees) != 0 {
+		t.Fatalf("completed tree in default view %+v", list)
+	}
+	e.must("GET", "/api/trees?completedFrom=2000-01-01", nil, 200, &list)
+	if len(list.Trees) != 1 || list.Trees[0].ID != tree.ID || list.Trees[0].CompletedAt == nil ||
+		list.Trees[0].SettledAt != nil || list.Trees[0].Counts["done"] != 0 || list.Trees[0].Counts["completed"] != 1 {
+		t.Fatalf("completed tree summary %+v", list)
+	}
+	if _, exists := list.Trees[0].Counts["settled"]; exists {
+		t.Fatal("tree counts still have settled")
+	}
+	e.must("GET", "/api/trees?completedFrom=2999-01-01", nil, 200, &list)
+	if len(list.Trees) != 0 {
+		t.Fatalf("completed tree after cutoff %+v", list)
+	}
+	e.must("GET", "/api/trees?completedFrom=nope", nil, 400, nil)
+}
+
 func TestAutoFanInLaunchesWhenAllNeedsSettle(t *testing.T) {
 	e := newEnv(t)
 	p1 := e.project("/w/one")
@@ -180,9 +224,9 @@ func TestAutoFanInLaunchesWhenAllNeedsSettle(t *testing.T) {
 		t.Fatalf("a %+v", got)
 	}
 
-	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCompleted)
-	_ = e.fake.Settle(*a.T3ThreadID)
-	_ = e.fake.SetStatus(*b.T3ThreadID, t3.StatusCompleted) // done, not settled
+	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusCompleted)
+	_ = e.fake.Settle(*a.ExternalSessionID)
+	_ = e.fake.SetStatus(*b.ExternalSessionID, t3.StatusCompleted) // done, not settled
 	e.poll()
 	e.complete(a.ID)
 	e.reconcile()
@@ -190,15 +234,15 @@ func TestAutoFanInLaunchesWhenAllNeedsSettle(t *testing.T) {
 		t.Fatalf("one need unsettled must hold: %+v", got)
 	}
 
-	_ = e.fake.Settle(*b.T3ThreadID)
+	_ = e.fake.Settle(*b.ExternalSessionID)
 	e.poll()
 	e.complete(b.ID)
 	e.reconcile()
 	got := e.getTask(c.ID)
-	if got.State != "running" || got.T3ThreadID == nil || !slices.Equal(got.Needs, []int64{a.ID, b.ID}) || got.Readiness != nil {
+	if got.State != "running" || got.ExternalSessionID == nil || !slices.Equal(got.Needs, []int64{a.ID, b.ID}) || got.Readiness != nil {
 		t.Fatalf("after both settle c must run, keeping its needs: %+v", got)
 	}
-	d, _ := e.fake.ReadThread(context.Background(), *got.T3ThreadID)
+	d, _ := e.fake.ReadThread(context.Background(), *got.ExternalSessionID)
 	if d.ProjectID != p2.T3ProjectID {
 		t.Fatalf("c launched in %s, want %s", d.ProjectID, p2.T3ProjectID)
 	}
@@ -230,8 +274,8 @@ func TestManualReadyNotifiesOnceAndStartTree(t *testing.T) {
 	if len(ready) != 0 {
 		t.Fatalf("blocked tasks are not ready: %v", ready)
 	}
-	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCompleted)
-	_ = e.fake.Settle(*a.T3ThreadID)
+	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusCompleted)
+	_ = e.fake.Settle(*a.ExternalSessionID)
 	e.poll()
 	e.complete(a.ID)
 	e.reconcile()
@@ -274,7 +318,7 @@ func TestFailedNeedKeepsDependentBlocked(t *testing.T) {
 	for _, status := range []t3.ThreadStatus{t3.StatusFailed, t3.StatusInterrupted} {
 		a := e.task(p.ID, "a", map[string]any{"start": true})
 		b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}})
-		_ = e.fake.SetStatus(*a.T3ThreadID, status)
+		_ = e.fake.SetStatus(*a.ExternalSessionID, status)
 		e.poll()
 		e.reconcile()
 		if got := e.getTask(b.ID); got.State != "backlog" || readinessOf(got) != "blocked" {

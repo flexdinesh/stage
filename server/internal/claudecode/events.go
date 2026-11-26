@@ -120,16 +120,16 @@ func (a *Adapter) settle(ctx context.Context, n Nudge) (execution.Observation, b
 			continue
 		}
 		last, have = o, true
-		if settled(n, o.State) {
+		if reflectsNudge(n, o.State) {
 			break
 		}
 	}
 	return last, have
 }
 
-// settled reports whether state shows the change n's event announces. An
-// event that announces nothing in particular is settled by one read.
-func settled(n Nudge, state string) bool {
+// reflectsNudge reports whether state shows the change n's event announces.
+// An event that announces no state change needs only one read.
+func reflectsNudge(n Nudge, state string) bool {
 	switch n.Event {
 	case "Stop", "StopFailure", "SessionEnd":
 		return state != "running"

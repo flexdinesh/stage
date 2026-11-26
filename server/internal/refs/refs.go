@@ -25,7 +25,7 @@ const (
 	KindSession Kind = "session"
 )
 
-// Ref is a parsed reference: TaskID for a task, TreeID for a tree, ThreadID
+// Ref is a parsed reference: TaskID for a task, TreeID for a tree, SessionID
 // (the external session id; ConnectionID 0 when the reference names none)
 // for a session.
 type Ref struct {
@@ -33,7 +33,7 @@ type Ref struct {
 	Kind         Kind
 	TaskID       int64
 	TreeID       int64
-	ThreadID     string
+	SessionID    string
 }
 
 // ErrInvalid: the input names no task, tree or session.
@@ -80,7 +80,7 @@ func Parse(s string) (Ref, error) {
 	if strings.HasPrefix(s, "#") || strings.ContainsAny(s, " \t\r\n/") {
 		return Ref{}, ErrInvalid
 	}
-	return Ref{Kind: KindSession, ThreadID: s}, nil
+	return Ref{Kind: KindSession, SessionID: s}, nil
 }
 
 func taskRef(digits string) (Ref, error) {
@@ -146,9 +146,9 @@ func stagePath(u *url.URL) (Ref, bool) {
 			if err != nil || c <= 0 {
 				return Ref{}, false
 			}
-			return Ref{Kind: KindSession, ConnectionID: c, ThreadID: id}, true
+			return Ref{Kind: KindSession, ConnectionID: c, SessionID: id}, true
 		}
-		return Ref{Kind: KindSession, ThreadID: id}, true
+		return Ref{Kind: KindSession, SessionID: id}, true
 	}
 	return Ref{}, false
 }
@@ -173,7 +173,7 @@ func parseDeepLink(s string) (Ref, error) {
 		if err != nil || connection <= 0 {
 			return Ref{}, ErrInvalid
 		}
-		return Ref{Kind: KindSession, ConnectionID: connection, ThreadID: segs[3]}, nil
+		return Ref{Kind: KindSession, ConnectionID: connection, SessionID: segs[3]}, nil
 	}
 	if len(segs) != 2 {
 		return Ref{}, ErrInvalid
@@ -184,7 +184,7 @@ func parseDeepLink(s string) (Ref, error) {
 	case "trees":
 		return treeRef(segs[1])
 	case "sessions":
-		return Ref{Kind: KindSession, ThreadID: segs[1]}, nil
+		return Ref{Kind: KindSession, SessionID: segs[1]}, nil
 	}
 	return Ref{}, ErrInvalid
 }

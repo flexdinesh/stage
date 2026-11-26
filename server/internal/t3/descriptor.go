@@ -27,6 +27,7 @@ const (
 // sessions it runs in other harnesses (Wraps).
 var Descriptor = harness.Descriptor{
 	Kind: Kind, Name: "T3", Hosting: harness.Connected, StableIdentity: true,
+	LinkSchemes: []string{"t3code"},
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedSettled, Provenance: "harness_settled",
 		Setting:   "Complete tasks when settled in T3",

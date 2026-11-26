@@ -33,7 +33,7 @@ func (s *server) putDefaultConnection(w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
-// putNotifyEvents: body {"events": TaskState[]} (needs_input|failed|ready|done|settled).
+// putNotifyEvents: body {"events": TaskState[]} (needs_input|failed|ready|done).
 func (s *server) putNotifyEvents(w http.ResponseWriter, r *http.Request) error {
 	var body struct {
 		Events *[]db.TaskState `json:"events"`

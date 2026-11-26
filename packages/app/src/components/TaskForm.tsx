@@ -182,14 +182,14 @@ function initialState(
 }
 
 
-/** Value that settles `ms` after its last change (preview requests while typing a cron). Pass a primitive: a new object each render never settles. */
+/** Value updated after `ms` without a change, for previews while typing a cron. */
 function useDebounced<T extends string | null>(value: T, ms: number): T {
-  const [settled, setSettled] = useState(value);
+  const [debounced, setDebounced] = useState(value);
   useEffect(() => {
-    const t = setTimeout(() => setSettled(value), ms);
+    const t = setTimeout(() => setDebounced(value), ms);
     return () => clearTimeout(t);
   }, [value, ms]);
-  return settled;
+  return debounced;
 }
 
 interface TaskFormProps {

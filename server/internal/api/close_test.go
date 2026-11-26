@@ -63,7 +63,7 @@ func TestTreeDoneArchiveAndReopenOnActivity(t *testing.T) {
 	e.must("PATCH", treePath(tree), map[string]any{"status": "archived"}, 409, nil)
 	e.must("PATCH", treePath(tree), map[string]any{"status": "closed"}, 400, nil)
 
-	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCancelled)
+	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusCancelled)
 	e.poll()
 	var tr closeTree
 	e.must("PATCH", treePath(tree), map[string]any{"status": "done"}, 200, &tr)
@@ -99,7 +99,7 @@ func TestTreeDoneArchiveAndReopenOnActivity(t *testing.T) {
 	if ids := e.closeTrees("?status=archived"); !slices.Equal(ids, []int64{tree}) {
 		t.Fatalf("archived trees %v", ids)
 	}
-	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusRunning)
+	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusRunning)
 	e.poll()
 	e.must("GET", treePath(tree), nil, 200, &tr)
 	if tr.Status != "archived" || tr.ClosedAt == nil {
@@ -126,7 +126,7 @@ func TestTaskArchiveAndDelete(t *testing.T) {
 	e.must("POST", taskPath(member.ID, "/archive"), nil, 409, nil)  // tree member
 	e.must("POST", taskPath(99999, "/archive"), nil, 404, nil)
 
-	_ = e.fake.SetStatus(*started.T3ThreadID, t3.StatusFailed)
+	_ = e.fake.SetStatus(*started.ExternalSessionID, t3.StatusFailed)
 	e.poll()
 	e.must("DELETE", taskPath(started.ID), nil, 409, nil)
 	e.must("POST", taskPath(started.ID, "/archive"), nil, 200, &got)

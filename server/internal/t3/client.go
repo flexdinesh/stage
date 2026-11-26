@@ -264,7 +264,14 @@ type Thread struct {
 
 // PullRequest is a PR T3 associates with a thread. State is T3's string
 // (open, merged, closed, draft, ...); Source is created, agent or linked.
-type PullRequest = execution.Artifact
+type PullRequest struct {
+	Host       string
+	Repository string
+	Number     int
+	URL        string
+	Source     string
+	State      string
+}
 
 // ThreadDetail is t3_thread_read: thread + detail fields + recentRuns.
 type ThreadDetail struct {

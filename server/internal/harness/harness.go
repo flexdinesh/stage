@@ -7,6 +7,7 @@ package harness
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -83,6 +84,9 @@ type Descriptor struct {
 	// revived. Otherwise the harness proves continuity itself.
 	StableIdentity bool      `json:"-"`
 	Closures       []Closure `json:"closures"`
+	// LinkSchemes are the URL schemes of the harness's own app links
+	// (Links.Native, links in replies), lower case, without ":".
+	LinkSchemes []string `json:"linkSchemes"`
 	// Setup is the connection setup schema (connected and hosted harnesses).
 	Setup Setup `json:"setup"`
 	// Attribution is how an agent running on this harness tells Stage its
@@ -207,6 +211,12 @@ var provenances = map[string]string{
 	execution.ClosedArchived: "harness_archived",
 }
 
+var linkSchemePattern = regexp.MustCompile(`^[a-z][a-z0-9+.-]*$`)
+
+var reservedLinkSchemes = []string{
+	"http", "https", "ftp", "ftps", "mailto", "tel", "javascript", "data", "vbscript", "file", "blob", "about", "stage",
+}
+
 // Registry is the fixed set of harness kinds this server knows.
 type Registry struct{ list []Descriptor }
 
@@ -221,6 +231,9 @@ func NewRegistry(ds ...Descriptor) (*Registry, error) {
 		}
 		if ds[i].Attention == "" {
 			ds[i].Attention = AttentionNotify
+		}
+		if ds[i].LinkSchemes == nil {
+			ds[i].LinkSchemes = []string{}
 		}
 	}
 	for _, d := range ds {
@@ -239,6 +252,13 @@ func NewRegistry(ds ...Descriptor) (*Registry, error) {
 		}
 		if d.Attention != AttentionNotify && d.Attention != AttentionSilent {
 			return nil, fmt.Errorf("harness %s: unknown attention policy %q", d.Kind, d.Attention)
+		}
+		seenSchemes := map[string]bool{}
+		for _, s := range d.LinkSchemes {
+			if !linkSchemePattern.MatchString(s) || seenSchemes[s] || slices.Contains(reservedLinkSchemes, s) || strings.HasPrefix(s, "stage-") {
+				return nil, fmt.Errorf("harness %s: invalid link scheme %q", d.Kind, s)
+			}
+			seenSchemes[s] = true
 		}
 		for _, c := range d.Closures {
 			if p, ok := provenances[c.Signal]; !ok || p != c.Provenance {

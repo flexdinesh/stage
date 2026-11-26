@@ -18,7 +18,7 @@ test("an adopted backlog session keeps its launch controls in the harness", () =
 
 test("a task waits only while blocked on its needs", () => {
   assert.equal(isWaiting(task(1, { needs: [3], readiness: "blocked" })), true);
-  // Ready (needs settled, manual) or outside a tree: not waiting.
+  // Ready (needs completed, manual) or outside a tree: not waiting.
   assert.equal(isWaiting(task(1, { needs: [3], readiness: "ready" })), false);
   assert.equal(isWaiting(task(1)), false);
   assert.equal(isWaiting(task(1, { state: "running", needs: [3] })), false);
@@ -90,14 +90,13 @@ test("HTTP contract: needs, trees and adopt calls", async () => {
 });
 
 test("a completed task shows one chip until execution moves on", () => {
-  for (const state of ["done", "settled", "backlog"]) assert.deepEqual(statusChips(task(1, { state, acceptanceId: 9 })), ["completed"]);
+  for (const state of ["done", "backlog"]) assert.deepEqual(statusChips(task(1, { state, acceptanceId: 9 })), ["completed"]);
   for (const state of ["running", "needs_input", "launching", "failed", "interrupted", "cancelled"])
     assert.deepEqual(statusChips(task(1, { state, acceptanceId: 9 })), ["completed", state]);
 });
 
 test("a finished run not completed yet reads to review", () => {
   assert.deepEqual(statusChips(task(1, { state: "done" })), ["to_review"]);
-  assert.deepEqual(statusChips(task(1, { state: "settled" })), ["to_review"]);
 });
 
 test("open tasks show readiness in backlog, else their execution state", () => {

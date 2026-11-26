@@ -15,7 +15,7 @@ Coding agents with a shell use the CLI by default: it costs no context until use
 | Command | Does |
 |---|---|
 | `stage task ls [--project P] [--state S,..] [-q TEXT] [--closed true\|all] [--limit N]` | list tasks; open tasks by default |
-| `stage task show ID` | a task with its final reply, artifact links, handoff and base |
+| `stage task show ID` | a task with its final reply, available session link, launch options and handoff |
 | `stage task add --title T --prompt TEXT\|- [config]` | create a task, saved to backlog unless `--start` |
 | `stage task edit ID [config]` | edit a task; outside backlog only the title changes |
 | `stage task needs ID [NEED...]` | replace a backlog task's needs (none clears them) |
@@ -218,7 +218,7 @@ stage task add --title "Fix flaky test" --prompt "..." --connection 2 --executio
 stage task add --title "Deploy" --prompt-file deploy.md --after-me             # eligible after user completion of this session's task
 echo "..." | stage task add --title "Refactor" --prompt - --connection 1 --execution-config '{"options":[{"id":"worktree","value":true},{"id":"baseRef","value":"origin/main"}]}' --start
 stage task ls --state backlog --json
-stage task wait 42 --until done,settled --timeout 30m                          # exit 3 on timeout
+stage task wait 42 --until done --timeout 30m                          # exit 3 on timeout
 stage tree new --title "Auth" 41 43:41 42:43                                   # 43 needs 41, 42 needs 43
 stage task add --title "Docs" --prompt "..." --needs 42 --start-mode manual    # ready (not launched) once the user completes 42
 stage tree start 7                                                             # start every ready member

@@ -18,7 +18,7 @@ type (
 )
 
 // NotificationKey is a loaded row's group key (the adapter computes the
-// same key in SQL). n.T3ThreadID is the task's current session only when
+// same key in SQL). n.ExternalSessionID is the task's current session only when
 // TaskID is set, where the task key wins.
 func NotificationKey(n Notification) string {
 	switch {
@@ -26,8 +26,8 @@ func NotificationKey(n Notification) string {
 		return "task:" + strconv.FormatInt(*n.TaskID, 10)
 	case isTaskURL(n.URL):
 		return "task:" + strings.TrimPrefix(n.URL, "/tasks/")
-	case n.T3ThreadID != nil:
-		return "thread:" + strconv.FormatInt(n.ConnectionID, 10) + ":" + *n.T3ThreadID
+	case n.ExternalSessionID != nil:
+		return "session:" + strconv.FormatInt(n.ConnectionID, 10) + ":" + *n.ExternalSessionID
 	}
 	return "notification:" + strconv.FormatInt(n.ID, 10)
 }
@@ -47,9 +47,9 @@ func isTaskURL(u string) bool {
 }
 
 // TagForKey is a group key's push tag (`task:<id>` → `task-<id>`,
-// `thread:<id>` → `thread-<id>`); identity-less keys have none ("").
+// `session:<id>` → `session-<id>`); identity-less keys have none ("").
 func TagForKey(key string) string {
-	if kind, id, ok := strings.Cut(key, ":"); ok && (kind == "task" || kind == "thread") {
+	if kind, id, ok := strings.Cut(key, ":"); ok && (kind == "task" || kind == "session") {
 		return kind + "-" + id
 	}
 	return ""
@@ -120,7 +120,7 @@ func (s *Store) MarkNotificationGroupsRead(ctx context.Context, groupKeys []stri
 	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Notifications().MarkGroupsRead(ctx, groupKeys) })
 }
 
-// UnreadNotificationTags returns the push tags (`task-<id>`, `thread-<id>`) of
+// UnreadNotificationTags returns the push tags (`task-<id>`, `session-<id>`) of
 // groups with unread entries. Identity-less groups have no tag.
 func (s *Store) UnreadNotificationTags(ctx context.Context) ([]string, error) {
 	keys, err := read(ctx, s, func(tx store.Tx) ([]string, error) { return tx.Notifications().UnreadKeys(ctx) })

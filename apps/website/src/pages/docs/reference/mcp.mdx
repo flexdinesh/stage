@@ -83,9 +83,10 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 - Results are the REST shapes as JSON; lists are compact rows. Errors are tool errors carrying the API `error`.
 - `list_tasks` rows carry `treeId`, `needs`, `readiness`, `adopted` and `lastWordPreview`. Open tasks by default; `closed: true|all` adds archived tasks and members of done or archived trees.
 - `list_trees` returns active trees by default (`status` done, archived or all for others).
-- `get_task` returns the task's events, `thread.lastWord` (the final reply), static `artifactLinks`, its tree, `handoff`, `currentHandoffs` and the grouped `batch`. The CLI prints the final reply and artifact URLs.
+- `get_task` returns the task's events, `session`, available session links, `finalReply`, its tree, `handoff`, `currentHandoffs` and the grouped `batch`. `stage task show` prints the final reply and the session's web or native link when available.
 - `imagePaths` reads local files (PNG, JPEG, GIF, WebP, up to 8) and uploads them. CLI and stdio only; HTTP MCP rejects them.
-- `wait_task` polls the task every 3s until its state is in `until` (default `needs_input done settled failed interrupted cancelled`) or `timeoutSeconds` passes (default 600, max 3600). CLI `task wait` defaults to `--timeout 10m` and exits 3 on timeout.
+- `stop_task` interrupts a task's running session.
+- `wait_task` polls the task every 3s until its state is in `until` (default `needs_input done failed interrupted cancelled`) or `timeoutSeconds` passes (default 600, max 3600). CLI `task wait` defaults to `--timeout 10m` and exits 3 on timeout.
 - `preview_schedule` returns the next three fire times of a cron in a zone.
 
 ## Context and destination
@@ -137,7 +138,7 @@ Trees are the only way to express dependencies. A task's needs are tasks in the 
 
 ### Handoff
 
-When a task with needs starts, its launch prompt gets one block per accepted need: saved reply excerpt, available links, branch/worktree, thread and task/journal references. On by default.
+When a task with needs starts, its launch prompt gets one block per accepted need: saved reply excerpt, branch or worktree, session ID and link when available, and task and journal references. On by default.
 
 - `handoff: false` on `create_task` or `update_task` turns it off (CLI `--handoff=false`). Omitted keeps the task's value.
 - The reply cap per need is `min(4000, max(1000, 8000 / needs))` Unicode characters.

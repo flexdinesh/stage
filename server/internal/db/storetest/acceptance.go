@@ -8,12 +8,14 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 func init() {
 	register("AcceptedScheduledTaskDoesNotLaunch", caseAcceptedScheduledTaskDoesNotLaunch)
 	register("AutomaticClaimRechecksReleaseEligibility", caseAutomaticClaimRechecksReleaseEligibility)
-	register("SettlementNeverAcceptsNewWork", caseSettlementNeverAcceptsNewWork)
+	register("ExecutionNeverAcceptsNewWork", caseExecutionNeverAcceptsNewWork)
+	register("CompletionEvidenceSessionLink", caseCompletionEvidenceSessionLink)
 }
 
 func acceptTask(t *testing.T, s *db.Store, ctx context.Context, id int64) {
@@ -80,7 +82,7 @@ func reopenTask(t *testing.T, s *db.Store, ctx context.Context, id int64) {
 	}
 }
 
-func caseSettlementNeverAcceptsNewWork(t *testing.T, open Factory) {
+func caseExecutionNeverAcceptsNewWork(t *testing.T, open Factory) {
 	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "source", nil)
@@ -88,7 +90,7 @@ func caseSettlementNeverAcceptsNewWork(t *testing.T, open Factory) {
 	if _, err := s.UpdateTree(ctx, *b.TreeID, db.TreePatch{StartMode: db.Optional[db.StartMode]{Set: true, V: db.StartManual}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, state := range []db.TaskState{db.StateDone, db.StateSettled, db.StateInterrupted, db.StateFailed, db.StateCancelled} {
+	for _, state := range []db.TaskState{db.StateDone, db.StateInterrupted, db.StateFailed, db.StateCancelled} {
 		setState(t, s, ctx, a.ID, state)
 		if got := getTask(t, s, ctx, b.ID); readiness(got) != "blocked" {
 			t.Fatalf("%s released task", state)
@@ -105,5 +107,59 @@ func caseSettlementNeverAcceptsNewWork(t *testing.T, open Factory) {
 	reopenTask(t, s, ctx, a.ID)
 	if got := getTask(t, s, ctx, b.ID); readiness(got) != "blocked" {
 		t.Fatal("reopen did not block unclaimed start")
+	}
+}
+
+func caseCompletionEvidenceSessionLink(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
+	p := mustProject(t, s, ctx, "project")
+	task := mustTask(t, s, ctx, p.ID, "task", nil)
+	ref := session("observed-session")
+	launch(t, s, ctx, task.ID, ref.ExternalSessionID, db.StateDone)
+	web := "https://example.com/session"
+	native := "example-app://session"
+	beforeCompletion := time.Now().Add(-time.Minute)
+	at := time.Now()
+
+	for _, tc := range []struct {
+		links execution.Links
+		want  *string
+	}{
+		{execution.Links{Command: "resume"}, nil},
+		{execution.Links{Native: native, Command: "resume"}, &native},
+		{execution.Links{Web: web, Native: native}, &web},
+	} {
+		at = at.Add(time.Second)
+		if err := s.PutObservation(ctx, execution.Observation{
+			Session: ref, Project: "project", State: "done", Links: tc.links, UpdatedAt: at,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		p, err := s.CompletionPreview(ctx, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := p.Evidence
+		if e.ExternalSessionID == nil || *e.ExternalSessionID != ref.ExternalSessionID {
+			t.Fatalf("evidence session: %+v", e)
+		}
+		switch {
+		case tc.want == nil && e.SessionLink == nil:
+		case tc.want != nil && e.SessionLink != nil && *e.SessionLink == *tc.want:
+		default:
+			t.Fatalf("evidence link from %+v: %+v", tc.links, e)
+		}
+	}
+	filter := db.TaskFilter{CompletedFrom: &beforeCompletion}
+	if tasks, err := s.ListTasks(ctx, filter); err != nil || len(tasks) != 0 {
+		t.Fatalf("completed filter before acceptance: %+v %v", tasks, err)
+	}
+	acceptTask(t, s, ctx, task.ID)
+	if tasks, err := s.ListTasks(ctx, filter); err != nil || len(tasks) != 1 || tasks[0].ID != task.ID {
+		t.Fatalf("completed filter after acceptance: %+v %v", tasks, err)
+	}
+	history, err := s.Acceptances(ctx, task.ID)
+	if err != nil || len(history) != 1 || history[0].Evidence.SessionLink == nil || *history[0].Evidence.SessionLink != web {
+		t.Fatalf("recorded evidence: %+v %v", history, err)
 	}
 }

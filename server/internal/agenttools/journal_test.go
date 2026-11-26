@@ -18,7 +18,7 @@ func TestJournalMCPInputs(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		// The legacy T3 caller thread belongs to the active T3 connection.
+		// The T3 caller session belongs to the active T3 connection.
 		if r.URL.Path == "/api/connections" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"connections": []db.HarnessConnection{{ID: 1, Harness: "t3", Active: true}}})
 			return
@@ -155,8 +155,8 @@ func TestJournalLifecycleMCP(t *testing.T) {
 func TestContextTracksCurrentTreeAndNoteSource(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/context-journal")
-	threadID := e.session(p, "Contributor")
-	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Session: &db.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: threadID}}})
+	sessionID := e.session(p, "Contributor")
+	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Session: &db.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: sessionID}}})
 	var adopted agenttools.AdoptOut
 	mustCall(t, cs, "adopt_session", nil, &adopted)
 	var first client.TreeDetail
@@ -173,7 +173,7 @@ func TestContextTracksCurrentTreeAndNoteSource(t *testing.T) {
 		"treeId": first.ID, "sourceTaskId": adopted.Task.ID, "requestId": "tree-first", "text": "conclusion",
 	}, &entry)
 	if entry.TreeID == nil || *entry.TreeID != first.ID || entry.TaskID != nil ||
-		entry.SourceThreadID == nil || *entry.SourceThreadID != threadID ||
+		entry.SourceSession == nil || *entry.SourceSession != *e.t3(sessionID) ||
 		entry.SourceTaskID == nil || *entry.SourceTaskID != adopted.Task.ID {
 		t.Fatalf("provenance %+v", entry)
 	}

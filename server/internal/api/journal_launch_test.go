@@ -68,7 +68,7 @@ func TestJournalLaunchRetryAfterRestartAndMove(t *testing.T) {
 	if len(messages) != 3 || messages[0] != messages[1] || messages[0] != messages[2] || !strings.Contains(messages[2], fmt.Sprintf("TreeId at launch: %d.", oldTree)) {
 		t.Fatalf("retry changed launch context: %q", messages)
 	}
-	if err := e.fake.SetStatus(*started.T3ThreadID, t3.StatusInterrupted); err != nil {
+	if err := e.fake.SetStatus(*started.ExternalSessionID, t3.StatusInterrupted); err != nil {
 		t.Fatal(err)
 	}
 	e.poll()

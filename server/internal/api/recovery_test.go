@@ -35,7 +35,7 @@ func TestLegacyUnconfirmedLaunchLinksOnlyAfterPreview(t *testing.T) {
 	if preview.Observation.Title != "Existing work" || preview.Attempt != 1 {
 		t.Fatalf("preview %+v", preview)
 	}
-	if got := e.getTask(pending.ID); got.State != "launching" || got.T3ThreadID != nil {
+	if got := e.getTask(pending.ID); got.State != "launching" || got.ExternalSessionID != nil {
 		t.Fatal("preview attached")
 	}
 	body := map[string]any{"link": link, "attempt": preview.Attempt, "revision": preview.Revision + 1, "environment": preview.Environment}
@@ -43,7 +43,7 @@ func TestLegacyUnconfirmedLaunchLinksOnlyAfterPreview(t *testing.T) {
 	body["revision"] = preview.Revision
 	var attached task
 	e.must("POST", endpoint, body, 200, &attached)
-	if attached.State != "running" || attached.T3ThreadID == nil || *attached.T3ThreadID != existing.ThreadID || attached.LaunchAttempt != 1 || len(e.fake.Launched) != before {
+	if attached.State != "running" || attached.ExternalSessionID == nil || *attached.ExternalSessionID != existing.ThreadID || attached.LaunchAttempt != 1 || len(e.fake.Launched) != before {
 		t.Fatalf("link launched or changed identity %+v", attached)
 	}
 	e.must("POST", endpoint, body, 409, nil)
@@ -57,7 +57,7 @@ func TestRecoveryPreviewRejectsForeignOwnedAndUnverifiedSessions(t *testing.T) {
 	}
 	endpoint := fmt.Sprintf("/api/tasks/%d/launch-link/preview", pending.ID)
 	owned := e.task(p.ID, "Owned", map[string]any{"start": true})
-	e.must("POST", endpoint, map[string]any{"link": t3.AppThreadURL(t3.FakeEnvironmentID, *owned.T3ThreadID)}, 409, nil)
+	e.must("POST", endpoint, map[string]any{"link": t3.AppThreadURL(t3.FakeEnvironmentID, *owned.ExternalSessionID)}, 409, nil)
 	other := e.project("/w/other")
 	foreign, err := e.fake.LaunchThread(t.Context(), t3.LaunchInput{ProjectID: other.T3ProjectID, Title: "Other"})
 	if err != nil {

@@ -36,11 +36,21 @@ test("provenanceText says who completed the result", () => {
   assert.match(provenanceText("harness_settled"), /^Completed automatically when its harness closed the session\./);
 });
 
+test("a new provenance uses its declared copy or the generic fallback", () => {
+  const provenance = "harness_published";
+  const descriptor = { closures: [{ provenance, signal: "published", setting: "", completed: "Completed when published.", via: "via publish" }] };
+  assert.equal(provenanceText(provenance, descriptor), "Completed when published.");
+  assert.equal(autoCompletedMeta(provenance, descriptor), "via publish");
+  assert.equal(provenanceText(provenance, settles), "Completed automatically when its harness closed the session. This result stays unchanged when execution continues.");
+  assert.equal(autoCompletedMeta(provenance, settles), "via harness");
+});
+
 test("autoCompletedMeta labels inferred completions only", () => {
   assert.equal(autoCompletedMeta("harness_settled", settles), "via Box settle");
   assert.equal(autoCompletedMeta("harness_archived", archives), "via Crate archive");
   assert.equal(autoCompletedMeta("harness_archived"), "via harness");
   assert.equal(autoCompletedMeta("user", settles), null);
+  assert.equal(autoCompletedMeta("historical_settlement", settles), null);
   assert.equal(autoCompletedMeta(null), null);
 });
 
@@ -56,7 +66,6 @@ test("stateMove offers Completed for open work, with what accepting means", () =
   assert.deepEqual(stateMove(st(), NONE), { kind: "complete", to: "completed", detail: "accept without a run", disabled: false });
   assert.equal(stateMove(st({ readiness: "ready", needs: [3] }), NONE).detail, "accept without a run");
   assert.equal(stateMove(st({ state: "done" }), NONE).detail, "review the result, then accept");
-  assert.equal(stateMove(st({ state: "settled" }), NONE).detail, "review the result, then accept");
   assert.equal(stateMove(st({ state: "failed" }), NONE).detail, "accept the run as it ended");
 });
 
@@ -71,7 +80,6 @@ const accepted = (extra) => stateSummary(st({ state: "done", acceptanceId: 7, co
 
 test("stateMove takes completed work back to the status it shows without acceptance", () => {
   assert.deepEqual(back({ state: "done" }), { kind: "uncomplete", to: "to_review", detail: "clears acceptance; history stays", disabled: false });
-  assert.equal(back({ state: "settled" }).to, "to_review");
   assert.equal(back({}).to, "backlog");
   assert.equal(back({ state: "running", treeId: 1, treeStatus: "open" }).to, "running");
 });

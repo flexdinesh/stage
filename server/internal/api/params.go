@@ -140,7 +140,7 @@ func queryBool(q url.Values, key string) (*bool, error) {
 }
 
 // querySubagents parses subagents=include|exclude (default include);
-// true = exclude subagent threads.
+// true = exclude subagent sessions.
 func querySubagents(q url.Values) (bool, error) {
 	switch v := strings.TrimSpace(q.Get("subagents")); v {
 	case "", "include":
@@ -168,6 +168,13 @@ func queryTime(q url.Values, key string, loc *time.Location) (*time.Time, error)
 		}
 	}
 	return nil, db.Invalid("invalid %s %q (want ISO date or datetime)", key, v)
+}
+
+func queryCompletedFrom(q url.Values) (*time.Time, error) {
+	if q.Has("settledFrom") {
+		return nil, db.Invalid("settledFrom was removed in API v9; use completedFrom")
+	}
+	return queryTime(q, "completedFrom", time.UTC)
 }
 
 func validEnum(name, v string, allowed []string) error {

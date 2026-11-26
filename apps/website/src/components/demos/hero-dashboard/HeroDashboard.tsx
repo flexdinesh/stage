@@ -204,7 +204,7 @@ function TopBar({ need }: { need: number }) {
       <span className="hdb-tools">
         <span className="hdb-search">
           <IconSearch size={14} />
-          <span>Search tasks, threads</span>
+          <span>Search tasks, sessions</span>
           <Kbd keys={['Ctrl K']} className="hdb-kbd" />
         </span>
         <Button className="hdb-sq hdb-ok" icon={<IconCheck />} aria-label="T3 connected" />
@@ -243,7 +243,7 @@ const STATS: { tone: Tone; label: string; n?: number }[] = [
   { tone: 'done', label: 'Awaiting completion', n: 3 },
   { tone: 'bad', label: 'Failed', n: 0 },
   { tone: 'idle', label: 'Backlog', n: 4 },
-  { tone: 'ok', label: 'Settled', n: 12 },
+  { tone: 'ok', label: 'Completed', n: 12 },
 ]
 
 function Stats({ need, run, compact }: { need: number; run: number; compact: boolean }) {

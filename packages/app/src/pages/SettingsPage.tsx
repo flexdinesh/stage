@@ -81,7 +81,6 @@ const EVENTS: readonly { event: NotificationEvent; label: string; hint: string }
   { event: "failed", label: "Failed", hint: "run failed" },
   { event: "ready", label: "Ready", hint: "needs are completed, start it" },
   { event: "done", label: "Done", hint: "run finished" },
-  { event: "settled", label: "Completed", hint: "accepted in Stage" },
 ];
 
 const NOTIFY_EVENTS_KEY = ["setNotifyEvents"];
@@ -351,7 +350,7 @@ export function SettingsConnectionsPage() {
         {sync.data === undefined ? null : (
           <Alert tone="plain">
             Synced <span className="tabular font-mono">{sync.data.projects}</span> projects,{" "}
-            <span className="tabular font-mono">{sync.data.threads}</span> sessions at <span className="font-mono">{dateTime(sync.data.finishedAt)}</span>.
+            <span className="tabular font-mono">{sync.data.sessions}</span> sessions at <span className="font-mono">{dateTime(sync.data.finishedAt)}</span>.
             {sync.data.unavailableConnections?.map((id) => <p key={id}>{harnesses.name(id)} could not finish syncing. Check its connection below.</p>)}
           </Alert>
         )}

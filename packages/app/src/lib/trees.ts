@@ -1,5 +1,5 @@
 import type { StartMode, Task, Tree, TreeCounts, TreeDetail, TreeMemberRequest, TreeSummary } from "../api/types.ts";
-import { age, relativeTime, shortDate } from "./format.ts";
+import { age, relativeTime } from "./format.ts";
 
 /** What layout and graph helpers need of a member. */
 type Node = Pick<Task, "id" | "needs">;
@@ -83,7 +83,7 @@ export function needCandidates<T extends Node>(nodes: readonly T[], taskId: numb
 
 // ---- Graph ----
 
-/** A level's execution step: live work (or a ready task) in it, every member settled, or still waiting. */
+/** A level's execution step: live work (or a ready task) in it, every member completed, or still waiting. */
 export type BandState = "now" | "done" | "waits";
 
 export function bandState(members: readonly Member[]): BandState {
@@ -95,7 +95,7 @@ export function bandState(members: readonly Member[]): BandState {
   return "waits";
 }
 
-/** A need edge: met once the need settles, failed while it failed (dependents stay blocked), else waiting. */
+/** A need edge: met once the need completes, failed while it failed (dependents stay blocked), else waiting. */
 export type EdgeState = "met" | "waiting" | "failed";
 
 export function edgeState(need: Pick<Task, "state" | "acceptanceId">): EdgeState {
@@ -177,14 +177,13 @@ export function countMembers(members: readonly Member[]): TreeCounts {
     running: 0,
     needsInput: 0,
     done: 0,
-    settled: 0,
+    completed: 0,
     failed: 0,
     interrupted: 0,
     cancelled: 0,
   };
   for (const m of members) {
-    if (m.acceptanceId !== null) c.settled++;
-    else if (m.state === "settled") c.done++;
+    if (m.acceptanceId !== null) c.completed++;
     else if (m.state === "needs_input") c.needsInput++;
     else c[m.state]++;
     if (m.state === "backlog" && m.readiness === "blocked") c.blocked++;
@@ -195,19 +194,19 @@ export function countMembers(members: readonly Member[]): TreeCounts {
 
 /** One stretch of the state progress bar. `hollow` stretches have not started (blocked or waiting backlog). */
 export interface Segment {
-  key: "settled" | "done" | "running" | "needs_input" | "failed" | "ready" | "waiting" | "cancelled";
+  key: "completed" | "done" | "running" | "needs_input" | "failed" | "ready" | "waiting" | "cancelled";
   label: string;
   tone: "ok" | "done" | "run" | "need" | "bad" | "idle";
   count: number;
   hollow: boolean;
 }
 
-/** The tree's most pressing next step: answer > start > retry > settle > running > waiting > done. */
+/** The tree's most pressing next step: answer > start > retry > complete > running > waiting > done. */
 export type NextAction =
   | { kind: "answer"; count: number }
   | { kind: "start"; count: number }
   | { kind: "retry"; count: number }
-  | { kind: "settle"; count: number }
+  | { kind: "complete"; count: number }
   | { kind: "running"; count: number }
   | { kind: "waiting"; count: number }
   | { kind: "done"; count: number };
@@ -224,7 +223,7 @@ export function treeRollup(counts: TreeCounts): Rollup {
   const running = counts.running + counts.launching;
   const waiting = counts.backlog - counts.ready;
   const all: Segment[] = [
-    { key: "settled", label: "completed", tone: "ok", count: counts.settled, hollow: false },
+    { key: "completed", label: "completed", tone: "ok", count: counts.completed, hollow: false },
     { key: "done", label: "done", tone: "done", count: counts.done, hollow: false },
     { key: "running", label: "running", tone: "run", count: running, hollow: false },
     { key: "needs_input", label: "needs input", tone: "need", count: counts.needsInput, hollow: false },
@@ -241,46 +240,46 @@ export function treeRollup(counts: TreeCounts): Rollup {
         : failed > 0
           ? { kind: "retry", count: failed }
           : counts.done > 0
-            ? { kind: "settle", count: counts.done }
+            ? { kind: "complete", count: counts.done }
             : running > 0
               ? { kind: "running", count: running }
               : waiting + counts.cancelled > 0
                 ? { kind: "waiting", count: waiting + counts.cancelled }
-                : { kind: "done", count: counts.settled };
+                : { kind: "done", count: counts.completed };
   return { counts, segments: all.filter((s) => s.count > 0), next };
 }
 
 /** Trees view state cells, most pressing first: needs input, review, ready, failed, running, waiting, completed. */
-export type TreeGroupKey = "needs" | "done" | "ready" | "failed" | "running" | "waiting" | "settled";
+export type TreeGroupKey = "needs" | "done" | "ready" | "failed" | "running" | "waiting" | "completed";
 
-export const TREE_GROUP_KEYS: readonly TreeGroupKey[] = ["needs", "done", "ready", "failed", "running", "waiting", "settled"];
+export const TREE_GROUP_KEYS: readonly TreeGroupKey[] = ["needs", "done", "ready", "failed", "running", "waiting", "completed"];
 
 const NEXT_GROUP: Record<NextAction["kind"], TreeGroupKey> = {
   answer: "needs",
-  settle: "done",
+  complete: "done",
   start: "ready",
   retry: "failed",
   running: "running",
   waiting: "waiting",
-  done: "settled",
+  done: "completed",
 };
 
 export const parseTreeGroup = (v: string | null): TreeGroupKey | null => TREE_GROUP_KEYS.find((k) => k === v) ?? null;
 
-/** A tree's group: completed once every member settled (an empty tree waits), else its rollup's next step. */
-export function treeGroup(tree: Pick<TreeSummary, "counts" | "settledAt">): TreeGroupKey {
-  if (tree.settledAt !== null) return "settled";
+/** A tree enters Completed when all members are accepted. Otherwise it follows its next step. */
+export function treeGroup(tree: Pick<TreeSummary, "counts" | "completedAt">): TreeGroupKey {
+  if (tree.completedAt !== null) return "completed";
   if (tree.counts.total === 0) return "waiting";
   return NEXT_GROUP[treeRollup(tree.counts).next.kind];
 }
 
 /** Trees in group order, most pressing first; ties keep input order (the API's most recent activity first). */
-export function byTreeGroup<T extends Pick<TreeSummary, "counts" | "settledAt">>(trees: readonly T[]): T[] {
+export function byTreeGroup<T extends Pick<TreeSummary, "counts" | "completedAt">>(trees: readonly T[]): T[] {
   const rank = (t: T) => TREE_GROUP_KEYS.indexOf(treeGroup(t));
   return trees.toSorted((a, b) => rank(a) - rank(b));
 }
 
-/** "7 tasks: 2 settled, 1 running, 4 blocked" (state bar label). */
+/** "7 tasks: 2 completed, 1 running, 4 blocked" (state bar label). */
 export function rollupLabel(r: Rollup): string {
   const n = r.counts.total;
   const parts = r.segments.map((s) => `${s.count} ${s.label}`);
@@ -296,7 +295,7 @@ export function nextActionText(next: NextAction): string {
       return `${next.count} ready`;
     case "retry":
       return `${next.count} failed`;
-    case "settle":
+    case "complete":
       return `${next.count} to complete`;
     case "running":
       return `${next.count} running`;
@@ -350,20 +349,16 @@ export function nodeState(t: Pick<Task, "state" | "readiness" | "acceptanceId">)
 }
 
 /** What inState reads of a member. */
-type Timed = Pick<Task, "state" | "readiness" | "stateSince" | "readyAt" | "createdAt" | "launchedAt" | "finishedAt" | "settledAt">;
+type Timed = Pick<Task, "state" | "readiness" | "stateSince" | "readyAt" | "createdAt" | "launchedAt" | "finishedAt">;
 
 /**
- * A member's time in its current state, for tree rows: "running 18m", "waiting 6m", "done 22h ago", "settled Nov 15",
+ * A member's time in its current state, for tree rows: "running 18m", "waiting 6m", "done 22h ago",
  * "ready 3h", "queued 2d". `at` is the instant it counts from (exact time on hover). `blocked`: its connection cannot
  * launch it now, so a ready task reads queued.
  */
 export function inState(t: Timed, now: number = Date.now(), { blocked = false }: { blocked?: boolean } = {}): { text: string; at: string } {
   const since = (fallback: string | null) => t.stateSince ?? fallback ?? t.createdAt;
   switch (t.state) {
-    case "settled": {
-      const at = t.settledAt ?? since(null);
-      return { text: `settled ${shortDate(at, now)}`, at };
-    }
     case "done": {
       const at = t.finishedAt ?? since(null);
       return { text: `done ${relativeTime(at, now)}`, at };
@@ -395,8 +390,8 @@ export function inState(t: Timed, now: number = Date.now(), { blocked = false }:
   }
 }
 
-/** Every member settled. */
-export const treeSettled = (tasks: readonly Pick<Task, "state" | "acceptanceId">[]) => tasks.length > 0 && tasks.every((t) => t.acceptanceId !== null);
+/** Every member completed. */
+export const treeCompleted = (tasks: readonly Pick<Task, "state" | "acceptanceId">[]) => tasks.length > 0 && tasks.every((t) => t.acceptanceId !== null);
 
 /** Marked done or archived: nothing starts, structure is read-only, members leave the Dashboard. */
 export const treeClosed = (tree: Pick<Tree, "status">) => tree.status !== "open";

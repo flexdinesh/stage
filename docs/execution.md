@@ -273,7 +273,9 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
 - **Closures.** Completion is inferred only from a closure the harness's
   descriptor declares; the descriptor supplies the stored provenance, the
   journal event, the auto-complete toggle label and the accepted-result copy.
-  A harness that declares none has no auto-complete.
+  A harness that declares none has no auto-complete. Hosts use the matching
+  closure from the task's descriptor for inferred provenance, with generic
+  copy when no closure matches. User and historical acceptance use fixed copy.
 - **Attention.** What a session from the adapter's attention feed that no
   task owns may produce. `notify` (the default; T3, OpenCode): a silent
   waiting row, plus an inbox event and push for transitions into
@@ -346,16 +348,20 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   options, a T3 predecessor's stored fallback base ref and branch
   included, and journaled where each predecessor-based task now starts).
 - `Observation` is a validated snapshot: session/project, normalized state,
-  activity, top-level/archive eligibility, directory and branch, links, bounded reply and
-  available artifact links. States are running, needs_input, done, failed,
+  activity, top-level/archive eligibility, directory and branch, links, and a bounded
+  reply. States are running, needs_input, done, failed,
   interrupted, cancelled or idle. Idle does not overwrite a known task state.
   Unknown/malformed snapshots and missing/offline sessions never imply execution
   failure or completion. Connection health is independent. `closed`
   (`{signal}`, omitted when open) reports a closure in the harness: `settled`
-  (T3) or `archived` (OpenCode archive, Claude Code `rm`). It says nothing
-  about success. An idle observation may carry a closure (the harness closed
+  (T3) or `archived` (OpenCode or Codex archive, Claude Code `rm`). Stage
+  separately verifies that execution succeeded before inferring completion. An idle observation may carry a closure (the harness closed
   the session and dropped its state with it): the task keeps its state and
   inference reads the stored `done`.
+- A `Reply` contains `itemId`, `runId`, `text`, `truncated` and `updatedAt`.
+  The opening prompt exposes the item ID. Acceptance uses the item and run
+  IDs to identify the cached reply and its execution. `Links` contains `web`, `native` and `command` as available.
+  Acceptance captures the web link first, then the native link.
 - `usage` (`execution.Usage`, omitted when the harness reports none) is what
   the session consumed over its whole life: `turns`, `inputTokens`
   (uncached), `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`,
@@ -439,11 +445,24 @@ interaction).
   nothing; each result says `ingested`, `ignored` or `invalid`. A push for
   a connection on an offline worker (or one that needs an update) is 409
   `connection_unavailable` and changes nothing. Polling still reconciles.
+  API v9 rejects `artifacts`, `modelLabel`, `links.service`, `links.app`,
+  `reply.messageId` and `reply.position` before strict decoding or ingestion.
+  The 400 response names the indexed field, for example
+  `observations[0].reply.position was removed in API v9`. Stored observation
+  JSON may retain older fields until the next write. Readers ignore them.
 - **Resume command.** `Links.command` is a copyable shell command that
   resumes the session in the harness's own client, for a harness without a web
   or app destination. The platform's `ExecutionLinks.command` carries it; hosts
   never open it, and the task page offers Copy resume command when no
   destination exists.
+- **Native link schemes.** `Descriptor.linkSchemes` declares lower-case scheme
+  names without a colon, such as T3's `t3code`. `harness.NewRegistry` emits
+  an empty array for no schemes and rejects duplicates, malformed names and
+  reserved schemes with `harness <kind>: invalid link scheme "<s>"`. See the
+  [API descriptor](api.md#harness-connections-api-v6) for the validation rules.
+  Reply Markdown allows HTTP(S), FTP(S), `mailto`, `tel`, Stage and relative
+  links immediately. Harness links gain a destination once clients
+  load and validate the descriptors. Script URLs stay blocked.
 - **Harness-wide options.** `Capabilities.options` apply whatever the model,
   beside each model's own. A config may set the union
   (`Capabilities.OptionsFor`); an id reused between them is malformed
@@ -568,8 +587,7 @@ therefore reads the original admission instead of sending the prompt again.
 Stage polls active execution, pending permissions and forms, and the session's
 busy and idle times. A new active execution takes precedence over the previous
 outcome. Inconsistent snapshots are retried. Terminal replies use completed assistant
-text from that execution, bounded to 4,000 characters. Available HTTP(S) artifact
-links come from the optional session-scoped artifact inventory. A pasted ID or a
+text from that execution, bounded to 4,000 characters. A pasted ID or a
 matching OpenCode web-client session URL supports explicit adoption. Browsers and
 desktop hosts use the configured web-client destination. User acceptance and offline
 handoff use Stage's stored evidence.

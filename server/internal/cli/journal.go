@@ -129,8 +129,6 @@ func printJournalEntry(w io.Writer, entry db.JournalEntry) {
 	}
 	if entry.SourceSession != nil {
 		source = append(source, fmt.Sprintf("connection %d session %s", entry.SourceSession.ConnectionID, entry.SourceSession.ExternalSessionID))
-	} else if entry.SourceThreadID != nil {
-		source = append(source, "session "+*entry.SourceThreadID)
 	}
 	if len(source) > 0 {
 		fmt.Fprintln(w, "  "+strings.Join(source, "; "))

@@ -239,7 +239,8 @@ SQLite's; Postgres backups are the operator's ([storage.md](storage.md#backups))
 - It does not expose paths, the pid or the database URL.
 
 Every `/api` response carries `Stage-Api-Version: <n>` (`buildinfo.APIVersion`,
-currently 2). The number changes only on breaking API changes.
+currently 9). Health reports the same value in `apiVersion`. Upgrade servers
+and workers together for the [API v9 rollout](api.md#api-v9-changes).
 
 API v2 replaces mutable task notes with append-only task/tree journals and
 `initialNote` on task creation/adoption. Old task notes are discarded; existing

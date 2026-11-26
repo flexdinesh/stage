@@ -22,11 +22,11 @@ func (s *Store) ListTasks(ctx context.Context, f TaskFilter) ([]Task, error) {
 	return read(ctx, s, func(tx store.Tx) ([]Task, error) { return tx.Tasks().List(ctx, f) })
 }
 
-// PollableTasks: tasks whose thread may still change state. Active tasks
+// PollableTasks: tasks whose session may still change state. Active tasks
 // always; done tasks updated in the last hour always, older uncompleted
 // ones only when includeStale (the poller passes it at most once a minute);
 // failed/interrupted/cancelled when touched in the last 10 minutes (e.g. a
-// follow-up restarted the thread) or the mirror shows the thread active.
+// follow-up restarted the session) or the mirror shows the session active.
 // An adopted backlog session is watched for its first native execution.
 func (s *Store) PollableTasks(ctx context.Context, includeStale bool) ([]Task, error) {
 	return read(ctx, s, func(tx store.Tx) ([]Task, error) { return tx.Tasks().Pollable(ctx, includeStale) })
@@ -123,7 +123,7 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 
 	needs := slices.Clone(in.Needs)
 	if in.NeedsSession != nil {
-		owner, _, err := s.adoptThread(ctx, tx, AdoptInput{Binding: in.NeedsBinding, Session: *in.NeedsSession})
+		owner, _, err := s.adoptSession(ctx, tx, AdoptInput{Binding: in.NeedsBinding, Session: *in.NeedsSession})
 		if err != nil {
 			return 0, err
 		}
@@ -341,7 +341,7 @@ type (
 )
 
 // TransitionTask applies t atomically: state, timestamps (finishedAt on first
-// entry into a finished state, settledAt on settled) and a task_events row.
+// entry into a finished state) and a task_events row.
 func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionResult, error) {
 	var res TransitionResult
 	err := s.e.Write(ctx, func(tx store.Tx) error {

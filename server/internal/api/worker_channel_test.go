@@ -157,12 +157,12 @@ func TestWorkerChannelRoundTrip(t *testing.T) {
 	}
 }
 
-func TestWorkerChannelNeedsUpdate(t *testing.T) {
+func TestWorkerChannelV8NeedsUpdate(t *testing.T) {
 	e := newEnv(t, withPublicURL)
 	j := e.join("old")
-	h := map[string]string{"Authorization": "Bearer " + j.Token, buildinfo.APIVersionHeader: "1", workerchan.VersionHeader: "0.1.0"}
+	h := map[string]string{"Authorization": "Bearer " + j.Token, buildinfo.APIVersionHeader: "8", workerchan.VersionHeader: "0.1.0"}
 	var out errOut
-	if rec := raw(t, e.h, "GET", "/api/worker/channel", h, nil, &out); rec.Code != 409 || out.Code != "api_version_mismatch" {
+	if rec := raw(t, e.h, "GET", "/api/worker/channel", h, nil, &out); rec.Code != 409 || out.Code != "api_version_mismatch" || rec.Header().Get(buildinfo.APIVersionHeader) != "9" {
 		t.Fatalf("mismatch %d %+v", rec.Code, out)
 	}
 	var m statusOut

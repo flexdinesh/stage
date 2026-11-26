@@ -5,10 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/flexdinesh/stage/server/internal/execution"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 func TestAdapterNormalizesExecutionWithoutSettlementAuthority(t *testing.T) {
@@ -62,6 +63,41 @@ func TestUnstartedCancelledRunDoesNotDecideState(t *testing.T) {
 		}
 	}
 }
+func TestObservationRunSpan(t *testing.T) {
+	base := time.Date(2026, 11, 10, 1, 0, 0, 0, time.UTC)
+	at := func(m int) *time.Time { v := base.Add(time.Duration(m) * time.Minute); return &v }
+	run := func(req int, start, done *time.Time) Run {
+		return Run{RequestedAt: *at(req), StartedAt: start, CompletedAt: done}
+	}
+	created := base.Add(-time.Minute)
+	cases := []struct {
+		name       string
+		d          ThreadDetail
+		start, end *time.Time
+	}{
+		{"no runs", ThreadDetail{}, nil, nil},
+		{"one run", ThreadDetail{RunCount: 1, RecentRuns: []Run{run(0, at(1), at(5))}}, at(1), at(5)},
+		{"first start to last completion", ThreadDetail{RunCount: 3, RecentRuns: []Run{
+			run(30, at(30), at(35)), run(20, nil, at(21)), run(0, at(1), at(2)),
+		}}, at(1), at(35)},
+		{"oldest never started uses requestedAt", ThreadDetail{RunCount: 2, RecentRuns: []Run{
+			run(10, at(10), at(12)), run(0, nil, at(1)),
+		}}, at(0), at(12)},
+		{"newest incomplete", ThreadDetail{RunCount: 1, RecentRuns: []Run{run(0, at(1), nil)}}, at(1), nil},
+		{"older runs not read fall back to createdAt", ThreadDetail{
+			Thread: Thread{CreatedAt: created}, RunCount: 60, RecentRuns: []Run{run(30, at(30), at(40))},
+		}, &created, at(40)},
+	}
+	eq := func(a, b *time.Time) bool { return (a == nil) == (b == nil) && (a == nil || a.Equal(*b)) }
+	for _, c := range cases {
+		o := c.d.Observation()
+		start, end := o.StartedAt, o.EndedAt
+		if !eq(start, c.start) || !eq(end, c.end) {
+			t.Errorf("%s: span %v..%v, want %v..%v", c.name, start, end, c.start, c.end)
+		}
+	}
+}
+
 func TestSettledThreadReportsClosure(t *testing.T) {
 	d := ThreadDetail{Thread: Thread{ThreadID: "thread", ProjectID: "project", Status: StatusCompleted}}
 	if o := d.Observation(); o.Closed != nil {

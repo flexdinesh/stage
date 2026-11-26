@@ -332,7 +332,7 @@ export const useSchedulePreview = (body: SchedulePreviewRequest | null) => {
   });
 };
 
-/** Tasks + external threads needing input (app badge, nav count). */
+/** Tasks + external sessions needing input (app badge, nav count). */
 export const useBadge = () => {
   const api = useApi();
   return useQuery({ queryKey: keys.badge, queryFn: api.badge, refetchInterval: POLL.live });
@@ -346,7 +346,7 @@ export const useNotifications = () => {
   return useQuery({ queryKey: latestNotificationsKey, queryFn: () => api.notifications({ limit: 50 }), refetchInterval: POLL.live });
 };
 
-/** Notifications drawer: current needs input first, then recent task/thread groups. */
+/** Notifications drawer: current needs input first, then recent task/session groups. */
 export const useNotificationInbox = () => {
   const api = useApi();
   return useInfiniteQuery({
@@ -386,7 +386,7 @@ export const useMe = () => {
   return useQuery({ queryKey: keys.me, queryFn: api.me, refetchInterval: false, staleTime: Infinity });
 };
 
-/** Task mutations can change any task, thread, stat or prefill view: refresh them all. */
+/** Task mutations can change any task, session, stat or prefill view: refresh them all. */
 export function invalidateWork(qc: QueryClient): Promise<void> {
   return Promise.all(
     [
@@ -466,7 +466,7 @@ export function useConnectionOperation(connectionId: number, op: OperationId, en
 
 /**
  * What a task's session waits on, when its connection offers operation `respond`. Read only while the task needs
- * input on an active connection; polled meanwhile. `settled`: whether the list is final for now (nothing to read, or
+ * input on an active connection; polled meanwhile. `ready`: whether the list is final for now (nothing to read, or
  * the first read answered), so a caller can tell "no requests" from "not read yet".
  */
 export function useSessionRequests({ taskId, connectionId, needsInput }: { taskId: number | null; connectionId: number; needsInput: boolean }) {
@@ -481,8 +481,8 @@ export function useSessionRequests({ taskId, connectionId, needsInput }: { taskI
     refetchInterval: REQUESTS_POLL,
     retry: false,
   });
-  const settled = !live || (respond.known && (!respondable || q.isSuccess || q.isError));
-  return { requests: live && respondable ? (q.data?.requests ?? NO_REQUESTS) : NO_REQUESTS, error: q.error, settled };
+  const ready = !live || (respond.known && (!respondable || q.isSuccess || q.isError));
+  return { requests: live && respondable ? (q.data?.requests ?? NO_REQUESTS) : NO_REQUESTS, error: q.error, ready };
 }
 
 /** Answers one of a task's requests; the task, its requests and the inbox refresh either way (a 404 means it was answered elsewhere). */

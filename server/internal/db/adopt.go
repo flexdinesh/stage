@@ -22,14 +22,14 @@ type AdoptInput struct {
 	TreeID          *int64
 }
 
-func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, error) {
+func (s *Store) AdoptSession(ctx context.Context, in AdoptInput) (Task, bool, error) {
 	var id int64
 	var created bool
 	err := s.e.Write(ctx, func(tx store.Tx) error {
 		// Write may rerun fn (Postgres retry): start each run from scratch.
 		id, created = 0, false
 		var err error
-		id, created, err = s.adoptThread(ctx, tx, in)
+		id, created, err = s.adoptSession(ctx, tx, in)
 		if err == nil && in.TreeID != nil {
 			if err = treeExists(ctx, tx, *in.TreeID); err == nil {
 				err = joinTree(ctx, tx, id, *in.TreeID)
@@ -44,7 +44,7 @@ func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, err
 	return t, created, err
 }
 
-func (s *Store) adoptThread(ctx context.Context, tx store.Tx, in AdoptInput) (int64, bool, error) {
+func (s *Store) adoptSession(ctx context.Context, tx store.Tx, in AdoptInput) (int64, bool, error) {
 	ref := in.Session
 	if err := connectionUsable(ctx, tx, ref.ConnectionID); err != nil {
 		return 0, false, err

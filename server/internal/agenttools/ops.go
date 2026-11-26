@@ -414,15 +414,15 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 
 // TaskRow is a compact task for lists.
 type TaskRow struct {
-	ConnectionID int64        `json:"connectionId"`
-	ID           int64        `json:"id"`
-	Title        string       `json:"title"`
-	State        db.TaskState `json:"state"`
-	ProjectID    int64        `json:"projectId"`
-	Project      string       `json:"project"`
-	T3ThreadID   *string      `json:"externalSessionId,omitempty"`
-	TreeID       *int64       `json:"treeId,omitempty"`
-	Needs        []int64      `json:"needs,omitempty"`
+	ConnectionID      int64        `json:"connectionId"`
+	ID                int64        `json:"id"`
+	Title             string       `json:"title"`
+	State             db.TaskState `json:"state"`
+	ProjectID         int64        `json:"projectId"`
+	Project           string       `json:"project"`
+	ExternalSessionID *string      `json:"externalSessionId,omitempty"`
+	TreeID            *int64       `json:"treeId,omitempty"`
+	Needs             []int64      `json:"needs,omitempty"`
 	// Readiness: blocked | ready for a backlog tree member.
 	Readiness  *db.Readiness  `json:"readiness,omitempty"`
 	TreeStatus *db.TreeStatus `json:"treeStatus,omitempty"` // its tree's status (open | done | archived)
@@ -440,7 +440,7 @@ func taskRow(t client.Task) TaskRow {
 	return TaskRow{
 		ConnectionID: t.ConnectionID,
 		ID:           t.ID, Title: t.Title, State: t.State, ProjectID: t.ProjectID, Project: t.ProjectTitle,
-		T3ThreadID: t.T3ThreadID, TreeID: t.TreeID, Needs: t.Needs, Readiness: t.Readiness, TreeStatus: t.TreeStatus,
+		ExternalSessionID: t.ExternalSessionID, TreeID: t.TreeID, Needs: t.Needs, Readiness: t.Readiness, TreeStatus: t.TreeStatus,
 		Archived: t.ArchivedAt != nil, Adopted: t.Adopted,
 		StartAt: t.StartAt, ScheduleID: t.ScheduleID, LastWordPreview: t.LastWordPreview,
 		UpdatedAt: t.UpdatedAt,
@@ -451,7 +451,7 @@ func taskRow(t client.Task) TaskRow {
 type ListTasksArgs struct {
 	OriginSession *db.SessionRef `json:"originSession,omitempty"`
 	Project       string         `json:"project,omitempty" jsonschema:"project id or title; omitted = all projects"`
-	States        []string       `json:"states,omitempty" jsonschema:"backlog|launching|running|needs_input|done|settled|failed|interrupted|cancelled"`
+	States        []string       `json:"states,omitempty" jsonschema:"backlog|launching|running|needs_input|done|failed|interrupted|cancelled"`
 	Query         string         `json:"query,omitempty" jsonschema:"substring of title or prompt"`
 	Closed        string         `json:"closed,omitempty" jsonschema:"false (default: open tasks only) | true (archived, or in a done or archived tree) | all"`
 	Limit         int            `json:"limit,omitempty" jsonschema:"max rows (default 50)"`
@@ -464,6 +464,9 @@ type TasksOut struct {
 }
 
 func (o *Ops) ListTasks(ctx context.Context, a ListTasksArgs) (TasksOut, error) {
+	if slices.Contains(a.States, "settled") {
+		return TasksOut{}, db.Invalid("state settled was removed in API v9; use state done (completedAt marks acceptance)")
+	}
 	var q client.TaskQuery
 	if a.Project != "" {
 		p, _, err := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, a.Project)
@@ -506,12 +509,12 @@ func (o *Ops) GetTask(ctx context.Context, a IDArgs) (client.TaskDetail, error) 
 // WaitArgs are the tree and start options of create_task.
 type WaitArgs struct {
 	TreeID     *int64  `json:"treeId,omitempty" jsonschema:"join this tree as a parallel root unless needs are given (default: the needs' tree, else a new tree when there are needs)"`
-	Needs      []int64 `json:"needs,omitempty" jsonschema:"task ids this task runs after (same tree): it starts once all of them settle; tasks sharing a need run in parallel"`
+	Needs      []int64 `json:"needs,omitempty" jsonschema:"task ids this task runs after (same tree): it starts once all of them are completed; tasks sharing a need run in parallel"`
 	AfterMe    bool    `json:"afterMe,omitempty" jsonschema:"also need your own session: it is adopted as a task in the tree and this task waits for its user completion in Stage (needs your session id)"`
 	StartMode  string  `json:"startMode,omitempty" jsonschema:"inherit (default; omit unless the user asks). In an auto tree the task launches once its needs are completed, at once if they already are: expected, not a reason for manual. auto or manual (reads ready) only for a user-requested per-task exception, preserved when the tree mode changes"`
 	StartLocal string  `json:"startLocal,omitempty" jsonschema:"one-shot start, wall time YYYY-MM-DDTHH:mm in startTz"`
 	StartTz    string  `json:"startTz,omitempty" jsonschema:"IANA zone for startLocal, e.g. America/New_York"`
-	Handoff    *bool   `json:"handoff,omitempty" jsonschema:"append each need's final reply, PRs, branch and thread link to the prompt at launch (default true)"`
+	Handoff    *bool   `json:"handoff,omitempty" jsonschema:"append each need's final reply, branch and session link to the prompt at launch (default true)"`
 }
 
 // needsSession resolves afterMe to the caller's session id.
@@ -636,7 +639,7 @@ type UpdateTaskArgs struct {
 	UpdateArgs
 	StartLocal *string `json:"startLocal,omitempty" jsonschema:"set a one-shot start (with startTz); empty string clears it"`
 	StartTz    *string `json:"startTz,omitempty"`
-	Handoff    *bool   `json:"handoff,omitempty" jsonschema:"append each need's final reply, PRs, branch and thread link to the prompt at launch; backlog only"`
+	Handoff    *bool   `json:"handoff,omitempty" jsonschema:"append each need's final reply, branch and session link to the prompt at launch; backlog only"`
 	StartMode  *string `json:"startMode,omitempty" jsonschema:"auto | manual | inherit (the tree's); backlog only"`
 }
 
@@ -702,10 +705,10 @@ func (o *Ops) DuplicateTask(ctx context.Context, a IDArgs) (client.Task, error) 
 	return o.Client.DuplicateTask(ctx, a.ID)
 }
 
-// FollowupArgs is followup_task.
+// WaitTaskArgs is wait_task.
 type WaitTaskArgs struct {
 	ID             int64    `json:"id"`
-	Until          []string `json:"until,omitempty" jsonschema:"states to wait for (default: needs_input done settled failed interrupted cancelled)"`
+	Until          []string `json:"until,omitempty" jsonschema:"states to wait for (default: needs_input done failed interrupted cancelled)"`
 	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"give up after this many seconds (default 600, max 3600)"`
 }
 
@@ -716,12 +719,24 @@ type WaitOut struct {
 	TimedOut bool        `json:"timedOut"`
 }
 
-var defaultUntil = []string{"needs_input", "done", "settled", "failed", "interrupted", "cancelled"}
+var defaultUntil = []string{"needs_input", "done", "failed", "interrupted", "cancelled"}
 
 func (o *Ops) WaitTask(ctx context.Context, a WaitTaskArgs) (WaitOut, error) {
 	until := a.Until
 	if len(until) == 0 {
 		until = defaultUntil
+	}
+	if slices.Contains(until, "settled") {
+		return WaitOut{}, db.Invalid("until: settled was removed in API v9; wait for done")
+	}
+	for _, state := range until {
+		if !db.TaskState(state).Valid() {
+			want := make([]string, len(db.TaskStates))
+			for i, s := range db.TaskStates {
+				want[i] = string(s)
+			}
+			return WaitOut{}, db.Invalid("until: invalid state %q (want one of %s)", state, strings.Join(want, ", "))
+		}
 	}
 	timeout := time.Duration(a.TimeoutSeconds) * time.Second
 	if timeout <= 0 {

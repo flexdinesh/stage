@@ -104,7 +104,7 @@ Each connection keeps its own new-task defaults in its Manage drawer (Settings >
 | ready | a manual tree task can start; the notification offers Start |
 | done | a run finished |
 
-Historical `settled` events remain. Each event is toggleable in Settings > Notifications, one filter for every device. Notifications cover tasks and top-level sessions started in either harness (subagents excluded).
+Each event is toggleable in Settings > Notifications, with one filter for every device. Notifications cover tasks and supported external sessions (subagents excluded). Completing a task in Stage sends no notification.
 
 - **Inbox and toasts**: every notification lands in an in-app inbox and a toast. A needs-input toast clears once the question is resolved.
 - **Silent rows**: pre-existing external sessions waiting for input appear as silent current-state rows in the inbox when they have no recorded notification group. They add no unread event, push, toast or synthetic history. A recorded group replaces the silent row. Local Claude Code sessions waiting for input always appear this way and never notify; a row offers Open, Copy resume command or "Answer in Claude Code", and Track fills in Track session for you to confirm.

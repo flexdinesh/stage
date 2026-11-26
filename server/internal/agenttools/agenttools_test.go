@@ -51,7 +51,7 @@ func newEnv(t *testing.T) *env {
 func harnessEnv(t *testing.T, other execution.Adapter) *env {
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
-	// These tests complete settled tasks explicitly.
+	// These tests record acceptance explicitly.
 	if _, err := store.SetAutoComplete(t.Context(), store.ActiveID(db.LocalMachine, "t3"), false); err != nil {
 		t.Fatal(err)
 	}
@@ -96,12 +96,12 @@ func (e *env) project(root string) db.Project {
 	return out
 }
 
-// session launches a running external thread in project p.
 // t3 is session id s on the T3 connection.
 func (e *env) t3(s string) *db.SessionRef {
 	return &db.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: s}
 }
 
+// session launches a running external session in project p.
 func (e *env) session(p db.Project, title string) string {
 	e.t.Helper()
 	ctx := context.Background()
@@ -223,7 +223,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	// afterMe tracks the caller's session as a task and needs it.
 	var me client.TaskDetail
 	mustCall(t, cs, "get_task", map[string]any{"id": tk.Needs[0]}, &me)
-	if !me.Adopted || me.T3ThreadID == nil || *me.T3ThreadID != s || me.TreeID == nil || *me.TreeID != *tk.TreeID {
+	if !me.Adopted || me.ExternalSessionID == nil || *me.ExternalSessionID != s || me.TreeID == nil || *me.TreeID != *tk.TreeID {
 		t.Fatalf("caller task %+v", me.Task)
 	}
 
@@ -253,7 +253,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 		t.Fatalf("unknown project: %q", msg)
 	}
 
-	// The session settling starts the task.
+	// T3 settlement with auto-completion disabled leaves the dependent blocked.
 	_ = e.fake.SetStatus(s, t3.StatusCompleted)
 	_ = e.fake.Settle(s)
 	if err := e.sync.PollActive(context.Background()); err != nil {
@@ -265,12 +265,29 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	var got client.TaskDetail
 	mustCall(t, cs, "get_task", map[string]any{"id": tk.ID}, &got)
 	if got.State != db.StateBacklog || got.Readiness == nil || *got.Readiness != db.ReadinessBlocked {
-		t.Fatalf("after settle %+v", got.Task)
+		t.Fatalf("after T3 settlement %+v", got.Task)
 	}
 	var rows agenttools.TasksOut
 	mustCall(t, cs, "list_tasks", map[string]any{"project": fmt.Sprint(p.ID), "states": []string{"running"}}, &rows)
 	if rows.Total != 0 {
 		t.Fatalf("list %+v", rows)
+	}
+	e.acceptTask(me.Task)
+	mustCall(t, cs, "get_task", map[string]any{"id": tk.ID}, &got)
+	if got.State != db.StateRunning {
+		t.Fatalf("dependent after acceptance %+v", got.Task)
+	}
+	e.acceptTask(got.Task)
+	var listed struct {
+		Trees []struct {
+			CompletedAt *time.Time     `json:"completedAt"`
+			States      map[string]int `json:"states"`
+		} `json:"trees"`
+	}
+	mustCall(t, cs, "list_trees", map[string]any{"status": "done"}, &listed)
+	if len(listed.Trees) != 1 || listed.Trees[0].CompletedAt == nil ||
+		len(listed.Trees[0].States) != 1 || listed.Trees[0].States["completed"] != 2 {
+		t.Fatalf("completed tree rows %+v", listed.Trees)
 	}
 }
 
@@ -304,6 +321,21 @@ func TestCreateTaskDefaultsCarryModelNotModes(t *testing.T) {
 	}
 }
 
+func TestWaitTaskRejectsSettled(t *testing.T) {
+	cs := connect(t, &agenttools.Ops{Client: client.New("http://127.0.0.1:1")})
+	args := map[string]any{"id": 1, "until": []string{"done", "settled"}}
+	if msg := call(t, cs, "wait_task", args, nil); msg != "until: settled was removed in API v9; wait for done" {
+		t.Fatalf("wait_task settled: %q", msg)
+	}
+	args["until"] = []string{"unknown"}
+	if msg := call(t, cs, "wait_task", args, nil); msg != `until: invalid state "unknown" (want one of backlog, launching, running, needs_input, done, failed, interrupted, cancelled)` {
+		t.Fatalf("wait_task unknown: %q", msg)
+	}
+	if msg := call(t, cs, "list_tasks", map[string]any{"states": []string{"settled"}}, nil); msg != "state settled was removed in API v9; use state done (completedAt marks acceptance)" {
+		t.Fatalf("list_tasks settled: %q", msg)
+	}
+}
+
 func TestLifecycleWaitTools(t *testing.T) {
 	e := newEnv(t)
 	e.project("/w/life")
@@ -311,7 +343,7 @@ func TestLifecycleWaitTools(t *testing.T) {
 
 	var a, b client.Task
 	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "a", "prompt": "x", "start": true}, &a)
-	if a.State == db.StateBacklog || a.T3ThreadID == nil {
+	if a.State == db.StateBacklog || a.ExternalSessionID == nil {
 		t.Fatalf("start=true %+v", a)
 	}
 	if msg := call(t, cs, "create_task", map[string]any{"project": "1", "title": "b", "prompt": "y", "needs": []int64{a.ID}, "start": true}, nil); !strings.Contains(msg, "cannot also start now") {
@@ -326,7 +358,7 @@ func TestLifecycleWaitTools(t *testing.T) {
 		t.Fatalf("update %+v", b)
 	}
 
-	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCompleted)
+	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusCompleted)
 	if err := e.sync.PollActive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -350,15 +382,15 @@ func TestLifecycleWaitTools(t *testing.T) {
 	mustCall(t, cs, "stop_task", map[string]any{"id": a.ID}, nil)
 }
 
-// settle completes and settles a launched task's thread, then lets the
-// release runner react.
+// acceptTask finishes a launched session, records acceptance and reconciles the tree.
 func (e *env) acceptTask(tk client.Task) {
 	e.t.Helper()
-	if tk.T3ThreadID == nil {
+	if tk.ExternalSessionID == nil {
 		e.t.Fatalf("task %d not launched", tk.ID)
 	}
-	_ = e.fake.SetStatus(*tk.T3ThreadID, t3.StatusCompleted)
-	_ = e.fake.Settle(*tk.T3ThreadID)
+	if err := e.fake.SetStatus(*tk.ExternalSessionID, t3.StatusCompleted); err != nil {
+		e.t.Fatal(err)
+	}
 	if err := e.sync.PollActive(context.Background()); err != nil {
 		e.t.Fatal(err)
 	}
@@ -528,7 +560,7 @@ func TestLifecycleTreeTools(t *testing.T) {
 		t.Fatalf("list_trees %+v", trees)
 	}
 	if r := trees.Trees[0]; r.ID != tree.ID || r.Tasks != 3 || r.Levels != 2 || r.States["ready"] != 2 || r.States["blocked"] != 1 ||
-		len(r.States) != 2 || !slices.Equal(r.Projects, []string{p.Title}) || r.SettledAt != nil {
+		len(r.States) != 2 || !slices.Equal(r.Projects, []string{p.Title}) || r.CompletedAt != nil {
 		t.Fatalf("tree row %+v", r)
 	}
 
@@ -565,7 +597,7 @@ func TestLifecycleTreeTools(t *testing.T) {
 	var cd client.TaskDetail
 	mustCall(t, cs, "get_task", map[string]any{"id": c.ID}, &cd)
 	if cd.State != db.StateBacklog || readiness(cd.Task) != "ready" || cd.ReadyAt == nil || cd.Tree == nil || cd.Tree.ID != tree.ID {
-		t.Fatalf("manual c after needs settle %+v", cd.Task)
+		t.Fatalf("manual c after needs complete %+v", cd.Task)
 	}
 
 	// set_needs on a loose task joins the tree; add_to_tree with needs; remove_from_tree splices.
@@ -639,7 +671,7 @@ func TestAdoptSessionTool(t *testing.T) {
 
 	var out agenttools.AdoptOut
 	mustCall(t, cs, "adopt_session", map[string]any{}, &out)
-	if !out.Created || !out.Task.Adopted || out.Task.T3ThreadID == nil || *out.Task.T3ThreadID != me ||
+	if !out.Created || !out.Task.Adopted || out.Task.ExternalSessionID == nil || *out.Task.ExternalSessionID != me ||
 		out.Task.Title != "Planner" || out.Task.Prompt != "" {
 		t.Fatalf("adopt own session %+v", out)
 	}
@@ -694,10 +726,10 @@ func TestLastWordTools(t *testing.T) {
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/word"}})
 	var a client.Task
 	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "a", "prompt": "x", "start": true}, &a)
-	if a.T3ThreadID == nil {
+	if a.ExternalSessionID == nil {
 		t.Fatalf("not launched %+v", a)
 	}
-	id := *a.T3ThreadID
+	id := *a.ExternalSessionID
 	if err := e.fake.SetReply(id, t3.Reply{ItemID: "i1", Text: "## Done\nFixed **the race**."}); err != nil {
 		t.Fatal(err)
 	}
@@ -963,11 +995,11 @@ func TestReadRefTool(t *testing.T) {
 	}
 
 	mustCall(t, cs, "start_task", map[string]any{"id": tk.ID}, &tk)
-	threadID := *tk.T3ThreadID
-	if err := e.fake.SetReply(threadID, t3.Reply{Text: "Fixed the token refresh."}); err != nil {
+	sessionID := *tk.ExternalSessionID
+	if err := e.fake.SetReply(sessionID, t3.Reply{Text: "Fixed the token refresh."}); err != nil {
 		t.Fatal(err)
 	}
-	_ = e.fake.SetStatus(threadID, t3.StatusCompleted)
+	_ = e.fake.SetStatus(sessionID, t3.StatusCompleted)
 	if err := e.sync.PollActive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -975,11 +1007,11 @@ func TestReadRefTool(t *testing.T) {
 	// Task ref carries its session; session ref carries its task.
 	r = agenttools.RefOut{}
 	mustCall(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("#%d", tk.ID)}, &r)
-	if r.Kind != "task" || r.Task == nil || r.SessionRef == nil || r.SessionRef.ExternalSessionID != threadID || !strings.Contains(r.Next, "native harness") {
+	if r.Kind != "task" || r.Task == nil || r.SessionRef == nil || r.SessionRef.ExternalSessionID != sessionID || !strings.Contains(r.Next, "native harness") {
 		t.Fatalf("task ref %+v", r)
 	}
 	r = agenttools.RefOut{}
-	mustCall(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("http://127.0.0.1:7380/connections/%d/sessions/%s", dbtest.T3Connection, threadID)}, &r)
+	mustCall(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("http://127.0.0.1:7380/connections/%d/sessions/%s", dbtest.T3Connection, sessionID)}, &r)
 	if r.Kind != "session" || r.SessionRef == nil || r.Task == nil || r.Task.ID != tk.ID {
 		t.Fatalf("session ref %+v", r)
 	}
@@ -987,7 +1019,7 @@ func TestReadRefTool(t *testing.T) {
 		t.Fatalf("session final reply %+v", r.Task.FinalReply)
 	}
 	// A bare session id names no connection.
-	if msg := call(t, cs, "read_ref", map[string]any{"ref": threadID}, nil); !strings.Contains(msg, "connectionId is required") {
+	if msg := call(t, cs, "read_ref", map[string]any{"ref": sessionID}, nil); !strings.Contains(msg, "connectionId is required") {
 		t.Fatalf("bare session id %q", msg)
 	}
 

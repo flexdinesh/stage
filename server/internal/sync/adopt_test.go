@@ -11,10 +11,9 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
-// An adopted session's initial state (db.adoptStateSQL) must match what the
-// poller maps the same session to (MapThreadState from done, the state an
-// idle session without runs reads).
-func TestAdoptStateMatchesMapThreadState(t *testing.T) {
+// Adoption starts from the same observation the poller uses. Idle becomes
+// backlog or done according to whether the session recorded work.
+func TestAdoptStateMatchesObservation(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	ctx := context.Background()
 	if _, err := store.InsertProject(ctx, db.Project{Title: "app", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: "proj-1", Workspace: "/w"}}}); err != nil {
@@ -40,10 +39,10 @@ func TestAdoptStateMatchesMapThreadState(t *testing.T) {
 					if run != "" {
 						d.RecentRuns = []t3.Run{{RunID: "r1", Status: run, RequestedAt: now}}
 					}
-					if err := store.UpsertThreadDetail(ctx, d); err != nil {
+					if err := store.PutObservation(ctx, d.Observation()); err != nil {
 						t.Fatal(err)
 					}
-					task, created, err := store.AdoptThread(ctx, db.AdoptInput{Session: db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}})
+					task, created, err := store.AdoptSession(ctx, db.AdoptInput{Session: db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}})
 					if err != nil || !created {
 						t.Fatalf("adopt %s: %v", id, err)
 					}
@@ -57,7 +56,7 @@ func TestAdoptStateMatchesMapThreadState(t *testing.T) {
 						}
 					}
 					if task.State != want {
-						t.Fatalf("status=%s latest=%q settled=%v pending=%d: adopted %s, MapThreadState %s", status, run, settled, pending, task.State, want)
+						t.Fatalf("status=%s latest=%q settled=%v pending=%d: adopted %s, want %s", status, run, settled, pending, task.State, want)
 					}
 				}
 			}

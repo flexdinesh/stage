@@ -172,13 +172,7 @@ func IsStatus(err error, status int) bool {
 }
 
 // Task is the API Task shape.
-type ArtifactLink struct {
-	Label string `json:"label"`
-	URL   string `json:"url"`
-}
-
 type Task struct {
-	ArtifactLinks []ArtifactLink `json:"artifactLinks"`
 	// Links: where the session opens (its harness's destinations).
 	Links execution.Links `json:"links"`
 	db.Task
@@ -457,7 +451,7 @@ func taskPath(id int64, action string) string {
 	return p
 }
 
-// Task reads one task with events, thread and tree.
+// Task reads one task with events, session and tree.
 func (c *Client) Task(ctx context.Context, id int64) (TaskDetail, error) {
 	var out TaskDetail
 	err := c.do(ctx, http.MethodGet, taskPath(id, ""), nil, &out)
@@ -501,14 +495,14 @@ func (c *Client) StartTask(ctx context.Context, id int64) (Task, error) {
 	return out, err
 }
 
-// StopTask interrupts a task's thread.
+// StopTask interrupts a task's session.
 func (c *Client) StopTask(ctx context.Context, id int64) (Task, error) {
 	var out Task
 	err := c.do(ctx, http.MethodPost, taskPath(id, "stop"), nil, &out)
 	return out, err
 }
 
-// FollowupTask sends a message (and/or staged images) to a task's thread.
+// DuplicateTask creates a new backlog task from an existing task.
 func (c *Client) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 	var out Task
 	err := c.do(ctx, http.MethodPost, taskPath(id, "duplicate"), nil, &out)
@@ -527,13 +521,13 @@ func (c *Client) SetNeeds(ctx context.Context, id int64, needs []int64) (Task, e
 }
 
 // TreeQuery filters GET /api/trees: Status active (default; plus open
-// trees settled since SettledFrom) | done | archived | all; All is
+// trees completed since CompletedFrom) | done | archived | all; All is
 // Status all.
 type TreeQuery struct {
-	All         bool
-	Status      string
-	ProjectID   *int64
-	SettledFrom *time.Time
+	All           bool
+	Status        string
+	ProjectID     *int64
+	CompletedFrom *time.Time
 }
 
 // NewTree is the POST /api/trees body.
@@ -581,8 +575,8 @@ func (c *Client) Trees(ctx context.Context, f TreeQuery) ([]db.TreeSummary, erro
 		q.Set("status", f.Status)
 	}
 	setID(q, "project", f.ProjectID)
-	if f.SettledFrom != nil {
-		q.Set("settledFrom", f.SettledFrom.UTC().Format(time.RFC3339))
+	if f.CompletedFrom != nil {
+		q.Set("completedFrom", f.CompletedFrom.UTC().Format(time.RFC3339))
 	}
 	var out struct {
 		Trees []db.TreeSummary `json:"trees"`

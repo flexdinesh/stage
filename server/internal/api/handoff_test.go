@@ -11,13 +11,13 @@ import (
 )
 
 type handoffRec struct {
-	Attempt        int     `json:"attempt"`
-	Status         string  `json:"status"`
-	SourceTaskID   *int64  `json:"sourceTaskId"`
-	SourceThreadID string  `json:"sourceThreadId"`
-	SourceTitle    string  `json:"sourceTitle"`
-	Text           string  `json:"text"`
-	Reason         *string `json:"reason"`
+	Attempt      int            `json:"attempt"`
+	Status       string         `json:"status"`
+	SourceTaskID *int64         `json:"sourceTaskId"`
+	Session      *db.SessionRef `json:"session"`
+	SourceTitle  string         `json:"sourceTitle"`
+	Text         string         `json:"text"`
+	Reason       *string        `json:"reason"`
 }
 
 type handoffTask struct {
@@ -46,9 +46,9 @@ func (e *env) handoffTask(id int64) handoffTask {
 	return out
 }
 
-// settle completes and settles thread, then lets sync and the release runner act
+// acceptSession completes and settles a T3 session, then drives release
 // (launch failures are asserted through task state).
-func (e *env) acceptThread(thread string) {
+func (e *env) acceptSession(thread string) {
 	e.t.Helper()
 	_ = e.fake.SetStatus(thread, t3.StatusCompleted)
 	_ = e.fake.Settle(thread)
@@ -58,7 +58,7 @@ func (e *env) acceptThread(thread string) {
 		e.t.Fatal(err)
 	}
 	for _, task := range tasks {
-		if task.T3ThreadID != nil && *task.T3ThreadID == thread {
+		if task.ExternalSessionID != nil && *task.ExternalSessionID == thread {
 			e.complete(task.ID)
 		}
 	}
@@ -91,21 +91,35 @@ func TestHandoffAppendedForNeed(t *testing.T) {
 	if got := e.handoffTask(b.ID); !got.Handoff || got.CurrentHandoffs == nil || len(got.CurrentHandoffs) != 0 {
 		t.Fatalf("task with needs: handoff must default on with no record yet: %+v", got)
 	}
-	thread := *a.T3ThreadID
+	thread := *a.ExternalSessionID
 	_ = e.fake.SetThread(thread, func(d *t3.ThreadDetail) {
 		d.Branch, d.WorktreePath = "feat/api", "/w/wt-api"
 		d.PullRequests = []t3.PullRequest{{Repository: "me/app", Number: 41, URL: "https://github.com/me/app/pull/41", State: "open"}}
 	})
 	_ = e.fake.SetReply(thread, t3.Reply{Text: "Shipped the API; see PR 41."})
-	e.acceptThread(thread)
+	e.acceptSession(thread)
 
 	got := e.handoffTask(b.ID)
 	h := got.one(t)
 	if got.State != "running" || h == nil {
 		t.Fatalf("dependent must run with a handoff: %+v", got)
 	}
-	if h.Status != "sent" || h.Attempt != 1 || h.SourceTaskID == nil || *h.SourceTaskID != a.ID || h.SourceThreadID != thread {
+	if h.Status != "sent" || h.Attempt != 1 || h.SourceTaskID == nil || *h.SourceTaskID != a.ID ||
+		h.Session == nil || *h.Session != (db.SessionRef{ConnectionID: 1, ExternalSessionID: thread}) {
 		t.Fatalf("handoff record %+v", h)
+	}
+	var detail struct {
+		CurrentHandoffs []map[string]any `json:"currentHandoffs"`
+	}
+	e.must("GET", taskPath(b.ID), nil, 200, &detail)
+	if len(detail.CurrentHandoffs) != 1 {
+		t.Fatalf("handoff JSON %+v", detail)
+	}
+	if _, exists := detail.CurrentHandoffs[0]["sourceThreadId"]; exists {
+		t.Fatal("handoff still has sourceThreadId")
+	}
+	if strings.Contains(h.Text, "Artifact:") || strings.Contains(h.Text, "https://github.com/me/app/pull/41") {
+		t.Fatalf("handoff includes removed PR artifact: %s", h.Text)
 	}
 	if msg := e.lastMessage(); !strings.HasPrefix(msg, "reply OK\n\n"+h.Text+"\n\n<stage-journal>") {
 		t.Fatalf("launch prompt must be prompt + stored block:\n%q\nblock:\n%q", msg, h.Text)
@@ -132,9 +146,9 @@ func TestHandoffCapsReplyAndMarksTruncation(t *testing.T) {
 	p := e.project("/w/cap")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
 	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needs": []int64{a.ID}})
-	thread := *a.T3ThreadID
+	thread := *a.ExternalSessionID
 	_ = e.fake.SetReply(thread, t3.Reply{Text: strings.Repeat("x", 5000) + "TAIL"})
-	e.acceptThread(thread)
+	e.acceptSession(thread)
 	h := e.handoffTask(b.ID).one(t)
 	if h == nil || h.Status != "sent" {
 		t.Fatalf("handoff %+v", h)
@@ -153,8 +167,8 @@ func TestHandoffOffStillSendsJournalInstructions(t *testing.T) {
 	p := e.project("/w/off")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
 	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needs": []int64{a.ID}, "handoff": false})
-	_ = e.fake.SetReply(*a.T3ThreadID, t3.Reply{Text: "done"})
-	e.acceptThread(*a.T3ThreadID)
+	_ = e.fake.SetReply(*a.ExternalSessionID, t3.Reply{Text: "done"})
+	e.acceptSession(*a.ExternalSessionID)
 	got := e.handoffTask(b.ID)
 	if got.State != "running" || got.Handoff || len(got.CurrentHandoffs) != 0 {
 		t.Fatalf("handoff off: %+v", got)
@@ -170,7 +184,7 @@ func TestHandoffMissingReplyIsExplicit(t *testing.T) {
 	a := e.task(p.ID, "a", map[string]any{"start": true})
 	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}, "startMode": "auto"})
 	e.t3.failReply.Store(true)
-	e.acceptThread(*a.T3ThreadID)
+	e.acceptSession(*a.ExternalSessionID)
 	got := e.handoffTask(b.ID)
 	h := got.one(t)
 	if got.State != "running" || h == nil || h.Status != "sent" || !strings.Contains(h.Text, "Final reply: missing at acceptance.") {
@@ -185,11 +199,11 @@ func TestHandoffFromAdoptedSession(t *testing.T) {
 	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needsSession": e.t3Session(s)})
 	planner := b.Needs[0]
 	_ = e.fake.SetReply(s, t3.Reply{Text: "Plan ready."})
-	e.acceptThread(s)
+	e.acceptSession(s)
 	got := e.handoffTask(b.ID)
 	h := got.one(t)
 	if got.State != "running" || h == nil || h.Status != "sent" || h.SourceTaskID == nil || *h.SourceTaskID != planner ||
-		h.SourceThreadID != s || h.SourceTitle != "Planner" {
+		h.Session == nil || *h.Session != (db.SessionRef{ConnectionID: 1, ExternalSessionID: s}) || h.SourceTitle != "Planner" {
 		t.Fatalf("session handoff %+v / %+v", got, h)
 	}
 	if !strings.Contains(h.Text, fmt.Sprintf(`"Planner" (task #%d)`, planner)) || !strings.Contains(h.Text, "Plan ready.") {
@@ -208,12 +222,12 @@ func TestHandoffFanInPerNeed(t *testing.T) {
 	b := e.task(p.ID, "b", map[string]any{"start": true})
 	c := e.task(p.ID, "c", map[string]any{"start": true})
 	d := e.task(p.ID, "d", map[string]any{"startMode": "auto", "needs": []int64{c.ID, a.ID, b.ID}})
-	_ = e.fake.SetReply(*a.T3ThreadID, t3.Reply{Text: strings.Repeat("a", 3000) + "TAIL"})
-	_ = e.fake.SetReply(*b.T3ThreadID, t3.Reply{Text: "b done"})
-	_ = e.fake.SetReply(*c.T3ThreadID, t3.Reply{Text: "c done"})
-	e.acceptThread(*a.T3ThreadID)
-	e.acceptThread(*b.T3ThreadID)
-	e.acceptThread(*c.T3ThreadID)
+	_ = e.fake.SetReply(*a.ExternalSessionID, t3.Reply{Text: strings.Repeat("a", 3000) + "TAIL"})
+	_ = e.fake.SetReply(*b.ExternalSessionID, t3.Reply{Text: "b done"})
+	_ = e.fake.SetReply(*c.ExternalSessionID, t3.Reply{Text: "c done"})
+	e.acceptSession(*a.ExternalSessionID)
+	e.acceptSession(*b.ExternalSessionID)
+	e.acceptSession(*c.ExternalSessionID)
 	got := e.handoffTask(d.ID)
 	hs := got.CurrentHandoffs
 	if got.State != "running" || len(hs) != 3 {
@@ -242,7 +256,7 @@ func TestUnacceptedNeedsCannotHandOff(t *testing.T) {
 	p := e.project("/w/blocked")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
 	b := e.task(p.ID, "b", map[string]any{"needs": []int64{a.ID}})
-	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCompleted)
+	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusCompleted)
 	e.poll()
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", b.ID), nil, 409, nil)
 	if got := e.handoffTask(b.ID); len(got.CurrentHandoffs) != 0 || got.LaunchAttempt != 0 {
@@ -255,7 +269,7 @@ func TestHandoffNoReplyStillSendsContext(t *testing.T) {
 	p := e.project("/w/noreply")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
 	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needs": []int64{a.ID}})
-	e.acceptThread(*a.T3ThreadID)
+	e.acceptSession(*a.ExternalSessionID)
 	h := e.handoffTask(b.ID).one(t)
 	if h == nil || h.Status != "sent" || !strings.Contains(h.Text, "Final reply: missing at acceptance.") ||
 		strings.Contains(h.Text, "Branch:") || strings.Contains(h.Text, "Pull requests:") {
@@ -268,10 +282,10 @@ func TestHandoffAcceptedSnapshotSurvivesNewAttempt(t *testing.T) {
 	p := e.project("/w/restart")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
 	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needs": []int64{a.ID}})
-	thread := *a.T3ThreadID
+	thread := *a.ExternalSessionID
 	_ = e.fake.SetReply(thread, t3.Reply{ItemID: "r1", Text: "first"})
 	e.t3.failLaunch.Store(true)
-	e.acceptThread(thread)
+	e.acceptSession(thread)
 	if got := e.handoffTask(b.ID); got.State != "backlog" || got.one(t) == nil || got.one(t).Attempt != 1 {
 		t.Fatalf("first attempt %+v", got)
 	}
@@ -293,10 +307,10 @@ func TestHandoffReusedForSameAttempt(t *testing.T) {
 	p := e.project("/w/reuse")
 	a := e.task(p.ID, "a", map[string]any{"start": true})
 	b := e.task(p.ID, "b", map[string]any{"startMode": "auto", "needs": []int64{a.ID}})
-	thread := *a.T3ThreadID
+	thread := *a.ExternalSessionID
 	_ = e.fake.SetReply(thread, t3.Reply{ItemID: "r1", Text: "original"})
 	e.t3.lostLaunches.Store(2) // launch + same-id retry both lose the response
-	e.acceptThread(thread)
+	e.acceptSession(thread)
 	first := e.handoffTask(b.ID)
 	if first.State != "launching" || first.one(t) == nil {
 		t.Fatalf("lost launch %+v", first)

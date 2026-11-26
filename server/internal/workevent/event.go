@@ -10,11 +10,9 @@ type TaskChange struct {
 	Detail string
 }
 
-// SessionChange is emitted by a harness-specific observer. IDs are scoped
-// to the configured harness; connection identities arrive before a second harness.
+// SessionChange is emitted by a harness-specific observer for a session on its connection.
 type SessionChange struct {
 	Session   *db.SessionRef
-	ThreadID  string
 	ProjectID string
 	Title     string
 	From      *db.TaskState
@@ -22,5 +20,5 @@ type SessionChange struct {
 }
 
 func Notifiable(s db.TaskState) bool {
-	return s == db.StateNeedsInput || s == db.StateDone || s == db.StateFailed || s == db.StateSettled
+	return s == db.StateNeedsInput || s == db.StateDone || s == db.StateFailed
 }

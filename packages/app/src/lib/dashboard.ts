@@ -2,9 +2,9 @@ import type { HarnessConnection, Task } from "../api/types.ts";
 import type { StatusItem } from "./status.ts";
 
 /** Task groups, in Tasks view order; the Dashboard lists the first four (`ATTENTION_GROUPS`). */
-export type GroupKey = "needs" | "done" | "ready" | "failed" | "running" | "backlog" | "scheduled" | "settled";
+export type GroupKey = "needs" | "done" | "ready" | "failed" | "running" | "backlog" | "scheduled" | "completed";
 
-export const GROUP_KEYS: readonly GroupKey[] = ["needs", "done", "ready", "failed", "running", "backlog", "scheduled", "settled"];
+export const GROUP_KEYS: readonly GroupKey[] = ["needs", "done", "ready", "failed", "running", "backlog", "scheduled", "completed"];
 
 /** What asks for the user: the Dashboard. */
 export const ATTENTION_GROUPS: readonly GroupKey[] = ["needs", "done", "ready", "failed"];
@@ -26,7 +26,7 @@ export function inGroup(key: GroupKey, t: Grouped, since: string, lingering: Rea
       return t.state === "launching" || t.state === "running";
     case "done":
       return awaitingReview(t, lingering);
-    case "settled":
+    case "completed":
       return completedSince(t, since, lingering);
   }
   if (t.acceptanceId !== null) return false;
@@ -90,7 +90,7 @@ export const nextLingerEnd = (linger: Linger): number | null => (linger.size ===
 
 /** Awaiting review: a finished run without a current acceptance, or one completed here that still lingers. */
 export const awaitingReview = (t: Pick<Task, "id" | "state" | "acceptanceId">, lingering: ReadonlySet<number>) =>
-  (t.state === "done" || t.state === "settled") && (t.acceptanceId === null || lingering.has(t.id));
+  t.state === "done" && (t.acceptanceId === null || lingering.has(t.id));
 
 /** Completed in the window, unless still lingering in Awaiting review. */
 export const completedSince = (t: Pick<Task, "id" | "completedAt">, since: string, lingering: ReadonlySet<number>) =>
@@ -105,7 +105,7 @@ export interface GroupFold {
 }
 
 /** Only Completed starts collapsed. */
-export const DEFAULT_FOLD: GroupFold = { collapsed: ["settled"], seen: [] };
+export const DEFAULT_FOLD: GroupFold = { collapsed: ["completed"], seen: [] };
 
 /** One needs-input episode: re-entering needs input (a new question) is a new episode. */
 export const needsEpisode = (t: Pick<Task, "id" | "stateSince">) => `${t.id}:${t.stateSince ?? ""}`;
@@ -125,7 +125,7 @@ export function parseFold(raw: string | null): GroupFold {
   if (typeof v !== "object" || v === null) return DEFAULT_FOLD;
   const collapsed = strings("collapsed" in v ? v.collapsed : null);
   if (collapsed === null) return DEFAULT_FOLD;
-  return { collapsed, seen: strings("seen" in v ? v.seen : null) ?? [] };
+  return { collapsed: collapsed.map((key) => key === "settled" ? "completed" : key), seen: strings("seen" in v ? v.seen : null) ?? [] };
 }
 
 /**

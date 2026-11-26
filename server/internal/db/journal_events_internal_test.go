@@ -71,8 +71,7 @@ func TestHandoffSourceSession(t *testing.T) {
 		h    Handoff
 		want string
 	}{
-		{Handoff{Session: &SessionRef{ConnectionID: t3, ExternalSessionID: "thr-src"}, SourceThreadID: "thr-src"}, fmt.Sprintf("%d:thr-src", t3)},
-		{Handoff{SourceThreadID: "legacy-thr"}, "-"},
+		{Handoff{Session: &SessionRef{ConnectionID: t3, ExternalSessionID: "thr-src"}}, fmt.Sprintf("%d:thr-src", t3)},
 		{Handoff{}, "-"},
 	} {
 		task := launchedTask(t, s, ctx, project, fmt.Sprintf("thr-%d", i))

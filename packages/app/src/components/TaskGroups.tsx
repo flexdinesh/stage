@@ -65,7 +65,7 @@ export const GROUP_META: Record<GroupKey, GroupMeta> = {
     tone: "idle",
     empty: "Nothing scheduled in the next 24 hours. Pick At time or Repeat under Start in New task.",
   },
-  settled: {
+  completed: {
     title: "Completed · last 7 days",
     stat: "Completed",
     short: "done",
@@ -175,7 +175,7 @@ export function StatCount({ tone, count, selected = false }: { tone: ChipTone; c
 }
 
 /**
- * Strip of group counts; a cell filters the view to its group. A trailing `settled` cell hides on phone.
+ * Strip of group counts; a cell filters the view to its group. A trailing `completed` cell hides on phone.
  * `counts` null while loading: bars stand in for the numbers and the cells are disabled.
  */
 export function StatStrip<K extends string>({
@@ -192,7 +192,7 @@ export function StatStrip<K extends string>({
   onToggle: (key: K) => void;
 }) {
   // Phone fits six cells; the cell before a hidden Completed closes the row.
-  const phoneLast = groups.at(-1) === "settled" ? groups.at(-2) : undefined;
+  const phoneLast = groups.at(-1) === "completed" ? groups.at(-2) : undefined;
   return (
     <div role="group" aria-label="Filter by state" aria-busy={counts === null} className="mb-4 flex border border-line bg-surface">
       {groups.map((key) => {
@@ -211,7 +211,7 @@ export function StatStrip<K extends string>({
               toneClass(g.tone),
               "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 border-r border-line px-1 py-1.5 whitespace-nowrap max-lg:last-of-type:border-r-0 transition-colors duration-150 lg:flex-none lg:flex-row lg:justify-start lg:gap-2 lg:px-3",
               // Completed stays reachable from its collapsible group.
-              key === "settled" && "max-md:hidden",
+              key === "completed" && "max-md:hidden",
               key === phoneLast && "max-md:border-r-0",
               on ? "bg-[color-mix(in_srgb,var(--c)_10%,transparent)] shadow-[inset_0_-2px_var(--c)]" : "enabled:hover:bg-panel",
             )}

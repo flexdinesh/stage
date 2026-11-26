@@ -42,7 +42,7 @@ function IndependentHeader({ count }: { count: number }) {
  * Session detail panel: tasks this session created, grouped by tree (headers open the tree), then independent
  * tasks. Start a task, edit a backlog task; check independent backlog tasks to make a tree of them.
  */
-export function CreatedTasksPanel({ threadId, batch }: { threadId: string; batch: CreatedTasks }) {
+export function CreatedTasksPanel({ sessionId, batch }: { sessionId: string; batch: CreatedTasks }) {
   // The id only: the form edits the live task from the batch, never a copy from when it opened.
   const [editingId, setEditingId] = useState<number | null>(null);
   const editing = [...batch.trees.flatMap((t) => t.tasks), ...batch.independent].find((t) => t.id === editingId) ?? null;
@@ -67,7 +67,7 @@ export function CreatedTasksPanel({ threadId, batch }: { threadId: string; batch
   const rows = (tasks: Task[]): ReactNode =>
     tasks.map((t) => (
       <Row key={t.id} bare>
-        <TaskRow task={t} contextThreadId={threadId} extra={editButton(t)} />
+        <TaskRow task={t} contextSessionId={sessionId} extra={editButton(t)} />
       </Row>
     ));
 
@@ -91,7 +91,7 @@ export function CreatedTasksPanel({ threadId, batch }: { threadId: string; batch
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <TaskRow task={t} contextThreadId={threadId} extra={editButton(t)} />
+          <TaskRow task={t} contextSessionId={sessionId} extra={editButton(t)} />
         </div>
       </Row>
     );
@@ -168,7 +168,7 @@ export function BatchPanel({ task }: { task: TaskDetail }) {
   };
   return (
     <>
-    {params.has("batch") ? <Drawer title="Created tasks" wide onClose={close}><CreatedTasksPanel threadId={task.originSession.externalSessionId} batch={batch} /></Drawer> : null}
+    {params.has("batch") ? <Drawer title="Created tasks" wide onClose={close}><CreatedTasksPanel sessionId={task.originSession.externalSessionId} batch={batch} /></Drawer> : null}
     <Panel
       title="Batch"
       meta={`${batchSize(batch)}`}

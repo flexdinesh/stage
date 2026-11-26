@@ -1,10 +1,11 @@
 import DOMPurify from "dompurify";
 import { useMemo } from "react";
-import { ALLOWED_URI, markdownToHtml } from "../lib/markdown.ts";
+import { useHarnesses } from "../api/queries.ts";
+import { linkSchemes } from "../lib/harnesses.ts";
+import { allowedUri, markdownToHtml } from "../lib/markdown.ts";
 import { useRefSlots } from "./StageLinks.tsx";
 
-// Links in a reply open outside stage; DOMPurify drops javascript: and other unsafe URLs (ALLOWED_URI keeps
-// t3code: and stage deep links, which the host routes).
+// Reply links open outside Stage. DOMPurify applies the allowed schemes before the host routes a link.
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (node.tagName === "A" && node.hasAttribute("href")) {
     node.setAttribute("target", "_blank");
@@ -14,7 +15,13 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 
 /** Sanitized markdown body of a reply (lazy-loaded with marked + DOMPurify). `refs` renders stage links as chips. */
 export default function ReplyMarkdown({ text, refs = false }: { text: string; refs?: boolean }) {
-  const html = useMemo(() => DOMPurify.sanitize(markdownToHtml(text), { USE_PROFILES: { html: true }, ALLOWED_URI_REGEXP: ALLOWED_URI }), [text]);
+  const { descriptors } = useHarnesses();
+  const schemes = useMemo(() => linkSchemes(descriptors), [descriptors]);
+  const schemeKey = schemes.join(",");
+  const html = useMemo(() => DOMPurify.sanitize(markdownToHtml(text), {
+    USE_PROFILES: { html: true },
+    ALLOWED_URI_REGEXP: allowedUri(schemeKey === "" ? [] : schemeKey.split(",")),
+  }), [text, schemeKey]);
   const [root, chips] = useRefSlots(html, refs);
   return (
     <>

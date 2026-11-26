@@ -9,21 +9,17 @@ export const TASK_STATES = [
   "running",
   "needs_input",
   "done",
-  "settled",
   "failed",
   "interrupted",
   "cancelled",
 ] as const;
 export type TaskState = (typeof TASK_STATES)[number];
 
-export const SEND_MODES = ["auto", "queue", "steer", "restart"] as const;
-export type SendMode = (typeof SEND_MODES)[number];
-
 /** When a tree member launches once its needs are completed: auto (the server launches it) or manual (it reads ready). */
 export const START_MODES = ["auto", "manual"] as const;
 export type StartMode = (typeof START_MODES)[number];
 
-/** A backlog tree member: blocked (a need is not settled) or ready (every need settled and manual, or no needs). */
+/** A backlog tree member: blocked (a need is incomplete) or ready (every need completed and manual, or no needs). */
 export type Readiness = "blocked" | "ready";
 
 // ---- Shared ----
@@ -65,7 +61,7 @@ export interface Health {
 export interface SyncResult {
   unavailableConnections?: number[];
   projects: number;
-  threads: number;
+  sessions: number;
   finishedAt: string;
 }
 
@@ -91,7 +87,7 @@ export interface Project {
   /** Machine whose agent gateway forwarded the create; null when not through a gateway. */
   sourceMachineId: number | null;
   updatedAt: string;
-  /** Latest thread update/settle or task update; null when none. */
+  /** Latest session or task update; null when none. */
   lastActivityAt: string | null;
   /** "discovered" when harness discovery imported it. */
   origin: "discovered" | null;
@@ -161,11 +157,11 @@ export interface LaunchRecovery {attempt:number; revision:number; phase:string; 
 /** A session the harness returned for an unconfirmed launch before Stage recorded it. */
 export interface LaunchSession extends SessionRef { title: string; state: string; links?: ExecutionLinks }
 /** Session destinations; `command` resumes it in the harness's own client (copy, never run). */
-export interface ExecutionLinks { web?: string; native?: string; app?: string; service?: string; command?: string }
+export interface ExecutionLinks { web?: string; native?: string; command?: string }
 /** A harness kind: the server's registry (GET /harnesses) says which exist. */
 export type Harness = string;
 /** A closure signal the harness reports and the copy that names it (an inferred completion's provenance). */
-export interface HarnessClosure { signal: string; provenance: Acceptance["provenance"]; setting: string; completed: string; via: string }
+export interface HarnessClosure { signal: string; provenance: Provenance; setting: string; completed: string; via: string }
 /** GET /api/harnesses: one harness kind, its policies and copy, and whether this machine can run it. */
 /** A connection setup setting or action input; settings are one object keyed by id (null resets). */
 export interface SetupField {
@@ -183,6 +179,7 @@ export interface HarnessDescriptor {
   /** connected: Stage connects to its service; hosted: it runs as processes on Stage's machine. */
   hosting: "connected" | "hosted";
   closures: HarnessClosure[];
+  linkSchemes: string[];
   setup: HarnessSetup;
   /** How the harness names an agent's session: MCP _meta keys it sends per call, and the variable its agents read their session id from. */
   attribution: {
@@ -274,7 +271,7 @@ export interface HarnessConnection {
   harness: Harness;
   /** Meaningful for the active connection only. */
   configured: boolean;
-  /** Complete tasks when a successful run is settled (T3) or archived (OpenCode) there. */
+  /** Complete tasks when their harness closes a successful session. */
   autoComplete: boolean;
   /** False once another instance of the harness replaced it: its tasks and bindings stay read-only. */
   active: boolean;
@@ -370,8 +367,7 @@ export interface Task {
   acceptanceRevision: number;
   completedAt: string | null;
   /** Provenance of the current acceptance; null while open. */
-  completionProvenance: Acceptance["provenance"] | null;
-  artifactLinks: { label: string; url: string }[];
+  completionProvenance: Provenance | null;
   id: number;
   projectId: number;
   projectTitle: string;
@@ -392,9 +388,9 @@ export interface Task {
   needs: number[];
   /** Tasks that need this one, by id. */
   dependents: number[];
-  /** Tracks an existing T3 session (prompt ""); stage never starts, restarts or duplicates it. */
+  /** Tracks an existing harness session (prompt ""); stage never starts, restarts or duplicates it. */
   adopted: boolean;
-  /** A manual task's needs all settled (the ready notification episode); null otherwise. */
+  /** All of a manual task's needs completed (the ready notification episode); null otherwise. */
   readyAt: string | null;
   /** One-shot start (UTC instant) of a backlog task; null once launched or when unset. */
   startAt: string | null;
@@ -405,7 +401,7 @@ export interface Task {
   scheduleTitle: string | null;
   /** The origin session's title; null when unknown. */
   originSessionTitle: string | null;
-  /** Append one handoff block per finished need (final reply, PRs, branch, thread link) to the launch prompt. */
+  /** Append one handoff block per finished need (final reply, branch and session link) to the launch prompt. */
   handoff: boolean;
   /** Images sent with the prompt on every launch, upload order. */
   attachments: Attachment[];
@@ -413,15 +409,12 @@ export interface Task {
   lastError: string | null;
   launchedAt: string | null;
   finishedAt: string | null;
-  settledAt: string | null;
-  /** Elapsed run span of the task's thread: first run start to newest run completion. */
+  /** Elapsed run span of the task's session: first run start to newest run completion. */
   runStartedAt: string | null;
   runEndedAt: string | null;
-  /** The thread's latest assistant reply as one plain line (detail: `thread.lastWord`). */
+  /** The session's latest assistant reply as one plain line. */
   lastWordPreview: string | null;
   lastWordAt: string | null;
-  /** Pull requests of the task's thread (T3 mirror); empty without a thread. */
-  /** Answerable questions the task's thread is waiting on (approvals excluded). */
   createdAt: string;
   /** User id of its creator (a schedule's creator for a task the schedule spawned). */
   createdBy: number;
@@ -438,7 +431,6 @@ export interface Task {
   deletable: boolean;
 }
 
-/** A pull request T3 associates with a thread. `state` is T3's string (open, merged, closed, draft, ...). */
 export interface TaskEvent {
   id: number;
   taskId: number;
@@ -486,8 +478,8 @@ export interface AcceptedEvidence {
   treeId: number | null;
   treeTitle: string | null;
   projectId: number;
-  threadId: string | null;
-  threadLink: string | null;
+  externalSessionId: string | null;
+  sessionLink: string | null;
   branch: string | null;
   worktreePath: string | null;
   executionState: TaskState;
@@ -498,16 +490,17 @@ export interface AcceptedEvidence {
   replyTruncated: boolean;
   replyAt: string | null;
   observedAt: string | null;
-  historicalSettledAt: string | null;
-  artifacts: { url: string; repository: string; number: number }[];
   journalThroughId: number;
 }
+/** `user`, `historical_settlement`, or a harness closure’s provenance (`HarnessDescriptor.closures`). */
+export type Provenance = string;
+
 export interface Acceptance {
   id: number;
   taskId: number;
   acceptedAt: string;
   capturedAt: string;
-  provenance: "user" | "historical_settlement" | "harness_settled" | "harness_archived";
+  provenance: Provenance;
   evidence: AcceptedEvidence;
   note: string;
 }
@@ -534,7 +527,7 @@ export interface Handoff {
   attempt: number;
   status: "sent" | "skipped";
   sourceTaskId: number | null;
-  sourceThreadId: string;
+  session?: SessionRef;
   sourceTitle: string;
   /** The appended block; "" when skipped. */
   text: string;
@@ -560,7 +553,7 @@ export interface CreatedTasks {
 
 // ---- Trees ----
 
-/** A DAG of tasks: each member's needs are members that must settle before it starts. */
+/** A DAG of tasks: each member's needs are members that must be completed before it starts. */
 /** open; done (marked done by hand: nothing more starts); archived. Activity on a member reopens it. */
 export type TreeStatus = "open" | "done" | "archived";
 
@@ -591,7 +584,7 @@ export interface TreeEdge {
 export interface TreeTimes {
   /** First member launch; null before any. */
   startedAt: string | null;
-  /** Latest of the tree's creation, a member's updatedAt and its thread's updatedAt. */
+  /** Latest of the tree's creation, a member's updatedAt and its session's updatedAt. */
   lastActivityAt: string;
 }
 
@@ -614,7 +607,7 @@ export interface TreeCounts {
   running: number;
   needsInput: number;
   done: number;
-  settled: number;
+  completed: number;
   failed: number;
   interrupted: number;
   cancelled: number;
@@ -625,8 +618,8 @@ export interface TreeSummary extends Tree, TreeTimes {
   levels: number;
   /** Member project titles, sorted. */
   projects: string[];
-  /** Every member settled: the latest settle; null otherwise. */
-  settledAt: string | null;
+  /** When the final member was completed; null while work remains. */
+  completedAt: string | null;
 }
 
 export interface TreeList {
@@ -651,13 +644,13 @@ export interface UpdateTreeRequest {
   status?: TreeStatus;
 }
 
-/** Trees page and API view: active (open, a member not settled), done (marked done or all settled), archived, all. */
+/** Trees page and API view: active (open, with an incomplete member), done (marked done or all members completed), archived, all. */
 export type TreeView = "active" | "done" | "archived" | "all";
 
 export interface TreeListQuery {
   status?: TreeView;
   /** With active: also open trees completed at or after this. */
-  settledFrom?: string;
+  completedFrom?: string;
   project?: number;
 }
 
@@ -778,7 +771,6 @@ export interface JournalEntry {
   taskId: number | null;
   treeId: number | null;
   sourceTaskId: number | null;
-  sourceThreadId: string | null;
   attempt: number | null;
   category: string;
   text: string;
@@ -908,8 +900,8 @@ export interface TaskListQuery {
   q?: string;
   from?: string;
   to?: string;
-  /** settledAt >= this (ISO date or datetime). */
-  settledFrom?: string;
+  /** completedAt >= this (ISO date or datetime). */
+  completedFrom?: string;
   /** Omitted: open tasks only; true: archived or in a done/archived tree; all: both. */
   closed?: "true" | "all";
 }
@@ -986,21 +978,21 @@ export interface PushEndpointBody {
 }
 
 export interface Badge {
-  /** Tasks in needs_input + external threads needing input. */
+  /** Tasks in needs_input + external sessions needing input. */
   needsInput: number;
 }
 
 // ---- Notifications inbox ----
 
 /** States a notification is sent for. */
-export type NotificationEvent = Extract<TaskState, "needs_input" | "done" | "failed" | "settled"> | "ready";
+export type NotificationEvent = Extract<TaskState, "needs_input" | "done" | "failed"> | "ready";
 
 export interface Notification {
   links?: ExecutionLinks;
   connectionId: number;
   id: number;
   event: NotificationEvent;
-  /** null for external threads (or once the task is deleted). */
+  /** null for external sessions (or once the task is deleted). */
   taskId: number | null;
   externalSessionId: string | null;
   /** Snapshot at send time. */
@@ -1010,7 +1002,7 @@ export interface Notification {
   url: string;
   createdAt: string;
   readAt: string | null;
-  /** Live: the task's state, or the external thread's (`settled` when settled). null = unknown. */
+  /** Live: the task's state, or the external session's. null = unknown. */
   currentState: TaskState | null;
 }
 
@@ -1046,7 +1038,7 @@ export interface NotificationGroupPage {
   nextCursor: string | null;
 }
 
-/** Push tags (`task-<id>`, `thread-<id>`) of groups with unread notifications. */
+/** Push tags (`task-<id>`, `session-<connectionId>:<externalSessionId>`) of groups with unread notifications. */
 export interface UnreadNotificationTags {
   tags: string[];
 }

@@ -8,18 +8,18 @@ import (
 	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
-type ThreadChange = workevent.SessionChange
+type SessionChange = workevent.SessionChange
 
-func Notifiable(s db.TaskState) bool { return workevent.Notifiable(s) }
-func (s *Service) WatchThreads(ctx context.Context) error {
+// WatchAttention polls sessions that need attention across active connections.
+func (s *Service) WatchAttention(ctx context.Context) error {
 	for id := range s.connections() {
-		if err := s.watchConnection(ctx, id); err != nil {
+		if err := s.watchAttention(ctx, id); err != nil {
 			return err
 		}
 	}
 	return nil
 }
-func (s *Service) watchConnection(ctx context.Context, connection int64) error {
+func (s *Service) watchAttention(ctx context.Context, connection int64) error {
 	a, err := s.Adapter(connection)
 	if err != nil {
 		return err
@@ -64,15 +64,15 @@ func (s *Service) watchConnection(ctx context.Context, connection int64) error {
 		if _, err := s.store.TaskBySession(ctx, ref); err == nil {
 			continue
 		}
-		if silent || !seeded || previous.State == o.State || !Notifiable(db.TaskState(o.State)) {
+		if silent || !seeded || previous.State == o.State || !workevent.Notifiable(db.TaskState(o.State)) {
 			continue
 		}
 		if previous.State == "" && !o.CreatedAt.After(s.started) {
 			continue
 		}
 		prev := db.TaskState(previous.State)
-		if s.OnThreadChange != nil {
-			s.OnThreadChange(ctx, ThreadChange{Session: &ref, ThreadID: ref.ExternalSessionID, ProjectID: o.Project, Title: o.Title, From: &prev, To: db.TaskState(o.State)})
+		if s.OnSessionChange != nil {
+			s.OnSessionChange(ctx, SessionChange{Session: &ref, ProjectID: o.Project, Title: o.Title, From: &prev, To: db.TaskState(o.State)})
 		}
 	}
 	s.watchSeeded.Store(connection, true)

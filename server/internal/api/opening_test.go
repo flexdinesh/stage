@@ -42,6 +42,15 @@ func TestAdoptedOpeningPrompt(t *testing.T) {
 	if got.Item == nil || got.Item.ItemID != "first" || got.Item.Text != "build it" || got.Item.Kind != "user" || got.Item.Inherited {
 		t.Fatalf("item = %+v", got.Item)
 	}
+	var shape struct {
+		Item map[string]any `json:"item"`
+	}
+	e.must("GET", base, nil, 200, &shape)
+	for _, field := range []string{"messageId", "position", "sourceThreadId"} {
+		if _, exists := shape.Item[field]; exists {
+			t.Fatalf("opening item still has %s", field)
+		}
+	}
 
 	long := strings.Repeat("opening ", 500)
 	if err := e.fake.UpdateItem(id, position, func(item *t3.TimelineItem) { item.Text = long }); err != nil {

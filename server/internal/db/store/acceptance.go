@@ -2,34 +2,67 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"time"
-
-	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // AcceptedEvidence is copied once. No source-harness read is needed to use it.
 type AcceptedEvidence struct {
-	Session             *SessionRef          `json:"session"`
-	TaskID              int64                `json:"taskId"`
-	Title               string               `json:"title"`
-	TreeID              *int64               `json:"treeId"`
-	TreeTitle           *string              `json:"treeTitle"`
-	ProjectID           int64                `json:"projectId"`
-	ThreadID            *string              `json:"threadId"`
-	ThreadLink          *string              `json:"threadLink"`
-	Branch              *string              `json:"branch"`
-	WorktreePath        *string              `json:"worktreePath"`
-	ExecutionState      TaskState            `json:"executionState"`
-	RunID               *string              `json:"runId"`
-	ReplyRunID          *string              `json:"replyRunId"`
-	ReplyItemID         *string              `json:"replyItemId"`
-	Reply               *string              `json:"reply"`
-	ReplyTruncated      bool                 `json:"replyTruncated"`
-	ReplyAt             *time.Time           `json:"replyAt"`
-	ObservedAt          *time.Time           `json:"observedAt"`
-	HistoricalSettledAt *time.Time           `json:"historicalSettledAt"`
-	Artifacts           []execution.Artifact `json:"artifacts"`
-	JournalThroughID    int64                `json:"journalThroughId"`
+	Session           *SessionRef `json:"session"`
+	TaskID            int64       `json:"taskId"`
+	Title             string      `json:"title"`
+	TreeID            *int64      `json:"treeId"`
+	TreeTitle         *string     `json:"treeTitle"`
+	ProjectID         int64       `json:"projectId"`
+	ExternalSessionID *string     `json:"externalSessionId"`
+	SessionLink       *string     `json:"sessionLink"`
+	Branch            *string     `json:"branch"`
+	WorktreePath      *string     `json:"worktreePath"`
+	ExecutionState    TaskState   `json:"executionState"`
+	RunID             *string     `json:"runId"`
+	ReplyRunID        *string     `json:"replyRunId"`
+	ReplyItemID       *string     `json:"replyItemId"`
+	Reply             *string     `json:"reply"`
+	ReplyTruncated    bool        `json:"replyTruncated"`
+	ReplyAt           *time.Time  `json:"replyAt"`
+	ObservedAt        *time.Time  `json:"observedAt"`
+	JournalThroughID  int64       `json:"journalThroughId"`
+}
+
+// UnmarshalJSON reads accepted evidence captured before API v9.
+func (e *AcceptedEvidence) UnmarshalJSON(b []byte) error {
+	type evidence AcceptedEvidence
+	var v struct {
+		evidence
+		ExternalSessionID json.RawMessage `json:"externalSessionId"`
+		SessionLink       json.RawMessage `json:"sessionLink"`
+		ThreadID          json.RawMessage `json:"threadId"`
+		ThreadLink        json.RawMessage `json:"threadLink"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	if v.ExternalSessionID == nil {
+		v.ExternalSessionID = v.ThreadID
+	}
+	if v.ExternalSessionID != nil {
+		if err := json.Unmarshal(v.ExternalSessionID, &v.evidence.ExternalSessionID); err != nil {
+			return err
+		}
+	}
+	if v.SessionLink == nil {
+		v.SessionLink = v.ThreadLink
+	}
+	if v.SessionLink != nil {
+		if err := json.Unmarshal(v.SessionLink, &v.evidence.SessionLink); err != nil {
+			return err
+		}
+	}
+	if v.ExecutionState == "settled" {
+		v.ExecutionState = StateDone
+	}
+	*e = AcceptedEvidence(v.evidence)
+	return nil
 }
 
 type Acceptance struct {

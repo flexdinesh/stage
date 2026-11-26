@@ -13,7 +13,6 @@ const (
 	StateRunning     = store.StateRunning
 	StateNeedsInput  = store.StateNeedsInput
 	StateDone        = store.StateDone
-	StateSettled     = store.StateSettled
 	StateFailed      = store.StateFailed
 	StateInterrupted = store.StateInterrupted
 	StateCancelled   = store.StateCancelled

@@ -21,20 +21,20 @@ type Change = workevent.TaskChange
 type Result struct {
 	Unavailable []int64   `json:"unavailableConnections,omitempty"`
 	Projects    int       `json:"projects"`
-	Threads     int       `json:"threads"`
+	Sessions    int       `json:"sessions"`
 	FinishedAt  time.Time `json:"finishedAt"`
 }
 
 var ErrSyncRunning error = &db.ConflictError{Msg: "sync already running"}
 
 type Service struct {
-	store          *db.Store
-	machines       *machine.Set // every machine's adapters, connectors and ops
-	log            *slog.Logger
-	OnTransition   func(context.Context, Change)
-	OnThreadChange func(context.Context, ThreadChange)
-	OnAccepted     func() // a completion was inferred (tree release may follow)
-	OnFullSync     func() // a full sync (Sync now) finished
+	store           *db.Store
+	machines        *machine.Set // every machine's adapters, connectors and ops
+	log             *slog.Logger
+	OnTransition    func(context.Context, Change)
+	OnSessionChange func(context.Context, SessionChange)
+	OnAccepted      func() // a completion was inferred (tree release may follow)
+	OnFullSync      func() // a full sync (Sync now) finished
 	// OnConnectionSynced runs after a connection's full sync succeeded
 	// (the composition records it where a harness's setup shows it).
 	OnConnectionSynced                                             func(ctx context.Context, connection int64, at time.Time) error
@@ -155,9 +155,9 @@ func (s *Service) Kick() {
 }
 
 type Progress struct {
-	Running           bool
-	StartedAt         *time.Time
-	Projects, Threads int
+	Running            bool
+	StartedAt          *time.Time
+	Projects, Sessions int
 }
 
 // syncState is one connection's full sync: at most one runs per connection.
@@ -214,7 +214,7 @@ func (s *Service) Run(ctx context.Context) {
 			go loop(s.FullSyncEvery, refresh, func(ctx context.Context) error { _, err := s.syncConnection(ctx, id); return err })
 			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.Stream(ctx, id) })
 			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.pollConnection(ctx, id) })
-			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.watchConnection(ctx, id) })
+			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.watchAttention(ctx, id) })
 		}
 	}
 	ensure()
@@ -278,7 +278,7 @@ func (s *Service) FullSync(ctx context.Context, skip ...int64) (Result, error) {
 	for range connections {
 		r := <-results
 		out.Projects += r.result.Projects
-		out.Threads += r.result.Threads
+		out.Sessions += r.result.Sessions
 		if r.err != nil {
 			out.Unavailable = append(out.Unavailable, r.id)
 			errs = append(errs, r.err)
@@ -336,7 +336,7 @@ func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) 
 		if err := s.PollTask(ctx, t); err != nil {
 			errs = append(errs, err)
 		} else {
-			r.Threads++
+			r.Sessions++
 		}
 	}
 	r.FinishedAt = time.Now().UTC()

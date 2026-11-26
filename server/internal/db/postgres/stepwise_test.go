@@ -5,6 +5,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -37,6 +38,10 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	},
 	33: {{name: "workspaces become launch options", seed: seedV0032(launchOptionsSeed...), check: checkV0033LaunchOptions}},
 	34: {{name: "workspace columns and launch bases dropped", seed: seedV0032(launchBasesSeed...), check: checkV0034DropWorkspaces}},
+	35: {
+		{name: "legacy states and preference entries removed", seed: seedV0035DropSettled, check: checkV0035DropSettled},
+		{name: "empty preference filter retained", seed: seedV0032(`UPDATE preferences SET notify_events='["settled"]'`), check: checkV0035EmptyPreferences},
+	},
 }
 
 func seedV0029Search(t *testing.T, pool *sql.DB) {
@@ -386,4 +391,77 @@ func checkV0034DropWorkspaces(t *testing.T, pool *sql.DB) {
 	wantPGRows(t, pool, `SELECT id || ' ' || (execution_config->'options')::text FROM tasks`, `1 [{"id": "worktree", "value": true}]`)
 	wantPGRows(t, pool, `SELECT count(*)::text FROM schedules`, "1")
 	seedV0032(`INSERT INTO tasks (id, project_id, title, prompt, connection_id) VALUES (2, 1, 'New', 'p', 2)`)(t, pool)
+}
+
+const v0035Evidence = `{ "threadId" : "legacy-1", "threadLink": "https://example.com/session", "executionState":"settled", "reply":"kept", "artifacts":[{"label":"old"}], "historicalSettledAt":"2026-11-03T00:00:00Z" }`
+const v0035Request = `{ "requestId" : "original", "revision": 1, "note": "kept" }`
+
+func seedV0035DropSettled(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	seedV0032(
+		`INSERT INTO harness_connections(id,harness,machine_id) VALUES(5,'t3',1)`,
+		`INSERT INTO projects(id,title) VALUES(1,'P')`,
+		`INSERT INTO session_identities(id,connection_id,external_id) VALUES(6,5,'legacy-1')`,
+		`INSERT INTO tasks(id,project_id,title,prompt,state,finished_at,settled_at,connection_id,session_id) VALUES
+ (7,1,'Historical needle','p','settled','2026-11-01T00:00:00Z','2026-11-03T00:00:00Z',5,6),
+ (8,1,'Reopened','p','settled',NULL,'2026-11-04T00:00:00Z',5,NULL)`,
+		`INSERT INTO task_acceptances(id,task_id,provenance,evidence,source_session_id) VALUES
+ (11,7,'historical_settlement','`+v0035Evidence+`',6),(12,8,'historical_settlement','{}',NULL)`,
+		`UPDATE tasks SET acceptance_id=11,acceptance_revision=1 WHERE id=7`,
+		`UPDATE tasks SET acceptance_revision=2 WHERE id=8`,
+		`INSERT INTO acceptance_requests VALUES(7,'original','`+v0035Request+`','{"revision":1,"acceptanceId":11}')`,
+		`INSERT INTO task_events(id,task_id,from_state,to_state,detail) VALUES
+ (1,7,'running','settled','original settled detail'),(2,8,'settled','running','original reopened detail')`,
+		`INSERT INTO journal_entries(id,kind,task_id,text,request_id) VALUES(1,'note',7,'original settled note','n')`,
+		`INSERT INTO notifications(id,event,task_id,title,url,session_id) VALUES(15,'settled',7,'legacy','/tasks/7',6)`,
+		`UPDATE preferences SET default_connection_id=5, notify_events='["done","settled","needs_input","settled","ready","failed"]'`,
+	)(t, pool)
+}
+
+func checkV0035DropSettled(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	ctx := t.Context()
+	for _, q := range []string{
+		`SELECT count(*) = 1 FROM tasks WHERE id=7 AND state='done' AND finished_at='2026-11-01T00:00:00Z' AND acceptance_id=11 AND acceptance_revision=1`,
+		`SELECT count(*) = 1 FROM tasks WHERE id=8 AND state='done' AND finished_at='2026-11-04T00:00:00Z' AND acceptance_id IS NULL AND acceptance_revision=2`,
+		`SELECT count(*) = 0 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='tasks' AND column_name='settled_at'`,
+		`SELECT count(*) = 1 FROM task_events WHERE id=1 AND task_id=7 AND from_state='running' AND to_state='done' AND detail='original settled detail'`,
+		`SELECT count(*) = 1 FROM task_events WHERE id=2 AND task_id=8 AND from_state='done' AND to_state='running' AND detail='original reopened detail'`,
+		`SELECT count(*) = 1 FROM journal_entries WHERE id=1 AND text='original settled note'`,
+		`SELECT count(*) = 1 FROM notifications WHERE id=15 AND event='done' AND task_id=7 AND session_id=6`,
+		`SELECT count(*) = 1 FROM preferences WHERE id=1 AND default_connection_id=5 AND notify_events='["done","needs_input","ready","failed"]'`,
+		`SELECT count(*) = 1 FROM task_acceptances WHERE id=11 AND provenance='historical_settlement' AND evidence='` + v0035Evidence + `'`,
+		`SELECT count(*) = 1 FROM acceptance_requests WHERE request_id='original' AND input='` + v0035Request + `'`,
+	} {
+		var ok bool
+		if err := pool.QueryRowContext(ctx, q).Scan(&ok); err != nil || !ok {
+			t.Errorf("%s: got %t, %v", q, ok, err)
+		}
+	}
+	for _, q := range []string{
+		`INSERT INTO tasks(project_id,title,prompt,state,connection_id) VALUES(1,'T','p','settled',5)`,
+		`INSERT INTO notifications(event,title,url) VALUES('settled','T','/tasks/7')`,
+	} {
+		_, err := pool.ExecContext(ctx, q)
+		var state interface{ SQLState() string }
+		if !errors.As(err, &state) || state.SQLState() != "23514" {
+			t.Fatalf("%s: want CHECK violation, got %v", q, err)
+		}
+	}
+}
+
+func checkV0035EmptyPreferences(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	ctx := t.Context()
+	var events string
+	if err := pool.QueryRowContext(ctx, `SELECT notify_events FROM preferences WHERE id=1`).Scan(&events); err != nil || events != "[]" {
+		t.Fatalf("empty preferences: %s, %v", events, err)
+	}
+	if _, err := pool.ExecContext(ctx, `UPDATE preferences SET notify_events=DEFAULT WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	var defaultMatches bool
+	if err := pool.QueryRowContext(ctx, `SELECT notify_events='["needs_input","failed","done"]' FROM preferences WHERE id=1`).Scan(&defaultMatches); err != nil || !defaultMatches {
+		t.Fatalf("Postgres notification default: %v, %v", defaultMatches, err)
+	}
 }

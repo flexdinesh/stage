@@ -7,7 +7,7 @@ import './run-order.css'
 // Needs, told as stage does it: #13's Tree panel adds #12 as a need (picker,
 // then Add). The rows pick up "needs #12" / "then #13" and the levels join.
 // The user accepts #12 in Stage; explicitly automatic #13 launches, and its
-// handoff (final reply, PR, branch) is the payoff.
+// handoff (final reply, branch, session link) is the payoff.
 
 type A = 'running' | 'done' | 'completed'
 type B = 'backlog' | 'launching' | 'running'
@@ -284,7 +284,7 @@ export function Demo() {
                               </span>
                               <span>Hand off context</span>
                             </span>
-                            <span className="ro-hint">Appends #12&apos;s final reply, PRs, branch and thread link at launch.</span>
+                            <span className="ro-hint">Appends #12&apos;s final reply, branch and session link at launch.</span>
                           </div>
                         ),
                         record: (
@@ -298,9 +298,7 @@ export function Demo() {
                             </div>
                             <p className="ro-handoff__reply">Retries back off from 2s to 64s, then dead-letter after 8 tries.</p>
                             <div className="ro-handoff__refs">
-                              <span className="ro-chip ro-chip--dot" data-tone="run">
-                                billing-api#41
-                              </span>
+                              <span className="ro-chip">Session link</span>
                               <span className="ro-branch">
                                 <span className="ro-branch__key">branch</span> feat/webhook-retries
                               </span>

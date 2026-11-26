@@ -49,7 +49,7 @@ export interface NativeNotifications {
   enableNotifications(): Promise<void>;
   disableNotifications(): Promise<void>;
   testNotification(): Promise<void>;
-  /** Closes the notification shown for `tag` (task-12, thread-x); all of them for "". */
+  /** Closes the notification shown for `tag` (task-12, session-x); all of them for "". */
   closeNotifications(tag: string): Promise<void>;
   syncNotifications(): Promise<void>;
   /** False when the system has no known notification settings to open. */
