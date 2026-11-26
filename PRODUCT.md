@@ -13,7 +13,7 @@ Developers running T3 Code, OpenCode, Codex and Claude Code sessions across seve
 A self-hosted task manager for T3 Code, OpenCode V2, Codex and Claude Code. Users plan tasks, review final replies, complete work and start ready dependents across projects.
 
 ## Positioning
-Stage owns projects, tasks, trees, schedules, journals, acceptance and durable handoff: it launches a task into a harness and keeps up with its progress. T3, OpenCode, Codex and Claude Code own sessions and everything in them: conversations, questions, approvals, execution, workspaces, worktrees and branches ([ADR 0007](docs/adr/0007-harness-boundary.md)). What a harness can do beyond that is declared by the harness, and the app adapts to it.
+Stage owns projects, tasks, trees, schedules, journals, acceptance and durable handoff: it launches a task into a harness and keeps up with its progress. T3, OpenCode, Codex and Claude Code own sessions and everything in them: conversations, questions, approvals, execution, workspaces, worktrees and branches ([ADR 0007](docs/adr/0007-harness-boundary.md)). Stage-wide features work across harnesses or adapt to declared capabilities, while each harness keeps its own scoped extras, settings, setup panel and vocabulary ([ADR 0008 P2–P3](docs/adr/0008-harness-foundation.md#p2)).
 
 ## Operating Context
 - Self-hosted on the T3 host via docker compose, listening on 127.0.0.1:7380 by default (compose publishes it on host loopback; expose it only on a trusted private network or behind a proxy), no auth.

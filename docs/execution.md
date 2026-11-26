@@ -1,11 +1,11 @@
 # Stage execution boundary
 
 Stage owns task identity, dependencies, acceptance, journals and durable handoff.
-`internal/execution` describes the operations Stage retains. `internal/sync`
-coordinates those operations; `internal/t3.Adapter` translates T3 protocol,
-authentication, models, permission modes, launch options and states.
-Composition is a fixed connection-to-adapter map in the server. There is no
-plugin registration or service installation framework.
+`internal/execution` defines the adapter contract. A connection resolves to
+an adapter on its machine, in process or through the worker proxy. Each
+harness translates its native protocol, models, options and session state.
+This document describes the shipped contracts. [ADR 0008](adr/0008-harness-foundation.md)
+defines the target foundation, including the role split and rewrite in layer 09.
 
 ## Design rules
 
@@ -298,7 +298,9 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   variable is set or its origin variable holds a wrapped origin (unless
   its precedence owns), so the wrapper's variable names the caller.
 
-## Contracts for roadmap tasks 5 and 6
+<a id="contracts-for-roadmap-tasks-5-and-6"></a>
+
+## Session identity, capabilities and agent transport
 
 - A session is `{connectionId, externalSessionId}`. Neither a directory string
   nor an external session ID identifies another connection. Project bindings
@@ -396,10 +398,12 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
 
 Agent transports use the same session ref for per-call metadata, ownership, adoption and journal provenance. The caller and execution destination are independent. A harness names the caller through its descriptor's attribution (OpenCode attaches its native session ID to each MCP call) or the generic `Stage-Caller-Session` header and `STAGE_CALLER_SESSION` variable; the launch instructions carry the descriptor's caller hint. Stage records the connection-scoped origin on child tasks and journal entries. See [agent interface](api.md#agent-interface) for inputs and compatibility.
 
-## Execution contract v2
+<a id="execution-contract-v2"></a>
+
+## Optional adapter interfaces
 
 Optional parts of the adapter contract (`internal/execution/optional.go`).
-Product code type-asserts the interface and reads the operation's
+Product code uses `execution.As[T]` and reads the operation's
 availability; the descriptor states the policies the coordinator enforces.
 The contract tests prove them on fake harnesses (`internal/sync`
 `contract_v2_test.go`): `assigned` (server-assigned ids, non-idempotent

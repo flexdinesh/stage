@@ -47,6 +47,10 @@ capabilities, never a harness name. The code drifted:
    harness), stop, the final reply, workspace discovery for project
    binding, and caller attribution for journal provenance. A harness that
    cannot meet one of these is not a harness Stage supports.
+
+   [ADR 0008 P2](0008-harness-foundation.md#p2) and [D7](0008-harness-foundation.md#d7)
+   refine the operation requirement for the target contract. Layer 06
+   gates Stop, Track and Start on declared availability.
 4. **Extras are declared, never implied.** A harness's extra ability is
    one of: a descriptor policy, a typed operation in `Capabilities`, a
    typed launch option, or an optional interface reached through
@@ -78,6 +82,11 @@ capabilities, never a harness name. The code drifted:
    connection to `POST /api/connections/{id}/observations`, through the
    same validation and ingest path as `execution.EventSource`; polling
    still reconciles.
+
+   [ADR 0008 D11](0008-harness-foundation.md#d11) supersedes the polling
+   placement wording. Layer 10 runs an observer beside the adapter,
+   including inside the worker. The no-daemon rule and bridge ingest
+   still apply.
 9. **Interaction is an optional capability.** Answering approvals and
    questions in Stage (`execution.Interactive`, operations `respond` and
    `send`) stays where a harness offers it. It is the pattern for
@@ -104,6 +113,11 @@ capabilities, never a harness name. The code drifted:
     `machine.Ops` on the machine where the files live, never in adapters.
     Stage never asks a harness to create a project (`registerWorkspace` is
     removed).
+
+    [ADR 0008 D9](0008-harness-foundation.md#d9) and
+    [D10](0008-harness-foundation.md#d10) supersede this identity ladder
+    with persisted workspace evidence, identity keys and one resolver
+    in layer 07. The Stage and harness ownership rules above still apply.
 12. **No default harness.** No connection is seeded; `connectionId` is
     required unless a project binding or the default connection picks one.
     An omitted `executionConfig` means the harness defaults; an update

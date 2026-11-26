@@ -17,6 +17,12 @@
   --local-harnesses`); the main server decides from the profile the worker
   describes. Claude Code's setup holds no secrets, so the main server keeps
   all of it ([execution.md](../execution.md#remote-machines)).
+- **Amended by [ADR 0008](0008-harness-foundation.md) (2026-11-26):**
+  [D3](0008-harness-foundation.md#d3) removes shared paths and
+  [D9](0008-harness-foundation.md#d9) supersedes the related project
+  matching rules in decisions 2, 3 and 7 (layer 07).
+  [D12](0008-harness-foundation.md#d12) supersedes decision 4's exact API
+  version check with worker protocol negotiation (layer 03).
 
 ## Context
 
@@ -79,6 +85,11 @@ other optional interfaces). Because of this, the coordinator, sync, the
 runners and the contract suite do not know whether a machine is local.
 
 ### 3. Machine-runtime seam
+
+The shared-path translation in decision 2 and the `shared` parameters
+in the historical sketch below are superseded by
+[ADR 0008 D3](0008-harness-foundation.md#d3) and [D9](0008-harness-foundation.md#d9)
+in layer 07. Evidence comes from the file host.
 
 There is one per-machine host for adapters, connectors and machine-local ops.
 Sync, the runners, the API and connection setup reach harness code only
@@ -233,6 +244,10 @@ Browser and API access stays behind the authenticating proxy.
 - Machine tokens identify machines, not users.
 
 ### 7. Projects across machines
+
+[ADR 0008 D9](0008-harness-foundation.md#d9) and [D10](0008-harness-foundation.md#d10)
+supersede the matching paragraph below in layer 07. The project and
+binding ownership rules still apply.
 
 - Projects span machines through bindings. There is no `projects.machine_id`.
 - Task create, edit and schedule forms pick **Machine > Harness** from the
