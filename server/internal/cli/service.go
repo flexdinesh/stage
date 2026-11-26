@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/harnesses"
 	"github.com/flexdinesh/stage/server/internal/service"
 )
 
@@ -79,6 +80,7 @@ func (e Env) serviceDeps(role service.Role) service.Deps {
 		d = e.Service()
 	}
 	d.Role = role
+	d.HarnessEnv = harnesses.Env()
 	return d
 }
 

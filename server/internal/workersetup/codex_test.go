@@ -11,7 +11,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/codex/codextest"
 	"github.com/flexdinesh/stage/server/internal/codexsetup"
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -73,11 +72,11 @@ func TestRemoteCodexConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	if local := r.store.ActiveID(db.LocalMachine, codex.Kind); local != 0 {
 		t.Fatalf("connected the local machine: %d", local)
 	}
-	saved, err := r.store.CodexSettings(ctx, r.id)
-	if err != nil || saved != (config.CodexSettings{Binary: bin, Connected: true}) {
-		t.Fatalf("main server record %+v %v", saved, err)
+	saved := savedSettings[codexsetup.SetupSettings](r, r.id, codex.Kind)
+	if saved != (codexsetup.SetupSettings{Binary: bin, Connected: true}) {
+		t.Fatalf("main server record %+v", saved)
 	}
-	if local, _ := r.store.CodexSettings(ctx, db.LocalMachine); local != (config.CodexSettings{}) {
+	if local := savedSettings[codexsetup.SetupSettings](r, db.LocalMachine, codex.Kind); local != (codexsetup.SetupSettings{}) {
 		t.Fatalf("set up the local machine's Codex: %+v", local)
 	}
 	if creds, err := os.ReadFile(worker.NewCredentialStore(r.cfgPath).Path()); err == nil && strings.Contains(string(creds), codex.Kind) {
@@ -121,7 +120,7 @@ func TestRemoteCodexConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	if err := c.Disconnect(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if saved, _ := r.store.CodexSettings(ctx, r.id); saved.Connected {
+	if saved := savedSettings[codexsetup.SetupSettings](r, r.id, codex.Kind); saved.Connected {
 		t.Fatalf("disconnect not recorded: %+v", saved)
 	}
 	// The worker removed its adapter: the main server's proxy answers
@@ -154,13 +153,13 @@ func TestRemoteCodexNeedsAWorkerThatAllowsLocalHarnesses(t *testing.T) {
 	}
 }
 
-// A main server from before Codex on workers serves no Codex setup calls:
+// A main server without Codex omits it from the advertised kinds:
 // the worker still composes the other harnesses and leaves Codex out; the
 // main server reports the machine needs an update for Codex, and Codex
 // reads unavailable, never as a connect that fails.
-func TestRemoteCodexSkippedAgainstAnOlderServer(t *testing.T) {
+func TestRemoteCodexSkippedWhenServerOmitsKind(t *testing.T) {
 	_, opts := codexOptions(t)
-	r := newRigWith(t, map[string]string{}, rigOptions{profile: localHarnesses, claude: claudeOptions(claudetest.New(t)), codex: opts, unserved: []string{"setup.codex."}})
+	r := newRigWith(t, map[string]string{}, rigOptions{profile: localHarnesses, claude: claudeOptions(claudetest.New(t)), codex: opts, omittedKinds: []string{codex.Kind}})
 	ctx := t.Context()
 	if _, err := r.connector(claudecode.Kind).Status(ctx, false); err != nil {
 		t.Fatalf("Claude Code setup: %v", err)

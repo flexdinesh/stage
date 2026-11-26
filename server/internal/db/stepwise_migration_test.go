@@ -77,6 +77,10 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{"legacy states and preference entries removed", seedV0035DropSettled, checkV0035DropSettled},
 		{"empty preference filter retained", seedV0032(`UPDATE preferences SET notify_events='["settled"]'`), checkV0035EmptyPreferences},
 	},
+	36: {
+		{"settings, secrets and status copied", seedV0036HarnessSetup, checkV0036HarnessSetup},
+		{"unconfigured defaults retained", nil, checkV0036HarnessSetupDefaults},
+	},
 }
 
 // TestStepwiseMigrations is the upgrade coverage (no releases exist yet):

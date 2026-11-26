@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -29,31 +27,18 @@ const (
 	KindConnectorDisconnect = "connector.disconnect"
 )
 
-// Setup port calls a worker sends the main server (no request: answered by
-// the main server's hub handlers, scoped to the worker's machine).
+// Setup port calls a worker sends the main server, scoped to the worker's machine.
 const (
-	KindT3Get          = "setup.t3.get"
-	KindT3SetURL       = "setup.t3.setURL"
-	KindT3SetPublicURL = "setup.t3.setPublicURL"
-	KindT3LastError    = "setup.t3.lastError"
-	KindOpenCodeGet    = "setup.opencode.get"
-	KindOpenCodeSave   = "setup.opencode.save"
-	// KindClaudeGet and KindClaudeSave carry config.ClaudeSettings (the
-	// command, the config directory connected with, disconnected): Claude
-	// Code's setup holds no secrets.
-	KindClaudeGet  = "setup.claude.get"
-	KindClaudeSave = "setup.claude.save"
-	// KindCodexGet and KindCodexSave carry config.CodexSettings (the CLI
-	// path, connected): Codex's setup holds no secrets (`codex login` on
-	// that machine).
-	KindCodexGet         = "setup.codex.get"
-	KindCodexSave        = "setup.codex.save"
-	KindIdentityActive   = "setup.identity.active"
-	KindIdentitySwitch   = "setup.identity.switch"
-	KindIdentityGet      = "setup.identity.get"
-	KindIdentitySet      = "setup.identity.set"
-	KindIdentityRetired  = "setup.identity.retired"
-	KindIdentityEvidence = "setup.identity.evidence"
+	KindSettingsGet            = "setup.settings.get"
+	KindSettingsSave           = "setup.settings.save"
+	KindStatusError            = "setup.status.error"
+	KindIdentityActive         = "setup.identity.active"
+	KindIdentityActiveIdentity = "setup.identity.activeIdentity"
+	KindIdentitySwitch         = "setup.identity.switch"
+	KindIdentityExists         = "setup.identity.exists"
+	KindIdentitySet            = "setup.identity.set"
+	KindIdentityRetired        = "setup.identity.retired"
+	KindIdentityEvidence       = "setup.identity.evidence"
 )
 
 // Setup result error codes beyond the adapter calls'.
@@ -93,51 +78,37 @@ type ConnectorStatus struct {
 	Result harness.Result `json:"result"`
 }
 
-// T3Settings is the non-secret part of a machine's T3 setup (db.Connection).
-type T3Settings struct {
-	LastError      *string    `json:"lastError"`
-	LastFullSyncAt *time.Time `json:"lastFullSyncAt"`
-	T3URL          *string    `json:"t3Url"`
-	T3PublicURL    *string    `json:"t3PublicUrl"`
-	EnvironmentID  *string    `json:"environmentId"`
-	ConnectionID   int64      `json:"connectionId"`
-}
-
-// T3SettingsOf is c on the wire.
-func T3SettingsOf(c db.Connection) T3Settings {
-	return T3Settings{LastError: c.LastError, LastFullSyncAt: c.LastFullSyncAt, T3URL: c.T3URL, T3PublicURL: c.T3PublicURL, EnvironmentID: c.EnvironmentID, ConnectionID: c.ConnectionID}
-}
-
-// Connection is s as the store's type.
-func (s T3Settings) Connection() db.Connection {
-	return db.Connection{LastError: s.LastError, LastFullSyncAt: s.LastFullSyncAt, T3URL: s.T3URL, T3PublicURL: s.T3PublicURL, EnvironmentID: s.EnvironmentID, ConnectionID: s.ConnectionID}
-}
-
-// URLRequest is setup.t3.setURL ("" clears).
-type URLRequest struct {
-	URL string `json:"url"`
-}
-
-// MessageRequest is setup.t3.lastError ("" clears).
-type MessageRequest struct {
-	Message string `json:"message"`
-}
-
-// OpenCodeSettings is setup.opencode.get's result (no credential) and
-// setup.opencode.save's request (Verified ignored).
-type OpenCodeSettings struct {
-	Setup    config.OpenCodeSetup `json:"setup"`
-	Verified string               `json:"verified,omitempty"`
-}
-
-// KindRequest names a harness kind (setup.identity.active, retired).
+// KindRequest names a harness on the authenticated machine.
 type KindRequest struct {
 	Kind string `json:"kind"`
+}
+
+// SettingsRequest carries a patch to a harness's public settings.
+type SettingsRequest struct {
+	Kind  string          `json:"kind"`
+	Patch json.RawMessage `json:"patch"`
+}
+
+// StatusErrorRequest records a harness error. An empty message clears it.
+type StatusErrorRequest struct {
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
 }
 
 // IDResult is a connection id (0: none).
 type IDResult struct {
 	ID int64 `json:"id"`
+}
+
+// ActiveIdentityResult is the active connection id and harness instance identity.
+type ActiveIdentityResult struct {
+	ID       int64  `json:"id"`
+	Identity string `json:"identity"`
+}
+
+// ConnectionExistsResult reports whether a connection belongs to the worker's machine.
+type ConnectionExistsResult struct {
+	Exists bool `json:"exists"`
 }
 
 // IDsResult is a list of connection ids.
@@ -185,9 +156,9 @@ type IdentityRequest struct {
 
 // Evidence is setup.identity.evidence's result (db.Store.ConnectionEvidence).
 type Evidence struct {
-	Bindings     []db.ProjectBinding     `json:"bindings"`
-	Observations []execution.Observation `json:"observations"`
-	Unknown      bool                    `json:"unknown"`
+	Bindings     []harness.WorkspaceEvidence `json:"bindings"`
+	Observations []execution.Observation     `json:"observations"`
+	Unknown      bool                        `json:"unknown"`
 }
 
 // EncodeSetupError is a setup error as a result error: the store's typed
@@ -221,9 +192,7 @@ func EncodeSetupError(err error) error {
 	return encodeError(err)
 }
 
-// DecodeSetupError is a setup call's error as the store's typed error. An
-// offline machine, a worker still starting, or one without the call is
-// ErrOffline-like unavailability (execution.ErrUnavailable).
+// DecodeSetupError restores the meaning of a failed setup call.
 func DecodeSetupError(err error) error {
 	var re *workerchan.RemoteError
 	if err == nil || !errors.As(err, &re) {

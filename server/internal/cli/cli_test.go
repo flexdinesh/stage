@@ -62,16 +62,22 @@ func newHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h.sync = t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(h.fake)}, log)
 	local, _ := h.sync.Machines().Local(db.LocalMachine)
-	ocPorts := machine.NewStorePorts(store.OnMachine(db.LocalMachine), stageharness.MustRegistry(opencode.Descriptor))
-	openCode, err := opencodesetup.New(t.Context(), opencodesetup.Ports{Settings: ocPorts, Identity: ocPorts, Install: local.Install}, log)
+	reg := stageharness.MustRegistry(t3.Descriptor, opencode.Descriptor)
+	ports := machine.NewStorePorts(store.OnMachine(db.LocalMachine), reg)
+	openCode, err := opencodesetup.Module.Compose(t.Context(), stageharness.Ports{
+		Settings: ports.Settings(), Secrets: ports.Secrets(), Identity: ports, Install: local.Install,
+		SaveSettingsWithSecret: ports.SaveSettingsWithSecret, Logger: log,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	setup := t3setup.New(t3setup.Options{Config: config.Config{}, Settings: store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(store.OnMachine(db.LocalMachine), stageharness.MustRegistry(t3.Descriptor)), Client: h.fake, Fake: true, Logger: log})
-	reg := stageharness.MustRegistry(t3.Descriptor, opencode.Descriptor)
+	t.Cleanup(openCode.Close)
+	setup := t3setup.New(t3setup.Options{
+		Settings: ports.Settings(), Secrets: ports.Secrets(), Identity: ports, Client: h.fake, Fake: true, Logger: log,
+	})
 	h.sync.Harnesses = reg
 	connectors, err := stageharness.NewConnectors(reg, map[int64]map[string]stageharness.Connector{db.LocalMachine: {
-		t3.Kind: t3setup.NewConnector(setup, nil), opencode.Kind: opencodesetup.NewConnector(openCode),
+		t3.Kind: t3setup.NewConnector(setup), opencode.Kind: openCode.Connector,
 	}})
 	if err != nil {
 		t.Fatal(err)

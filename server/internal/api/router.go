@@ -20,7 +20,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/remote"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
@@ -28,7 +28,7 @@ import (
 type Deps struct {
 	Config config.Config
 	Store  *db.Store
-	Sync   *t3sync.Service
+	Sync   *coordinator.Service
 	Push   *notify.Notifier
 	Logger *slog.Logger
 	// Inbox wakes GET /api/notifications/stream (nil = a private hub).
@@ -318,7 +318,13 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 		if machine != s.Sync.Machines().DefaultID() {
 			return
 		}
-		sum := s.harnessSummary(c.Summary(r.Context()))
+		sum := c.Summary(r.Context())
+		if sum.LastError == "" {
+			if saved, err := s.Store.HarnessSyncStatus(r.Context(), machine, d.Kind); err == nil && saved.LastError != nil {
+				sum.LastError = *saved.LastError
+			}
+		}
+		sum = s.harnessSummary(sum)
 		hh := HealthHarness{Kind: d.Kind, ConnectionID: sum.ConnectionID, Configured: sum.Configured, Connected: sum.Connected}
 		if sum.LastError != "" {
 			hh.LastError = &sum.LastError
@@ -350,10 +356,10 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // writeErr maps app errors to contract statuses.
 func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	var (
-		invalid  *db.InvalidError
-		conflict *db.ConflictError
-		t3Err    *db.HarnessError
-		pushErr  *notify.PushError
+		invalid    *db.InvalidError
+		conflict   *db.ConflictError
+		harnessErr *db.HarnessError
+		pushErr    *notify.PushError
 	)
 	if writeAuthErr(w, err) {
 		return
@@ -372,8 +378,8 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": conflict.Msg, "code": conflict.Code})
 	case errors.As(err, &conflict):
 		writeError(w, http.StatusConflict, conflict.Msg)
-	case errors.As(err, &t3Err):
-		writeError(w, http.StatusBadGateway, t3Err.Error())
+	case errors.As(err, &harnessErr):
+		writeError(w, http.StatusBadGateway, harnessErr.Error())
 	case errors.As(err, &pushErr):
 		writeError(w, http.StatusBadGateway, pushErr.Msg)
 	default:

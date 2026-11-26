@@ -9,8 +9,9 @@ package t3
 import (
 	"context"
 	"errors"
-	"github.com/flexdinesh/stage/server/internal/execution"
 	"time"
+
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // Client is the T3 surface the backend consumes. Implementations must be safe
@@ -68,15 +69,19 @@ type Client interface {
 	Capabilities(ctx context.Context) (Catalog, error)
 }
 
-// TokenStore persists the OAuth mcp-client token. The db package implements
-// it against the single-row t3_connection table; the t3 client consumes it.
+// TokenStore persists the OAuth mcp-client token and reports auth errors.
 type TokenStore interface {
 	LoadToken(ctx context.Context) (StoredToken, error) // zero value if none
 	SaveToken(ctx context.Context, tok StoredToken) error
 	SetLastError(ctx context.Context, msg string) error // "" clears
 }
 
-type StoredToken = execution.Credential
+// StoredToken is the persisted OAuth mcp-client credential.
+type StoredToken struct {
+	ClientID  string    `json:"clientId"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
 
 var (
 	ErrNotConnected error = unavailableError{}

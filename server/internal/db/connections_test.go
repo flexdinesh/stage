@@ -82,12 +82,12 @@ func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) 
 	if c := cs[1]; c.ID != 2 || c.Harness != "opencode" || !c.Active || c.AutoComplete || c.Label != "http://oc:4096" {
 		t.Fatalf("opencode %+v", c)
 	}
-	conn, err := s.GetConnection(ctx, LocalMachine)
-	if err != nil || conn.EnvironmentID == nil || *conn.EnvironmentID != "env-a" || conn.ConnectionID != 1 {
-		t.Fatalf("t3 connection %+v %v", conn, err)
+	t3ID, env, err := s.ActiveConnectionIdentity(ctx, LocalMachine, "t3")
+	if err != nil || t3ID != 1 || env != "env-a" {
+		t.Fatalf("t3 connection %d %q %v", t3ID, env, err)
 	}
-	if _, _, verified, err := s.OpenCodeSettings(ctx, LocalMachine); err != nil || verified != "http://oc:4096" {
-		t.Fatalf("verified %q %v", verified, err)
+	if ocID, verified, err := s.ActiveConnectionIdentity(ctx, LocalMachine, "opencode"); err != nil || ocID != 2 || verified != "http://oc:4096" {
+		t.Fatalf("opencode connection %d %q %v", ocID, verified, err)
 	}
 	task, err := s.GetTask(ctx, 2)
 	if err != nil || task.ConnectionID != 2 || task.Harness != "opencode" || !task.ConnectionActive || task.Session == nil || task.Session.ExternalSessionID != "ses_x" {
@@ -203,6 +203,29 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 	}
 	if p, _ := s.GetProject(ctx, project); !p.Bindings[0].ConnectionActive {
 		t.Fatal("revived binding inactive")
+	}
+}
+
+func TestStableInstanceRevivesWithNoActiveConnection(t *testing.T) {
+	s, ctx, _ := connectionStore(t)
+	first, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := projectWithBinding(t, s, first.New, "/w/retired")
+	if err := s.RetireConnection(ctx, first.New, 0); err != nil {
+		t.Fatal(err)
+	}
+	if s.ActiveID(LocalMachine, t3.Kind) != 0 {
+		t.Fatal("the connection was not retired")
+	}
+	returned, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box", 0)
+	if err != nil || returned.Old != 0 || returned.New != first.New || !returned.Revived {
+		t.Fatalf("return to retired instance: %+v %v", returned, err)
+	}
+	p, err := s.GetProject(ctx, project)
+	if err != nil || len(p.Bindings) != 1 || !p.Bindings[0].ConnectionActive {
+		t.Fatalf("binding after revival: %+v %v", p.Bindings, err)
 	}
 }
 

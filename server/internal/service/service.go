@@ -22,6 +22,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/filelock"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/worker"
@@ -44,6 +45,8 @@ type Deps struct {
 	Root   bool // effective uid 0
 	Getenv func(string) string
 	Runner Runner
+	// HarnessEnv defines the harness settings accepted by this installation.
+	HarnessEnv harness.EnvOptions
 	// Health fetches /api/health from a unix:// URL.
 	Health func(ctx context.Context, url string) (client.Health, error)
 	// Probe runs `<exe> version --json`.
@@ -360,7 +363,7 @@ func roleNoun(r Role) string {
 
 // workerEnv is worker.env's values (empty when missing or invalid).
 func (c *Controller) workerEnv() map[string]string {
-	vals, err := config.ReadWorkerEnv(c.p.ServiceEnv)
+	vals, err := config.ReadWorkerEnv(c.p.ServiceEnv, c.d.HarnessEnv)
 	if err != nil {
 		return map[string]string{}
 	}
@@ -400,9 +403,9 @@ func (c *Controller) ensureServiceEnv(rep *Report) error {
 	case !errors.Is(err, fs.ErrExist):
 		return err
 	}
-	vals, err := config.ReadServiceEnv(c.p.ServiceEnv)
+	vals, err := config.ReadServiceEnv(c.p.ServiceEnv, c.d.HarnessEnv)
 	if err == nil {
-		_, err = config.LoadManaged(c.svcEnv, vals)
+		_, err = config.LoadManaged(c.svcEnv, vals, c.d.HarnessEnv)
 	}
 	if err != nil {
 		return &Error{Code: CodeInvalid, Msg: err.Error(), Fix: "fix " + c.p.ServiceEnv}
@@ -421,7 +424,7 @@ func (c *Controller) ensureWorkerEnv(rep *Report) error {
 	f, err := os.OpenFile(c.p.ServiceEnv, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	switch {
 	case err == nil:
-		_, werr := f.WriteString(config.WorkerEnvTemplate)
+		_, werr := f.WriteString(config.WorkerEnvTemplate(c.d.HarnessEnv))
 		if cerr := f.Close(); werr == nil {
 			werr = cerr
 		}
@@ -433,7 +436,7 @@ func (c *Controller) ensureWorkerEnv(rep *Report) error {
 	case !errors.Is(err, fs.ErrExist):
 		return err
 	}
-	vals, err := config.ReadWorkerEnv(c.p.ServiceEnv)
+	vals, err := config.ReadWorkerEnv(c.p.ServiceEnv, c.d.HarnessEnv)
 	if err != nil {
 		return &Error{Code: CodeInvalid, Msg: err.Error(), Fix: "fix " + c.p.ServiceEnv}
 	}
@@ -1096,9 +1099,9 @@ func (c *Controller) status(ctx context.Context) Status {
 		c.workerStatus(&st, rs, add)
 		return st
 	}
-	vals, err := config.ReadServiceEnv(p.ServiceEnv)
+	vals, err := config.ReadServiceEnv(p.ServiceEnv, c.d.HarnessEnv)
 	if err == nil {
-		_, err = config.LoadManaged(c.svcEnv, vals)
+		_, err = config.LoadManaged(c.svcEnv, vals, c.d.HarnessEnv)
 	}
 	if err != nil {
 		st.ServiceEnv.Error = err.Error()
@@ -1170,7 +1173,7 @@ func (c *Controller) status(ctx context.Context) Status {
 func (c *Controller) workerStatus(st *Status, rs RunState, add func(code, msg, fix string)) {
 	p := c.p
 	st.Role = string(RoleWorker)
-	if _, err := config.ReadWorkerEnv(p.ServiceEnv); err != nil {
+	if _, err := config.ReadWorkerEnv(p.ServiceEnv, c.d.HarnessEnv); err != nil {
 		st.ServiceEnv.Error = err.Error()
 		add("service_env_invalid", err.Error(), "fix "+p.ServiceEnv)
 	}

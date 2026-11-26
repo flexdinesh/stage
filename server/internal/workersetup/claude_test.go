@@ -11,6 +11,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest"
 	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
+	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -68,9 +69,9 @@ func TestRemoteClaudeConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	if local := r.store.ActiveID(db.LocalMachine, claudecode.Kind); local != 0 {
 		t.Fatalf("connected the local machine: %d", local)
 	}
-	saved, err := r.store.ClaudeSettings(ctx, r.id)
-	if err != nil || saved.Binary != f.Bin || saved.ConfigDir != f.ConfigDir() || saved.Disconnected {
-		t.Fatalf("main server record %+v %v", saved, err)
+	saved := savedSettings[claudecodesetup.SetupSettings](r, r.id, claudecode.Kind)
+	if saved.Binary != f.Bin || saved.ConfigDir != f.ConfigDir() || saved.Disconnected {
+		t.Fatalf("main server record %+v", saved)
 	}
 	if creds, err := os.ReadFile(worker.NewCredentialStore(r.cfgPath).Path()); err == nil && strings.Contains(string(creds), claudecode.Kind) {
 		t.Fatalf("Claude Code wrote to the worker's credentials: %q", creds)
@@ -108,7 +109,7 @@ func TestRemoteClaudeConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	if err := c.Disconnect(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if saved, _ := r.store.ClaudeSettings(ctx, r.id); !saved.Disconnected {
+	if saved := savedSettings[claudecodesetup.SetupSettings](r, r.id, claudecode.Kind); !saved.Disconnected {
 		t.Fatalf("disconnect not recorded: %+v", saved)
 	}
 	// The worker removed its adapter: the main server's proxy answers
@@ -137,12 +138,12 @@ func TestRemoteClaudeNeedsAWorkerThatAllowsLocalHarnesses(t *testing.T) {
 	}
 }
 
-// A main server from before Claude Code on workers serves no Claude Code
-// setup calls: the worker still composes T3 and OpenCode, and leaves
+// A main server without Claude Code omits it from the advertised kinds.
+// The worker still composes T3 and OpenCode, and leaves
 // Claude Code out (the main server reports the machine needs an update).
-func TestRemoteClaudeSkippedAgainstAnOlderServer(t *testing.T) {
+func TestRemoteClaudeSkippedWhenServerOmitsKind(t *testing.T) {
 	f := claudetest.New(t)
-	r := newRigWith(t, map[string]string{}, rigOptions{profile: localHarnesses, claude: claudeOptions(f), unserved: []string{"setup.claude.", "setup.codex."}})
+	r := newRigWith(t, map[string]string{}, rigOptions{profile: localHarnesses, claude: claudeOptions(f), omittedKinds: []string{claudecode.Kind, codex.Kind}})
 	ctx := t.Context()
 	if _, err := r.connector(t3.Kind).Status(ctx, false); err != nil {
 		t.Fatalf("T3 setup: %v", err)

@@ -69,7 +69,7 @@ func ReadRegistration() (Registration, error) {
 	if e = json.Unmarshal(b, &raw); e != nil {
 		return Registration{}, &RegistrationError{Reason: "invalid", Path: path, Detail: "not JSON"}
 	}
-	u, e := serviceURL("url", raw.URL)
+	u, e := ValidateURL("url", raw.URL)
 	if e != nil || raw.PID <= 0 {
 		return Registration{}, &RegistrationError{Reason: "invalid", Path: path, Detail: "missing a valid url or pid"}
 	}

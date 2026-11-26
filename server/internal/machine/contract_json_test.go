@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/codexsetup"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
-	"github.com/flexdinesh/stage/server/internal/opencode"
+	"github.com/flexdinesh/stage/server/internal/opencodesetup"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
@@ -66,7 +66,6 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		"Observation": observation,
 		"Links":       observation.Links,
 		"Reply":       *observation.Reply,
-		"Credential":  execution.Credential{ClientID: "client", Token: "tok", ExpiresAt: at},
 		"Request": execution.Request{ID: "q", Kind: "question", Title: "Pick", Detail: "one", Preview: "go test", Options: []execution.Choice{choice}, TextOption: "c",
 			Questions: []execution.Question{{ID: "0", Header: "H", Prompt: "Which?", Options: []execution.QuestionOption{{Label: "A", Description: "a"}}, Multi: true, Custom: true}}, CreatedAt: at},
 		"Response": execution.Response{Option: "c", Text: "because", Answers: map[string][]string{"0": {"A"}}},
@@ -78,19 +77,18 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 			Fields:  []harness.FieldState{{ID: "url", Value: "http://x", Set: true, Source: "saved"}},
 			Actions: []harness.ActionState{{ID: "pair", Available: true, Reason: "r"}},
 			Details: map[string]any{"state": "connected", "connected": true},
+			Sync:    &harness.SyncStatus{Running: true, StartedAt: &at, LastError: &str, LastFullSyncAt: &later, Projects: 1, Sessions: 2},
 		},
 		"Result":         harness.Result{Replaced: 4},
-		"T3Details":      t3setup.Details{Connected: true, State: t3.StateConnected, T3URL: "http://t3", PublicURL: "http://pub", T3URLSource: t3setup.SourceSettings, EnvironmentID: &str, ClientID: &str, TokenExpiresAt: &at, AdminTokenConfigured: true, LastError: &str, LastFullSyncAt: &at, Reachable: true, CheckedAt: &at, ProbeError: &str, T3: &t3setup.IdentityRef{EnvironmentID: "env", Label: "box", ServerVersion: "1"}, AutoPair: t3setup.AutoPairRef{Available: true, Reason: &str}, Sync: t3setup.SyncProgress{Running: true, StartedAt: &at, Projects: 1, Threads: 2}, ConnectionID: 7},
-		"OpenCodeStatus": config.OpenCodeStatus{ConnectionID: 8, Endpoint: "http://oc", BrowserEndpoint: "http://ocb", WebClient: "http://ocw", HasCredentials: true, State: "connected", Reason: "r", CheckedAt: &at, Auth: config.OpenCodeAuthPaired, ExpiresAt: &later, Local: config.OpenCodeLocal{Available: true, URL: "http://oc", Version: "2.3.0", Reason: "r"}},
+		"T3Details":      t3setup.Details{Connected: true, State: t3.StateConnected, T3URL: "http://t3", PublicURL: "http://pub", T3URLSource: t3setup.SourceSettings, EnvironmentID: &str, ClientID: &str, TokenExpiresAt: &at, AdminTokenConfigured: true, Reachable: true, CheckedAt: &at, ProbeError: &str, T3: &t3setup.IdentityRef{EnvironmentID: "env", Label: "box", ServerVersion: "1"}, AutoPair: t3setup.AutoPairRef{Available: true, Reason: &str}, ConnectionID: 7},
+		"OpenCodeStatus": opencodesetup.Status{ConnectionID: 8, Endpoint: "http://oc", BrowserEndpoint: "http://ocb", WebClient: "http://ocw", HasCredentials: true, State: "connected", Reason: "r", CheckedAt: &at, Auth: opencodesetup.AuthPaired, ExpiresAt: &later, Local: opencodesetup.LocalStatus{Available: true, URL: "http://oc", Version: "2.3.0", Reason: "r"}},
 		// Port payloads (settings, credentials, identity).
-		"Switch":             db.Switch{Old: 1, New: 2, Changed: true, Revived: true},
-		"Connection":         db.Connection{LastError: &str, LastFullSyncAt: &at, T3URL: &str, T3PublicURL: &str, EnvironmentID: &str, ConnectionID: 1},
-		"HarnessConnection":  db.HarnessConnection{Configured: true, ID: 1, MachineID: 2, Harness: "kind", AutoComplete: true, Active: true, Label: "box", RetiredAt: &str, ForgottenAt: &str, Tasks: 3, Bindings: 4, NewTaskConfig: &execution.Config{Model: "m", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("high")}}, Permission: "p", Mode: "x"}},
-		"ProjectBinding":     binding,
-		"OpenCodeSetup":      config.OpenCodeSetup{Endpoint: "http://oc", BrowserEndpoint: "http://ocb", WebClient: "http://ocw", Auth: config.OpenCodeAuthPaired},
-		"OpenCodeCredential": config.OpenCodeCredential{Username: "opencode", Password: "tok", TokenIssuedAt: &at},
-		"CodexSettings":      config.CodexSettings{Binary: "/opt/codex/bin/codex", Connected: true},
-		"Registration":       opencode.Registration{ID: "svc", Version: "2.3.0", URL: "http://127.0.0.1:4096", Password: "pw", PID: 42},
+		"Switch":            db.Switch{Old: 1, New: 2, Changed: true, Revived: true},
+		"WorkspaceEvidence": harness.WorkspaceEvidence{ExternalProjectID: "p", Workspace: "/w"},
+		"HarnessConnection": db.HarnessConnection{Configured: true, ID: 1, MachineID: 2, Harness: "kind", AutoComplete: true, Active: true, Label: "box", RetiredAt: &str, ForgottenAt: &str, Tasks: 3, Bindings: 4, NewTaskConfig: &execution.Config{Model: "m", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("high")}}, Permission: "p", Mode: "x"}},
+		"ProjectBinding":    binding,
+		"OpenCodeSetup":     opencodesetup.SetupSettings{Endpoint: "http://oc", BrowserEndpoint: "http://ocb", WebClient: "http://ocw", Auth: opencodesetup.AuthPaired},
+		"CodexSettings":     codexsetup.SetupSettings{Binary: "/opt/codex/bin/codex", Connected: true},
 		// Machine ops.
 		"SharedRoot":       machine.SharedRoot{HarnessRoot: "/srv", StageRoot: "/home/u/src"},
 		"CheckoutEvidence": machine.CheckoutEvidence{Common: "64769:1234", Subproject: "app", Remote: "github.com/o/r", RepoPath: "app"},

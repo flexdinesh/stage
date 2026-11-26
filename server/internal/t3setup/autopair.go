@@ -162,7 +162,7 @@ func (s *Service) AutoPair(ctx context.Context) (Paired, error) {
 		return Paired{}, pairErr("no T3 server answered at %s (%s); start it and try again", s.Endpoint().URL, orNoAnswer(p.Err))
 	}
 	rctx, cancel := context.WithTimeout(ctx, AutoPairTimeout)
-	out, err := s.o.Local.Run(rctx, ap.Bin, PairingArgs(s.o.Config.T3ClientName))
+	out, err := s.o.Local.Run(rctx, ap.Bin, PairingArgs(s.o.ClientName))
 	cancel()
 	if err != nil {
 		return Paired{}, pairErr("t3 auth pairing create failed: %v", err)

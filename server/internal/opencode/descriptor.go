@@ -18,7 +18,7 @@ const (
 // identity (the connector proves continuity); an archived session may
 // complete its task.
 var Descriptor = harness.Descriptor{
-	Kind: Kind, Name: "OpenCode", Hosting: harness.Connected,
+	Kind: Kind, Name: "OpenCode", Hosting: harness.Connected, ContinuityProof: true,
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedArchived, Provenance: "harness_archived",
 		Setting:   "Complete tasks when archived in OpenCode",

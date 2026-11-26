@@ -2,8 +2,6 @@ package api_test
 
 import (
 	"encoding/json"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,11 +20,15 @@ func withOpenCode(t *testing.T) func(*api.Deps) {
 	return func(d *api.Deps) {
 		local, _ := d.Sync.Machines().Local(db.LocalMachine)
 		ports := machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(opencode.Descriptor))
-		s, err := opencodesetup.New(t.Context(), opencodesetup.Ports{Settings: ports, Identity: ports, Install: local.Install}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		composed, err := opencodesetup.Module.Compose(t.Context(), harness.Ports{
+			Settings: ports.Settings(), Secrets: ports.Secrets(), Identity: ports, Install: local.Install,
+			SaveSettingsWithSecret: ports.SaveSettingsWithSecret, Logger: d.Logger,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		d.Connectors = mustConnectors(map[string]harness.Connector{opencode.Kind: opencodesetup.NewConnector(s)})
+		t.Cleanup(composed.Close)
+		d.Connectors = mustConnectors(map[string]harness.Connector{opencode.Kind: composed.Connector})
 	}
 }
 
@@ -85,6 +87,10 @@ func TestOpenCodeConnectionEndpoints(t *testing.T) {
 	if code, body := e.raw("POST", "/api/harnesses/opencode/actions/pair", string(payload)); code != 200 {
 		t.Fatalf("pair %d %v", code, body)
 	}
+	connection := e.store.ActiveID(db.LocalMachine, opencode.Kind)
+	if _, err := e.sync.Adapter(connection); err != nil {
+		t.Fatalf("adapter not installed: %v", err)
+	}
 	code, st = e.status("opencode")
 	if code != 200 || st["auth"] != "paired" || st["state"] != "connected" || st["endpoint"] != fake.URL || st["hasCredentials"] != true {
 		t.Fatalf("paired status %v", st)
@@ -107,15 +113,7 @@ func TestOpenCodeConnectionEndpoints(t *testing.T) {
 	if code != 200 || st["auth"] != "none" || st["state"] != "unconfigured" || st["endpoint"] != "" {
 		t.Fatalf("after disconnect %v", st)
 	}
-	if _, err := e.sync.Adapter(e.openCodeID(t)); err == nil {
+	if _, err := e.sync.Adapter(connection); err == nil {
 		t.Fatal("adapter still installed")
 	}
-}
-
-func (e *env) openCodeID(t *testing.T) int64 {
-	id, err := e.store.EnsureOpenCode(t.Context(), db.LocalMachine)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return id
 }

@@ -126,6 +126,16 @@ func TestServeExitCodes(t *testing.T) {
 	if code != want || !strings.Contains(stderr, "must include unix") {
 		t.Fatalf("invalid service.env: %d %s", code, stderr)
 	}
+	for _, key := range []string{"T3_ADMIN_TOKEN", "OPENCODE_PASSWORD"} {
+		if err := os.WriteFile(filepath.Join(cfgDir, "service.env"), []byte("STAGE_LISTEN=127.0.0.1:7380\n"+key+"=sensitive-value\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		code, stderr = runMain(t, environ, "serve", "--managed")
+		if code != want || !strings.Contains(stderr, key+" is no longer read") ||
+			!strings.Contains(stderr, "Settings > Connections") || strings.Contains(stderr, "sensitive-value") {
+			t.Fatalf("removed %s: %d %s", key, code, stderr)
+		}
+	}
 }
 
 // An invalid STAGE_DATABASE_URL: exit 78, never printing the value.

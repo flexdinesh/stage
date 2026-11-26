@@ -41,6 +41,7 @@ type Tx interface {
 	Notifications() Notifications
 	Sessions() Sessions
 	Connections() Connections
+	HarnessSetup() HarnessSetup
 	Machines() Machines
 	Projects() Projects
 	Tasks() Tasks

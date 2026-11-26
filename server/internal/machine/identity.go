@@ -20,7 +20,6 @@ type Identity interface {
 	// connection of kind; the first one creates the connection row
 	// (db.Store.SwitchInstance).
 	SwitchInstance(ctx context.Context, kind, identity, label string, revive int64) (db.Switch, error)
-	GetHarnessConnection(ctx context.Context, id int64) (db.HarnessConnection, error)
 }
 
 // Install moves a harness's adapter from connection old to next (equal

@@ -269,6 +269,9 @@ func (f *oauthFlow) do(req *http.Request, step string, out any) error {
 		return &OAuthError{Step: step, Status: resp.StatusCode, Message: err.Error()}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if token, ok := strings.CutPrefix(req.Header.Get("Authorization"), "Bearer "); ok && token != "" {
+			raw = bytes.ReplaceAll(raw, []byte(token), []byte("[redacted]"))
+		}
 		return httpError(step, resp.StatusCode, raw)
 	}
 	if err := json.Unmarshal(raw, out); err != nil {

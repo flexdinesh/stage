@@ -7,6 +7,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
 // A fresh install has no connection and so no default harness (ADR 0007
@@ -31,9 +32,9 @@ func TestFreshInstallHasNoConnection(t *testing.T) {
 	if _, err := s.CreateTask(t.Context(), db.NewTask{ProjectID: p.ID, Title: "T", Prompt: "p"}); err == nil {
 		t.Fatal("task created without a connection")
 	}
-	id, err := s.EnsureOpenCode(t.Context(), db.LocalMachine)
-	if err != nil || s.Harness(id) != "opencode" {
-		t.Fatalf("first connection %d %v", id, err)
+	sw, err := s.SwitchInstance(t.Context(), db.LocalMachine, harness.Descriptor{Kind: "opencode"}, "instance", "", 0)
+	if err != nil || s.Harness(sw.New) != "opencode" {
+		t.Fatalf("first connection %d %v", sw.New, err)
 	}
 }
 
@@ -42,10 +43,11 @@ func TestFreshInstallHasNoConnection(t *testing.T) {
 func TestWaitingSessionTitlesFromObservation(t *testing.T) {
 	s := db.NewStore(dbtest.FreshEngine(t))
 	ctx := t.Context()
-	conn, err := s.EnsureOpenCode(ctx, db.LocalMachine)
+	sw, err := s.SwitchInstance(ctx, db.LocalMachine, harness.Descriptor{Kind: "opencode"}, "instance", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	conn := sw.New
 	if _, err := s.InsertProject(ctx, db.Project{Title: "Stage P", Bindings: []db.ProjectBinding{{ConnectionID: conn, ExternalProjectID: "ext-p", Workspace: "/w"}}}); err != nil {
 		t.Fatal(err)
 	}

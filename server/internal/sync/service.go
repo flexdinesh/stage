@@ -312,8 +312,14 @@ func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) 
 		}
 	}
 	r.FinishedAt = time.Now().UTC()
-	if s.OnConnectionSynced != nil && len(errs) == 0 {
-		errs = append(errs, s.OnConnectionSynced(ctx, id, r.FinishedAt))
+	if len(errs) == 0 {
+		machine, kind := s.store.ConnectionMachine(id), s.store.Harness(id)
+		if machine != 0 && s.store.ActiveID(machine, kind) == id {
+			errs = append(errs, s.store.SetHarnessLastFullSync(ctx, machine, kind, r.FinishedAt))
+		}
+		if s.OnConnectionSynced != nil {
+			errs = append(errs, s.OnConnectionSynced(ctx, id, r.FinishedAt))
+		}
 	}
 	return r, errors.Join(errs...)
 }

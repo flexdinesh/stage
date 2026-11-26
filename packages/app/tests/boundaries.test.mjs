@@ -2,11 +2,13 @@
 // (src/platform/index.ts). These browser APIs belong in a host adapter
 // (apps/web/src/platform/), and no host framework may leak into product code.
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, sep } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const src = new URL("../src/", import.meta.url).pathname;
+const src = fileURLToPath(new URL("../src/", import.meta.url));
 
 const FORBIDDEN = [
   [/\bEventSource\b/, "transport.subscribe"],
@@ -56,18 +58,47 @@ test("every dropdown is the Combobox, never a native select", () => {
 
 // ADR 0007 decision 4: the UI reads a harness only through what it declares (descriptor, capabilities, launch
 // options) and its slot registry entry; only src/harnesses/ names a harness kind.
-const HARNESSES = join("harnesses") + "/";
-const KIND_LITERAL = /(["'`])(t3|opencode|codex|claude)\1/;
-const NAME_COMPARISON = /(===|!==|==|!=|\bcase)\s*(["'`])(T3|OpenCode|Codex|Claude Code)\2/;
+const HARNESSES = "harnesses" + sep;
 const KIND_IMPORT = /from\s+["'][./]*harnesses\/(?!index\.ts["'])[^"']+["']/;
 
+function subdirectories(dir) {
+  return readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+}
+
+function descriptorNames() {
+  // Display names come from the Go descriptors, independently of the UI slot directory names.
+  const internal = fileURLToPath(new URL("../../../server/internal/", import.meta.url));
+  return subdirectories(internal).flatMap((dir) => {
+    const file = join(internal, dir, "descriptor.go");
+    if (!existsSync(file)) return [];
+    const name = readFileSync(file, "utf8").match(/\bDescriptor\s*=\s*harness\.Descriptor\s*\{[^}]*?\bName:\s*"([^"\n]+)"/)?.[1];
+    return name ? [name] : [];
+  });
+}
+
+function harnessBoundaryFor(kinds, names) {
+  const kind = kinds.map(RegExp.escape).join("|") || "(?!)";
+  const name = [...new Set([...kinds, ...names])].map(RegExp.escape).join("|") || "(?!)";
+  const quote = `(["'\x60])`;
+  const compare = "(?:===|!==|==|!=)";
+  return {
+    kindLiteral: new RegExp(`${quote}(?:${kind})\\1`),
+    nameComparison: new RegExp(`(?:${compare}|\\bcase)\\s*${quote}(?:${name})\\1|${quote}(?:${name})\\2\\s*${compare}`, "i"),
+  };
+}
+
+const harnessBoundary = harnessBoundaryFor(subdirectories(join(src, "harnesses")), descriptorNames());
+
 /** Harness-kind literals, display-name comparisons and imports past the registry in `text`, as findings for `rel`. */
-export function harnessKindFindings(rel, text) {
+export function harnessKindFindings(rel, text, { kindLiteral, nameComparison } = harnessBoundary) {
   const found = [];
-  text.split("\n").forEach((line, i) => {
-    if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
-    if (KIND_LITERAL.test(line)) found.push(`${rel}:${i + 1}: harness kind literal (go through src/harnesses/index.ts): ${line.trim()}`);
-    if (NAME_COMPARISON.test(line)) found.push(`${rel}:${i + 1}: harness name comparison (read a capability or the registry): ${line.trim()}`);
+  const code = text.replace(
+    /(["'`])(?:\\[\s\S]|(?!\1)[^\\])*\1|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
+    (token, quote) => quote ? token : token.replace(/[^\n]/g, " "),
+  );
+  code.split("\n").forEach((line, i) => {
+    if (kindLiteral.test(line)) found.push(`${rel}:${i + 1}: harness kind literal (go through src/harnesses/index.ts): ${line.trim()}`);
+    else if (nameComparison.test(line)) found.push(`${rel}:${i + 1}: harness name comparison (read a capability or the registry): ${line.trim()}`);
     if (KIND_IMPORT.test(line)) found.push(`${rel}:${i + 1}: import a harness through src/harnesses/index.ts: ${line.trim()}`);
   });
   return found;
@@ -87,6 +118,22 @@ test("the harness boundary check catches a planted kind literal, name comparison
   assert.equal(harnessKindFindings("x.ts", `if (c.harness === "t3") return;`).length, 1);
   assert.equal(harnessKindFindings("x.ts", "const k = `claude`;").length, 1);
   assert.equal(harnessKindFindings("x.ts", `if (name === "OpenCode") return;`).length, 1);
+  assert.equal(harnessKindFindings("x.ts", `if (name === "Claude Code") return;`).length, 1);
   assert.equal(harnessKindFindings("x.ts", `import { T3_KIND } from "../harnesses/t3/api.ts";`).length, 1);
-  assert.deepEqual(harnessKindFindings("x.ts", `// the "t3" harness\nimport { harnessSlots } from "../harnesses/index.ts";`), []);
+  assert.deepEqual(harnessKindFindings("x.ts", `const kind = c.harness; // the "t3" harness
+/*
+  The name "Claude Code" and kind "claude" can appear in a comment.
+*/
+import { harnessSlots } from "../harnesses/index.ts";`), []);
+});
+
+test("the harness boundary recognizes a new slot directory and display name", (t) => {
+  const slots = mkdtempSync(join(tmpdir(), "stage-harness-boundary-"));
+  t.after(() => rmSync(slots, { recursive: true }));
+  mkdirSync(join(slots, "drift.wave"));
+  const boundary = harnessBoundaryFor(subdirectories(slots), ["Drift Wave"]);
+  const check = (text) => harnessKindFindings("x.ts", text, boundary);
+  assert.match(check(`const k = "drift.wave";`)[0], /harness kind literal/);
+  assert.match(check(`if ("Drift Wave" === name) return;`)[0], /harness name comparison/);
+  assert.deepEqual(check(`const k = "drift-wave"; const label = "Drift Wave";`), []);
 });

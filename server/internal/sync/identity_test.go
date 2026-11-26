@@ -14,7 +14,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest"
 	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/codex/codextest"
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -180,7 +179,7 @@ func openCodeAdapter(t *testing.T, connection int64, projects ...ocProject) exec
 		_ = json.NewEncoder(w).Encode(rows)
 	}))
 	t.Cleanup(srv.Close)
-	a, err := opencode.New(connection, opencode.Settings{Endpoint: srv.URL, Auth: config.OpenCodeAuthLocal})
+	a, err := opencode.New(connection, opencode.Settings{Endpoint: srv.URL, Local: true})
 	if err != nil {
 		t.Fatal(err)
 	}

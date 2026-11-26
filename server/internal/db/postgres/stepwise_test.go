@@ -42,6 +42,10 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{name: "legacy states and preference entries removed", seed: seedV0035DropSettled, check: checkV0035DropSettled},
 		{name: "empty preference filter retained", seed: seedV0032(`UPDATE preferences SET notify_events='["settled"]'`), check: checkV0035EmptyPreferences},
 	},
+	36: {
+		{name: "settings, secrets and status copied", seed: seedV0036HarnessSetup, check: checkV0036HarnessSetup},
+		{name: "unconfigured defaults retained", check: checkV0036HarnessSetupDefaults},
+	},
 }
 
 func seedV0029Search(t *testing.T, pool *sql.DB) {

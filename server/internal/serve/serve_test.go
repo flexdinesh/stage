@@ -82,7 +82,7 @@ func cfg(t *testing.T, dataDir string, listens ...string) config.Config {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return config.Config{Listen: addrs, DataDir: dataDir, T3ClientName: "stage"}
+	return config.Config{Listen: addrs, DataDir: dataDir}
 }
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -106,7 +106,7 @@ func startLogged(t *testing.T, c config.Config, tc t3.Client, logger *slog.Logge
 	readyCh := make(chan serve.Ready, 1)
 	i := &inst{cancel: cancel, done: make(chan error, 1)}
 	go func() {
-		i.done <- serve.Run(ctx, serve.Options{Config: c, T3: tc, Logger: logger, Ready: func(r serve.Ready) { readyCh <- r }, ShutdownTimeout: 10 * time.Second})
+		i.done <- serve.Run(ctx, serve.Options{Config: c, HarnessOverrides: map[string]any{t3.Kind: tc}, Logger: logger, Ready: func(r serve.Ready) { readyCh <- r }, ShutdownTimeout: 10 * time.Second})
 	}()
 	select {
 	case i.ready = <-readyCh:
@@ -143,7 +143,7 @@ func runErr(t *testing.T, c config.Config) error {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err := serve.Run(ctx, serve.Options{Config: c, T3: newT3(), Logger: quiet(), Ready: func(serve.Ready) { t.Error("second instance became ready") }})
+	err := serve.Run(ctx, serve.Options{Config: c, HarnessOverrides: map[string]any{t3.Kind: newT3()}, Logger: quiet(), Ready: func(serve.Ready) { t.Error("second instance became ready") }})
 	if err == nil {
 		t.Fatal("instance started; want a startup error")
 	}
@@ -402,7 +402,7 @@ func TestDataDirOwnership(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			c := cfg(t, data2, "unix:"+filepath.Join(short, fmt.Sprintf("c%d.sock", k)))
-			errs[k] = serve.Run(ctx, serve.Options{Config: c, T3: newT3(), Logger: quiet(), ShutdownTimeout: 5 * time.Second, Ready: func(serve.Ready) {
+			errs[k] = serve.Run(ctx, serve.Options{Config: c, HarnessOverrides: map[string]any{t3.Kind: newT3()}, Logger: quiet(), ShutdownTimeout: 5 * time.Second, Ready: func(serve.Ready) {
 				readyCount.Add(1)
 				time.AfterFunc(time.Second, cancel)
 			}})
@@ -544,7 +544,7 @@ func TestMain(m *testing.M) {
 		if err != nil {
 			os.Exit(2)
 		}
-		c := config.Config{Listen: addrs, DataDir: data, T3ClientName: "stage", T3Fake: os.Getenv("T3_FAKE") == "1"}
+		c := config.Config{Listen: addrs, DataDir: data}
 		_ = serve.Run(context.Background(), serve.Options{Config: c, Logger: quiet(), Ready: func(serve.Ready) { fmt.Println("ready") }})
 		os.Exit(1)
 	}

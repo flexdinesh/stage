@@ -64,6 +64,31 @@ func TestCopyState(t *testing.T) {
 	}
 }
 
+func TestCopyTargetHarnessData(t *testing.T) {
+	for _, tc := range []struct {
+		table, write string
+	}{
+		{"harness_settings", `INSERT INTO harness_settings(machine_id,kind,settings) VALUES(1,'example','{"setting":null}')`},
+		{"harness_secrets", `INSERT INTO harness_secrets(machine_id,kind,key,value) VALUES(1,'example','token','null')`},
+		{"harness_sync_status", `INSERT INTO harness_sync_status(machine_id,kind,last_error) VALUES(1,'example','failed')`},
+	} {
+		t.Run(tc.table, func(t *testing.T) {
+			ctx := t.Context()
+			d := openEngine(t, freshURL(t), Options{})
+			if err := d.Migrator().Up(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.pool.Exec(ctx, tc.write); err != nil {
+				t.Fatal(err)
+			}
+			state, err := d.State(ctx)
+			if err != nil || state.Occupied != tc.table {
+				t.Fatalf("copy target state %+v %v, expected %s to occupy", state, err, tc.table)
+			}
+		})
+	}
+}
+
 // Schema lists every table once with known kinds, parents before
 // children, and every baseline seed table.
 func TestCopySchema(t *testing.T) {

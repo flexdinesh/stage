@@ -21,103 +21,27 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/t3"
-)
-
-// Where the T3 URL comes from.
-const (
-	SourceSettings = "settings" // saved through the url setting
-	SourceDefault  = "default"  // config.DefaultT3URL
 )
 
 // StatusProbeTimeout bounds the probe refresh of a status read.
 const StatusProbeTimeout = 3 * time.Second
 
-// Endpoint is the T3 address in use.
-type Endpoint struct {
-	URL       string // server-side MCP/OAuth calls
-	PublicURL string // browser "Open in T3" links
-	Source    string // SourceSettings | SourceDefault
-	// PublicSet: PublicURL is the saved browser URL (else the T3 URL).
-	PublicSet bool
-}
-
-// Settings is the machine's saved T3 setup (non-secret: the URL and
-// browser URL settings and the active connection's environment). The T3
-// token is the client's credential store (t3.TokenStore).
-type Settings interface {
-	GetConnection(ctx context.Context) (db.Connection, error)
-	SetT3URL(ctx context.Context, u string) error
-	SetT3PublicURL(ctx context.Context, u string) error
-}
-
-// AdminTokens stores the machine's T3 admin token (a secret: where the
-// harness runs, like the T3 token).
-type AdminTokens interface {
-	LoadT3AdminToken(ctx context.Context) (string, error)
-	SaveT3AdminToken(ctx context.Context, tok string) error
-}
-
-// Identity is the main server's record of the machine's T3 connections.
-type Identity interface {
-	SwitchInstance(ctx context.Context, kind, identity, label string, revive int64) (db.Switch, error)
-	GetHarnessConnection(ctx context.Context, id int64) (db.HarnessConnection, error)
-}
-
-// Resolve is the endpoint of the saved settings (conn.T3URL, else the
-// default; conn.T3PublicURL, else the T3 URL).
-func Resolve(conn db.Connection) Endpoint {
-	ep := Endpoint{URL: config.DefaultT3URL, Source: SourceDefault}
-	if conn.T3URL != nil && *conn.T3URL != "" {
-		ep.URL, ep.Source = *conn.T3URL, SourceSettings
-	}
-	ep.URL = strings.TrimRight(ep.URL, "/")
-	ep.PublicURL = ep.URL
-	if conn.T3PublicURL != nil && *conn.T3PublicURL != "" {
-		ep.PublicURL, ep.PublicSet = strings.TrimRight(*conn.T3PublicURL, "/"), true
-	}
-	return ep
-}
-
-// NormalizeURL validates a T3 URL setting: http or https, a host, no
-// credentials, query or fragment, no path besides "/". It returns it
-// without the trailing slash.
-func NormalizeURL(raw string) (string, error) {
-	s := strings.TrimSpace(raw)
-	u, err := url.Parse(s)
-	if err != nil || s == "" {
-		return "", errors.New("url must be an http(s) URL like http://127.0.0.1:3773")
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", errors.New("url must start with http:// or https://")
-	}
-	if u.Host == "" || u.Hostname() == "" {
-		return "", errors.New("url needs a host")
-	}
-	if u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
-		return "", errors.New("url must be only scheme://host[:port], with no path, query or credentials")
-	}
-	return strings.ToLower(u.Scheme) + "://" + u.Host, nil
-}
-
 // Options configure New.
 type Options struct {
-	Config   config.Config
-	Settings Settings
-	Identity Identity
-	Client   t3.Client
-	Endpoint Endpoint // the endpoint the client was built with (Resolve)
-	// AdminTokens stores the admin token; AdminToken is the one the client
-	// was built with ("" when none).
-	AdminTokens AdminTokens
-	AdminToken  string
+	Settings   harness.Settings
+	Secrets    harness.Secrets
+	Identity   harness.Identity
+	Client     t3.Client
+	Endpoint   Endpoint // the endpoint the client was built with (Resolve)
+	AdminToken string   // the saved admin token the client was built with
+	ClientName string   // OAuth client name, also used in the auto-pair label
 	// Fake: Client is the in-memory fake (no auto-pair; any URL is it).
 	Fake bool
 	// OnPaired runs after every successful pairing (full sync now). Must
@@ -126,10 +50,10 @@ type Options struct {
 	// OnSwitched runs when pairing moved T3 to another connection, or
 	// created the machine's first one (the adapter must follow before
 	// OnPaired). Must not block.
-	OnSwitched func(db.Switch)
+	OnSwitched func(harness.Switch)
 	Logger     *slog.Logger
 	// Local finds and runs the t3 CLI on the machine T3 runs on; nil is
-	// LocalCLI with Config.T3Bin.
+	// LocalCLI.
 	Local Local
 	// ProbeURL probes a candidate URL; nil = t3.ProbeURL with a 3s client.
 	ProbeURL func(ctx context.Context, base string) t3.Probe
@@ -154,10 +78,10 @@ func New(o Options) *Service {
 		o.Logger = slog.Default()
 	}
 	if o.Endpoint.URL == "" {
-		o.Endpoint = Resolve(db.Connection{})
+		o.Endpoint = Resolve(Settings{})
 	}
 	if o.Local == nil {
-		o.Local = &LocalCLI{Bin: o.Config.T3Bin}
+		o.Local = &LocalCLI{}
 	}
 	if o.ProbeURL == nil {
 		hc := &http.Client{Timeout: StatusProbeTimeout}
@@ -192,6 +116,8 @@ type Status struct {
 // (bounded by StatusProbeTimeout); otherwise memory only.
 func (s *Service) Status(ctx context.Context, refresh bool) Status {
 	if refresh {
+		s.opMu.Lock()
+		defer s.opMu.Unlock()
 		pctx, cancel := context.WithTimeout(ctx, StatusProbeTimeout)
 		s.o.Client.Probe(pctx)
 		cancel()
@@ -207,20 +133,21 @@ func (s *Service) Status(ctx context.Context, refresh bool) Status {
 // client at it. 409 when the server is bound to a T3 environment the new
 // URL does not serve; 400 for an invalid URL.
 func (s *Service) SetURL(ctx context.Context, raw *string) error {
-	target, saved, source := config.DefaultT3URL, "", SourceDefault
+	target, source := DefaultT3URL, SourceDefault
+	var saved *string
 	if raw != nil {
 		u, err := NormalizeURL(*raw)
 		if err != nil {
 			return db.Invalid("%s", err.Error())
 		}
-		target, saved, source = u, u, SourceSettings
+		target, saved, source = u, &u, SourceSettings
 	}
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	if err := s.checkBinding(ctx, target); err != nil {
 		return err
 	}
-	if err := s.o.Settings.SetT3URL(ctx, saved); err != nil {
+	if err := saveSettings(ctx, s.o.Settings, map[string]*string{"url": saved}); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -239,24 +166,24 @@ func (s *Service) SetURL(ctx context.Context, raw *string) error {
 // SetPublicURL saves the browser URL setting (nil: the T3 URL). 400 for an
 // invalid URL.
 func (s *Service) SetPublicURL(ctx context.Context, raw *string) error {
-	saved := ""
+	var saved *string
 	if raw != nil {
 		u, err := NormalizeURL(*raw)
 		if err != nil {
 			return db.Invalid("publicUrl: %s", err.Error())
 		}
-		saved = u
+		saved = &u
 	}
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	if err := s.o.Settings.SetT3PublicURL(ctx, saved); err != nil {
+	if err := saveSettings(ctx, s.o.Settings, map[string]*string{"publicUrl": saved}); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	ep := s.ep
-	ep.PublicURL, ep.PublicSet = saved, saved != ""
-	if saved == "" {
-		ep.PublicURL = ep.URL
+	ep.PublicURL, ep.PublicSet = ep.URL, saved != nil
+	if saved != nil {
+		ep.PublicURL = *saved
 	}
 	s.ep = ep
 	s.mu.Unlock()
@@ -270,19 +197,19 @@ func (s *Service) SetPublicURL(ctx context.Context, raw *string) error {
 // when that fails; the admin token stays saved, so renewal retries).
 func (s *Service) SetAdminToken(ctx context.Context, tok string) error {
 	tok = strings.TrimSpace(tok)
-	if s.o.AdminTokens == nil {
+	if s.o.Secrets == nil {
 		return errors.New("t3: no admin token store")
 	}
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	if err := s.o.AdminTokens.SaveT3AdminToken(ctx, tok); err != nil {
+	if err := s.saveAdminToken(ctx, tok); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	s.admin = tok != ""
 	s.mu.Unlock()
 	if err := s.o.Client.SetAdminToken(ctx, tok); err != nil {
-		return &db.T3Error{Err: errors.New("the admin token did not work: " + err.Error())}
+		return &db.HarnessError{Err: errors.New("the admin token did not work: " + err.Error())}
 	}
 	if tok != "" {
 		if _, err := s.afterToken(ctx); err != nil {
@@ -295,9 +222,9 @@ func (s *Service) SetAdminToken(ctx context.Context, tok string) error {
 
 // Paired is the outcome of a pairing.
 type Paired struct {
-	// Replaced is the T3 connection this pairing retired (nil when the
+	// Replaced is the T3 connection this pairing retired (0 when the
 	// same environment was paired again, or the old one held nothing).
-	Replaced *db.HarnessConnection
+	Replaced int64
 }
 
 // Pair redeems a pairing code (`t3 pair`), records the T3 environment it
@@ -309,7 +236,7 @@ func (s *Service) Pair(ctx context.Context, code string) (Paired, error) {
 	defer s.opMu.Unlock()
 	if err := s.o.Client.Pair(ctx, code); err != nil {
 		// Always 502 "pairing failed" (drop the chain so ErrNotConnected can't map to 503).
-		return Paired{}, &db.T3Error{Err: errors.New("pairing failed: " + err.Error())}
+		return Paired{}, &db.HarnessError{Err: errors.New("pairing failed: " + err.Error())}
 	}
 	return s.afterToken(ctx)
 }
@@ -329,8 +256,8 @@ func (s *Service) afterToken(ctx context.Context) (Paired, error) {
 			if s.o.OnSwitched != nil {
 				s.o.OnSwitched(sw)
 			}
-			if old, err := s.o.Identity.GetHarnessConnection(ctx, sw.Old); err == nil {
-				out.Replaced = &old
+			if exists, err := s.o.Identity.ConnectionExists(ctx, sw.Old); err == nil && exists {
+				out.Replaced = sw.Old
 			}
 		case sw.Old == 0 && sw.New != 0:
 			// The machine's first T3 connection (a remote machine has none
@@ -355,43 +282,46 @@ func (s *Service) afterToken(ctx context.Context) (Paired, error) {
 func (s *Service) Unpair(ctx context.Context) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	if s.o.AdminTokens != nil {
-		if err := s.o.AdminTokens.SaveT3AdminToken(ctx, ""); err != nil {
+	if s.o.Secrets != nil {
+		if err := s.saveAdminToken(ctx, ""); err != nil {
 			return err
 		}
 	}
+	s.mu.Lock()
+	s.admin = false
+	s.mu.Unlock()
 	if err := s.o.Client.SetAdminToken(ctx, ""); err != nil {
 		return err
 	}
 	if err := s.o.Client.Unpair(ctx); err != nil {
 		return err
 	}
-	if err := s.o.Settings.SetT3URL(ctx, ""); err != nil {
+	if err := saveSettings(ctx, s.o.Settings, map[string]*string{"url": nil, "publicUrl": nil}); err != nil {
 		return err
 	}
-	if err := s.o.Settings.SetT3PublicURL(ctx, ""); err != nil {
-		return err
-	}
-	ep := Resolve(db.Connection{})
+	ep := Resolve(Settings{})
 	s.mu.Lock()
-	s.ep, s.admin = ep, false
+	s.ep = ep
 	s.mu.Unlock()
 	s.o.Client.Reconfigure(ep.URL, ep.PublicURL)
 	s.log.Info("t3 disconnected")
 	return nil
 }
 
+func (s *Service) saveAdminToken(ctx context.Context, tok string) error {
+	if tok == "" {
+		return s.o.Secrets.Delete(ctx, t3.Kind, adminTokenKey)
+	}
+	return saveSecret(ctx, s.o.Secrets, adminTokenKey, tok)
+}
+
 // bound is the active T3 connection's environment ("" when none yet) and
 // its label (the probed T3's label when it is that environment, else the id).
 func (s *Service) bound(ctx context.Context) (string, string, error) {
-	conn, err := s.o.Settings.GetConnection(ctx)
-	if err != nil {
+	_, env, err := s.o.Identity.ActiveIdentity(ctx, t3.Kind)
+	if err != nil || env == "" {
 		return "", "", err
 	}
-	if conn.EnvironmentID == nil || *conn.EnvironmentID == "" {
-		return "", "", nil
-	}
-	env := *conn.EnvironmentID
 	label := env
 	if p := s.o.Client.Status(ctx).Probe; p.Identity != nil && p.Identity.EnvironmentID == env && p.Identity.Label != "" {
 		label = p.Identity.Label
@@ -401,13 +331,13 @@ func (s *Service) bound(ctx context.Context) (string, string, error) {
 
 // bindLegacy stamps a T3 connection paired before identities existed: it
 // holds a valid token T3 has not rejected and the URL answers with an
-// identity. It never replaces a stamped connection.
+// identity. It never replaces a stamped connection. opMu held.
 func (s *Service) bindLegacy(ctx context.Context, st t3.ConnectionStatus) {
 	if !st.Connected || st.Probe.Identity == nil {
 		return
 	}
-	conn, err := s.o.Settings.GetConnection(ctx)
-	if err != nil || (conn.EnvironmentID != nil && *conn.EnvironmentID != "") {
+	_, env, err := s.o.Identity.ActiveIdentity(ctx, t3.Kind)
+	if err != nil || env != "" {
 		return
 	}
 	sw, err := s.o.Identity.SwitchInstance(ctx, t3.Kind, st.Probe.Identity.EnvironmentID, st.Probe.Identity.Label, 0)
@@ -450,7 +380,7 @@ func (s *Service) checkBinding(ctx context.Context, target string) error {
 
 // pairErr wraps a CLI failure as a 502.
 func pairErr(format string, a ...any) error {
-	return &db.T3Error{Err: fmt.Errorf(format, a...)}
+	return &db.HarnessError{Err: fmt.Errorf(format, a...)}
 }
 
 // IsFake reports whether c is the in-memory fake (or wraps it).

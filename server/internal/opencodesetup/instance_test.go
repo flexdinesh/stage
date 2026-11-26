@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -150,18 +149,24 @@ func TestReplacingTheOpenCodeServiceRetiresItsConnection(t *testing.T) {
 	addrB := other.start(t)
 
 	var in installs
-	s, err := New(ctx, storePorts(store, in.install), nil)
+	s, err := newService(ctx, storePorts(store, in.install), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := s.ID()
-	if err := s.Save(ctx, config.OpenCodeEdit{Endpoint: &addrA}); err != nil {
+	if s.ID() != 0 || len(in.moves) != 0 {
+		t.Fatal("unconfigured OpenCode created a connection at boot")
+	}
+	if err := s.Save(ctx, Edit{Endpoint: &addrA}); err != nil {
 		t.Fatal(err)
+	}
+	first := s.ID()
+	if first == 0 || len(in.moves) != 1 || in.moves[0] != [2]int64{0, first} {
+		t.Fatalf("first connection %d, adapter moves %v", first, in.moves)
 	}
 	projectID := record(t, store, s, addrA)
 
 	// Same service, new address: the connection stays.
-	if err := s.Save(ctx, config.OpenCodeEdit{Endpoint: &addrA2}); err != nil || s.ID() != first {
+	if err := s.Save(ctx, Edit{Endpoint: &addrA2}); err != nil || s.ID() != first {
 		t.Fatalf("moved address: %v id %d", err, s.ID())
 	}
 	if _, verified, _ := savedSettings(store); verified != addrA2 {
@@ -169,14 +174,14 @@ func TestReplacingTheOpenCodeServiceRetiresItsConnection(t *testing.T) {
 	}
 
 	// A different service is refused without confirmation; nothing changes.
-	err = s.Save(ctx, config.OpenCodeEdit{Endpoint: &addrB})
+	err = s.Save(ctx, Edit{Endpoint: &addrB})
 	var conflict *db.ConflictError
 	if !errors.As(err, &conflict) || conflict.Code != "instance_changed" || s.ID() != first {
 		t.Fatalf("unconfirmed switch: %v id %d", err, s.ID())
 	}
 
 	// Confirmed: a new connection; the old one keeps the binding and session.
-	if err := s.Save(ctx, config.OpenCodeEdit{Endpoint: &addrB, NewInstance: true}); err != nil {
+	if err := s.Save(ctx, Edit{Endpoint: &addrB, NewInstance: true}); err != nil {
 		t.Fatal(err)
 	}
 	second := s.ID()
@@ -200,10 +205,10 @@ func TestReplacingTheOpenCodeServiceRetiresItsConnection(t *testing.T) {
 	}
 
 	// The original service again: confirmed, its connection is restored.
-	if err := s.Save(ctx, config.OpenCodeEdit{Endpoint: &addrA}); !errors.As(err, &conflict) || conflict.Code != "instance_returned" || s.ID() != second {
+	if err := s.Save(ctx, Edit{Endpoint: &addrA}); !errors.As(err, &conflict) || conflict.Code != "instance_returned" || s.ID() != second {
 		t.Fatalf("unconfirmed revive: %v id %d", err, s.ID())
 	}
-	if err := s.Save(ctx, config.OpenCodeEdit{Endpoint: &addrA, NewInstance: true}); err != nil {
+	if err := s.Save(ctx, Edit{Endpoint: &addrA, NewInstance: true}); err != nil {
 		t.Fatal(err)
 	}
 	if s.ID() != first || !store.ConnectionActive(first) {
@@ -226,13 +231,19 @@ func TestPairingAnotherServiceKeepsTheRedeemedTokenForTheConfirm(t *testing.T) {
 	addrB := other.start(t)
 
 	var in installs
-	s, err := New(ctx, storePorts(store, in.install), nil)
+	s, err := newService(ctx, storePorts(store, in.install), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := s.ID()
-	if err := s.Save(ctx, config.OpenCodeEdit{Endpoint: &addrA}); err != nil {
+	if s.ID() != 0 || len(in.moves) != 0 {
+		t.Fatal("unconfigured OpenCode created a connection at boot")
+	}
+	if err := s.Save(ctx, Edit{Endpoint: &addrA}); err != nil {
 		t.Fatal(err)
+	}
+	first := s.ID()
+	if first == 0 || len(in.moves) != 1 || in.moves[0] != [2]int64{0, first} {
+		t.Fatalf("first connection %d, adapter moves %v", first, in.moves)
 	}
 	record(t, store, s, addrA)
 
@@ -248,7 +259,7 @@ func TestPairingAnotherServiceKeepsTheRedeemedTokenForTheConfirm(t *testing.T) {
 		t.Fatalf("link redeemed %d times", other.redeems)
 	}
 	saved, _, err := savedSettings(store)
-	if err != nil || s.ID() == first || saved.Auth != config.OpenCodeAuthPaired || saved.Password != "tok-once" || saved.Endpoint != addrB {
+	if err != nil || s.ID() == first || saved.Auth != AuthPaired || saved.Password != "tok-once" || saved.Endpoint != addrB {
 		t.Fatalf("paired %+v id %d %v", saved, s.ID(), err)
 	}
 	// Spent: the same link now needs a fresh one.

@@ -152,6 +152,50 @@ test("disconnect prompt names the T3, what stays, and the token's validity only 
 
 const reply = (details, replaced) => ({ kind: "t3", name: "T3", connectionId: 1, configured: true, connected: details.connected, state: details.state ?? "unpaired", fields: [], actions: [], details, ...(replaced ? { replaced } : {}) });
 
+test("T3 status reads generic sync progress and results using thread vocabulary", async () => {
+  const { sync: _progress, lastError: _error, lastFullSyncAt: _lastSync, ...details } = connected;
+  const startedAt = "2026-11-17T09:59:30Z";
+  let sync = { running: true, startedAt, projects: 1, sessions: 4 };
+  const { api } = fakeApi(async () => Response.json({ ...reply(details), sync }));
+
+  const running = await t3Api(api).status();
+  assert.deepEqual(running.sync, { running: true, startedAt, projects: 1, threads: 4 });
+  assert.equal(running.lastFullSyncAt, null);
+  assert.equal(running.lastError, null);
+  assert.equal(notes(running)[2], "first sync:active:1 project · 4 threads");
+  assert.equal(primaryAction(running), null);
+
+  sync = { running: false, projects: 0, sessions: 0, lastError: "sync failed", lastFullSyncAt: SYNCED };
+  const finished = await t3Api(api).status();
+  assert.deepEqual(finished.sync, { running: false, startedAt: null, projects: 0, threads: 0 });
+  assert.equal(finished.lastError, "sync failed");
+  assert.equal(finished.lastFullSyncAt, SYNCED);
+  assert.equal(firstSyncLanded(running, finished), true);
+  assert.equal(notes(finished)[2], "first sync:ok:done");
+});
+
+test("generic sync clears older T3 details, which still work when sync is absent", async () => {
+  const details = {
+    ...connected,
+    lastError: "old sync error",
+    lastFullSyncAt: SYNCED,
+    sync: { running: true, startedAt: SYNCED, projects: 2, threads: 5 },
+  };
+  let sync;
+  const { api } = fakeApi(async () => Response.json({ ...reply(details), sync }));
+
+  const legacy = await t3Api(api).status();
+  assert.equal(legacy.lastError, details.lastError);
+  assert.equal(legacy.lastFullSyncAt, details.lastFullSyncAt);
+  assert.deepEqual(legacy.sync, details.sync);
+
+  sync = { running: false, startedAt: null, projects: 0, sessions: 0, lastError: null, lastFullSyncAt: null };
+  const current = await t3Api(api).status();
+  assert.equal(current.lastError, null);
+  assert.equal(current.lastFullSyncAt, null);
+  assert.deepEqual(current.sync, { running: false, startedAt: null, projects: 0, threads: 0 });
+});
+
 test("disconnect sends DELETE /harnesses/t3/connection and returns the normalized details", async () => {
   const seen = [];
   const { api } = fakeApi(async (path, init) => {

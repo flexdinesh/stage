@@ -14,11 +14,9 @@ import (
 	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/listen"
 )
-
-// DefaultT3URL is the T3 server address without a saved setting.
-const DefaultT3URL = "http://127.0.0.1:3773"
 
 type Config struct {
 	// Listen: STAGE_LISTEN (comma list) or `stage serve --listen` (repeatable),
@@ -30,32 +28,31 @@ type Config struct {
 	// DataDir).
 	Database  Database
 	PublicURL string // STAGE_PUBLIC_URL, optional (PWA URL; VAPID subject when https)
-	// T3Bin (T3_BIN) is the t3 CLI auto-pair runs; "" = look it up.
-	T3Bin string
 	// AllowedOrigins are the browser origins trusted besides loopback ones
 	// (normalized scheme://host[:port]): STAGE_ALLOWED_ORIGINS plus the
 	// origin of STAGE_PUBLIC_URL. Their hosts pass the Host check.
 	AllowedOrigins []string
-	// T3ClientName names this app's T3 session (OAuth client, pairing
-	// label): the installation identity ("stage"), plus " dev" with
-	// STAGE_ENV=dev.
-	T3ClientName string
-	// T3Fake (T3_FAKE=1) uses the in-memory fake T3 client; T3FakeSeed
-	// (T3_FAKE_SEED=1) seeds it with demo threads.
-	T3Fake, T3FakeSeed bool
-	// RemovedEnv are the RemovedHarnessEnvKeys set in the environment
+	// RemovedEnv are the removed harness keys set in the environment
 	// (ignored; startup warns).
 	RemovedEnv []string
+
+	getenv func(string) string
 }
 
 // Load reads the process environment. listenFlags (`stage serve
 // --listen`, each a comma list), when given, override STAGE_LISTEN.
-func Load(listenFlags []string) (Config, error) { return LoadFrom(os.Getenv, listenFlags) }
+func Load(listenFlags []string, env harness.EnvOptions) (Config, error) {
+	return LoadFrom(os.Getenv, listenFlags, env)
+}
 
 // LoadFrom is Load over getenv.
-func LoadFrom(getenv func(string) string, listenFlags []string) (Config, error) {
-	cfg := HarnessFrom(getenv)
-	cfg.PublicURL = getenv("STAGE_PUBLIC_URL")
+func LoadFrom(getenv func(string) string, listenFlags []string, env harness.EnvOptions) (Config, error) {
+	cfg := Config{getenv: getenv, PublicURL: getenv("STAGE_PUBLIC_URL")}
+	for _, k := range env.Removed {
+		if getenv(k) != "" {
+			cfg.RemovedEnv = append(cfg.RemovedEnv, k)
+		}
+	}
 	dev := getenv("STAGE_ENV") == "dev"
 	var err error
 	if cfg.Listen, err = loadListen(getenv, listenFlags); err != nil {
@@ -85,18 +82,13 @@ func LoadFrom(getenv func(string) string, listenFlags []string) (Config, error) 
 	return cfg, nil
 }
 
-// HarnessEnvKeys are the harness options a process takes from its
-// environment (HarnessFrom): the main server's for its local machine, a
-// worker's for its machine. Connection settings (URLs, credentials) are
-// never taken from the environment: they are set up in Settings.
-var HarnessEnvKeys = []string{"T3_FAKE", "T3_FAKE_SEED", "T3_BIN"}
-
-// RemovedHarnessEnvKeys are harness connection settings that were once
-// read from the environment and no longer are (set them up in Settings >
-// Connections). Startup warns about each one still set.
-var RemovedHarnessEnvKeys = []string{
-	"T3_URL", "T3_PUBLIC_URL", "T3_ADMIN_TOKEN",
-	"OPENCODE_URL", "OPENCODE_PUBLIC_URL", "OPENCODE_WEB_URL", "OPENCODE_USERNAME", "OPENCODE_PASSWORD",
+// Getenv reads from the environment used to load the config, or the process
+// environment when the config was constructed directly.
+func (c Config) Getenv(key string) string {
+	if c.getenv == nil {
+		return os.Getenv(key)
+	}
+	return c.getenv(key)
 }
 
 // WarnRemovedEnv is the startup warning for RemovedEnv ("" when none).
@@ -105,33 +97,6 @@ func (c Config) WarnRemovedEnv() string {
 		return ""
 	}
 	return strings.Join(c.RemovedEnv, ", ") + " no longer read; set the connection up in Settings > Connections"
-}
-
-// RemovedHarnessEnv lists the RemovedHarnessEnvKeys set in getenv.
-func RemovedHarnessEnv(getenv func(string) string) []string {
-	var out []string
-	for _, k := range RemovedHarnessEnvKeys {
-		if getenv(k) != "" {
-			out = append(out, k)
-		}
-	}
-	return out
-}
-
-// HarnessFrom is the harness part of a Config (HarnessEnvKeys, and
-// STAGE_ENV=dev for the T3 client name) from getenv.
-func HarnessFrom(getenv func(string) string) Config {
-	cfg := Config{
-		T3Bin:        getenv("T3_BIN"),
-		T3ClientName: buildinfo.Identity,
-		T3Fake:       getenv("T3_FAKE") == "1",
-		T3FakeSeed:   getenv("T3_FAKE_SEED") == "1",
-		RemovedEnv:   RemovedHarnessEnv(getenv),
-	}
-	if getenv("STAGE_ENV") == "dev" {
-		cfg.T3ClientName += " dev"
-	}
-	return cfg
 }
 
 func loadListen(getenv func(string) string, flags []string) ([]listen.Addr, error) {

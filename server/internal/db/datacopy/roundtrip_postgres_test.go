@@ -41,12 +41,18 @@ var seedSQL = []string{
 	`INSERT INTO harness_connections (id, machine_id, harness, active, retired_at, forgotten_at) VALUES (3, 2, 't3', 0, '2026-11-04T01:02:03.456789Z', '2026-11-04T02:00:00.000000Z')`,
 	`INSERT INTO session_identities (id, connection_id, external_id) VALUES (1, 1, 'thread-1'), (2, 2, 'oc-session')`,
 	`INSERT INTO shared_paths (connection_id, harness_root, stage_root) VALUES (2, '/h', '/s')`,
-	`UPDATE t3_connection SET client_id = 'c', token = 'tok', expires_at = '2026-12-01T00:00:00.000000Z', t3_url = 'http://t3' WHERE machine_id = 1`,
-	`INSERT INTO t3_connection (machine_id, updated_at) VALUES (2, '2026-11-05T00:00:00.000000Z')`,
-	`UPDATE opencode_settings SET endpoint = 'http://oc', auth = 'basic', username = 'u', password = 'p', token_issued_at = '2026-11-05T00:00:00.000000Z' WHERE machine_id = 1`,
-	`INSERT INTO opencode_settings (machine_id) VALUES (2)`,
-	`INSERT INTO claude_settings (machine_id, binary_path, config_dir, disconnected, updated_at) VALUES (1, '/opt/claude ✓', '/home/u/.claude', 1, '2026-11-05T00:00:00.123456Z'), (2, '', '', 0, '2026-11-05T00:00:00.000000Z')`,
-	`INSERT INTO codex_settings (machine_id, binary_path, connected) VALUES (1, '/opt/cödex bin', 1), (2, '', 0)`,
+	`UPDATE harness_settings SET settings = '{"url":"http://t3","publicUrl":null}' WHERE machine_id = 1 AND kind = 't3'`,
+	`UPDATE harness_settings SET settings = '{"endpoint":"http://oc","browserEndpoint":"https://browser","webClient":"","auth":"basic"}' WHERE machine_id = 1 AND kind = 'opencode'`,
+	`INSERT INTO harness_settings (machine_id, kind, settings, updated_at) VALUES
+	  (1, 'claude', '{"binary":"/opt/claude ✓","configDir":"/home/u/.claude","disconnected":true}', '2026-11-05T00:00:00.123456Z'),
+	  (2, 'codex', '{"binary":"/opt/cödex bin","connected":false}', NULL)`,
+	`INSERT INTO harness_secrets (machine_id, kind, key, value) VALUES
+	  (1, 't3', 'token', '{"clientId":"c","token":"s","expiresAt":"2026-12-01T00:00:00.000000Z"}'),
+	  (1, 't3', 'adminToken', '"admin"'),
+	  (1, 'opencode', 'credential', '{"username":"u","password":"p","tokenIssuedAt":"2026-11-05T00:00:00.123456Z"}')`,
+	`INSERT INTO harness_sync_status (machine_id, kind, last_error, last_full_sync_at) VALUES
+	  (1, 't3', 'once', '2026-11-05T10:00:00.123456Z'),
+	  (2, 't3', NULL, NULL)`,
 	`UPDATE preferences SET default_connection_id = 2, notify_events = '["done", "failed"]' WHERE id = 1`,
 	`INSERT INTO projects (id, title, origin, imported_connection_id, imported_at, archive_owner, created_by_user_id, source_machine_id) VALUES (1, 'Proj ✓', 'discovered', 2, '2026-11-06T00:00:00.000000Z', 'user', 2, 2)`,
 	`INSERT INTO project_bindings (id, project_id, connection_id, external_project_id, workspace, origin) VALUES (1, 1, 1, 'ext-1', '/w', 'manual')`,
@@ -209,9 +215,17 @@ func TestRoundTrip(t *testing.T) {
 	ls, ps := db.NewStore(lite), db.NewStore(dst)
 	one, two := int64(1), int64(2)
 	reads := map[string]func(*db.Store) (any, error){
-		"task 1": func(s *db.Store) (any, error) { return s.GetTask(ctx, 1) },
-		"task 2": func(s *db.Store) (any, error) { return s.GetTask(ctx, 2) },
-		"search": func(s *db.Store) (any, error) { return s.ListTasks(ctx, db.TaskFilter{Q: "NEEDLE %_", Closed: "all"}) },
+		"T3 settings":           func(s *db.Store) (any, error) { return s.HarnessSettings(ctx, one, "t3") },
+		"OpenCode settings":     func(s *db.Store) (any, error) { return s.HarnessSettings(ctx, one, "opencode") },
+		"Claude settings":       func(s *db.Store) (any, error) { return s.HarnessSettings(ctx, one, "claude") },
+		"worker Codex settings": func(s *db.Store) (any, error) { return s.HarnessSettings(ctx, two, "codex") },
+		"T3 token":              func(s *db.Store) (any, error) { return s.HarnessSecret(ctx, one, "t3", "token") },
+		"T3 admin token":        func(s *db.Store) (any, error) { return s.HarnessSecret(ctx, one, "t3", "adminToken") },
+		"OpenCode credential":   func(s *db.Store) (any, error) { return s.HarnessSecret(ctx, one, "opencode", "credential") },
+		"T3 status":             func(s *db.Store) (any, error) { return s.HarnessSyncStatus(ctx, one, "t3") },
+		"task 1":                func(s *db.Store) (any, error) { return s.GetTask(ctx, 1) },
+		"task 2":                func(s *db.Store) (any, error) { return s.GetTask(ctx, 2) },
+		"search":                func(s *db.Store) (any, error) { return s.ListTasks(ctx, db.TaskFilter{Q: "NEEDLE %_", Closed: "all"}) },
 		"journal": func(s *db.Store) (any, error) {
 			return s.ReadJournal(ctx, store.JournalOwner{TaskID: &one}, store.JournalQuery{Kind: "all"})
 		},

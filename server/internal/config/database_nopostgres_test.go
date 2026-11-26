@@ -22,7 +22,7 @@ func TestParseDatabaseNoPostgres(t *testing.T) {
 		}
 		if _, err := LoadFrom(func(k string) string {
 			return map[string]string{"HOME": t.TempDir(), DatabaseEnv: v}[k]
-		}, nil); !errors.Is(err, ErrNoPostgres) {
+		}, nil, testEnv); !errors.Is(err, ErrNoPostgres) {
 			t.Fatalf("LoadFrom %q: %v", v, err)
 		}
 	}

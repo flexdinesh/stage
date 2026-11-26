@@ -17,27 +17,23 @@ import (
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
-	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/client"
-	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/guard"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/harnesses"
 	"github.com/flexdinesh/stage/server/internal/install"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/notify"
-	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/release"
 	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/schedule"
 	coordinator "github.com/flexdinesh/stage/server/internal/sync"
-	"github.com/flexdinesh/stage/server/internal/t3"
-	"github.com/flexdinesh/stage/server/internal/t3setup"
 	"github.com/flexdinesh/stage/server/internal/webui"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
@@ -50,10 +46,9 @@ const ShutdownTimeout = 100 * time.Second
 // Options configure Run.
 type Options struct {
 	Config config.Config
-	// T3 is the T3 client; nil uses the in-memory fake with Config.T3Fake
-	// (T3_FAKE=1), else the real MCP client from Config.
-	T3     t3.Client
-	Logger *slog.Logger
+	// HarnessOverrides injects machine-local dependencies keyed by kind in tests.
+	HarnessOverrides map[string]any
+	Logger           *slog.Logger
 	// Ready, when set, is called once every listener serves.
 	Ready func(Ready)
 	// ShutdownTimeout overrides ShutdownTimeout (tests).
@@ -91,12 +86,12 @@ type Ready struct {
 //  3. open the engine STAGE_DATABASE_URL selects (SQLite in the data dir,
 //     or Postgres: opening and its ownership lock bounded at 30s, held
 //     elsewhere 75), refuse a schema newer than this binary (78), back it
-//     up when migrations are pending, migrate, start T3, recover launching
+//     up when migrations are pending, migrate, compose harnesses, recover launching
 //     tasks and start the background loops
 //  4. serve all listeners, then notify READY=1 (systemd)
 //
 // Shutdown: STOPPING=1, background loops and notification streams end, the
-// HTTP server drains for up to ShutdownTimeout, then T3 and the database
+// HTTP server drains for up to ShutdownTimeout, then harness clients and the database
 // close, sockets are removed with their locks released, and the data dir
 // lock is released last.
 func Run(ctx context.Context, o Options) error {
@@ -178,10 +173,7 @@ func Run(ctx context.Context, o Options) error {
 	defer func() {
 		stop()
 		wg.Wait() // background loops exit once ctx ends
-		if local != nil && local.codex != nil {
-			local.codex.Close()
-		}
-		if local != nil && local.close != nil {
+		if local != nil {
 			local.close()
 		}
 	}()
@@ -190,7 +182,7 @@ func Run(ctx context.Context, o Options) error {
 	home, _ := os.UserHomeDir()
 	cliName := install.CLIName(home, buildinfo.Identity)
 	// The fixed harness composition: every kind this server knows, in order.
-	harnesses := harness.MustRegistry(t3.Descriptor, opencode.Descriptor, claudecode.Descriptor, codex.Descriptor)
+	registry := harnesses.Registry()
 	profile := o.Profile
 	if profile.Kind == "" {
 		profile.Kind = harness.ProfileServer
@@ -198,19 +190,15 @@ func Run(ctx context.Context, o Options) error {
 	nameLocalMachine(ctx, store, profile, cfg.PublicURL, logger)
 	// The machine-runtime seam: the in-process local machine, plus a remote
 	// machine per joined worker (below, ADR 0002).
-	local, err = newLocalMachine(ctx, &wg, store, cfg, o.T3, profile, logger)
-	if err != nil {
-		return err
-	}
+	local = &localMachine{Local: machine.NewLocal(db.LocalMachine, profile, machine.LocalOps{})}
 	machines := machine.MustSet(local)
 	syncSvc := coordinator.NewForMachines(store, machines, logger)
-	syncSvc.Harnesses = harnesses
+	syncSvc.Harnesses = registry
 	syncSvc.PublicURL = cfg.PublicURL
 	syncSvc.CLI = cliName
 	// Retires connections whose instance moved to another machine (moved.go).
 	moved := newMovedRetirer(store, syncSvc.FullSyncEvery, logger)
 	syncSvc.OnFullSync = moved.Kick
-	syncSvc.OnConnectionSynced = t3setup.RecordFullSync(store)
 	notifier := notify.New(store, cfg.PublicURL, logger)
 	// One release and one schedule runner per active connection, on every
 	// machine; the sets follow instance switches.
@@ -247,10 +235,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	syncSvc.OnSessionChange = notifier.OnSessionChange
 	syncSvc.OnAccepted = kickTrees
-	if err := local.compose(ctx, store, cfg, harnesses, syncSvc.Kick, func(connection int64) t3setup.SyncProgress {
-		p := syncSvc.Progress(connection)
-		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Sessions}
-	}, logger); err != nil {
+	if err := local.compose(ctx, store, cfg, registry, o.HarnessOverrides, syncSvc.Kick, logger); err != nil {
 		return err
 	}
 	// Worker channels end with ctx, so Shutdown does not wait on their
@@ -277,13 +262,9 @@ func Run(ctx context.Context, o Options) error {
 	// Remote connection setup: each worker runs its machine's connectors;
 	// the main server proxies them and answers their setup ports from its
 	// record (never storing harness credentials).
-	progress := func(connection int64) t3setup.SyncProgress {
-		p := syncSvc.Progress(connection)
-		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Sessions}
-	}
-	hosts.SetSetup(remoteSetupHooks(store, harnesses, progress, syncSvc.Kick))
+	hosts.SetSetup(remoteSetupHooks(store, registry, syncSvc.Kick))
 	remote.ServeSetup(channels, func(machineID int64) machine.StorePorts {
-		return machine.NewStorePorts(store.OnMachine(machineID), harnesses)
+		return machine.NewStorePorts(store.OnMachine(machineID), registry)
 	}, func(machineID int64, sw db.Switch) {
 		if !channels.Presence(machineID).Online {
 			return // the ready snapshot will wake sync and scheduling
@@ -292,7 +273,7 @@ func Run(ctx context.Context, o Options) error {
 		releases.Resync()
 		schedules.Resync()
 		moved.Kick()
-	})
+	}, harnesses.Modules())
 	remotes, err := store.ListMachines(ctx)
 	if err != nil {
 		return err
@@ -302,11 +283,11 @@ func Run(ctx context.Context, o Options) error {
 			hosts.Join(m.ID)
 		}
 	}
-	if _, err := machines.Connectors(harnesses); err != nil {
+	if _, err := machines.Connectors(registry); err != nil {
 		return err
 	}
 	moved.connectors = func() harness.Connectors {
-		c, err := machines.Connectors(harnesses)
+		c, err := machines.Connectors(registry)
 		if err != nil {
 			logger.Error("connectors", "err", err)
 		}
@@ -343,13 +324,13 @@ func Run(ctx context.Context, o Options) error {
 		Config: cfg, Store: store, Sync: syncSvc, Push: notifier, Logger: logger,
 		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees,
 		LiveConnectors: func() harness.Connectors {
-			c, err := machines.Connectors(harnesses)
+			c, err := machines.Connectors(registry)
 			if err != nil {
 				logger.Error("connectors", "err", err)
 			}
 			return c
 		},
-		Harnesses: harnesses, Channels: channels, Machines: hosts,
+		Harnesses: registry, Channels: channels, Machines: hosts,
 		MCP: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mcpHandler.ServeHTTP(w, r) }),
 	})
 	mcpHandler = agenttools.HTTPHandler(&agenttools.Ops{

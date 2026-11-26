@@ -48,6 +48,14 @@ func init() {
 		if err := json.Unmarshal(st.Details, &s); err != nil {
 			return err
 		}
+		if st.Sync != nil {
+			s.LastFullSyncAt = st.Sync.LastFullSyncAt
+			s.LastError = st.Sync.LastError
+			s.Sync.Running = st.Sync.Running
+			s.Sync.StartedAt = st.Sync.StartedAt
+			s.Sync.Projects = st.Sync.Projects
+			s.Sync.Threads = st.Sync.Sessions
+		}
 		printT3Status(w, s, cli)
 		return nil
 	}

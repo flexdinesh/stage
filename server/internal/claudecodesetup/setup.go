@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/claudecode"
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -43,19 +42,8 @@ const (
 // checkTimeout bounds each CLI check (--version, auth status).
 const checkTimeout = 20 * time.Second
 
-// Settings persists the machine's Claude Code setup (claude_settings).
-type Settings interface {
-	ClaudeSettings(ctx context.Context) (config.ClaudeSettings, error)
-	SaveClaudeSettings(ctx context.Context, c config.ClaudeSettings) error
-}
-
-// Ports are what the setup needs from its machine and the main server;
-// never the store itself.
-type Ports struct {
-	Settings Settings
-	Identity machine.Identity
-	Install  machine.Install
-}
+// Ports are the machine's setup dependencies.
+type Ports = harness.Ports
 
 // Options are the machine-local environment.
 type Options struct {
@@ -100,7 +88,7 @@ type Service struct {
 	ports  Ports
 	opts   Options
 	log    *slog.Logger
-	saved  config.ClaudeSettings
+	saved  SetupSettings
 	id     int64 // the machine's Claude Code connection (0: none yet)
 	active bool  // an adapter is installed on id
 	// last check (Status refresh, connect)
@@ -116,6 +104,7 @@ type Service struct {
 	hooks      *claudecode.Hooks
 	hooksTried bool
 	hooksErr   string
+	closeHooks func()
 }
 
 // New loads the setup and, when Claude Code is connected here, installs
@@ -133,7 +122,7 @@ func New(ctx context.Context, p Ports, o Options) (*Service, error) {
 	if o.NewAdapter == nil {
 		o.NewAdapter = func(opts claudecode.Options) execution.Adapter { return claudecode.New(opts) }
 	}
-	saved, err := p.Settings.ClaudeSettings(ctx)
+	saved, err := loadSettings(ctx, p.Settings)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +188,21 @@ func (s *Service) openHooks() {
 		return
 	}
 	s.hooks = h
-	context.AfterFunc(s.life, func() { _ = h.Close() })
+	closeHooks := sync.OnceFunc(func() { _ = h.Close() })
+	stop := context.AfterFunc(s.life, closeHooks)
+	s.closeHooks = func() {
+		stop()
+		closeHooks()
+	}
+}
+
+// Close stops the hook receiver, if opened.
+func (s *Service) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closeHooks != nil {
+		s.closeHooks()
+	}
 }
 
 // uninstall removes the connection's adapter and ends its push
@@ -293,7 +296,7 @@ func (s *Service) Connect(ctx context.Context) (harness.Result, error) {
 	}
 	next := s.saved
 	next.ConfigDir, next.Disconnected = au.ConfigDirectory, false
-	if err := s.ports.Settings.SaveClaudeSettings(ctx, next); err != nil {
+	if err := saveSettings(ctx, s.ports.Settings, map[string]any{"configDir": next.ConfigDir, "disconnected": false}); err != nil {
 		return harness.Result{}, err
 	}
 	s.saved = next
@@ -316,7 +319,7 @@ func (s *Service) Disconnect(ctx context.Context) error {
 	defer s.mu.Unlock()
 	next := s.saved
 	next.Disconnected = true
-	if err := s.ports.Settings.SaveClaudeSettings(ctx, next); err != nil {
+	if err := saveSettings(ctx, s.ports.Settings, map[string]bool{"disconnected": true}); err != nil {
 		return err
 	}
 	s.saved = next
@@ -344,8 +347,9 @@ func (s *Service) Configure(ctx context.Context, raw json.RawMessage) error {
 	next.Binary = ""
 	if in.Binary != nil {
 		next.Binary = strings.TrimSpace(*in.Binary)
+		in.Binary = &next.Binary
 	}
-	if err := s.ports.Settings.SaveClaudeSettings(ctx, next); err != nil {
+	if err := saveSettings(ctx, s.ports.Settings, in); err != nil {
 		return err
 	}
 	s.saved, s.checked = next, false

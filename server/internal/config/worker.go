@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/listen"
 )
 
@@ -26,13 +27,9 @@ const WorkerConfigEnv = "STAGE_WORKER_CONFIG"
 // item: unix (docs/runtime.md "Agent gateway").
 const WorkerListenEnv = "STAGE_WORKER_LISTEN"
 
-// WorkerEnvKeys are the keys worker.env may set: the worker config, the
-// gateway's listeners, and the harness options of this machine
-// (HarnessEnvKeys).
-var WorkerEnvKeys = append([]string{WorkerConfigEnv, WorkerListenEnv}, HarnessEnvKeys...)
-
 // WorkerEnvTemplate is the worker.env `stage worker service start` creates.
-const WorkerEnvTemplate = `# Stage worker service configuration (docs/service.md). Read by
+func WorkerEnvTemplate(env harness.EnvOptions) string {
+	return `# Stage worker service configuration (docs/service.md). Read by
 # ` + "`stage worker run --managed`" + ` at start; apply changes with
 # ` + "`stage worker service restart`" + `. KEY=VALUE per line. Only the keys
 # below are allowed; the shell environment is never used.
@@ -46,10 +43,8 @@ const WorkerEnvTemplate = `# Stage worker service configuration (docs/service.md
 # the CLI and stage mcp find) is required; add host:port for HTTP MCP clients.
 # STAGE_WORKER_LISTEN=unix,127.0.0.1:7381
 
-# The t3 CLI auto-pair runs (default: looked up on PATH). Harness
-# connections are set up in Settings > Connections, never here.
-# T3_BIN=
-`
+` + env.WorkerTemplate
+}
 
 // ParseWorkerListen parses a gateway listen list (WorkerListenEnv, or
 // `--listen` items joined by commas); empty means unix. It must include
@@ -80,8 +75,9 @@ func WorkerEnvPath(getenv func(string) string, goos string) (string, error) {
 }
 
 // ParseWorkerEnv reads worker.env (same syntax as service.env).
-func ParseWorkerEnv(r io.Reader) (map[string]string, error) {
-	vals, err := parseEnvFile(r, WorkerEnvFile, WorkerEnvKeys, false)
+func ParseWorkerEnv(r io.Reader, env harness.EnvOptions) (map[string]string, error) {
+	keys := append([]string{WorkerConfigEnv, WorkerListenEnv}, env.Keys...)
+	vals, err := parseEnvFile(r, WorkerEnvFile, keys, env.Removed, false)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +95,7 @@ func ParseWorkerEnv(r io.Reader) (map[string]string, error) {
 // ReadWorkerEnv reads and validates the worker.env at path. A missing file
 // means the defaults (no keys). A file readable or writable by group or
 // others is refused.
-func ReadWorkerEnv(path string) (map[string]string, error) {
+func ReadWorkerEnv(path string, env harness.EnvOptions) (map[string]string, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return map[string]string{}, nil
@@ -115,7 +111,7 @@ func ReadWorkerEnv(path string) (map[string]string, error) {
 	if st.Mode().Perm()&0o077 != 0 {
 		return nil, fmt.Errorf("%s has mode %v; want 0600: chmod 600 %s", path, st.Mode().Perm(), path)
 	}
-	vals, err := ParseWorkerEnv(f)
+	vals, err := ParseWorkerEnv(f, env)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}

@@ -204,6 +204,15 @@ export interface HarnessDescriptor {
   /** How its sessions are named when tracking one (the Track session field's hint); absent: the generic hint. */
   sessionHint?: string;
 }
+/** Full sync progress and the last completed sync, when the harness reports them. */
+export interface HarnessSyncStatus {
+  lastError?: string | null;
+  lastFullSyncAt?: string | null;
+  startedAt?: string | null;
+  running: boolean;
+  projects: number;
+  sessions: number;
+}
 /** GET /api/harnesses/{kind}/status; D is the harness's own details (its panel's state). */
 export interface HarnessStatus<D = unknown> {
   kind: Harness;
@@ -218,6 +227,7 @@ export interface HarnessStatus<D = unknown> {
   fields: { id: string; value: string; set: boolean; source: "saved" | "default" }[];
   actions: { id: string; available: boolean; reason?: string }[];
   details?: D;
+  sync?: HarnessSyncStatus;
   /** The connection a setting change or action just retired. */
   replaced?: ReplacedConnection | null;
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
 // machineJSON is the machine in a harness list: its /api/machines shape
@@ -101,31 +102,50 @@ type connectionStatusJSON struct {
 // machine, 409 harness_unavailable with the machine's reason for a kind it
 // does not allow (the connector is never reached), 409 for a kind with no
 // connection setup there.
-func (s *server) connector(r *http.Request) (harness.Descriptor, harness.Connector, error) {
+func (s *server) connector(r *http.Request) (int64, harness.Descriptor, harness.Connector, error) {
 	m, err := s.harnessMachine(r)
 	if err != nil {
-		return harness.Descriptor{}, nil, err
+		return 0, harness.Descriptor{}, nil, err
 	}
 	d, ok := s.registry().Lookup(r.PathValue("kind"))
 	if !ok {
-		return d, nil, fmt.Errorf("%w: unknown harness %q", db.ErrNotFound, r.PathValue("kind"))
+		return m.ID, d, nil, fmt.Errorf("%w: unknown harness %q", db.ErrNotFound, r.PathValue("kind"))
 	}
 	if hm, ok := s.Sync.Machines().Get(m.ID); ok {
 		if a := hm.Allows(d); !a.Available {
-			return d, nil, &db.ConflictError{Code: "harness_unavailable", Msg: a.Reason}
+			return m.ID, d, nil, &db.ConflictError{Code: "harness_unavailable", Msg: a.Reason}
 		}
 	}
 	c, ok := s.connectors().Get(m.ID, d.Kind)
 	if !ok {
-		return d, nil, db.Conflict("%s has no connection setup on %s.", d.Name, m.Label)
+		return m.ID, d, nil, db.Conflict("%s has no connection setup on %s.", d.Name, m.Label)
 	}
-	return d, c, nil
+	return m.ID, d, c, nil
 }
 
-func (s *server) writeConnectionStatus(w http.ResponseWriter, ctx context.Context, d harness.Descriptor, c harness.Connector, refresh bool, res harness.Result) error {
+func (s *server) writeConnectionStatus(w http.ResponseWriter, ctx context.Context, machine int64, d harness.Descriptor, c harness.Connector, refresh bool, res harness.Result) error {
 	st, err := c.Status(ctx, refresh)
 	if err != nil {
 		return err
+	}
+	saved, err := s.Store.HarnessSyncStatus(ctx, machine, d.Kind)
+	if err != nil {
+		return err
+	}
+	var progress coordinator.Progress
+	if st.ConnectionID != 0 {
+		progress = s.Sync.Progress(st.ConnectionID)
+	}
+	st.Sync = &harness.SyncStatus{
+		LastError: saved.LastError, LastFullSyncAt: saved.LastFullSyncAt,
+		Running: progress.Running, StartedAt: progress.StartedAt,
+		Projects: progress.Projects, Sessions: progress.Sessions,
+	}
+	if st.LastError != "" {
+		message := st.LastError
+		st.Sync.LastError = &message
+	} else if saved.LastError != nil {
+		st.LastError = *saved.LastError
 	}
 	st.Summary = s.harnessSummary(st.Summary)
 	if st.Fields == nil {
@@ -153,16 +173,16 @@ func (s *server) harnessSummary(summary harness.Summary) harness.Summary {
 
 // harnessStatus is GET /api/harnesses/{kind}/status (refreshes a stale probe).
 func (s *server) harnessStatus(w http.ResponseWriter, r *http.Request) error {
-	d, c, err := s.connector(r)
+	machine, d, c, err := s.connector(r)
 	if err != nil {
 		return err
 	}
-	return s.writeConnectionStatus(w, r.Context(), d, c, true, harness.Result{})
+	return s.writeConnectionStatus(w, r.Context(), machine, d, c, true, harness.Result{})
 }
 
 // harnessSettings is PUT /api/harnesses/{kind}/settings {field: value|null}.
 func (s *server) harnessSettings(w http.ResponseWriter, r *http.Request) error {
-	d, c, err := s.connector(r)
+	machine, d, c, err := s.connector(r)
 	if err != nil {
 		return err
 	}
@@ -174,12 +194,12 @@ func (s *server) harnessSettings(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return s.writeConnectionStatus(w, r.Context(), d, c, true, res)
+	return s.writeConnectionStatus(w, r.Context(), machine, d, c, true, res)
 }
 
 // harnessAction is POST /api/harnesses/{kind}/actions/{action} {input}.
 func (s *server) harnessAction(w http.ResponseWriter, r *http.Request) error {
-	d, c, err := s.connector(r)
+	machine, d, c, err := s.connector(r)
 	if err != nil {
 		return err
 	}
@@ -195,12 +215,12 @@ func (s *server) harnessAction(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return s.writeConnectionStatus(w, r.Context(), d, c, false, res)
+	return s.writeConnectionStatus(w, r.Context(), machine, d, c, false, res)
 }
 
 // harnessDisconnect is DELETE /api/harnesses/{kind}/connection.
 func (s *server) harnessDisconnect(w http.ResponseWriter, r *http.Request) error {
-	d, c, err := s.connector(r)
+	machine, d, c, err := s.connector(r)
 	if err != nil {
 		return err
 	}
@@ -210,5 +230,5 @@ func (s *server) harnessDisconnect(w http.ResponseWriter, r *http.Request) error
 	if err := c.Disconnect(r.Context()); err != nil {
 		return err
 	}
-	return s.writeConnectionStatus(w, r.Context(), d, c, false, harness.Result{})
+	return s.writeConnectionStatus(w, r.Context(), machine, d, c, false, harness.Result{})
 }

@@ -122,7 +122,6 @@ type Task struct {
 	// Deletable: no notes or execution history; otherwise archive only.
 	Deletable        bool       `json:"deletable"`
 	SessionUpdatedAt *time.Time `json:"-"` // mirrored session's updatedAt (tree activity)
-	T3ProjectID      string     `json:"-"` // project's T3 id (for launch)
 	TreeStartMode    *StartMode `json:"-"` // the tree's start mode (batch grouping)
 }
 

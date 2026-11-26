@@ -1056,7 +1056,7 @@ func TestGuideNamesEveryInterface(t *testing.T) {
 	for _, w := range []string{
 		"Use whichever Stage interface you have: the stage CLI (stage help; stage call TOOL JSON runs any tool named here, stage tools NAME shows its input), Stage MCP tools (names here), or the Stage server's HTTP API (/api).",
 		"If none is reachable, say so and continue; never install one.",
-		"The stage CLI and stdio MCP detect it from your harness's session variable (T3: T3CODE_THREAD_ID, OpenCode: OPENCODE_SESSION_ID, Claude Code: CLAUDE_CODE_SESSION_ID; stage context shows it), and OpenCode MCP sends it per call.",
+		"The stage CLI and stdio MCP detect it from your harness's session variable (stage context shows it). Harness integrations may also send it per call.",
 		"CLI: export STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>, or pass --caller-connection and --caller-session.",
 		"over HTTP MCP send the header Stage-Caller-Session: <connectionId>:<externalSessionId>",
 		"HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption",

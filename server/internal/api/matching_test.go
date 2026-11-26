@@ -14,6 +14,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/opencode"
 	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
 
@@ -32,14 +33,20 @@ func (i workspaceInventory) Workspaces(context.Context) ([]execution.WorkspaceIn
 	return i.rows, nil
 }
 
+func matchConnection(t *testing.T, store *db.Store, machine int64) int64 {
+	t.Helper()
+	sw, err := store.SwitchInstance(t.Context(), machine, opencode.Descriptor, "matching-target", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sw.New
+}
+
 func TestMatchProposesRemoteAndBindsVerifiedFamily(t *testing.T) {
 	var temp dbtest.DB
 	store := db.NewStore(temp.Reset(t))
 	ctx := t.Context()
-	connection, err := store.EnsureOpenCode(ctx, db.LocalMachine)
-	if err != nil {
-		t.Fatal(err)
-	}
+	connection := matchConnection(t, store, db.LocalMachine)
 	source := execution.WorkspaceInfo{ID: "t3-project", WorkspaceRoot: "/t3/repo", OriginRemote: "git@host:owner/repo.git"}
 	target := execution.WorkspaceInfo{ID: "oc-project", WorkspaceRoot: "/oc/repo", OriginRemote: "https://host/owner/repo"}
 	p, err := store.InsertProject(ctx, db.Project{Title: "Matched", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: source.ID, Workspace: source.WorkspaceRoot}}})
@@ -106,10 +113,7 @@ func TestMatchNeverProvesACheckoutAcrossMachines(t *testing.T) {
 	if _, err := pool.ExecContext(ctx, `INSERT INTO machines(id,label) VALUES(2,'Laptop')`); err != nil {
 		t.Fatal(err)
 	}
-	connection, err := store.EnsureOpenCode(ctx, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	connection := matchConnection(t, store, 2)
 	source := execution.WorkspaceInfo{ID: "t3-project", WorkspaceRoot: "/t3/repo", OriginRemote: "git@host:owner/repo.git"}
 	target := execution.WorkspaceInfo{ID: "oc-project", WorkspaceRoot: "/oc/repo", OriginRemote: "https://host/owner/repo"}
 	p, err := store.InsertProject(ctx, db.Project{Title: "Matched", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: source.ID, Workspace: source.WorkspaceRoot}}})
@@ -156,10 +160,7 @@ func TestMatchRemoteAcrossMachinesRequiresSameSubproject(t *testing.T) {
 	if _, err := pool.ExecContext(ctx, `INSERT INTO machines(id,label) VALUES(2,'Laptop')`); err != nil {
 		t.Fatal(err)
 	}
-	connection, err := store.EnsureOpenCode(ctx, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	connection := matchConnection(t, store, 2)
 	mono := func(id, dir, path string) execution.WorkspaceInfo {
 		return execution.WorkspaceInfo{ID: id, WorkspaceRoot: dir, OriginRemote: "git@host:o/mono.git", Repo: "host/o/mono", RepoPath: path}
 	}
@@ -228,10 +229,7 @@ func TestMatchLocalWorkspacesByPathOrCheckout(t *testing.T) {
 			if err := pool.QueryRowContext(ctx, "INSERT INTO harness_connections(harness,machine_id) VALUES('claude',1) RETURNING id").Scan(&owner); err != nil {
 				t.Fatal(err)
 			}
-			connection, err := store.EnsureOpenCode(ctx, db.LocalMachine)
-			if err != nil {
-				t.Fatal(err)
-			}
+			connection := matchConnection(t, store, db.LocalMachine)
 			source := execution.WorkspaceInfo{ID: repo, WorkspaceRoot: repo, Local: true}
 			target := execution.WorkspaceInfo{ID: "oc", WorkspaceRoot: tc.dir, Local: true}
 			p, err := store.InsertProject(ctx, db.Project{Title: "App", Bindings: []db.ProjectBinding{{ConnectionID: owner, ExternalProjectID: source.ID, Workspace: source.WorkspaceRoot}}})

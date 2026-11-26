@@ -97,30 +97,19 @@ not allow.
   the match action. The main server loads shared paths and walks the
   project identity ladder (`projectmatch`); only evidence from the same
   machine proves a checkout. `machine.LocalOps` runs them here.
-- **Setup ports.** `opencodesetup.Ports` and the `t3setup.Options` ports
-  replace the store. Settings: OpenCode's `config.OpenCodeSetup`
-  (non-secret) and `config.OpenCodeCredential` (secret), loaded and saved
-  together in one call; T3's URL setting and environment. Credentials: the
-  OpenCode credential, and the T3 token through `t3.TokenStore`. Identity:
-  ensure, identity stamps, instance switches by kind (the main server
-  applies its own registry's policy), retired connections, stored evidence.
-  `machine.Identity` is the harness-neutral identity port (active
-  connection of a kind, instance switch, connection read) that
-  `machine.StorePorts` and the worker's ports both serve; a hosted
-  harness's setup takes it with the install port (`machine.Install`).
-  `machine.Connect` is a connect action's core: `SwitchInstance` (the first
-  connect creates the machine's connection row, the same identity keeps
-  it, another replaces it under the replaced-instance rules), then install
-  the adapter on the new connection; its result names the replaced
-  connection.
-  Event sink: the install port, `OnSwitched`/`OnPaired`. Harness-specific
-  machine-local work is its own port: `opencodesetup.Local` (service.json and
-  its probe), `t3setup.Local` (find and run the t3 CLI for auto-pair) and
-  `codexsetup.Options.Daemon` (run `codex app-server daemon version|start`).
-  `codexsetup.Settings` loads and saves `config.CodexSettings` (CLI path,
-  connected).
-  `machine.StorePorts` backs settings, credentials and identity with the
-  store for the local machine. Checkpoint save stays the `Launch` callback.
+- **Setup ports.** Each `harness.Module` composes over machine-bound ports
+  in `harness/module.go`. `Settings.Get` reads a public JSON object by kind
+  and `Settings.Save` applies a partial update. Omitted fields retain their
+  values. Null resets a field to its module default. `Secrets.Get`, `Set`
+  and `Delete` address an opaque value by kind and key. The setup package
+  owns the typed settings and credential formats. The local placement can
+  commit a settings patch and a secret edit in one transaction.
+  `Identity` loads the active instance, switches or stamps it, and supplies
+  Stage's stored evidence for continuity proof. The install port registers
+  the adapter on the returned connection. Data dir, profile, environment,
+  binary lookup and logging are supplied where the module runs. Module
+  cleanup releases Stage's client resources at shutdown. Checkpoint save
+  stays the `Launch` callback.
 - **RemoteMachine.** A joined machine is hosted as `remote.Machine`
   ([Remote machines](#remote-machines)); `machine.Set` gains and loses
   remote machines as they join and are removed.
@@ -181,41 +170,32 @@ suite cannot tell a remote machine from the local one.
   and streams idle, task states and acceptance do not change, a backlog
   launch is refused as `connection_unavailable`, and an attempt already
   dispatched stays unconfirmed and retries until the worker is back.
-- **Setup.** A remote machine's connection setup runs on its worker
-  (`server/internal/workersetup`): the same `t3setup`, `opencodesetup`,
-  `claudecodesetup` and `codexsetup` constructors as the local machine
-  (Claude Code and Codex only when the worker's profile allows local
-  harnesses), composed during authenticated negotiation, over ports that
-  call the main server
-  (`setup.*` worker-to-main kinds, `remote.ServeSetup`, always scoped to
-  the token's machine; a connection of another machine is `not_found`).
-  The main server keeps the connection rows, identity, status, non-secret
-  settings (T3 URL and Browser URL, OpenCode addresses and auth mode,
-  Claude Code's command, connected config directory and disconnect:
-  `setup.claude.get` and `setup.claude.save`; Codex's CLI path and
-  connected: `setup.codex.get` and `setup.codex.save`, the machine's
-  `codex_settings` row) and sync bookkeeping; Claude Code and Codex have
-  no credentials (Claude's own login, `codex login`, on that machine).
-  A server can omit a harness kind or setup request kind from its
-  advertisement. The worker composes the other harnesses. The server
-  applies the same availability rule for missing connected and hosted
-  harness kinds. Stage never stops a worker's
-  Codex daemon either (ADR 0007 decision 14). Harness credentials (the
-  T3 token and admin token, OpenCode Basic credentials or paired token) stay in the
-  worker's `credentials.json` (`0600`, deleted on join and leave) and never
-  cross the channel. The main server's `remote.Connector` per machine and
-  kind forwards `Status`, `Configure`, `Run` and `Disconnect` as
-  `connector.*` calls; `Summary` is memory only (the main server's active
-  connection plus the worker's last ready snapshot and connector status). Offline, needs update and
-  a worker still composing its setup are `remote.UnavailableError`
-  (503 `machine_offline`, `machine_needs_update`,
-  `machine_setup_starting`). Every registered kind has a connector proxy
-  on every remote machine (`remoteSetupHooks`); `remote.Machine.Allows`
-  decides which ones the machine offers. A remote machine's connection row is created
-  on first connect (T3 pairing, OpenCode connect or pair, Claude Code or
-  Codex connect), and a switch on
-  the worker follows the connections on the main server (runners, sync).
-  No environment variable sets a connection.
+- **Setup.** The worker and serve compose the same modules in
+  registry order (`workersetup`, `serve/localmachine.go`). Both apply
+  their machine profile before calling `Compose`. The worker also
+  checks the server's advertised harness kinds before composing.
+  `setup.settings.get` takes `{kind}` and returns the public settings
+  object. `setup.settings.save` takes `{kind, patch}` and applies the
+  module-validated patch. These requests and all `setup.identity.*`
+  requests use the authenticated machine. `setup.status.error` reports
+  a redacted setup error for that machine and kind. Active identity
+  reads use `setup.identity.activeIdentity`; connection existence uses
+  `setup.identity.exists`.
+  The main server stores identity, public settings and sync status.
+  Worker credentials are local values under kind and key in
+  `credentials.json` (schema 2, mode `0600`, deleted on join and leave).
+  First use upgrades known schema-1 entries atomically. Credential values
+  stay out of settings replies, negotiation and status. Entered secrets
+  can reach the worker in the intended `connector.configure` or
+  `connector.run` request. Layer 10 can cache the public settings
+  document on the worker independently of its local secrets.
+  A `remote.Connector` proxies status and setup mutations over
+  `connector.*`; its summary reads the active ID and the latest ready
+  snapshot or connector status. The first successful pair or connect
+  creates the connection. Worker switches follow the same retirement
+  and revival policy as serve, and wake sync and scheduling after ready.
+  Offline, incompatible and starting workers have distinct availability
+  reasons. Connection settings come from Settings > Connections.
 - **Verification.** Every `TestContract*` in `server/internal/sync` runs
   twice, in process and behind a real worker channel
   (`remote/remotetest`: the hub and its HTTP serving on a loopback server
@@ -238,13 +218,21 @@ suite cannot tell a remote machine from the local one.
 
 ## Harness registry
 
-Each harness package declares a `harness.Descriptor`: kind, name, hosting,
-whether its instance identity is stable, the closure signals it reports
-with their copy, and an optional session hint (how a user names one of its
-sessions in Track session). `serve` composes a fixed `harness.Registry` (T3, OpenCode, Claude Code, Codex)
-and runs one release and one schedule runner per active connection, on
-every machine (`serve/runners.go` follows instance switches). The database
-stores kinds as text; the registry, not a schema CHECK, decides which exist.
+One ordered list in `server/internal/harnesses/modules.go` registers the
+modules used by the local server and the worker. A module supplies a
+`Descriptor`, `Compose(context.Context, harness.Ports)`, its public
+settings validator, and any process environment or legacy secret
+declarations. `Compose` installs existing adapters through the install
+port and returns the connector and optional cleanup. A connector is
+available before the first connection exists. The registry, whose order
+also controls the API list, decides which kinds Stage knows. Serve runs a
+release and schedule runner per active connection and follows switches
+(`serve/runners.go`).
+
+Stage does not seed connection rows. A fresh installation shows the
+automatic-completion preference after the harness first connects because
+the preference belongs to that connection. Existing connection preferences
+survive the settings migration.
 
 - **Hosting.** `connected`: Stage connects to a service (T3, OpenCode), on any
   machine profile. `hosted` (Claude Code, Codex): the harness runs as processes on its machine
@@ -254,7 +242,10 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
 - **Stable identity.** When the identity names one instance for good (a T3
   environment id), pairing a retired connection's identity revives it, and
   identities are unique per machine and kind. Otherwise (an OpenCode address)
-  the connector proves continuity itself and passes the connection to revive.
+  the module declares continuity proof and selects the connection to revive.
+  A stable-identity module may also declare a moved-retire predicate. Stage
+  evaluates it against the old and new connector summaries when the old
+  machine is reachable.
 - **Connection setup.** A harness's descriptor, connected or hosted,
   carries a setup schema (settings fields with their locking environment
   variable, typed actions, disconnect). Its setup package implements `harness.Connector`
@@ -265,7 +256,8 @@ stores kinds as text; the registry, not a schema CHECK, decides which exist.
   does not allow). A hosted harness has no connection row until its
   connect action creates one through the identity port (`machine.Connect`).
   The API exposes them generically under `/api/harnesses/{kind}/...`; health, sync skipping and
-  connection lists read connector summaries. Hosts render the schema, or a
+  connection lists read connector summaries. Setup status carries Stage’s
+  full sync timestamp, error and progress in top-level `sync`. Hosts render the schema, or a
   panel registered for the kind (UI `packages/app/src/harnesses/` slot registry, CLI `slots_*.go`).
 - **Closures.** Completion is inferred only from a closure the harness's
   descriptor declares; the descriptor supplies the stored provenance, the
@@ -620,12 +612,12 @@ Claude Code has no HTTP API. Kind `claude`, hosting `hosted`, stable identity
 (the `configDirectory` from `claude auth status --json`), launch
 `correlated`, closure `archived` (`claude rm`). Setup (`internal/claudecodesetup`): the command
 setting, a connect action and disconnect ([api.md](api.md#harness-connections-api-v6)),
-stored per machine in `claude_settings` with the config directory the
+stored per machine in `harness_settings` with the config directory the
 connection was made with; `serve` composes it only where the machine allows
 hosted harnesses. On a worker (`workersetup`) it runs on that machine, with
 that machine's `claude`, login and daemon, when the worker allows local
 harnesses (the worker service, or `stage worker run --local-harnesses`);
-its settings live on the main server's `claude_settings` row for that
+its settings live on the main server's `harness_settings` row for that
 machine ([Remote machines](#remote-machines)). The resume command then has
 to run on that machine.
 
@@ -854,7 +846,7 @@ Codex owns threads, models, login and project trust. Stage stores no Codex
 credentials and never writes Codex's config. On a worker (`workersetup`) the
 setup runs on that machine, with that machine's `codex`, login and daemon,
 when the worker allows local harnesses; its settings live on the main
-server's `codex_settings` row for that machine
+server's `harness_settings` row for that machine
 ([Remote machines](#remote-machines)), and the resume command runs there.
 
 - **Client.** One connection per adapter, opened lazily. When the daemon is

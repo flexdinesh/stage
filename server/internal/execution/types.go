@@ -334,12 +334,6 @@ type Closure struct {
 	Signal string `json:"signal"`
 }
 
-type Credential struct {
-	ClientID  string    `json:"clientId"`
-	Token     string    `json:"token"`
-	ExpiresAt time.Time `json:"expiresAt"`
-}
-
 func (o Observation) Valid() error {
 	if o.Session.ConnectionID <= 0 || o.Session.ExternalSessionID == "" || o.Project == "" {
 		return errors.New("malformed observation: missing identity")

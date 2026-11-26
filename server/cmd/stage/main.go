@@ -18,6 +18,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/harnesses"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/logfile"
@@ -120,7 +121,7 @@ func run(args []string) (bool, error) {
 			opts.OnLocked = managedLog
 		}
 	} else {
-		opts.Config, err = config.Load(listens)
+		opts.Config, err = config.Load(listens, harnesses.Env())
 	}
 	if err != nil {
 		return *managed, config.Invalid(err)
@@ -135,11 +136,12 @@ func loadManaged() (config.Config, error) {
 	if err != nil {
 		return config.Config{}, err
 	}
-	vals, err := config.ReadServiceEnv(path)
+	env := harnesses.Env()
+	vals, err := config.ReadServiceEnv(path, env)
 	if err != nil {
 		return config.Config{}, err
 	}
-	return config.LoadManaged(os.Getenv, vals)
+	return config.LoadManaged(os.Getenv, vals, env)
 }
 
 // managedLog (macOS) switches logging to the rotated ~/Library/Logs file

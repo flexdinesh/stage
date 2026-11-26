@@ -9,7 +9,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/harness"
-	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 )
@@ -33,11 +32,11 @@ func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 		client := a.(*t3.Adapter).Client
-		withT3Setup(d, t3setup.New(t3setup.Options{Config: d.Config, Settings: d.Store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Fake: true, Logger: d.Logger,
-			OnSwitched: func(sw db.Switch) {
+		withT3Setup(d, t3setup.Options{Client: client, Fake: true,
+			OnSwitched: func(sw harness.Switch) {
 				local, _ := d.Sync.Machines().Local(db.LocalMachine)
 				local.Install(sw.Old, sw.New, t3.NewConnectionAdapter(client, sw.New))
-			}}))
+			}})
 	})
 	first := e.store.ActiveID(db.LocalMachine, "t3")
 	if _, err := e.store.SwitchInstance(t.Context(), db.LocalMachine, t3.Descriptor, t3.FakeEnvironmentID, "box a", 0); err != nil {
@@ -117,7 +116,7 @@ func TestForgettingADisconnectedConnectionRetiresIt(t *testing.T) {
 			t.Fatal(err)
 		}
 		client := a.(*t3.Adapter).Client
-		withT3Setup(d, t3setup.New(t3setup.Options{Config: d.Config, Settings: d.Store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Fake: true, Logger: d.Logger}))
+		withT3Setup(d, t3setup.Options{Client: client, Fake: true})
 	})
 	first := e.store.ActiveID(db.LocalMachine, "t3")
 	if _, err := e.store.SwitchInstance(t.Context(), db.LocalMachine, t3.Descriptor, t3.FakeEnvironmentID, "box a", 0); err != nil {

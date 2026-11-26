@@ -73,14 +73,15 @@ func (h Harnesses) Lookup(kind string) (HarnessDescriptor, bool) {
 
 // HarnessStatus is GET /api/harnesses/{kind}/status.
 type HarnessStatus struct {
-	Kind         string `json:"kind"`
-	Name         string `json:"name"`
-	ConnectionID int64  `json:"connectionId"`
-	Configured   bool   `json:"configured"`
-	Connected    bool   `json:"connected"`
-	LastError    string `json:"lastError,omitempty"`
-	State        string `json:"state"`
-	Reason       string `json:"reason,omitempty"`
+	Kind         string              `json:"kind"`
+	Name         string              `json:"name"`
+	ConnectionID int64               `json:"connectionId"`
+	Configured   bool                `json:"configured"`
+	Connected    bool                `json:"connected"`
+	LastError    string              `json:"lastError,omitempty"`
+	State        string              `json:"state"`
+	Reason       string              `json:"reason,omitempty"`
+	Sync         *harness.SyncStatus `json:"sync,omitempty"`
 	Fields       []struct {
 		ID     string `json:"id"`
 		Value  string `json:"value"`

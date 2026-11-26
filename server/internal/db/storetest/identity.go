@@ -31,7 +31,7 @@ func importAt(t *testing.T, s *db.Store, ctx context.Context, connection int64, 
 func caseImportIdentityLadder(t *testing.T, open Factory) {
 	s, ctx := setup(t, open)
 	claude := harness.Descriptor{Kind: "claude", Hosting: harness.Hosted}
-	oc, err := s.EnsureOpenCode(ctx, db.LocalMachine)
+	oc, err := s.SwitchInstance(ctx, db.LocalMachine, harness.Descriptor{Kind: "opencode"}, "instance", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func caseImportIdentityLadder(t *testing.T, open Factory) {
 	ws := func(id, dir, repo string) execution.WorkspaceInfo {
 		return execution.WorkspaceInfo{ID: id, Title: id, WorkspaceRoot: dir, Importable: true, Repo: repo, RepoPath: "."}
 	}
-	importAt(t, s, ctx, oc, ws("app", "/w/app", "github.com/o/app"))
+	importAt(t, s, ctx, oc.New, ws("app", "/w/app", "github.com/o/app"))
 	importAt(t, s, ctx, local.New, ws("/w/app", "/w/app", "github.com/o/app"))
 	importAt(t, s, ctx, away.New, ws("/l/app", "/l/app", "github.com/o/app"), ws("/l/other", "/l/other", "github.com/o/other"))
 	ps, err := s.ListProjects(ctx, "all")
@@ -62,7 +62,7 @@ func caseImportIdentityLadder(t *testing.T, open Factory) {
 	for _, b := range ps[i].Bindings {
 		origins[b.ConnectionID] = b.Origin
 	}
-	if origins[oc] != db.BindingImported || origins[local.New] != db.BindingPath || origins[away.New] != db.BindingRemote {
+	if origins[oc.New] != db.BindingImported || origins[local.New] != db.BindingPath || origins[away.New] != db.BindingRemote {
 		t.Fatalf("bindings %+v", ps[i].Bindings)
 	}
 }

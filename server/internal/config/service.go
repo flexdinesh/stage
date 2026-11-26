@@ -13,16 +13,16 @@ import (
 	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
+	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
 // ServiceEnvFile is the managed service's config file name, in
 // ServiceConfigDir (docs/service.md).
 const ServiceEnvFile = "service.env"
 
-// ServiceEnvKeys are the keys service.env may set. In managed mode
-// (`stage serve --managed`) these, plus managedFixedKeys, are never taken
-// from the inherited environment: only from service.env.
-var ServiceEnvKeys = append([]string{"STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS"}, HarnessEnvKeys...)
+func serviceEnvKeys(env harness.EnvOptions) []string {
+	return append([]string{"STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS"}, env.Keys...)
+}
 
 // managedFixedKeys are ignored when inherited in managed mode and refused in
 // service.env, each with its reason: the service's data dir is always the
@@ -104,20 +104,19 @@ STAGE_LISTEN=unix
 
 # STAGE_PUBLIC_URL=
 # STAGE_ALLOWED_ORIGINS=
-# Harness connections (T3, OpenCode) are set up in Settings > Connections.
+# Harness connections are set up in Settings > Connections.
 `
 
 // ParseServiceEnv reads service.env: KEY=VALUE lines, '#' comments, blank
 // lines; a value may be wrapped in matching single or double quotes (no
-// escapes). Keys outside ServiceEnvKeys, managedFixedKeys and
-// duplicates are errors.
-func ParseServiceEnv(r io.Reader) (map[string]string, error) {
-	return parseEnvFile(r, ServiceEnvFile, ServiceEnvKeys, true)
+// escapes). Unknown keys, managedFixedKeys and duplicates are errors.
+func ParseServiceEnv(r io.Reader, env harness.EnvOptions) (map[string]string, error) {
+	return parseEnvFile(r, ServiceEnvFile, serviceEnvKeys(env), env.Removed, true)
 }
 
 // parseEnvFile parses a KEY=VALUE env file named name (for errors) that
 // may set only allowed; fixed refuses managedFixedKeys with their reason.
-func parseEnvFile(r io.Reader, name string, allowed []string, fixed bool) (map[string]string, error) {
+func parseEnvFile(r io.Reader, name string, allowed, removed []string, fixed bool) (map[string]string, error) {
 	out := map[string]string{}
 	sc := bufio.NewScanner(r)
 	for n := 1; sc.Scan(); n++ {
@@ -139,7 +138,7 @@ func parseEnvFile(r io.Reader, name string, allowed []string, fixed bool) (map[s
 				return nil, fmt.Errorf("%s line %d: %s cannot be set for the service (%s)", name, n, k, why)
 			}
 		}
-		if slices.Contains(RemovedHarnessEnvKeys, k) {
+		if slices.Contains(removed, k) {
 			return nil, fmt.Errorf("%s line %d: %s is no longer read; remove it and set the connection up in Settings > Connections", name, n, k)
 		}
 		if !slices.Contains(allowed, k) {
@@ -162,19 +161,10 @@ func parseEnvFile(r io.Reader, name string, allowed []string, fixed bool) (map[s
 	return out, nil
 }
 
-func allowedServiceKey(k string) bool {
-	for _, a := range ServiceEnvKeys {
-		if k == a {
-			return true
-		}
-	}
-	return false
-}
-
 // ReadServiceEnv reads and validates the service.env at path. A missing
 // file means the template defaults (STAGE_LISTEN=unix). A file readable or
 // writable by group or others is refused (it may hold secrets).
-func ReadServiceEnv(path string) (map[string]string, error) {
+func ReadServiceEnv(path string, env harness.EnvOptions) (map[string]string, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return map[string]string{"STAGE_LISTEN": "unix"}, nil
@@ -190,7 +180,7 @@ func ReadServiceEnv(path string) (map[string]string, error) {
 	if st.Mode().Perm()&0o077 != 0 {
 		return nil, fmt.Errorf("%s has mode %v; want 0600 (it may hold secrets): chmod 600 %s", path, st.Mode().Perm(), path)
 	}
-	vals, err := ParseServiceEnv(f)
+	vals, err := ParseServiceEnv(f, env)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -200,15 +190,15 @@ func ReadServiceEnv(path string) (map[string]string, error) {
 	return vals, nil
 }
 
-// LoadManaged is the config of `stage serve --managed`: the keys of
-// ServiceEnvKeys come only from file (service.env), STAGE_DATA_DIR,
-// STAGE_ENV and STAGE_DATABASE_URL are ignored (the data dir is the
-// identity default; the database is SQLite in it), everything
-// else (HOME, XDG_*) from getenv. The listeners must include the private
-// default socket (`unix`).
-func LoadManaged(getenv func(string) string, file map[string]string) (Config, error) {
+// LoadManaged is the config of `stage serve --managed`. Supported service.env
+// keys come from file. STAGE_DATA_DIR, STAGE_ENV and STAGE_DATABASE_URL are
+// ignored, so the service uses SQLite in the identity's default data dir.
+// Other variables (HOME, XDG_*) come from getenv. The listeners must include
+// the private default socket (`unix`).
+func LoadManaged(getenv func(string) string, file map[string]string, env harness.EnvOptions) (Config, error) {
+	keys := serviceEnvKeys(env)
 	overlay := func(k string) string {
-		if allowedServiceKey(k) {
+		if slices.Contains(keys, k) {
 			return file[k]
 		}
 		if _, ok := managedFixedKeys[k]; ok {
@@ -216,7 +206,7 @@ func LoadManaged(getenv func(string) string, file map[string]string) (Config, er
 		}
 		return getenv(k)
 	}
-	cfg, err := LoadFrom(overlay, nil)
+	cfg, err := LoadFrom(overlay, nil, env)
 	if err != nil {
 		return Config{}, fmt.Errorf("service.env: %w", err)
 	}

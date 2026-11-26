@@ -69,7 +69,7 @@ func TestMachinesMigrationKeepsConnectionsAndOpensKinds(t *testing.T) {
 func TestSwitchInstanceRevivesByIdentityOnlyForStableKinds(t *testing.T) {
 	s, ctx, _ := connectionStore(t)
 	stable := harness.Descriptor{Kind: "stable", Name: "Stable", Hosting: harness.Connected, StableIdentity: true}
-	loose := harness.Descriptor{Kind: "loose", Name: "Loose", Hosting: harness.Connected}
+	loose := harness.Descriptor{Kind: "loose", Name: "Loose", Hosting: harness.Connected, ContinuityProof: true}
 	for _, d := range []harness.Descriptor{stable, loose} {
 		first, err := s.SwitchInstance(ctx, LocalMachine, d, "id-a", "a", 0)
 		if err != nil || first.New == 0 {
@@ -93,6 +93,10 @@ func TestSwitchInstanceRevivesByIdentityOnlyForStableKinds(t *testing.T) {
 		if s.ActiveID(LocalMachine, d.Kind) != back.New {
 			t.Fatalf("%s active %d", d.Kind, s.ActiveID(LocalMachine, d.Kind))
 		}
+	}
+	var invalid *InvalidError
+	if _, err := s.SwitchInstance(ctx, LocalMachine, stable, "", "", 99); !errors.As(err, &invalid) {
+		t.Fatalf("unexpected explicit revival without continuity proof: %v", err)
 	}
 	var conflict *ConflictError
 	if _, err := s.SwitchInstance(ctx, LocalMachine, loose, "", "", 99); !errors.As(err, &conflict) {

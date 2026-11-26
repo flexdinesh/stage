@@ -126,8 +126,7 @@ Usage:
   stage harness KIND set FIELD=VALUE... [--reset FIELD]...
                                       save connection settings
   stage harness KIND run ACTION [FIELD=VALUE...]
-                                      run a setup action, e.g. t3: pair code=CODE, auto-pair;
-                                      opencode: connect-local, pair link=LINK [newInstance=true]
+                                      run a setup action offered by KIND's status
   stage harness KIND disconnect       forget KIND's connection credentials (tasks stay)
   stage machine [ls]                  the machines that run harnesses: kind, status, connections
   stage machine pair [--label L]      a one-time code (10 min) and the stage worker join command
@@ -144,7 +143,7 @@ Usage:
                                       /mcp forwarded to the server) on --listen (repeatable, env
                                       STAGE_WORKER_LISTEN, default and required: unix);
                                       --local-harnesses (env STAGE_LOCAL_HARNESSES=1) lets harnesses
-                                      that run as local processes (Claude Code) run here, as the
+                                      that run as local processes run here, as the
                                       worker service always does (exit 75 worker dir or gateway socket
                                       in use, 78 not joined, invalid config or machine removed)
   stage worker status                 the worker config, the local worker process and what the server
@@ -218,15 +217,7 @@ Usage:
   stage call TOOL [JSON|-]            run one agent tool with JSON arguments (- reads stdin); prints
                                       its result as JSON, exactly as over MCP (exit 1 tool error)
   stage mcp                           the agent tools over stdio MCP
-  stage setup [--claude] [--codex] [--opencode] [--mcp] [--check]
-                                      set up agents on this machine (default: those found): the
-                                      Stage skill and an instruction pointer (--mcp: also stdio MCP for
-                                      Claude Code and Codex), then check CLI, server and caller;
-                                      --check writes nothing (exit 1 on problems)
-  stage setup skill [--claude] [--codex] [--opencode]   the Stage skill only
-  stage setup mcp [--claude] [--codex] [--http]
-  stage setup instructions [--claude] [--codex] [--file PATH]
-  stage guide                         agent workflow guide
+` + setupUsage + `  stage guide                         agent workflow guide
 
 Config: --project P --connection ID --execution-config JSON (models ls shows the choices,
         including launch options such as a worktree, its base ref or branch)
@@ -245,9 +236,8 @@ Global: --url URL (env STAGE_URL; unix:///abs/path.sock for a socket; default: t
         socket when a server owns it, else http://127.0.0.1:7380) --json
 Caller: context, creation, notes and adoption accept --caller-connection ID --caller-session ID,
         else read STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>, else the harness's session
-        variable (T3CODE_THREAD_ID, OPENCODE_SESSION_ID, CLAUDE_CODE_SESSION_ID; stage mcp too) on its connection on this
-        machine. Harness MCP metadata (OpenCode) and the Stage-Caller-Session header on HTTP MCP name
-        the caller per call.
+        variable (stage mcp too) on its connection on this machine. Harness MCP metadata and the
+        Stage-Caller-Session header on HTTP MCP name the caller per call.
 Creation: --connection ID selects the destination. --execution-config JSON sets harness options.
 References/adoption: --target-connection ID --target-session ID names a scoped session.
 Creator filter: task ls --origin-connection ID --origin-session ID.

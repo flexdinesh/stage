@@ -17,7 +17,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
@@ -48,9 +47,9 @@ func invisible(field, s string) error {
 	return nil
 }
 
-// serviceURL validates the field's address. Errors name the field and
+// ValidateURL validates and normalizes the field's address. Errors name the field and
 // never echo the value, which may carry credentials.
-func serviceURL(field, s string) (string, error) {
+func ValidateURL(field, s string) (string, error) {
 	if e := invisible(field, s); e != nil {
 		return "", e
 	}
@@ -68,34 +67,39 @@ func serviceURL(field, s string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
-type Settings = config.OpenCodeSettings
+// Settings configures the HTTP adapter and its browser links.
+type Settings struct {
+	Endpoint, BrowserEndpoint, WebClient string
+	Username, Password                   string
+	Local                                bool
+}
 
 func New(connection int64, cfg Settings) (*Adapter, error) {
 	if connection <= 0 {
 		return nil, errors.New("configure a scoped OpenCode connection")
 	}
-	ep, e := serviceURL("Service URL", cfg.Endpoint)
+	ep, e := ValidateURL("Service URL", cfg.Endpoint)
 	if e != nil {
 		return nil, e
 	}
 	if cfg.BrowserEndpoint == "" {
 		cfg.BrowserEndpoint = ep
 	}
-	public, e := serviceURL("Browser service URL", cfg.BrowserEndpoint)
+	public, e := ValidateURL("Browser service URL", cfg.BrowserEndpoint)
 	if e != nil {
 		return nil, e
 	}
 	if cfg.WebClient == "" {
 		cfg.WebClient = public
 	}
-	site, e := serviceURL("Web client URL", cfg.WebClient)
+	site, e := ValidateURL("Web client URL", cfg.WebClient)
 	if e != nil {
 		return nil, e
 	}
 	if (cfg.Username == "") != (cfg.Password == "") {
 		return nil, errors.New("provide both OpenCode Basic credentials or neither")
 	}
-	return &Adapter{connection: connection, endpoint: ep, browserEndpoint: public, web: site, username: cfg.Username, password: cfg.Password, local: cfg.Auth == config.OpenCodeAuthLocal, http: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &Adapter{connection: connection, endpoint: ep, browserEndpoint: public, web: site, username: cfg.Username, password: cfg.Password, local: cfg.Local, http: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 // OnHealth registers fn to run at the start of every health check (the

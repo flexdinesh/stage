@@ -28,18 +28,21 @@ func TestInTxRollsBackOnPanic(t *testing.T) {
 			}
 		}()
 		_ = pool.inTx(ctx, func(tx *runner) error {
-			if _, err := tx.Exec(ctx, `UPDATE t3_connection SET last_error = 'in tx' WHERE machine_id = 1`); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO harness_sync_status(machine_id, kind, last_error) VALUES(1, 'test', 'in tx')`); err != nil {
 				return err
 			}
 			panic("boom")
 		})
 	}()
+	if status, err := s.HarnessSyncStatus(ctx, db.LocalMachine, "test"); err != nil || status.LastError != nil {
+		t.Fatalf("panicked transaction persisted: %+v %v", status, err)
+	}
 	wctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	if err := s.SetLastError(wctx, db.LocalMachine, "after"); err != nil {
+	if err := s.SetHarnessLastError(wctx, db.LocalMachine, "test", "after"); err != nil {
 		t.Fatalf("write after panicked tx: %v", err)
 	}
-	c, err := s.GetConnection(ctx, db.LocalMachine)
+	c, err := s.HarnessSyncStatus(ctx, db.LocalMachine, "test")
 	if err != nil || c.LastError == nil || *c.LastError != "after" {
 		t.Fatalf("connection %+v, %v", c, err)
 	}

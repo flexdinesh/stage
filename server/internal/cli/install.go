@@ -9,13 +9,14 @@ import (
 	"os/exec"
 
 	"github.com/flexdinesh/stage/server/internal/install"
+	"github.com/flexdinesh/stage/server/internal/service"
 )
 
 func (e Env) installDeps() install.Deps {
 	if e.Install != nil {
 		return e.Install()
 	}
-	d := install.OSDeps(e.Stderr, e.Service)
+	d := install.OSDeps(e.Stderr, func() service.Deps { return e.serviceDeps(service.RoleServer) })
 	if e.Getenv != nil {
 		d.Getenv = e.Getenv
 		if h := e.Getenv("HOME"); h != "" {
