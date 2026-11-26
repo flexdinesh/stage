@@ -1,4 +1,4 @@
-/* plan-session: a T3 Code planning session (window) and stage's Created tasks
+/* plan-session: a T3 Code planning session (window) and stage's task list
    panel (satellite) filling in from its MCP calls. Ink Workbench tokens only. */
 
 .ps .ss-stage {
@@ -192,7 +192,7 @@
   }
 }
 
-/* ---- the satellite: stage's Created tasks panel ---- */
+/* ---- the satellite: stage's task list panel ---- */
 
 .ps .ps-panel {
   position: absolute;

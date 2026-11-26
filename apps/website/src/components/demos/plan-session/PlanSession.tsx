@@ -6,10 +6,10 @@ import './plan-session.css'
 
 // A planning session fans a job out across models. Beats: the agent says how
 // it will split the ask; four create_task calls stream in, each landing as a
-// backlog row in stage's Created tasks panel; create_tree 41 43:41 42:43 makes
+// backlog row in stage's task list; create_tree 41 43:41 42:43 makes
 // the first three a tree where each needs the one before (the header rolls
-// Independent to the tree's title, the rows slide into level order, the step
-// cells join); Start ready is pressed and the root goes running. The batch holds, then leaves around the ask.
+// Backlog to the tree's title, the rows slide into level order, the step
+// cells join); Start ready is pressed and the root goes running. The task list holds, then leaves around the ask.
 //
 // Gold: overlap (a smaller card in front of a window, straddling its edge)
 // with ai-chat's bottom-anchored thread and Stream reply. The session window
@@ -46,7 +46,7 @@ type S = {
   ordered: boolean
   linked: boolean
   started: boolean
-  /** The batch leaving at the loop's end */
+  /** The task list leaving at the loop's end */
   out: boolean
 }
 
@@ -107,7 +107,7 @@ async function script(a: Act<S>) {
   await a.move(REST)
   a.mark('payoff')
   await a.wait(2400)
-  // The batch leaves around the ask: panel first, then the calls, then the reply
+  // The task list leaves around the ask: panel first, then the calls, then the reply
   a.mark('exit')
   // Compact keeps its panel: it eases back to its opening slots instead
   a.put(a.layout === 'compact' ? { out: true, ordered: false, linked: false, started: false } : { out: true })
@@ -191,21 +191,21 @@ export function PlanSession() {
 
             <section className="ps-panel" data-show={panel || undefined}>
               <div className="ps-panel__head">
-                <span className="ps-label ps-label--ink">Created tasks</span>
+                <span className="ps-label ps-label--ink">Tasks</span>
                 <span className="ps-meta">
                   <Count value={shown} />
                 </span>
               </div>
               <div className="ps-panel__body" style={{ height: bodyH }}>
                 <div className="ps-sec" style={{ top: 0 }}>
-                  {/* Independent becomes the tree's header: the two crossfade in place */}
+                  {/* The backlog header becomes the tree's header: the two crossfade in place */}
                   <States
                     value={s.ordered ? 'chain' : 'loose'}
                     align="start"
                     states={{
                       loose: (
                         <>
-                          <span className="ps-label">Independent</span>
+                          <span className="ps-label">Backlog</span>
                           <span className="ps-meta">
                             <Count value={shown} />
                           </span>
@@ -229,7 +229,7 @@ export function PlanSession() {
                   </Button>
                 </div>
                 <div className="ps-sec ps-sec--late" style={{ top: SH + CHAIN.length * RH }} data-show={s.ordered || undefined}>
-                  <span className="ps-label">Independent</span>
+                  <span className="ps-label">Backlog</span>
                   <span className="ps-meta">1</span>
                 </div>
                 {compact

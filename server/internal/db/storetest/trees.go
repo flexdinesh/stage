@@ -35,6 +35,16 @@ func setState(t *testing.T, s *db.Store, ctx context.Context, id int64, to db.Ta
 	}
 }
 
+// needs sets id's needs (failing the test on error).
+func needs(t *testing.T, s *db.Store, ctx context.Context, id int64, ids ...int64) db.Task {
+	t.Helper()
+	got, err := s.SetNeeds(ctx, id, ids)
+	if err != nil {
+		t.Fatalf("set needs of %d to %v: %v", id, ids, err)
+	}
+	return got
+}
+
 func getTask(t *testing.T, s *db.Store, ctx context.Context, id int64) db.Task {
 	t.Helper()
 	got, err := s.GetTask(ctx, id)

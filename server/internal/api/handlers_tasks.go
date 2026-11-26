@@ -306,14 +306,6 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	if task.OriginSession != nil {
-		batch, err := s.Store.CreatedBySession(ctx, *task.OriginSession)
-		if err != nil {
-			return err
-		}
-		shaped := s.createdTasks(batch)
-		out.Batch = &shaped
-	}
 	writeJSON(w, http.StatusOK, out)
 	return nil
 }

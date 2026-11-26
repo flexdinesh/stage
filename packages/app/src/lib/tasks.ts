@@ -39,22 +39,6 @@ export function statusChips(t: Pick<Task, "state" | "readiness" | "acceptanceId"
   return [t.state];
 }
 
-// ---- Session batch (tasks one session created) ----
-
-/** Copy of items with the one at `from` moved by `by` (clamped to the ends). */
-export function moveItem<T>(items: readonly T[], from: number, by: number): T[] {
-  const out = [...items];
-  const to = Math.max(0, Math.min(out.length - 1, from + by));
-  const [item] = out.splice(from, 1);
-  if (item === undefined) return out;
-  out.splice(to, 0, item);
-  return out;
-}
-
-/** Number of tasks in a batch. */
-export const batchSize = (b: { trees: readonly { tasks: readonly Task[] }[]; independent: readonly Task[] }) =>
-  b.trees.reduce((n, t) => n + t.tasks.length, 0) + b.independent.length;
-
 // ---- Editing ----
 
 /** A task's editable fields as an edit form opened, in update-body shape: what `taskEditChanges` compares against. */

@@ -1,4 +1,4 @@
-import type { StartMode, Task, Tree, TreeCounts, TreeDetail, TreeMemberRequest, TreeSummary } from "../api/types.ts";
+import type { StartMode, Task, Tree, TreeCounts, TreeDetail, TreeSummary } from "../api/types.ts";
 import { age, relativeTime } from "./format.ts";
 
 /** What layout and graph helpers need of a member. */
@@ -447,17 +447,6 @@ export function joinSummary(
   if (needs.length === 0) return `#${taskId} joins ${treeTitle ?? "the tree"} as a parallel root`;
   const after = `#${taskId} runs after ${needs.map((n) => `#${n.id}`).join(" ")}`;
   return mode === "auto" && needs.every((n) => n.acceptanceId !== null) ? `${after}: starts right away` : after;
-}
-
-/** New tree from a selection: parallel (every task a root) or a chain (each needs the one before it). */
-export type TreeShape = "parallel" | "chain";
-
-/** Members for POST /trees: chain needs follow `order`. */
-export function treeMembers(order: readonly Pick<Task, "id">[], shape: TreeShape): TreeMemberRequest[] {
-  return order.map((t, i) => {
-    const prev = order[i - 1];
-    return shape === "chain" && prev !== undefined ? { taskId: t.id, needs: [prev.id] } : { taskId: t.id };
-  });
 }
 
 /** Where a member sits in the tree's level order (1-based), and the member count; null when not a member. */

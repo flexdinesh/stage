@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"slices"
@@ -290,39 +291,13 @@ func TestScheduleOriginInherited(t *testing.T) {
 	}
 }
 
-type createdTasks struct {
-	Trees []struct {
-		Tree struct {
-			ID        int64  `json:"id"`
-			Title     string `json:"title"`
-			StartMode string `json:"startMode"`
-		} `json:"tree"`
-		Tasks []agentTask `json:"tasks"`
-	} `json:"trees"`
-	Independent []agentTask `json:"independent"`
-}
-
-func batchIDs(c createdTasks) ([][]int64, []int64) {
-	trees := make([][]int64, len(c.Trees))
-	for i, tr := range c.Trees {
-		for _, t := range tr.Tasks {
-			trees[i] = append(trees[i], t.ID)
-		}
-	}
-	var ind []int64
-	for _, t := range c.Independent {
-		ind = append(ind, t.ID)
-	}
-	return trees, ind
-}
-
-func TestSessionBatchByTree(t *testing.T) {
+func TestTaskDetailAndOriginSessionFilter(t *testing.T) {
 	e := newEnv(t)
-	p := e.project("/w/batch")
+	p := e.project("/w/origin")
 	s := runningSession(t, e, p.T3ProjectID, "Planner")
 	a := e.agentTask(p.ID, "a", map[string]any{"originSession": e.t3Session(s), "needsSession": e.t3Session(s), "startMode": "auto"}, 201)
 	b := e.agentTask(p.ID, "b", map[string]any{"originSession": e.t3Session(s)}, 201)
-	_ = e.agentTask(p.ID, "c", map[string]any{"originSession": e.t3Session(s), "needs": []int64{a.ID}}, 201)
+	c := e.agentTask(p.ID, "c", map[string]any{"originSession": e.t3Session(s), "needs": []int64{a.ID}}, 201)
 	solo := e.agentTask(p.ID, "solo", nil, 201)
 
 	var rows struct {
@@ -330,19 +305,35 @@ func TestSessionBatchByTree(t *testing.T) {
 	}
 	e.must("GET", "/api/tasks?originThreadId="+s, nil, 400, nil)
 	e.must("GET", fmt.Sprintf("/api/tasks?originConnectionId=%d&originSessionId=%s", e.store.ActiveID(db.LocalMachine, "t3"), url.QueryEscape(s)), nil, 200, &rows)
-	if len(rows.Tasks) != 3 {
-		t.Fatalf("batch filter %+v", rows)
+	ids := make([]int64, 0, len(rows.Tasks))
+	for _, row := range rows.Tasks {
+		ids = append(ids, row.ID)
 	}
-	var td struct {
-		Batch *createdTasks `json:"batch"`
+	slices.Sort(ids)
+	if !slices.Equal(ids, []int64{a.ID, b.ID, c.ID}) {
+		t.Fatalf("tasks created by %s: %v", s, ids)
 	}
-	e.must("GET", fmt.Sprintf("/api/tasks/%d", b.ID), nil, 200, &td)
-	if td.Batch == nil || len(td.Batch.Trees) != 1 || len(td.Batch.Independent) != 1 {
-		t.Fatalf("task batch %+v", td.Batch)
-	}
-	td.Batch = nil
-	e.must("GET", fmt.Sprintf("/api/tasks/%d", solo.ID), nil, 200, &td)
-	if td.Batch != nil {
-		t.Fatalf("no origin: batch must be null, got %+v", td.Batch)
+
+	for _, want := range []agentTask{c, b, solo} {
+		var detail struct {
+			agentTask
+			Batch json.RawMessage `json:"batch"`
+		}
+		e.must("GET", taskPath(want.ID), nil, 200, &detail)
+		if detail.Batch != nil {
+			t.Fatalf("task %d has batch field", want.ID)
+		}
+		if detail.ID != want.ID || (want.ID == solo.ID && detail.OriginSession != nil) ||
+			(want.ID != solo.ID && !e.isT3Session(detail.OriginSession, s)) {
+			t.Fatalf("task %d detail: %+v", want.ID, detail.agentTask)
+		}
+		if want.ID == c.ID {
+			if detail.Tree == nil || c.TreeID == nil || detail.Tree.ID != *c.TreeID ||
+				!slices.ContainsFunc(detail.Tree.Tasks, func(task task) bool { return task.ID == a.ID }) {
+				t.Fatalf("task %d tree: %+v", want.ID, detail.Tree)
+			}
+		} else if detail.Tree != nil {
+			t.Fatalf("task %d has unexpected tree: %+v", want.ID, detail.Tree)
+		}
 	}
 }

@@ -46,6 +46,8 @@ func Run(t *testing.T, open Factory) {
 	}
 }
 
+func ptr[T any](v T) *T { return &v }
+
 // setup is a Store over a fresh engine.
 func setup(t *testing.T, open Factory) (*db.Store, context.Context) {
 	return db.NewStore(open(t)), context.Background()

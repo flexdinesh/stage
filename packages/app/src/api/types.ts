@@ -477,7 +477,6 @@ export interface TaskDetail extends Task {
   /** The task's tree; null outside one. */
   tree: TreeDetail | null;
   /** Tasks the task's origin session created; null without an origin session. */
-  batch: CreatedTasks | null;
   /** Handoff records of the current launch attempt, one per need; empty when none. */
   currentHandoffs: Handoff[];
 }
@@ -545,21 +544,6 @@ export interface Handoff {
   /** Skip reason; null when sent. */
   reason: string | null;
   at: string;
-}
-
-/** A tree's name and start mode. */
-export interface TreeRef {
-  id: number;
-  title: string;
-  startMode: StartMode;
-}
-
-/** A session batch: tasks one session created, grouped by tree. */
-export interface CreatedTasks {
-  /** Batch tasks per tree, ordered by each group's lowest task id; tasks by id. */
-  trees: { tree: TreeRef; tasks: Task[] }[];
-  /** Batch tasks outside any tree. */
-  independent: Task[];
 }
 
 // ---- Trees ----

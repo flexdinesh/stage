@@ -22,7 +22,6 @@ import { UsagePanel } from "../components/Usage.tsx";
 import { OpeningPrompt, PromptPanel } from "../components/PromptPanel.tsx";
 import { TaskStateBadge, taskStateLabel } from "../components/StateBadge.tsx";
 import { ImageStrip } from "../components/Images.tsx";
-import { BatchPanel } from "../components/CreatedTasks.tsx";
 import { NoTreePanel, TreeBar, TreePanel } from "../components/trees/TreePanel.tsx";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
@@ -404,7 +403,6 @@ function TaskBody({ task }: { task: TaskDetail }) {
           <div className="flex min-w-0 flex-col gap-3.5">
             <StatePanel task={task} className="max-lg:hidden" />
             {task.tree === null ? <NoTreePanel task={task} /> : <TreePanel task={task} tree={task.tree} />}
-            <BatchPanel task={task} />
             <SessionPanel task={task} />
             <UsagePanel task={task} />
             <ConfigPanel task={task} />
@@ -514,7 +512,7 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
         )}
         {task.originSession === null ? null : (
           <Detail label="Created by">
-            <TextLink to={`/tasks/${task.id}?batch=1`}>{task.originSessionTitle ?? task.originSession.externalSessionId}</TextLink>
+            <span>{task.originSessionTitle ?? task.originSession.externalSessionId}</span>
           </Detail>
         )}
         {task.scheduleId === null ? null : (

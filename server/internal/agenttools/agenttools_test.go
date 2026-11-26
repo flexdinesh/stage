@@ -758,8 +758,7 @@ func TestLastWordTools(t *testing.T) {
 
 }
 
-// A planning session queues dependent tasks, then verifies the batch.
-func TestPlanningSessionBatch(t *testing.T) {
+func TestPlanningSessionTasks(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/plan")
 	s := e.session(p, "Planner")
@@ -775,15 +774,21 @@ func TestPlanningSessionBatch(t *testing.T) {
 	var rows agenttools.TasksOut
 	mustCall(t, cs, "list_tasks", map[string]any{"originSession": e.t3(s)}, &rows)
 	if rows.Total != 3 {
-		t.Fatalf("batch: %+v", rows)
+		t.Fatalf("tasks created by %s: %+v", s, rows)
 	}
 	if msg := call(t, cs, "list_tasks", map[string]any{"originThreadId": s}, nil); !strings.Contains(msg, "originThreadId") {
 		t.Fatalf("removed originThreadId accepted: %q", msg)
 	}
-	var td client.TaskDetail
-	mustCall(t, cs, "get_task", map[string]any{"id": c.ID}, &td)
-	if td.Batch == nil || len(td.Batch.Trees) != 1 || len(td.Batch.Independent) != 1 || td.Tree != nil {
-		t.Fatalf("task batch %+v", td.Batch)
+	var detail struct {
+		client.TaskDetail
+		Batch json.RawMessage `json:"batch"`
+	}
+	mustCall(t, cs, "get_task", map[string]any{"id": c.ID}, &detail)
+	if detail.Batch != nil {
+		t.Fatalf("task %d has batch field", c.ID)
+	}
+	if detail.ID != c.ID || detail.OriginSession == nil || *detail.OriginSession != *e.t3(s) || detail.Tree != nil {
+		t.Fatalf("task detail: %+v", detail.TaskDetail)
 	}
 }
 

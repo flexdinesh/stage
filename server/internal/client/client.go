@@ -185,8 +185,7 @@ type TaskDetail struct {
 	Acceptances []db.Acceptance  `json:"acceptances"`
 	Task
 	Events []db.TaskEvent `json:"events"`
-	Tree   *TreeDetail    `json:"tree"`  // the task's tree (null outside one)
-	Batch  *CreatedTasks  `json:"batch"` // tasks the origin session created (null without one)
+	Tree   *TreeDetail    `json:"tree"` // the task's tree (null outside one)
 	// CurrentHandoffs: what the current launch attempt appended, one per need.
 	CurrentHandoffs []db.Handoff `json:"currentHandoffs"`
 }
@@ -197,16 +196,6 @@ type TreeDetail struct {
 	Tasks  []Task        `json:"tasks"`
 	Edges  []db.TreeEdge `json:"edges"`
 	Levels [][]int64     `json:"levels"`
-}
-
-// CreatedTasks is a session batch: tasks one session created, grouped by
-// tree, then tasks outside any tree.
-type CreatedTasks struct {
-	Trees []struct {
-		Tree  db.TreeRef `json:"tree"`
-		Tasks []Task     `json:"tasks"`
-	} `json:"trees"`
-	Independent []Task `json:"independent"`
 }
 
 // ScheduleRun is one fire of a schedule (detail reads include the task).

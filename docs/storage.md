@@ -135,6 +135,9 @@ classifies errors through the `ErrorClassifier`. `Machines`, `Connections`,
 in a read-check-write use case ([Transactions and
 locking](#transactions-and-locking)); a no-op on SQLite.
 
+Task creator attribution uses the stored `origin_session_id`. The task list
+can filter by the creator's scoped session identity.
+
 **Capability ports**
 
 | Port | SQLite | Postgres |
