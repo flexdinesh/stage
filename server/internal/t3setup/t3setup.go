@@ -120,8 +120,8 @@ type Options struct {
 	AdminToken  string
 	// Fake: Client is the in-memory fake (no auto-pair; any URL is it).
 	Fake bool
-	// OnPaired runs after every successful pairing (full sync and catalog
-	// refresh now). Must not block.
+	// OnPaired runs after every successful pairing (full sync now). Must
+	// not block.
 	OnPaired func()
 	// OnSwitched runs when pairing moved T3 to another connection, or
 	// created the machine's first one (the adapter must follow before

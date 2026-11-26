@@ -191,7 +191,6 @@ type TaskDetail struct {
 	Acceptances []db.Acceptance  `json:"acceptances"`
 	Task
 	Events []db.TaskEvent `json:"events"`
-	Thread *Thread        `json:"thread"`
 	Tree   *TreeDetail    `json:"tree"`  // the task's tree (null outside one)
 	Batch  *CreatedTasks  `json:"batch"` // tasks the origin session created (null without one)
 	// CurrentHandoffs: what the current launch attempt appended, one per need.
@@ -219,17 +218,6 @@ type CreatedTasks struct {
 	Independent []Task `json:"independent"`
 }
 
-// Thread is the API Thread (session) shape.
-type Thread struct {
-	db.Thread
-}
-
-// ThreadDetail is GET /api/connections/1/sessions/:id.
-type ThreadDetail struct {
-	Thread Thread `json:"thread"`
-	Task   *Task  `json:"task"`
-}
-
 // ScheduleRun is one fire of a schedule (detail reads include the task).
 type ScheduleRun struct {
 	ID         int64     `json:"id"`
@@ -248,80 +236,41 @@ type ScheduleDetail struct {
 	Runs []ScheduleRun `json:"runs"`
 }
 
-// CatalogOption is a model option and its values.
-type CatalogOption struct {
-	ID      string                  `json:"id"`
-	Values  []execution.OptionValue `json:"values"`
-	Default *execution.OptionValue  `json:"default"`
-}
-
-// CatalogModel is a provider model.
-type CatalogModel struct {
-	ID      string          `json:"id"`
-	Label   string          `json:"label"`
-	Options []CatalogOption `json:"options"`
-}
-
-// CatalogProvider is a T3 provider instance.
-type CatalogProvider struct {
-	ProviderInstanceID string         `json:"providerInstanceId"`
-	DriverKind         string         `json:"driverKind"`
-	DisplayName        string         `json:"displayName"`
-	Models             []CatalogModel `json:"models"`
-	RuntimeModes       []string       `json:"runtimeModes"`
-}
-
-// Catalog is GET /api/catalog.
-type Catalog struct {
-	Providers []CatalogProvider `json:"providers"`
-	FetchedAt *time.Time        `json:"fetchedAt"`
-}
-
 // CreateTask is the POST /api/tasks body (nil = omitted).
 type CreateTask struct {
-	NeedsSession       *db.SessionRef          `json:"needsSession,omitempty"`
-	ConnectionID       int64                   `json:"connectionId,omitempty"`
-	OriginSession      *db.SessionRef          `json:"originSession,omitempty"`
-	ExecutionConfig    *execution.Config       `json:"executionConfig,omitempty"`
-	ProjectID          int64                   `json:"projectId"`
-	Title              string                  `json:"title"`
-	Prompt             string                  `json:"prompt"`
-	ProviderInstanceID *string                 `json:"providerInstanceId,omitempty"`
-	Model              *string                 `json:"model,omitempty"`
-	ModelOptions       []execution.ModelOption `json:"modelOptions,omitempty"`
-	RuntimeMode        *string                 `json:"runtimeMode,omitempty"`
-	InteractionMode    *string                 `json:"interactionMode,omitempty"`
-	Workspace          *db.Workspace           `json:"workspace,omitempty"`
-	InitialNote        *string                 `json:"initialNote,omitempty"`
-	TreeID             *int64                  `json:"treeId,omitempty"`
-	Needs              []int64                 `json:"needs,omitempty"`
-	StartMode          *db.StartMode           `json:"startMode,omitempty"`
-	Handoff            *bool                   `json:"handoff,omitempty"`
-	AttachmentIDs      []int64                 `json:"attachmentIds,omitempty"`
-	StartLocal         *string                 `json:"startLocal,omitempty"`
-	StartTz            *string                 `json:"startTz,omitempty"`
-	Start              bool                    `json:"start,omitempty"`
+	NeedsSession    *db.SessionRef    `json:"needsSession,omitempty"`
+	ConnectionID    int64             `json:"connectionId,omitempty"`
+	OriginSession   *db.SessionRef    `json:"originSession,omitempty"`
+	ExecutionConfig *execution.Config `json:"executionConfig,omitempty"`
+	ProjectID       int64             `json:"projectId"`
+	Title           string            `json:"title"`
+	Prompt          string            `json:"prompt"`
+	Workspace       *db.Workspace     `json:"workspace,omitempty"`
+	InitialNote     *string           `json:"initialNote,omitempty"`
+	TreeID          *int64            `json:"treeId,omitempty"`
+	Needs           []int64           `json:"needs,omitempty"`
+	StartMode       *db.StartMode     `json:"startMode,omitempty"`
+	Handoff         *bool             `json:"handoff,omitempty"`
+	AttachmentIDs   []int64           `json:"attachmentIds,omitempty"`
+	StartLocal      *string           `json:"startLocal,omitempty"`
+	StartTz         *string           `json:"startTz,omitempty"`
+	Start           bool              `json:"start,omitempty"`
 }
 
 // CreateSchedule is the POST /api/schedules body.
 type CreateSchedule struct {
-	ConnectionID       int64                   `json:"connectionId,omitempty"`
-	OriginSession      *db.SessionRef          `json:"originSession,omitempty"`
-	ExecutionConfig    *execution.Config       `json:"executionConfig,omitempty"`
-	ProjectID          int64                   `json:"projectId"`
-	Title              string                  `json:"title"`
-	Prompt             string                  `json:"prompt"`
-	ProviderInstanceID *string                 `json:"providerInstanceId,omitempty"`
-	Model              *string                 `json:"model,omitempty"`
-	ModelOptions       []execution.ModelOption `json:"modelOptions,omitempty"`
-	RuntimeMode        *string                 `json:"runtimeMode,omitempty"`
-	InteractionMode    *string                 `json:"interactionMode,omitempty"`
-	Workspace          *db.Workspace           `json:"workspace,omitempty"`
-	Notes              *string                 `json:"notes,omitempty"`
-	AttachmentIDs      []int64                 `json:"attachmentIds,omitempty"`
-	Cron               string                  `json:"cron"`
-	Tz                 string                  `json:"tz"`
-	Paused             bool                    `json:"paused,omitempty"`
+	ConnectionID    int64             `json:"connectionId,omitempty"`
+	OriginSession   *db.SessionRef    `json:"originSession,omitempty"`
+	ExecutionConfig *execution.Config `json:"executionConfig,omitempty"`
+	ProjectID       int64             `json:"projectId"`
+	Title           string            `json:"title"`
+	Prompt          string            `json:"prompt"`
+	Workspace       *db.Workspace     `json:"workspace,omitempty"`
+	Notes           *string           `json:"notes,omitempty"`
+	AttachmentIDs   []int64           `json:"attachmentIds,omitempty"`
+	Cron            string            `json:"cron"`
+	Tz              string            `json:"tz"`
+	Paused          bool              `json:"paused,omitempty"`
 }
 
 // Patch is a partial update body: absent keys are unchanged, nil values
@@ -339,7 +288,7 @@ type TaskQuery struct {
 	Closed string
 }
 
-// ThreadQuery filters GET /api/threads.
+// do sends a request and decodes a 2xx response into out.
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
 	_, err := c.doStatus(ctx, method, path, body, out)
 	return err
@@ -481,13 +430,6 @@ func (c *Client) Projects(ctx context.Context) ([]db.Project, error) {
 	return out.Projects, err
 }
 
-// Catalog lists providers and models.
-func (c *Client) Catalog(ctx context.Context) (Catalog, error) {
-	var out Catalog
-	err := c.do(ctx, http.MethodGet, "/api/catalog", nil, &out)
-	return out, err
-}
-
 // Tasks lists tasks (updatedAt desc).
 func (c *Client) Tasks(ctx context.Context, f TaskQuery) ([]Task, error) {
 	q := url.Values{}
@@ -557,7 +499,7 @@ func (c *Client) ArchiveTask(ctx context.Context, id int64, archived bool) (Task
 	return out, err
 }
 
-// StartTask launches a task in T3.
+// StartTask launches a task on its connection.
 func (c *Client) StartTask(ctx context.Context, id int64) (Task, error) {
 	var out Task
 	err := c.do(ctx, http.MethodPost, taskPath(id, "start"), nil, &out)
@@ -616,7 +558,7 @@ type TreeStart struct {
 	} `json:"errors"`
 }
 
-// AdoptSession is the POST /api/connections/1/sessions/:id/adopt body.
+// AdoptSession is the POST /api/connections/:connectionId/sessions/:id/adopt body.
 type AdoptSession struct {
 	CallerSession   *db.SessionRef `json:"callerSession,omitempty"`
 	ProjectID       *int64         `json:"projectId,omitempty"`
@@ -713,30 +655,6 @@ func (c *Client) StartTree(ctx context.Context, id int64) (TreeStart, error) {
 	return out, err
 }
 
-// AdoptThread tracks session threadID as a task; created is false when a
-// task already owned it.
-func (c *Client) AdoptThread(ctx context.Context, threadID string, in AdoptSession) (Task, bool, error) {
-	t3, err := c.T3ConnectionID(ctx)
-	if err != nil {
-		return Task{}, false, err
-	}
-	return c.AdoptScoped(ctx, db.SessionRef{ConnectionID: t3, ExternalSessionID: threadID}, in)
-}
-
-// T3ConnectionID is the server's active T3 connection: legacy T3 thread
-// ids belong to it.
-func (c *Client) T3ConnectionID(ctx context.Context) (int64, error) {
-	cs, err := c.Connections(ctx)
-	if err != nil {
-		return 0, err
-	}
-	for _, conn := range cs {
-		if conn.Harness == db.HarnessT3 && conn.Active {
-			return conn.ID, nil
-		}
-	}
-	return 0, errors.New("no T3 connection on this Stage server")
-}
 func sessionPath(ref db.SessionRef) string {
 	return "/api/connections/" + strconv.FormatInt(ref.ConnectionID, 10) + "/sessions/" + url.PathEscape(ref.ExternalSessionID)
 }
@@ -858,16 +776,6 @@ func (c *Client) ProjectCapabilities(ctx context.Context, id, projectID int64) (
 	return out, err
 }
 
-func (c *Client) Thread(ctx context.Context, id string) (ThreadDetail, error) {
-	var out ThreadDetail
-	t3, err := c.T3ConnectionID(ctx)
-	if err != nil {
-		return out, err
-	}
-	err = c.do(ctx, http.MethodGet, "/api/connections/"+strconv.FormatInt(t3, 10)+"/sessions/"+url.PathEscape(id), nil, &out)
-	return out, err
-}
-
 // Ref is GET /api/refs/resolve: what a pasted reference names.
 type Ref struct {
 	Links        execution.Links `json:"links"`
@@ -878,16 +786,15 @@ type Ref struct {
 	TreeID       *int64          `json:"treeId,omitempty"`
 }
 
-// ResolveRef reads a stage task, tree or session link, T3 thread link, #task
-// id or thread id.
+// ResolveRef reads a stage task, tree or session link, a harness session
+// link, #task id or session id.
 func (c *Client) ResolveRef(ctx context.Context, ref string) (Ref, error) {
 	var out Ref
 	err := c.do(ctx, http.MethodGet, withQuery("/api/refs/resolve", url.Values{"ref": {ref}}), nil, &out)
 	return out, err
 }
 
-// PendingQuestions is GET /api/connections/1/sessions/:id/questions: answerable questions
-// plus approvals stage cannot resolve (handled in T3).
+// Upload stores an image attachment.
 func (c *Client) Upload(ctx context.Context, name string, data []byte) (db.Attachment, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)

@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	coordinator "github.com/flexdinesh/stage/server/internal/sync"
-	"strings"
-	"testing"
-	"time"
 )
 
 // This harness has documents and phases, not T3 threads, providers or runs.
@@ -142,7 +143,7 @@ func contractTask(t *testing.T, p placement) (*db.Store, db.Task) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 2, Title: "Write", Prompt: "Keep this intent", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "brain-7", Permission: "reviewed", Mode: "compose"}})
+	task, err := store.CreateTask(t.Context(), db.NewTask{ProjectID: project.ID, ConnectionID: 2, Title: "Write", Prompt: "Keep this intent", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: &execution.Config{Model: "brain-7", Permission: "reviewed", Mode: "compose"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,6 +246,7 @@ func TestContractArchivedSessionInfersCompletion(t *testing.T) {
 		}
 	})
 }
+
 // An idle observation keeps the task's state but may carry a closure: it
 // completes a task Stage recorded done, never one still running.
 func TestContractIdleClosureInfersFromStoredDone(t *testing.T) {
@@ -326,7 +328,7 @@ func TestContractSchedulesAndHandoffPreserveScopedConfiguration(t *testing.T) {
 		if text := coordinator.ComposeAcceptedHandoff(accepted[0], 4000); !strings.Contains(text, "connection 2") || !strings.Contains(text, "Saved result") {
 			t.Fatal(text)
 		}
-		sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: 2, ProjectID: source.ProjectID, Title: "Scheduled document", Prompt: "scheduled", RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: source.ExecutionConfig, Cron: "0 * * * *", Tz: "UTC"})
+		sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: 2, ProjectID: source.ProjectID, Title: "Scheduled document", Prompt: "scheduled", Workspace: db.Workspace{Type: "root"}, ExecutionConfig: source.ExecutionConfig, Cron: "0 * * * *", Tz: "UTC"})
 		if err != nil {
 			t.Fatal(err)
 		}

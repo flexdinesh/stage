@@ -25,6 +25,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/notify"
@@ -166,13 +167,14 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
 	// Tests complete tasks explicitly; inference tests turn auto-complete on.
-	if _, err := store.SetAutoComplete(context.Background(), store.LegacyT3ID(), false); err != nil {
+	if _, err := store.SetAutoComplete(context.Background(), store.ActiveID(db.LocalMachine, "t3"), false); err != nil {
 		t.Fatal(err)
 	}
 	fake := t3.NewFake()
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := t3sync.New(store, t3.NewAdapter(client), log)
+	svc := t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, log)
+	svc.OnConnectionSynced = t3setup.RecordFullSync(store)
 	svc.Harnesses = testHarnesses
 	runner := release.NewRunner(store, svc, log)
 	svc.OnTransition = runner.OnTransition
@@ -185,19 +187,25 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	for _, opt := range opts {
 		opt(&deps)
 	}
-	if deps.Setup == nil {
-		deps.Setup = t3setup.New(t3setup.Options{Config: deps.Config, Settings: store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Fake: true, Logger: log})
+	if _, ok := deps.Connectors.Get(db.LocalMachine, t3.Kind); !ok {
+		withT3Setup(&deps, t3setup.New(t3setup.Options{Config: deps.Config, Settings: store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Fake: true, Logger: log}))
 	}
-	connectors := map[string]harness.Connector{t3.Kind: t3setup.NewConnector(deps.Setup, func(connection int64) t3setup.SyncProgress {
+	h := api.NewRouter(deps)
+	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store}
+}
+
+// withT3Setup makes setup the local machine's T3 connector (its sync
+// progress read from d.Sync), keeping an OpenCode connector already set.
+func withT3Setup(d *api.Deps, setup *t3setup.Service) {
+	svc := d.Sync
+	connectors := map[string]harness.Connector{t3.Kind: t3setup.NewConnector(setup, func(connection int64) t3setup.SyncProgress {
 		p := svc.Progress(connection)
 		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Threads}
 	})}
-	if c, ok := deps.Connectors.Get(db.LocalMachine, opencode.Kind); ok {
+	if c, ok := d.Connectors.Get(db.LocalMachine, opencode.Kind); ok {
 		connectors[opencode.Kind] = c
 	}
-	deps.Connectors = mustConnectors(connectors)
-	h := api.NewRouter(deps)
-	return &env{t: t, h: h, fake: fake, t3: client, sync: svc, runner: runner, store: store}
+	d.Connectors = mustConnectors(connectors)
 }
 
 // do sends a request; out (if non-nil) receives the decoded body.
@@ -291,7 +299,6 @@ type task struct {
 		ToState   string  `json:"toState"`
 		Detail    string  `json:"detail"`
 	} `json:"events"`
-	Thread      *thread      `json:"thread"`
 	Tree        *treeDetail  `json:"tree"`
 	Attachments []attachment `json:"attachments"`
 }
@@ -317,19 +324,6 @@ type attachment struct {
 	Name      string `json:"name"`
 	MimeType  string `json:"mimeType"`
 	SizeBytes int    `json:"sizeBytes"`
-}
-
-type thread struct {
-	T3ThreadID  string  `json:"externalSessionId"`
-	ProjectID   *int64  `json:"projectId"`
-	Status      string  `json:"status"`
-	Settled     bool    `json:"settled"`
-	Source      string  `json:"source"`
-	TaskID      *int64  `json:"taskId"`
-	ProviderID  *string `json:"providerInstanceId"`
-	Title       string  `json:"title"`
-	T3ProjectID string  `json:"externalProjectId"`
-	SettledAt   *string `json:"settledAt"`
 }
 
 func (e *env) project(root string) project {
@@ -364,12 +358,12 @@ func TestHealthAndNotFound(t *testing.T) {
 	e := newEnv(t)
 	var h api.Health
 	e.must("GET", "/api/health", nil, 200, &h)
-	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 7 || h.Version == "" || len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || !h.Harnesses[0].Connected || !h.Harnesses[0].Configured || h.Schema != sqlite.MaxVersion() || h.Engine != "sqlite" {
+	if h.Status != "ok" || h.DB != "ok" || h.Service != "stage" || h.Identity != "stage" || h.APIVersion != 8 || h.Version == "" || len(h.Harnesses) != 1 || h.Harnesses[0].Kind != "t3" || !h.Harnesses[0].Connected || !h.Harnesses[0].Configured || h.Schema != sqlite.MaxVersion() || h.Engine != "sqlite" {
 		t.Fatalf("health %+v", h)
 	}
 	rec := httptest.NewRecorder()
 	e.h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/nope", nil))
-	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "7" {
+	if rec.Code != 404 || rec.Header().Get("Stage-Api-Version") != "8" {
 		t.Fatalf("404 with API version header %q", rec.Header().Get("Stage-Api-Version"))
 	}
 	// T3 offline: still a healthy Stage server, with T3 reported down.
@@ -401,17 +395,15 @@ func TestTaskLifecycle(t *testing.T) {
 	if p.Source != "app" || p.T3ProjectID == "" {
 		t.Fatalf("project %+v", p)
 	}
-	tk := e.task(p.ID, "Say OK", map[string]any{
-		"providerInstanceId": "claude", "model": "claude-haiku-5-5",
-		"modelOptions": []map[string]any{{"id": "effort", "value": "low"}},
-	})
+	tk := e.task(p.ID, "Say OK", map[string]any{"executionConfig": map[string]any{
+		"model": t3.ModelKey("claude", "claude-haiku-5-5"), "options": []map[string]any{{"id": "effort", "value": "low"}},
+	}})
 	if tk.State != "backlog" || tk.T3ThreadID != nil || tk.Links != (links{}) || tk.ProjectTitle != p.Title {
 		t.Fatalf("created %+v", tk)
 	}
 	if tk.Workspace["type"] != "root" {
 		t.Fatalf("defaults %+v", tk)
 	}
-	// Legacy model input is accepted and reported only as executionConfig.
 	if c := tk.Config; c == nil || c.Model != t3.ModelKey("claude", "claude-haiku-5-5") || len(c.Options) != 1 {
 		t.Fatalf("executionConfig %+v", tk.Config)
 	}
@@ -498,42 +490,19 @@ func TestTaskLifecycle(t *testing.T) {
 	if got.Events[len(got.Events)-1].Detail != "execution observed done" {
 		t.Fatalf("detail %q", got.Events[len(got.Events)-1].Detail)
 	}
-	if got.Thread == nil || got.Thread.Source != "app" || !got.Thread.Settled || got.Thread.SettledAt == nil || got.Thread.TaskID == nil || *got.Thread.TaskID != tk.ID {
-		t.Fatalf("thread %+v", got.Thread)
+	// API v8: task detail has no T3 thread; the session and links stand.
+	var detail map[string]any
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", tk.ID), nil, 200, &detail)
+	if _, ok := detail["thread"]; ok {
+		t.Fatal("task detail still has thread")
 	}
-	if got.Links.Native != "t3code://threads/fake-env/"+url.PathEscape(got.Thread.T3ThreadID) {
+	if got.T3ThreadID == nil || got.Links.Native != "t3code://threads/fake-env/"+url.PathEscape(*got.T3ThreadID) {
 		t.Fatalf("settled task native link %q", got.Links.Native)
 	}
 	// Accepted tasks remain observable.
 	tasks, _ := e.store.PollableTasks(context.Background(), true)
 	if len(tasks) != 1 {
 		t.Fatalf("pollable %d", len(tasks))
-	}
-}
-
-// A task saved with legacy interactionMode "plan", then given an
-// executionConfig with the harness-default mode, launches without plan mode,
-// so executionConfig must not keep reporting the stale "plan".
-func TestExecutionConfigOverridesLegacyInteractionMode(t *testing.T) {
-	e := newEnv(t)
-	p := e.project("/w/modes")
-	tk := e.task(p.ID, "A", map[string]any{"interactionMode": "plan"})
-	got := e.getTask(tk.ID)
-	if got.Config == nil || got.Config.Mode != "plan" {
-		t.Fatalf("legacy mode synthesized as %+v", got.Config)
-	}
-	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{
-		"executionConfig": map[string]any{"model": `["claude","claude-haiku-5-5"]`, "options": []any{}, "permission": "", "mode": ""},
-	}, 200, nil)
-	got = e.getTask(tk.ID)
-	if got.Config == nil || got.Config.Mode != "" || got.Config.Model != t3.ModelKey("claude", "claude-haiku-5-5") {
-		t.Fatalf("config-backed mode %+v, want harness default", got.Config)
-	}
-	var started task
-	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
-	d, err := e.fake.ReadThread(context.Background(), *started.T3ThreadID)
-	if err != nil || d.InteractionMode != t3.InteractionDefault {
-		t.Fatalf("launched mode %q err %v", d.InteractionMode, err)
 	}
 }
 
@@ -546,7 +515,7 @@ func TestTaskActions(t *testing.T) {
 	// Backlog: everything editable; null clears; bad enum 400.
 	var patched task
 	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{
-		"prompt": "new", "providerInstanceId": "claude", "model": "claude-haiku-5-5",
+		"prompt": "new", "executionConfig": map[string]any{"model": t3.ModelKey("claude", "claude-haiku-5-5")},
 		"workspace": map[string]any{"type": "worktree", "baseRef": "origin/main", "branch": nil},
 	}, 200, &patched)
 	if patched.Prompt != "new" || patched.Config == nil || patched.Config.Model != t3.ModelKey("claude", "claude-haiku-5-5") || patched.Workspace["type"] != "worktree" {
@@ -555,11 +524,11 @@ func TestTaskActions(t *testing.T) {
 	if b, ok := patched.Workspace["branch"]; !ok || b != nil {
 		t.Fatalf("worktree branch must be present and null: %v", patched.Workspace)
 	}
-	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"providerInstanceId": nil, "model": nil}, 200, &patched)
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"executionConfig": map[string]any{}}, 200, &patched)
 	if patched.Config != nil && patched.Config.Model != "" {
 		t.Fatalf("model not cleared: %+v", patched.Config)
 	}
-	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"runtimeMode": "yolo"}, 400, nil)
+	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"executionConfig": map[string]any{"permission": "yolo"}}, 400, nil)
 	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", tk.ID), map[string]any{"title": nil}, 400, nil)
 
 	var started task
@@ -756,7 +725,8 @@ func TestSaveAndStartWithoutBindingRetainsActionableBacklog(t *testing.T) {
 	e := newEnv(t)
 	var p project
 	e.must("POST", "/api/projects", map[string]any{"title": "Offline"}, 201, &p)
-	task := e.task(p.ID, "Plan", map[string]any{"start": true})
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "Plan", "prompt": "p"}, 400, nil)
+	task := e.task(p.ID, "Plan", map[string]any{"start": true, "connectionId": dbtest.T3Connection})
 	if task.State != "backlog" || task.LaunchAttempt != 0 || task.LastError == nil || !strings.Contains(*task.LastError, "Bind or confirm") {
 		t.Fatalf("silent launch refusal %+v", task)
 	}
@@ -1024,39 +994,10 @@ func TestTargetedSyncProjectsAndTasks(t *testing.T) {
 
 }
 
-func TestCatalogAndPair(t *testing.T) {
+// API v8 removed the T3 catalog; models come from a connection.
+func TestCatalogRemovedAndPair(t *testing.T) {
 	e := newEnv(t)
-	e.fake.Catalog.Providers = append(e.fake.Catalog.Providers, t3.Provider{
-		ProviderInstanceID: "broken", Constraints: []string{"not authenticated"},
-	}, t3.Provider{ProviderInstanceID: "bare", Models: []t3.Model{{ID: "m1"}}})
-	var cat struct {
-		Providers []struct {
-			ProviderInstanceID string `json:"providerInstanceId"`
-			DisplayName        string `json:"displayName"`
-			Models             []struct {
-				ID      string `json:"id"`
-				Label   string `json:"label"`
-				Options []struct {
-					ID      string `json:"id"`
-					Values  []any  `json:"values"`
-					Default any    `json:"default"`
-				} `json:"options"`
-			} `json:"models"`
-			RuntimeModes []string `json:"runtimeModes"`
-		} `json:"providers"`
-		FetchedAt *string `json:"fetchedAt"`
-	}
-	e.must("GET", "/api/catalog", nil, 200, &cat)
-	if len(cat.Providers) != 2 || cat.FetchedAt == nil {
-		t.Fatalf("catalog %+v", cat)
-	}
-	claude, bare := cat.Providers[0], cat.Providers[1]
-	if claude.Models[0].Options[0].Default != "medium" || len(claude.Models[0].Options[0].Values) != 3 || len(claude.RuntimeModes) != 4 {
-		t.Fatalf("claude %+v", claude)
-	}
-	if bare.DisplayName != "bare" || bare.Models[0].Label != "m1" || bare.Models[0].Options == nil || bare.RuntimeModes != nil {
-		t.Fatalf("fallbacks %+v", bare)
-	}
+	e.must("GET", "/api/catalog", nil, 404, nil)
 	e.must("POST", "/api/harnesses/t3/actions/pair", map[string]any{"code": " "}, 400, nil)
 	e.must("POST", "/api/harnesses/t3/actions/pair", map[string]any{"code": "ABCD-1234"}, 200, nil)
 }
@@ -1124,7 +1065,7 @@ func TestPreferences(t *testing.T) {
 	if p.DefaultConnectionID != nil {
 		t.Fatalf("fresh %+v", p)
 	}
-	t3ID := e.store.LegacyT3ID()
+	t3ID := e.store.ActiveID(db.LocalMachine, "t3")
 
 	// Default connection: set, reject an unknown one, clear. The old pin route is gone.
 	e.must("PUT", "/api/preferences/default-connection", map[string]any{"connectionId": t3ID}, 200, &p)
@@ -1140,7 +1081,7 @@ func TestPreferences(t *testing.T) {
 
 	// Creating a task no longer records anything in preferences.
 	pr := e.project("/w/prefs")
-	e.task(pr.ID, "A", map[string]any{"providerInstanceId": "codex", "model": "gpt-6", "runtimeMode": "auto"})
+	e.task(pr.ID, "A", map[string]any{"executionConfig": map[string]any{"model": t3.ModelKey("claude", "claude-haiku-5-5")}})
 	e.must("GET", "/api/preferences", nil, 200, &p)
 	if p.DefaultConnectionID != nil {
 		t.Fatalf("after create %+v", p)
@@ -1418,9 +1359,6 @@ func TestBadgeAndNeedsInputThreads(t *testing.T) {
 		if err = e.store.PutObservation(ctx, o); err != nil {
 			t.Fatal(err)
 		}
-		if err := e.store.SetObservedState(ctx, db.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: id}, st); err != nil {
-			t.Fatal(err)
-		}
 	}
 
 	var badge struct {
@@ -1440,7 +1378,7 @@ func TestNotificationsInbox(t *testing.T) {
 	var ids []int64
 	for i := range 3 {
 		id, err := e.store.InsertNotification(ctx, db.NewNotification{
-			Event: db.StateDone, T3ThreadID: &thread, Title: fmt.Sprintf("n%d", i), URL: "/history?q=x",
+			Event: db.StateDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: fmt.Sprintf("n%d", i), URL: "/history?q=x",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -1487,7 +1425,7 @@ func TestNotificationGroupRead(t *testing.T) {
 	ctx := context.Background()
 	for _, thread := range []string{"ext-1", "ext-2"} {
 		if _, err := e.store.InsertNotification(ctx, db.NewNotification{
-			Event: db.StateDone, T3ThreadID: &thread, Title: thread, URL: "/sessions/" + thread,
+			Event: db.StateDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: thread, URL: "/sessions/" + thread,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -1523,7 +1461,7 @@ func TestNotificationGroups(t *testing.T) {
 	var latest int64
 	for _, thread := range []string{threads[0], threads[1], threads[0]} {
 		id, err := e.store.InsertNotification(ctx, db.NewNotification{
-			Event: db.StateDone, T3ThreadID: &thread, Title: "Same title", URL: "/history?q=Same",
+			Event: db.StateDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Same title", URL: "/history?q=Same",
 		})
 		if err != nil {
 			t.Fatal(err)

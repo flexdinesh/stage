@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/db/store"
-	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // derivedState fingerprints every row a derived write or its cause touches.
@@ -21,7 +20,6 @@ func derivedState(t *testing.T, pool *sqlite.DB) string {
  ifnull((SELECT group_concat(task_id||'-'||need_id) FROM task_needs), '')||'|'||
  ifnull((SELECT group_concat(id||':'||ifnull(tree_id,'')||':'||recorded_work||':'||updated_at) FROM tasks), '')||'|'||
  ifnull((SELECT group_concat(id||':'||title||start_mode||status||recorded_work||membership_revision||updated_at||ifnull(closed_at,'')) FROM task_trees), '')||'|'||
- ifnull((SELECT group_concat(t3_thread_id||ifnull(stage_project_id,'-')) FROM threads), '')||'|'||
  (SELECT count(*) FROM task_acceptances)||'|'||(SELECT count(*) FROM task_handoffs)||'|'||(SELECT count(*) FROM session_identities)`).Scan(&s)
 	if err != nil {
 		t.Fatal(err)
@@ -47,11 +45,11 @@ type derivedFixture struct {
 func newDerivedFixture(t *testing.T, s *Store, ctx context.Context) derivedFixture {
 	t.Helper()
 	var f derivedFixture
-	f.t3 = s.LegacyT3ID()
+	f.t3 = s.ActiveID(LocalMachine, "t3")
 	f.project = projectWithBinding(t, s, f.t3, "/w/a")
 	task := func(title string) int64 {
 		t.Helper()
-		x, err := s.CreateTask(ctx, NewTask{ProjectID: f.project, Title: title, Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default", Workspace: Workspace{Type: "root"}})
+		x, err := s.CreateTask(ctx, NewTask{ConnectionID: dbtest.T3Connection, ProjectID: f.project, Title: title, Prompt: "p", Workspace: Workspace{Type: "root"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +76,6 @@ var errRollback = errors.New("roll back")
 // Each derived write commits exactly its rows with its cause and rolls
 // back with it.
 func TestDerivedWritesOnceAndRollBack(t *testing.T) {
-	now := time.Now().UTC()
 	for _, tc := range []struct {
 		name string
 		// rows: journal rows the write adds (events, or the note itself).
@@ -131,14 +128,6 @@ func TestDerivedWritesOnceAndRollBack(t *testing.T) {
 		}},
 		{"handoff", 0, func(ctx context.Context, tx store.Tx, f derivedFixture) error {
 			return recordHandoff(ctx, tx, f.l, Handoff{Attempt: 1, Status: HandoffSent, SourceTaskID: &f.a, SourceThreadID: "legacy", Text: "x"})
-		}},
-		{"thread mirror", 0, func(ctx context.Context, tx store.Tx, f derivedFixture) error {
-			o := execution.Observation{Session: SessionRef{ConnectionID: f.t3, ExternalSessionID: "thr-new"}, Project: "p/w/a", Title: "x", State: "running", Active: true, CreatedAt: now, UpdatedAt: now}
-			id, err := ensureSession(ctx, tx, o.Session)
-			if err != nil {
-				return err
-			}
-			return mirrorThread(ctx, tx, o, store.ThreadMirror{SessionID: id})
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -24,12 +25,12 @@ type agentTask struct {
 
 // t3Session is a T3 session reference body (needsSession, originSession).
 func (e *env) t3Session(id string) map[string]any {
-	return map[string]any{"connectionId": e.store.LegacyT3ID(), "externalSessionId": id}
+	return map[string]any{"connectionId": e.store.ActiveID(db.LocalMachine, "t3"), "externalSessionId": id}
 }
 
 // isT3Session reports whether ref names T3 session id.
 func (e *env) isT3Session(ref *sessionRef, id string) bool {
-	return ref != nil && ref.ConnectionID == e.store.LegacyT3ID() && ref.ExternalSessionID == id
+	return ref != nil && ref.ConnectionID == e.store.ActiveID(db.LocalMachine, "t3") && ref.ExternalSessionID == id
 }
 
 func (e *env) agentTask(projectID int64, title string, extra map[string]any, want int) agentTask {
@@ -66,7 +67,7 @@ func launchSession(t *testing.T, e *env, project, title string) string {
 func runningSession(t *testing.T, e *env, project, title string) string {
 	t.Helper()
 	id := launchSession(t, e, project, title)
-	if err := e.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: id}); err != nil {
+	if err := e.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -100,12 +101,12 @@ func TestAdoptSession(t *testing.T) {
 	if again.ID != a.ID || again.Title != "Planner" {
 		t.Fatalf("adopt again %+v", again)
 	}
-	var td struct {
-		Thread thread `json:"thread"`
+	var sc struct {
+		Task *agentTask `json:"task"`
 	}
-	e.must("GET", "/api/connections/1/sessions/"+s, nil, 200, &td)
-	if th := td.Thread; th.TaskID == nil || *th.TaskID != a.ID || th.Source != "app" {
-		t.Fatalf("session now owned %+v", th)
+	e.must("GET", "/api/connections/1/sessions/"+s+"/context", nil, 200, &sc)
+	if sc.Task == nil || sc.Task.ID != a.ID {
+		t.Fatalf("session now owned %+v", sc.Task)
 	}
 
 	// Stop works; start and duplicate do not.
@@ -328,7 +329,7 @@ func TestSessionBatchByTree(t *testing.T) {
 		Tasks []task `json:"tasks"`
 	}
 	e.must("GET", "/api/tasks?originThreadId="+s, nil, 400, nil)
-	e.must("GET", fmt.Sprintf("/api/tasks?originConnectionId=%d&originSessionId=%s", e.store.LegacyT3ID(), url.QueryEscape(s)), nil, 200, &rows)
+	e.must("GET", fmt.Sprintf("/api/tasks?originConnectionId=%d&originSessionId=%s", e.store.ActiveID(db.LocalMachine, "t3"), url.QueryEscape(s)), nil, 200, &rows)
 	if len(rows.Tasks) != 3 {
 		t.Fatalf("batch filter %+v", rows)
 	}

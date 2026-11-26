@@ -12,11 +12,16 @@ import (
 
 // postgresEngine: under check:postgres (STAGE_TEST_DATABASE_URL set) Engine
 // opens a fresh database cloned from a migrated template on that server
-// (docs/storage.md "Contract suite"); otherwise it stays on SQLite.
-func postgresEngine(t testing.TB) (store.Engine, bool) {
+// (docs/storage.md "Contract suite"), with T3Connection seeded; otherwise
+// it stays on SQLite. seed adds T3Connection.
+func postgresEngine(t testing.TB, seed bool) (store.Engine, bool) {
 	t.Helper()
 	if os.Getenv(pgtest.URLEnv) == "" {
 		return nil, false
 	}
-	return pgtest.Engine(t), true
+	d := pgtest.Engine(t)
+	if seed {
+		pgtest.SeedT3Connection(t, d)
+	}
+	return d, true
 }

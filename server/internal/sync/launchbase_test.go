@@ -1,8 +1,9 @@
 package sync_test
 
 import (
-	"github.com/flexdinesh/stage/server/internal/t3"
 	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 func TestPredecessorBaseAvailability(t *testing.T) {

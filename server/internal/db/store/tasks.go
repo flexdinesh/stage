@@ -186,27 +186,6 @@ type TaskEvent struct {
 	At        time.Time  `json:"at"`
 }
 
-// LegacyT3ModelKey is the T3 model id of a provider and model, "" unless
-// both are set (t3.ModelKey's encoding).
-func LegacyT3ModelKey(provider, model *string) string {
-	if provider == nil || model == nil || *provider == "" || *model == "" {
-		return ""
-	}
-	b, _ := json.Marshal([2]string{*provider, *model})
-	return string(b)
-}
-
-// LegacyT3Config is the execution config of the legacy T3 model inputs
-// (providerInstanceId, model, modelOptions, runtimeMode, interactionMode;
-// docs/api.md), as t3.LegacyConfig maps them. Writes and the legacy-column
-// backfill store it.
-func LegacyT3Config(provider, model *string, options []execution.ModelOption, runtime, interaction string) execution.Config {
-	if options == nil {
-		options = []execution.ModelOption{}
-	}
-	return execution.Config{Model: LegacyT3ModelKey(provider, model), Options: options, Permission: runtime, Mode: interaction}
-}
-
 type Attempt struct {
 	TaskID     int64                `json:"taskId"`
 	Number     int                  `json:"attempt"`
@@ -546,21 +525,8 @@ type Observations interface {
 	// Watched: connection's top-level sessions observed running, needing
 	// input or done.
 	Watched(ctx context.Context, connection int64) ([]SessionRef, error)
+	// NeedsInputCount: tasks in needs_input plus top-level sessions no task
+	// owns observed needing input.
+	NeedsInputCount(ctx context.Context) (int, error)
 }
 
-// ThreadMirror is the T3 mirror row derived from an observation.
-type ThreadMirror struct {
-	SessionID       int64
-	ParentThreadID  *string
-	Relationship    *string
-	Branch          *string
-	WorktreePath    *string
-	PendingRequests int
-	ActiveRunID     *string
-	LatestRunID     *string
-	Settled         bool
-	SettledAt       *time.Time
-	Model           *string
-	RuntimeMode     *string
-	InteractionMode *string
-}

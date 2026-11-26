@@ -27,9 +27,9 @@ func mustProject(t *testing.T, s *db.Store, ctx context.Context, t3id string) db
 
 func mustTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64, title string, needs []int64) db.Task {
 	t.Helper()
-	task, err := s.CreateTask(ctx, db.NewTask{
-		ProjectID: projectID, Title: title, Prompt: "p", RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, Needs: needs,
+	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection,
+		ProjectID: projectID, Title: title, Prompt: "p",
+		Workspace: db.Workspace{Type: "root"}, Needs: needs,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestPollableTasksThrottlesStaleCompleted(t *testing.T) {
 	for i, name := range []string{"running", "fresh", "stale"} {
 		task := mustTask(t, s, ctx, p.ID, name, nil)
 		thread := fmt.Sprintf("thread-%d", i)
-		_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: thread}})
+		_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: thread}})
 		if name != "running" {
 			_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone})
 		}
@@ -104,7 +104,7 @@ func TestSweepStagedAttachments(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := mustProject(t, s, ctx, "p-sweep").ID
-	if _, err := s.CreateTask(ctx, db.NewTask{ProjectID: p, Title: "t", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
+	if _, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p, Title: "t", Prompt: "p",
 		Workspace: db.Workspace{Type: "root"}, AttachmentIDs: []int64{attachedOld.ID}}); err != nil {
 		t.Fatal(err)
 	}
@@ -167,10 +167,10 @@ func note(t *testing.T, s *db.Store, ctx context.Context, owner db.JournalOwner,
 
 func mustSchedule(t *testing.T, s *db.Store, ctx context.Context, projectID int64, cron string) db.Schedule {
 	t.Helper()
-	sc, err := s.CreateSchedule(ctx, db.NewSchedule{
-		ProjectID: projectID, Title: "nightly", Prompt: "p", RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"},
-		Cron: cron, Tz: "UTC",
+	sc, err := s.CreateSchedule(ctx, db.NewSchedule{ConnectionID: dbtest.T3Connection,
+		ProjectID: projectID, Title: "nightly", Prompt: "p",
+		Workspace: db.Workspace{Type: "root"},
+		Cron:      cron, Tz: "UTC",
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -24,7 +26,7 @@ func TestInventoryReadsRepoThroughSharedPaths(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, ".git", "config"), []byte("[remote \"origin\"]\n\turl = https://github.com/o/app.git\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetSharedPath(t.Context(), db.SharedPath{ConnectionID: store.LegacyT3ID(), HarnessRoot: "/harness", StageRoot: stageRoot}); err != nil {
+	if err := store.SetSharedPath(t.Context(), db.SharedPath{ConnectionID: store.ActiveID(db.LocalMachine, "t3"), HarnessRoot: "/harness", StageRoot: stageRoot}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(repo, "packages", "web"), 0o755); err != nil {
@@ -34,8 +36,8 @@ func TestInventoryReadsRepoThroughSharedPaths(t *testing.T) {
 	fake.AddProject("app", "/harness/app")
 	fake.AddProject("web", "/harness/app/packages/web")
 	fake.AddProject("other", "/elsewhere/other")
-	svc := t3sync.New(store, t3.NewAdapter(fake), slog.New(slog.NewTextHandler(io.Discard, nil)))
-	ws, err := svc.Inventory(t.Context(), store.LegacyT3ID())
+	svc := t3sync.NewWithAdapters(store, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(fake)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ws, err := svc.Inventory(t.Context(), store.ActiveID(db.LocalMachine, "t3"))
 	if err != nil {
 		t.Fatal(err)
 	}

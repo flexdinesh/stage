@@ -210,6 +210,7 @@ func Run(ctx context.Context, o Options) error {
 	// Retires connections whose instance moved to another machine (moved.go).
 	moved := newMovedRetirer(store, syncSvc.FullSyncEvery, logger)
 	syncSvc.OnFullSync = moved.Kick
+	syncSvc.OnConnectionSynced = t3setup.RecordFullSync(store)
 	notifier := notify.New(store, cfg.PublicURL, logger)
 	// One release and one schedule runner per active connection, on every
 	// machine; the sets follow instance switches.
@@ -342,7 +343,7 @@ func Run(ctx context.Context, o Options) error {
 	// does not wait on open streams.
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, Sync: syncSvc, Push: notifier, Logger: logger,
-		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees, Setup: local.setup,
+		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees,
 		LiveConnectors: func() harness.Connectors {
 			c, err := machines.Connectors(harnesses)
 			if err != nil {

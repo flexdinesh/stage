@@ -52,20 +52,6 @@ func completionPreview(ctx context.Context, tx store.Tx, id int64) (CompletionPr
 	if task.AcceptanceID != nil {
 		p.BlockedReason = "This task is already completed. Change its state back to accept another result."
 	}
-	if task.T3ThreadID != nil {
-		th, found, err := tx.Acceptances().ThreadEvidence(ctx, task.SessionIdentityID)
-		if err != nil {
-			return p, err
-		}
-		status, pending, active := th.Status, th.Pending, th.ActiveRunID
-		if found {
-			e.Branch, e.WorktreePath, e.RunID, e.ReplyRunID = th.Branch, th.WorktreePath, th.RunID, th.ReplyRunID
-			e.Reply, e.ReplyTruncated, e.ReplyAt, e.ObservedAt = th.Reply, th.ReplyTruncated, th.ReplyAt, th.ObservedAt
-		}
-		if pending > 0 || active != nil && *active != "" || status == "running" || status == "needs_input" {
-			p.BlockedReason = "Stop execution in its harness before completing this task."
-		}
-	}
 	if task.Session != nil {
 		var observed execution.Observation
 		if task.SessionIdentityID != nil {

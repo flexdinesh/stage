@@ -181,10 +181,10 @@ Usage:
                                       expired, 4 not running, 5 data dir in use, 6 no service
                                       manager, 7 invalid config; --url/STAGE_URL do not apply
   stage context                       your session, cwd and resolved project
-  stage show REF                      the task or session a stage link, T3 thread link,
-                                      #TASK_ID or thread id names (with its session/task)
+  stage show REF                      the task, tree or session a stage link, harness session
+                                      link or #TASK_ID names (with its session/task)
   stage projects ls
-  stage models ls [--connection ID]
+  stage models ls --connection ID [--project ID]
   stage task ls [--project P] [--state S,..] [-q TEXT] [--closed true|all] [--limit N]
   stage task show ID
   stage task add --title T --prompt TEXT|- [config] [--needs ID,..] [--after-me] [--tree ID]
@@ -228,8 +228,8 @@ Usage:
   stage setup instructions [--claude] [--codex] [--file PATH]
   stage guide                         agent workflow guide
 
-Config: --project P --provider ID --model ID --effort E --option K=V... --runtime MODE
-        --mode default|plan --base-ref REF --branch NAME
+Config: --project P --connection ID --execution-config JSON (models ls shows the choices)
+        --workspace root|worktree --base-ref REF --branch NAME --base ref|predecessor
         --prompt-file PATH --image PATH...
 Notes: task add and sessions adopt accept --initial-note TEXT; schedules accept --notes TEXT.
 Trees: joining a tree without --needs makes a parallel root; --needs ID runs it after
@@ -482,8 +482,6 @@ func runModels(ctx context.Context, env Env, args []string) error {
 	return c.out(res, func(w io.Writer) {
 		if res.Capabilities != nil {
 			printCapabilities(w, *res.Capabilities)
-		} else {
-			printCatalog(w, res.Catalog)
 		}
 	})
 }

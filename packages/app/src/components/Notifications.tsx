@@ -94,7 +94,7 @@ export function usePushRefresh() {
   useEffect(
     () =>
       notifications?.onDelivered(() => {
-        for (const queryKey of [keys.notifications, keys.badge, keys.tasks, keys.task, keys.thread, keys.trees, keys.tree]) {
+        for (const queryKey of [keys.notifications, keys.badge, keys.tasks, keys.task, keys.trees, keys.tree]) {
           void qc.invalidateQueries({ queryKey });
         }
       }),

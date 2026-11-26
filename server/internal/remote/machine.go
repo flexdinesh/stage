@@ -167,7 +167,9 @@ func (m *Machine) Connectors() map[string]harness.Connector {
 func (m *Machine) Ops() machine.Ops { return ops{m} }
 
 // traits are the optional interfaces the worker's adapter for connection
-// implements; known is false until the worker described the machine.
+// implements; known is false until the worker described that connection
+// (a connection installed after the last describe is assumed capable, as
+// before the first describe: its calls answer for themselves).
 func (m *Machine) traits(connection int64) (traits []string, known bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -179,7 +181,7 @@ func (m *Machine) traits(connection int64) (traits []string, known bool) {
 			return h.Traits, true
 		}
 	}
-	return nil, true
+	return nil, false
 }
 
 // Described reports whether the worker described the machine since this

@@ -47,14 +47,15 @@ func ModelKey(provider, model string) string {
 	b, _ := json.Marshal([2]string{provider, model})
 	return string(b)
 }
-func LegacyConfig(provider, model string, opts []execution.ModelOption, permission, mode string) execution.Config {
+// threadConfig is the execution config a thread reports.
+func threadConfig(provider, model string, opts []execution.ModelOption, permission, mode string) execution.Config {
 	key := ""
 	if provider != "" && model != "" {
 		key = ModelKey(provider, model)
 	}
 	return execution.Config{Model: key, Options: opts, Permission: permission, Mode: mode}
 }
-func DecodeModelKey(key string) (string, string, error) {
+func decodeModelKey(key string) (string, string, error) {
 	var pair []string
 	if err := json.Unmarshal([]byte(key), &pair); err != nil || len(pair) != 2 || pair[0] == "" || pair[1] == "" {
 		return "", "", errors.New("invalid T3 model selection; choose a model from the catalog")
@@ -187,7 +188,9 @@ func (d ThreadDetail) Observation() execution.Observation {
 	case StatusCancelled, StatusRolledBack:
 		state = "cancelled"
 	case StatusIdle:
-		if d.Settled {
+		// Idle after a run (no run active, a latest run known) or settled:
+		// the run finished. Idle without either never ran.
+		if d.Settled || d.LatestRunID != "" {
 			state = "done"
 		}
 	default:
@@ -199,7 +202,7 @@ func (d ThreadDetail) Observation() execution.Observation {
 	if d.PendingRequestCount > 0 {
 		state = "needs_input"
 	}
-	o := execution.Observation{ModelLabel: d.Model, Session: execution.SessionRef{ConnectionID: 1, ExternalSessionID: d.ThreadID}, Project: d.ProjectID, Title: d.Title, State: state, Active: state == "running" || state == "needs_input", Archived: d.Archived, Child: d.RelationshipToParent == "subagent", Branch: strings.TrimSpace(d.Branch), Directory: d.WorktreePath, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt, ExecutionID: d.LatestRunID, Artifacts: d.PullRequests, Config: LegacyConfig(d.ProviderInstanceID, d.Model, nil, string(d.RuntimeMode), string(d.InteractionMode)), Links: execution.Links{App: d.Link}}
+	o := execution.Observation{ModelLabel: d.Model, Session: execution.SessionRef{ConnectionID: 1, ExternalSessionID: d.ThreadID}, Project: d.ProjectID, Title: d.Title, State: state, Active: state == "running" || state == "needs_input", Archived: d.Archived, Child: d.RelationshipToParent == "subagent", Branch: strings.TrimSpace(d.Branch), Directory: d.WorktreePath, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt, ExecutionID: d.LatestRunID, Artifacts: d.PullRequests, Config: threadConfig(d.ProviderInstanceID, d.Model, nil, string(d.RuntimeMode), string(d.InteractionMode)), Links: execution.Links{App: d.Link}}
 	if d.ParentThreadID != "" {
 		o.Parent = &execution.SessionRef{ConnectionID: 1, ExternalSessionID: d.ParentThreadID}
 	}
@@ -422,7 +425,7 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, checkpoint ex
 	}
 	var model *ModelSelection
 	if in.Config.Model != "" {
-		provider, name, e := DecodeModelKey(in.Config.Model)
+		provider, name, e := decodeModelKey(in.Config.Model)
 		if e != nil {
 			return execution.Observation{}, &execution.Rejected{Reason: e.Error()}
 		}

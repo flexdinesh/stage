@@ -71,12 +71,9 @@ func (s *Store) UpdateProject(ctx context.Context, id int64, title string, archi
 	})
 }
 
-// UpsertT3Projects refreshes discovery, never imports or edits Stage metadata.
-// The caller supplies a complete successful list; failures never mark missing.
-func (s *Store) UpsertT3Projects(ctx context.Context, ps []execution.WorkspaceInfo) (int, error) {
-	return s.RefreshWorkspaces(ctx, s.LegacyT3ID(), ps)
-}
-
+// RefreshWorkspaces refreshes a connection's discovery, never imports or
+// edits Stage metadata. The caller supplies a complete successful list;
+// failures never mark missing.
 func (s *Store) RefreshWorkspaces(ctx context.Context, connectionID int64, ps []execution.WorkspaceInfo) (int, error) {
 	return write(ctx, s, func(tx store.Tx) (int, error) {
 		n := 0
@@ -106,4 +103,25 @@ func (s *Store) RefreshWorkspaces(ctx context.Context, connectionID int64, ps []
 		}
 		return n, pr.RefreshBindingStatus(ctx, connectionID)
 	})
+}
+
+// BoundProjectTitle is the title of the Stage project bound to a
+// connection's harness project: the project of its only active binding
+// (false when none or several).
+func (s *Store) BoundProjectTitle(ctx context.Context, connectionID int64, external string) (string, bool, error) {
+	var title string
+	var found bool
+	err := s.e.Read(ctx, func(tx store.Tx) error {
+		id, err := tx.Projects().SoleBinding(ctx, connectionID, external)
+		if err != nil || id == nil {
+			return err
+		}
+		p, err := tx.Projects().Get(ctx, *id)
+		if err != nil {
+			return err
+		}
+		title, found = p.Title, true
+		return nil
+	})
+	return title, found, err
 }

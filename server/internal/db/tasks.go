@@ -36,40 +36,36 @@ func (s *Store) TaskEvents(ctx context.Context, taskID int64) ([]TaskEvent, erro
 	return read(ctx, s, func(tx store.Tx) ([]TaskEvent, error) { return tx.Tasks().Events(ctx, taskID) })
 }
 
-// NewTask is a validated create input. A T3 task without ExecutionConfig
-// stores the legacy model inputs (ProviderInstanceID, Model, ModelOptions,
-// RuntimeMode, InteractionMode) translated to one (legacyT3Config).
+// NewTask is a validated create input. ConnectionID is required; a nil
+// ExecutionConfig is the harness defaults.
 type NewTask struct {
-	ExecutionConfig    *execution.Config
-	ConnectionID       int64
-	OriginSession      *SessionRef
-	ProjectID          int64
-	Title              string
-	Prompt             string
-	ProviderInstanceID *string
-	Model              *string
-	ModelOptions       []execution.ModelOption
-	RuntimeMode        string // "" = full-access
-	InteractionMode    string // "" = default
-	Workspace          Workspace
-	InitialNote        string
-	AttachmentIDs      []int64 // staged images to attach (setAttachments)
-	StartAt            *time.Time
-	StartTz            *string // set with StartAt (IANA zone)
-	ScheduleID         *int64  // spawning schedule
-	Handoff            *bool   // append the needs' handoff at launch; nil = default (on)
+	ExecutionConfig *execution.Config
+	ConnectionID    int64
+	OriginSession   *SessionRef
+	ProjectID       int64
+	Title           string
+	Prompt          string
+	Workspace       Workspace
+	InitialNote     string
+	AttachmentIDs   []int64 // staged images to attach (setAttachments)
+	StartAt         *time.Time
+	StartTz         *string // set with StartAt (IANA zone)
+	ScheduleID      *int64  // spawning schedule
+	Handoff         *bool   // append the needs' handoff at launch; nil = default (on)
 	// TreeID: join this tree (docs/api.md "Tree rules"); nil with Needs joins
 	// the needs' tree (or a new one).
 	TreeID *int64
 	// Needs: tasks this one needs (setNeeds rules).
 	Needs []int64
-	// NeedsThreadID ("afterMe"): adopt this T3 session (or take its owning
+	// NeedsSession ("afterMe"): adopt this session (or take its owning
 	// task) and need it, before Needs.
-	NeedsThreadID *string
-	NeedsSession  *SessionRef
-	NeedsBinding  *ProjectBinding
-	StartMode     *StartMode // nil = inherit the tree's
+	NeedsSession *SessionRef
+	NeedsBinding *ProjectBinding
+	StartMode    *StartMode // nil = inherit the tree's
 }
+
+// errConnectionRequired: no harness connection was chosen.
+var errConnectionRequired = Invalid("connectionId is required: choose a harness connection")
 
 // errStartAndNeeds: a task waits on a start time or on needs, not both.
 var errStartAndNeeds = Invalid("a task can have a start time or needs, not both")
@@ -90,9 +86,9 @@ func (s *Store) createTask(ctx context.Context, in NewTask, extra func(tx store.
 }
 
 // insertTask is createTask's insert, inside tx: insert, adopt
-// NeedsThreadID, resolve and join the tree, set needs.
+// NeedsSession, resolve and join the tree, set needs.
 func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra func(tx store.Tx, id int64) error) (int64, error) {
-	if in.StartAt != nil && (len(in.Needs) > 0 || in.NeedsThreadID != nil || in.NeedsSession != nil) {
+	if in.StartAt != nil && (len(in.Needs) > 0 || in.NeedsSession != nil) {
 		return 0, errStartAndNeeds
 	}
 	if err := requireProject(ctx, tx, in.ProjectID); err != nil {
@@ -100,18 +96,14 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 	}
 	var originID *int64
 	if in.ConnectionID == 0 {
-		t3, err := legacyT3Tx(ctx, tx)
-		if err != nil {
-			return 0, err
-		}
-		in.ConnectionID = t3
+		return 0, errConnectionRequired
 	}
 	if err := connectionUsable(ctx, tx, in.ConnectionID); err != nil {
 		return 0, err
 	}
-	config, err := legacyT3Config(ctx, tx, in.ConnectionID, in.ExecutionConfig, in.ProviderInstanceID, in.Model, in.ModelOptions, in.RuntimeMode, in.InteractionMode)
-	if err != nil {
-		return 0, err
+	config := in.ExecutionConfig
+	if config == nil {
+		config = &execution.Config{Options: []execution.ModelOption{}}
 	}
 	if in.OriginSession != nil {
 		value, err := ensureSession(ctx, tx, *in.OriginSession)
@@ -131,14 +123,8 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 	}
 
 	needs := slices.Clone(in.Needs)
-	if in.NeedsThreadID != nil || in.NeedsSession != nil {
-		input := AdoptInput{Binding: in.NeedsBinding}
-		if in.NeedsSession != nil {
-			input.Session = *in.NeedsSession
-		} else {
-			input.ThreadID = *in.NeedsThreadID
-		}
-		owner, _, err := s.adoptThread(ctx, tx, input)
+	if in.NeedsSession != nil {
+		owner, _, err := s.adoptThread(ctx, tx, AdoptInput{Binding: in.NeedsBinding, Session: *in.NeedsSession})
 		if err != nil {
 			return 0, err
 		}
@@ -181,26 +167,19 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 }
 
 // TaskPatch is a partial task update (JSON body of PATCH /api/tasks/:id).
-// Nullable fields: providerInstanceId, model, startMode (Null clears). The
-// legacy T3 model fields set their part of the stored executionConfig
-// (mergeLegacyT3).
+// Nullable fields: startMode (Null clears).
 type TaskPatch struct {
-	ValidatedConnection int64                             `json:"-"`
-	ValidatedProject    int64                             `json:"-"`
-	ConnectionID        Optional[int64]                   `json:"connectionId"`
-	ExecutionConfig     Optional[execution.Config]        `json:"executionConfig"`
-	ProjectID           Optional[int64]                   `json:"projectId"`
-	Title               Optional[string]                  `json:"title"`
-	Prompt              Optional[string]                  `json:"prompt"`
-	ProviderInstanceID  Optional[string]                  `json:"providerInstanceId"`
-	Model               Optional[string]                  `json:"model"`
-	ModelOptions        Optional[[]execution.ModelOption] `json:"modelOptions"`
-	RuntimeMode         Optional[string]                  `json:"runtimeMode"`
-	InteractionMode     Optional[string]                  `json:"interactionMode"`
-	Workspace           Optional[Workspace]               `json:"workspace"`
-	AttachmentIDs       Optional[[]int64]                 `json:"attachmentIds"` // the exact image set; null = none
-	Handoff             Optional[bool]                    `json:"handoff"`       // append the needs' handoff at launch
-	StartMode           Optional[StartMode]               `json:"startMode"`     // null = inherit the tree's
+	ValidatedConnection int64                      `json:"-"`
+	ValidatedProject    int64                      `json:"-"`
+	ConnectionID        Optional[int64]            `json:"connectionId"`
+	ExecutionConfig     Optional[execution.Config] `json:"executionConfig"`
+	ProjectID           Optional[int64]            `json:"projectId"`
+	Title               Optional[string]           `json:"title"`
+	Prompt              Optional[string]           `json:"prompt"`
+	Workspace           Optional[Workspace]        `json:"workspace"`
+	AttachmentIDs       Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
+	Handoff             Optional[bool]             `json:"handoff"`       // append the needs' handoff at launch
+	StartMode           Optional[StartMode]        `json:"startMode"`     // null = inherit the tree's
 	// One-shot start: the API converts startLocal (wall time in startTz) into
 	// StartAt; StartAt and StartTz are set (or null) together.
 	StartLocal Optional[string]    `json:"startLocal"`
@@ -210,8 +189,7 @@ type TaskPatch struct {
 
 // restrictedSet reports whether a field editable only in backlog is present.
 func (p TaskPatch) restrictedSet() bool {
-	return p.ConnectionID.Set || p.ExecutionConfig.Set || p.ProjectID.Set || p.Prompt.Set || p.ProviderInstanceID.Set || p.Model.Set ||
-		p.ModelOptions.Set || p.RuntimeMode.Set || p.InteractionMode.Set || p.Workspace.Set || p.AttachmentIDs.Set ||
+	return p.ConnectionID.Set || p.ExecutionConfig.Set || p.ProjectID.Set || p.Prompt.Set || p.Workspace.Set || p.AttachmentIDs.Set ||
 		p.StartAt.Set || p.Handoff.Set || p.StartMode.Set
 }
 
@@ -245,15 +223,8 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 				return err
 			}
 		}
-		legacy, err := mergeLegacyT3(e.ExecutionConfig, p.ProviderInstanceID, p.Model, p.ModelOptions, p.RuntimeMode, p.InteractionMode)
-		if err != nil {
-			return err
-		}
 		u := store.TaskUpdate{ConnectionID: p.ConnectionID, ExecutionConfig: p.ExecutionConfig, ProjectID: p.ProjectID,
 			Title: p.Title, Prompt: p.Prompt, Workspace: p.Workspace, Handoff: p.Handoff, StartMode: p.StartMode}
-		if legacy != nil {
-			u.ExecutionConfig = Optional[execution.Config]{Set: true, V: *legacy}
-		}
 		if p.ConnectionID.Set {
 			if err := checkDestinationChange(ctx, tx, e.ConnectionID, p.ConnectionID.V, p.ExecutionConfig, p.Workspace); err != nil {
 				return err
@@ -493,60 +464,3 @@ func nonNilIDs(ids []int64) []int64 {
 	return ids
 }
 
-// legacyT3Config is a create's execution config: config when set, else on a
-// T3 connection the legacy T3 model inputs translated (docs/api.md "Create
-// task"; "" runtime and interaction modes take the T3 defaults full-access
-// and default), else nil.
-func legacyT3Config(ctx context.Context, tx store.Tx, connection int64, config *execution.Config,
-	provider, model *string, options []execution.ModelOption, runtime, interaction string) (*execution.Config, error) {
-	if config != nil {
-		return config, nil
-	}
-	t3, err := tx.Connections().HarnessIs(ctx, connection, HarnessT3)
-	if err != nil || !t3 {
-		return nil, err
-	}
-	if runtime == "" {
-		runtime = "full-access"
-	}
-	if interaction == "" {
-		interaction = "default"
-	}
-	c := store.LegacyT3Config(provider, model, options, runtime, interaction)
-	return &c, nil
-}
-
-// mergeLegacyT3 is the stored config with an edit's legacy T3 model fields
-// applied, nil when none is set: providerInstanceId and model set the model
-// together (both null clears it), modelOptions the options, runtimeMode the
-// permission and interactionMode the mode. The rest of the config is kept.
-func mergeLegacyT3(current *execution.Config, provider, model Optional[string],
-	options Optional[[]execution.ModelOption], runtime, interaction Optional[string]) (*execution.Config, error) {
-	if !provider.Set && !model.Set && !options.Set && !runtime.Set && !interaction.Set {
-		return nil, nil
-	}
-	if provider.Set != model.Set || provider.Null != model.Null {
-		return nil, Invalid("providerInstanceId and model must be set together")
-	}
-	c := execution.Config{Options: []execution.ModelOption{}}
-	if current != nil {
-		c = *current
-		c.Options = slices.Clone(c.Options)
-	}
-	if provider.Set {
-		c.Model = store.LegacyT3ModelKey(provider.Ptr(), model.Ptr())
-	}
-	if options.Set {
-		c.Options = slices.Clone(options.V)
-	}
-	if c.Options == nil {
-		c.Options = []execution.ModelOption{}
-	}
-	if runtime.Set {
-		c.Permission = runtime.V
-	}
-	if interaction.Set {
-		c.Mode = interaction.V
-	}
-	return &c, nil
-}

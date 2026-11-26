@@ -58,12 +58,10 @@ func (s *server) capabilities(ctx context.Context, id, projectID int64) (executi
 	}
 	return c, nil
 }
+
 func (s *server) validateSelection(ctx context.Context, id, project int64, c *execution.Config) error {
 	if c == nil || (c.Model == "" && c.Permission == "" && c.Mode == "" && len(c.Options) == 0) {
 		return nil
-	}
-	if id == 0 {
-		id = s.Store.LegacyT3ID()
 	}
 	caps, err := s.capabilities(ctx, id, project)
 	if err != nil {
@@ -154,6 +152,6 @@ func (s *server) attachLaunchLink(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return err
 	}
-	writeJSON(w, 200, s.task(s.envID(r.Context()), t))
+	writeJSON(w, 200, s.task(t))
 	return nil
 }

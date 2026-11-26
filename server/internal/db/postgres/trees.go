@@ -20,8 +20,8 @@ func (t *tx) Trees() store.Trees { return trees{t.r} }
 
 // treeActivitySQL is TreeTimes.LastActivityAt for tree tr in SQL.
 // GREATEST ignores NULLs (no journal entries, no members, no thread).
-const treeActivitySQL = `GREATEST(tr.created_at, tr.updated_at, (SELECT max(j.created_at) FROM journal_entries j WHERE j.tree_id = tr.id OR (j.kind = 'note' AND j.task_id IN (SELECT id FROM tasks WHERE tree_id = tr.id))), (SELECT max(GREATEST(m.updated_at, th.updated_at))
- FROM tasks m LEFT JOIN threads th ON th.session_id = m.session_id WHERE m.tree_id = tr.id))`
+const treeActivitySQL = `GREATEST(tr.created_at, tr.updated_at, (SELECT max(j.created_at) FROM journal_entries j WHERE j.tree_id = tr.id OR (j.kind = 'note' AND j.task_id IN (SELECT id FROM tasks WHERE tree_id = tr.id))), (SELECT max(GREATEST(m.updated_at, (o.observation->>'updatedAt')::timestamptz))
+ FROM tasks m LEFT JOIN execution_observations o ON o.session_id = m.session_id WHERE m.tree_id = tr.id))`
 
 const treeColumns = `tr.id, tr.title, tr.start_mode, tr.status, tr.closed_at, tr.created_at, tr.created_by_user_id, tr.source_machine_id, tr.updated_at,
   (NOT tr.recorded_work AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.tree_id = tr.id AND NOT ` + unstartedSQL + `)), ` + treeActivitySQL

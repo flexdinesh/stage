@@ -151,6 +151,26 @@ func TestAdapterLinkKeepsOpaqueSessionIdentity(t *testing.T) {
 	}
 }
 
+// T3 web links resolve through the connection's adapter, scoped to it and
+// to its public URL.
+func TestAdapterResolvesWebLinks(t *testing.T) {
+	fake := NewFake()
+	fake.PublicURL = "https://t3.example/base"
+	adapter := NewConnectionAdapter(fake, 7)
+	ref, err := adapter.ResolveLink(t.Context(), WebThreadURL(fake.PublicURL, FakeEnvironmentID, "thread-x"))
+	if err != nil || ref != (execution.SessionRef{ConnectionID: 7, ExternalSessionID: "thread-x"}) {
+		t.Fatal(ref, err)
+	}
+	if ref, err = adapter.ResolveLink(t.Context(), AppThreadURL(FakeEnvironmentID, "thread-y")); err != nil || ref.ConnectionID != 7 {
+		t.Fatal(ref, err)
+	}
+	for _, raw := range []string{"https://other.example/base/" + FakeEnvironmentID + "/thread-x", "https://t3.example/elsewhere/thread-x"} {
+		if _, err := adapter.ResolveLink(t.Context(), raw); err == nil {
+			t.Fatalf("%s accepted", raw)
+		}
+	}
+}
+
 func TestUnreportedRuntimeModesInheritHarnessPermissions(t *testing.T) {
 	fake := NewFake()
 	fake.Catalog.Providers[0].RuntimeModes = nil

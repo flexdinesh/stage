@@ -44,10 +44,6 @@ func (in ConfigInput) config() (execution.Config, error) {
 	return c, nil
 }
 
-func (a ConfigArgs) legacyConfig() bool {
-	return a.Provider != "" || a.Model != "" || a.RuntimeMode != "" || a.InteractionMode != "" || a.Effort != "" || len(a.Options) > 0
-}
-
 func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c agentctx.Caller) (int64, error) {
 	h, err := o.harnesses(ctx)
 	if err != nil {
@@ -78,8 +74,6 @@ func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c age
 			}
 		}
 		switch {
-		case a.legacyConfig():
-			id = h.t3()
 		case len(bindings) > 1:
 			return 0, errors.New("this project has multiple harness bindings; select connectionId from list_projects")
 		case c.Session != nil:

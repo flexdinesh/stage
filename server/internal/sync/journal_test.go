@@ -14,8 +14,8 @@ var testAttribution = map[string]harness.Attribution{t3.Kind: t3.Descriptor.Attr
 
 func TestJournalInstructionsNameEveryInterface(t *testing.T) {
 	tree := int64(4)
-	openCode := db.Task{ID: 7, TreeID: &tree, ConnectionID: 2, Harness: db.HarnessOpenCode}
-	t3 := db.Task{ID: 8, ConnectionID: 1, Harness: db.HarnessT3}
+	openCode := db.Task{ID: 7, TreeID: &tree, ConnectionID: 2, Harness: "opencode"}
+	t3 := db.Task{ID: 8, ConnectionID: 1, Harness: "t3"}
 	both := []string{
 		"<stage-journal>\n",
 		"Use whichever Stage interface you have: the stage CLI (stage context, stage task show, stage task|tree notes; stage call TOOL JSON runs any tool named below), Stage MCP tools (names below), or",
@@ -77,7 +77,7 @@ func TestJournalInstructionsNameEveryInterface(t *testing.T) {
 }
 
 func TestJournalInstructionsNameInstalledCLI(t *testing.T) {
-	got := journalInstructions(db.Task{ID: 1, ConnectionID: 1, Harness: db.HarnessOpenCode}, opencode.Descriptor.Attribution, httpAPI("", false, nil), "stage-dev")
+	got := journalInstructions(db.Task{ID: 1, ConnectionID: 1, Harness: "opencode"}, opencode.Descriptor.Attribution, httpAPI("", false, nil), "stage-dev")
 	want := "the stage-dev CLI (stage-dev context, stage-dev task show, stage-dev task|tree notes; stage-dev call TOOL JSON runs any tool named below), Stage MCP tools (names below), or the Stage server's HTTP API."
 	if !strings.Contains(got, want) {
 		t.Errorf("missing %q in:\n%s", want, got)

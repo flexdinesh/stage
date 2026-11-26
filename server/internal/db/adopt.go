@@ -13,7 +13,6 @@ import (
 // AdoptInput names the target independently of the caller who wrote the note.
 type AdoptInput struct {
 	Session         SessionRef
-	ThreadID        string // legacy T3 target
 	CallerSession   *SessionRef
 	ProjectID       *int64
 	NewProjectTitle string
@@ -47,18 +46,7 @@ func (s *Store) AdoptThread(ctx context.Context, in AdoptInput) (Task, bool, err
 
 func (s *Store) adoptThread(ctx context.Context, tx store.Tx, in AdoptInput) (int64, bool, error) {
 	ref := in.Session
-	if in.ThreadID != "" {
-		t3, err := legacyT3Tx(ctx, tx)
-		if err != nil {
-			return 0, false, err
-		}
-		ref = SessionRef{ConnectionID: t3, ExternalSessionID: in.ThreadID}
-	}
 	if err := connectionUsable(ctx, tx, ref.ConnectionID); err != nil {
-		return 0, false, err
-	}
-	isT3, err := tx.Connections().HarnessIs(ctx, ref.ConnectionID, HarnessT3)
-	if err != nil {
 		return 0, false, err
 	}
 	sid, err := ensureSession(ctx, tx, ref)
@@ -94,10 +82,13 @@ func (s *Store) adoptThread(ctx context.Context, tx store.Tx, in AdoptInput) (in
 		r := []rune(ref.ExternalSessionID)
 		title = "Session " + string(r[:min(8, len(r))])
 	}
+	// Idle: done when the harness reports an execution, else backlog (the
+	// first native execution is watched). A harness that knows its run
+	// finished reports done itself.
 	state := TaskState(o.State)
 	if state == "idle" {
 		state = StateDone
-		if !isT3 && o.StartedAt == nil && o.EndedAt == nil {
+		if o.StartedAt == nil && o.EndedAt == nil {
 			state = StateBacklog
 		}
 	}

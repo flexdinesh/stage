@@ -165,3 +165,12 @@ func suffix(t testing.TB) string {
 	}
 	return hex.EncodeToString(b)
 }
+
+// SeedT3Connection inserts T3 connection 1 on the local machine (unpaired,
+// identity unstamped), as every install before migration 0032 had.
+func SeedT3Connection(t testing.TB, d *postgres.DB) {
+	t.Helper()
+	if _, err := d.Pool().Exec(context.Background(), `INSERT INTO harness_connections (id, machine_id, harness, stable_identity) VALUES (1, 1, 't3', true)`); err != nil {
+		t.Fatalf("seed t3 connection: %v", err)
+	}
+}

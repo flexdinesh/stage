@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 )
 
 func init() {
@@ -25,7 +26,7 @@ func launch(t *testing.T, s *db.Store, ctx context.Context, id int64, thread str
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateLaunching, BeginAttempt: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: thread}}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: thread}}); err != nil {
 		t.Fatal(err)
 	}
 	if end != db.StateRunning {
@@ -135,8 +136,8 @@ func caseMarkTreeDoneAndReopen(t *testing.T, open Factory) {
 	wantConflict(t, err, "is done")
 	_, err = s.UpdateTree(ctx, tree, db.TreePatch{StartMode: db.Optional[db.StartMode]{Set: true, V: db.StartManual}})
 	wantConflict(t, err, "is done")
-	_, err = s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "e", Prompt: "p", RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"}, TreeID: &tree})
+	_, err = s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "e", Prompt: "p",
+		Workspace: db.Workspace{Type: "root"}, TreeID: &tree})
 	wantConflict(t, err, "is done")
 	if _, err := s.UpdateTree(ctx, tree, db.TreePatch{Title: db.Optional[string]{Set: true, V: "renamed"}}); err != nil {
 		t.Fatalf("rename done tree: %v", err)

@@ -17,9 +17,8 @@ import type {
   TreeListQuery,
   UpdateTreeRequest,
   Attachment,
-  ThreadDetail, SessionRef, SessionPreview,
+  SessionRef, SessionPreview,
   Badge,
-  Catalog,
   CreateProjectRequest,
   ExternalProject,
   CreateTaskRequest,
@@ -258,7 +257,6 @@ export function createApi(transport: Transport) {
     forgetConnection: (id: number) => apiSend(`/connections/${id}`, del),
     capabilities: (id: number, projectId?: number) => apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({projectId})}`),
     sync: () => apiFetch<SyncResult>("/sync", post()),
-    catalog: () => apiFetch<Catalog>("/catalog"),
 
     projects: (archived: ArchivedFilter = "false") => apiFetch<ProjectList>(`/projects${toQuery({ archived })}`),
     project: (id: number) => apiFetch<Project>(`/projects/${id}`),
@@ -337,7 +335,6 @@ export function createApi(transport: Transport) {
     },
     deleteAttachment: (id: number) => apiSend(`/attachments/${id}`, del),
 
-    thread: (connectionId: number, id: string) => apiFetch<ThreadDetail>(`/connections/${connectionId}/sessions/${encodeURIComponent(id)}`),
     /** Tracks a top-level session as a task (201 new, 200 when a task already owns it). */
     sessionContext: (ref: SessionRef) => apiFetch<SessionPreview>(`/connections/${ref.connectionId}/sessions/${encodeURIComponent(ref.externalSessionId)}/context`),
     adoptSession: (ref: SessionRef, body: AdoptSessionRequest = {}) =>

@@ -13,6 +13,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/notify"
 )
 
@@ -97,7 +98,7 @@ func readHello(t *testing.T, events <-chan sseEvent) (helloEvent, string) {
 func insertDone(t *testing.T, e *env, thread string) int64 {
 	t.Helper()
 	id, err := e.store.InsertNotification(context.Background(), db.NewNotification{
-		Event: db.StateDone, T3ThreadID: &thread, Title: thread, URL: "/sessions/" + thread,
+		Event: db.StateDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: thread, URL: "/sessions/" + thread,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +160,7 @@ func TestNotificationStreamReplay(t *testing.T) {
 	project := tk.ProjectTitle
 	thread := "provider:session/x"
 	taskRow, err := e.store.InsertNotification(ctx, db.NewNotification{Event: db.StateNeedsInput, TaskID: &tk.ID,
-		T3ThreadID: &thread, Title: tk.Title, ProjectTitle: &project, URL: fmt.Sprintf("/tasks/%d", tk.ID)})
+		Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: tk.Title, ProjectTitle: &project, URL: fmt.Sprintf("/tasks/%d", tk.ID)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -28,7 +28,7 @@ type refJSON struct {
 
 func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 	raw := strings.TrimSpace(r.URL.Query().Get("ref"))
-	ref, err := refs.Parse(raw, s.Setup.Endpoint().PublicURL)
+	ref, err := refs.Parse(raw)
 	selection := r.URL.Query().Get("connectionId")
 	if selection != "" {
 		id, parseErr := strconv.ParseInt(selection, 10, 64)
@@ -95,7 +95,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 	case refs.KindSession:
 		id := ref.ConnectionID
 		if id == 0 {
-			id = s.Store.LegacyT3ID()
+			return db.Invalid("connectionId is required for a session id without a connection")
 		}
 		target := db.SessionRef{ConnectionID: id, ExternalSessionID: ref.ThreadID}
 		out.Session = &target
@@ -110,17 +110,6 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		obs, err := s.Store.Observation(ctx, target)
-		if errors.Is(err, db.ErrNotFound) && id == s.Store.LegacyT3ID() {
-			th, e := s.Store.GetThread(ctx, target.ExternalSessionID)
-			if e == nil {
-				out.SessionTitle = th.Title
-				out.Links = s.sessionLinks(ctx, id, &target.ExternalSessionID)
-				break
-			}
-			if !errors.Is(e, db.ErrNotFound) {
-				return e
-			}
-		}
 		if errors.Is(err, db.ErrNotFound) && r.URL.Query().Get("cached") != "true" {
 			if err = s.Sync.RefreshScopedSession(ctx, target); err == nil {
 				obs, err = s.Store.Observation(ctx, target)

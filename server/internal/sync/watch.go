@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/workevent"
 )
@@ -43,15 +42,6 @@ func (s *Service) watchConnection(ctx context.Context, connection int64) error {
 		return e
 	}
 	refs = append(refs, stored...)
-	// The legacy session mirror holds only sessions of harnesses that keep
-	// one; for the others these are no-ops.
-	ids, e := s.store.WatchedThreadIDs(ctx, connection)
-	if e != nil {
-		return e
-	}
-	for _, id := range ids {
-		refs = append(refs, execution.SessionRef{ConnectionID: connection, ExternalSessionID: id})
-	}
 	seen := map[string]bool{}
 	for _, ref := range refs {
 		if seen[ref.ExternalSessionID] {
@@ -74,7 +64,6 @@ func (s *Service) watchConnection(ctx context.Context, connection int64) error {
 		if _, err := s.store.TaskBySession(ctx, ref); err == nil {
 			continue
 		}
-		_ = s.store.SetObservedState(ctx, ref, db.TaskState(o.State))
 		if silent || !seeded || previous.State == o.State || !Notifiable(db.TaskState(o.State)) {
 			continue
 		}

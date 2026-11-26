@@ -2,8 +2,9 @@ package sync
 
 import (
 	"context"
-	"github.com/flexdinesh/stage/server/internal/db"
 	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/db"
 )
 
 func TestWorkspaceSelection(t *testing.T) {

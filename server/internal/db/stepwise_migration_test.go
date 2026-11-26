@@ -63,6 +63,14 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	29: {{"search index built and kept", seedV0029Search, checkV0029Search}},
 	30: {{"claude settings table", seedV0030ClaudeSettings, checkV0030ClaudeSettings}},
 	31: {{"codex settings per machine", seedV0031CodexSettings, checkV0031CodexSettings}},
+	32: {
+		{"unused seeded connection removed", seedV0032Unused, checkV0032Connection(false)},
+		{"paired connection kept", seedV0032("UPDATE t3_connection SET token='tok' WHERE machine_id=1"), checkV0032Connection(true)},
+		{"stamped connection kept", seedV0032("UPDATE harness_connections SET identity='env-1' WHERE id=1"), checkV0032Connection(true)},
+		{"default connection kept", seedV0032("UPDATE preferences SET default_connection_id=1"), checkV0032Connection(true)},
+		{"referenced connection kept", seedV0032("INSERT INTO projects(id,title) VALUES(1,'P')", "INSERT INTO tasks(id,project_id,title,prompt,connection_id) VALUES(1,1,'T','p',1)"), checkV0032Connection(true)},
+		{"bound connection kept", seedV0032("INSERT INTO projects(id,title) VALUES(1,'P')", "INSERT INTO project_bindings(project_id,connection_id,external_project_id,workspace) VALUES(1,1,'x','/w')"), checkV0032Connection(true)},
+	},
 }
 
 // TestStepwiseMigrations is the upgrade coverage (no releases exist yet):
@@ -615,4 +623,39 @@ func checkV0031CodexSettings(t *testing.T, pool *sqlite.DB) {
 	mustFail(t, pool, "a second row for one machine", `INSERT INTO codex_settings(machine_id) VALUES(1)`)
 	mustFail(t, pool, "connected outside 0/1", `UPDATE codex_settings SET connected=2 WHERE machine_id=1`)
 	mustFail(t, pool, "an unknown machine", `INSERT INTO codex_settings(machine_id) VALUES(99)`)
+}
+
+// seedV0032Unused leaves the seeded T3 connection 1 untouched and mirrors a
+// thread (the table 0032 drops).
+func seedV0032Unused(t *testing.T, pool *sqlite.DB) {
+	mustExec(t, pool, `INSERT INTO threads(t3_thread_id,t3_project_id,status,created_at,updated_at) VALUES('th','p','idle','2026-01-01T00:00:00.000000Z','2026-01-01T00:00:00.000000Z')`)
+}
+
+// seedV0032 configures or references connection 1 with qs.
+func seedV0032(qs ...string) func(*testing.T, *sqlite.DB) {
+	return func(t *testing.T, pool *sqlite.DB) {
+		for _, q := range qs {
+			mustExec(t, pool, q)
+		}
+	}
+}
+
+// checkV0032Connection: connection 1 survives only when configured or
+// referenced, and the threads mirror is dropped either way.
+func checkV0032Connection(kept bool) func(*testing.T, *sqlite.DB) {
+	return func(t *testing.T, pool *sqlite.DB) {
+		want := "0"
+		if kept {
+			want = "1"
+		}
+		wantRows(t, pool, `SELECT count(*) FROM harness_connections WHERE id=1`, want)
+		if tableExists(t, pool, "threads") {
+			t.Fatal("threads not dropped")
+		}
+		if !kept {
+			// A new connection takes a new id; 1 is never reissued.
+			mustExec(t, pool, `INSERT INTO harness_connections(machine_id,harness) VALUES(1,'opencode')`)
+			wantRows(t, pool, `SELECT id FROM harness_connections`, "2")
+		}
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 )
 
 func init() {
@@ -31,7 +32,7 @@ func caseAcceptedScheduledTaskDoesNotLaunch(t *testing.T, open Factory) {
 	p := mustProject(t, s, ctx, "p")
 	at := time.Now().Add(-time.Minute)
 	tz := "UTC"
-	task, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "scheduled", Prompt: "work", StartAt: &at, StartTz: &tz, RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}})
+	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "scheduled", Prompt: "work", StartAt: &at, StartTz: &tz, Workspace: db.Workspace{Type: "root"}})
 	if err != nil {
 		t.Fatal(err)
 	}

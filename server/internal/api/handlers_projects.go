@@ -20,12 +20,8 @@ func (s *server) plannedConnection(ctx context.Context, id int64) error {
 	return err
 }
 
-// connectionPath is the {connectionId} path value; none means the legacy T3
-// connection (the local machine's active T3).
+// connectionPath is the {connectionId} path value.
 func (s *server) connectionPath(r *http.Request) (int64, error) {
-	if r.PathValue("connectionId") == "" {
-		return s.Store.LegacyT3ID(), nil
-	}
 	id, err := strconv.ParseInt(r.PathValue("connectionId"), 10, 64)
 	if err != nil || id < 1 {
 		return 0, db.Invalid("Choose a valid harness connection.")

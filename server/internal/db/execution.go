@@ -9,8 +9,9 @@ import (
 	"time"
 )
 
-// PutObservation keeps normalized state scoped by connection. The T3 cache is
-// maintained only for retained API compatibility, never as execution authority.
+// PutObservation keeps normalized state scoped by connection. A newer
+// stored observation wins; a reply the harness did not repeat is kept
+// within the same execution.
 func (s *Store) PutObservation(ctx context.Context, o execution.Observation) error {
 	if err := o.Valid(); err != nil {
 		return err
@@ -29,7 +30,7 @@ func (s *Store) PutObservation(ctx context.Context, o execution.Observation) err
 		if previous.UpdatedAt.After(o.UpdatedAt) {
 			return nil
 		}
-		if o.Reply == nil && (s.IsT3(o.Session.ConnectionID) || o.ExecutionID == previous.ExecutionID) {
+		if o.Reply == nil && o.ExecutionID == previous.ExecutionID {
 			o.Reply = previous.Reply
 		}
 		// Usage is cumulative per session: a read without it (an unreadable
@@ -37,52 +38,8 @@ func (s *Store) PutObservation(ctx context.Context, o execution.Observation) err
 		if o.Usage == nil {
 			o.Usage = previous.Usage
 		}
-		if err := tx.Observations().Put(ctx, id, o); err != nil {
-			return err
-		}
-		if !s.IsT3(o.Session.ConnectionID) {
-			return nil
-		}
-		pending := 0
-		if o.State == "needs_input" {
-			pending = 1
-		}
-		active := ""
-		if o.Active {
-			active = o.ExecutionID
-		}
-		// settled_at keeps the first observed settle; T3's own settledAt is not carried.
-		settled := o.Closed != nil && o.Closed.Signal == execution.ClosedSettled
-		var settledAt *time.Time
-		if settled {
-			settledAt = &o.UpdatedAt
-		}
-		err = mirrorThread(ctx, tx, o, store.ThreadMirror{
-			SessionID: id, ParentThreadID: externalParent(o), Relationship: childMarker(o.Child),
-			Branch: nullIfEmpty(o.Branch), WorktreePath: nullIfEmpty(o.Directory),
-			PendingRequests: pending, ActiveRunID: nullIfEmpty(active), LatestRunID: nullIfEmpty(o.ExecutionID),
-			Settled: settled, SettledAt: settledAt,
-			Model: nullIfEmpty(o.ModelLabel), RuntimeMode: nullIfEmpty(o.Config.Permission), InteractionMode: nullIfEmpty(o.Config.Mode),
-		})
-		if err != nil {
-			return err
-		}
-		if o.Reply != nil {
-			r := o.Reply
-			preview := PreviewText(r.Text)
-			at := r.UpdatedAt
-			err = tx.Threads().SetSessionLastWord(ctx, id, o.UpdatedAt, store.LastWordRow{Text: r.Text, Preview: &preview, Truncated: r.Truncated,
-				RunID: nullIfEmpty(r.RunID), At: &at})
-		}
-		return err
+		return tx.Observations().Put(ctx, id, o)
 	})
-}
-func childMarker(child bool) *string {
-	if child {
-		v := "subagent"
-		return &v
-	}
-	return nil
 }
 func (s *Store) Observation(ctx context.Context, ref execution.SessionRef) (execution.Observation, error) {
 	return read(ctx, s, func(tx store.Tx) (execution.Observation, error) { return tx.Observations().ByRef(ctx, ref) })
@@ -166,10 +123,7 @@ func (s *Store) RecoverAttempts(ctx context.Context) error {
 // and automatic reconciliation use the same revision guard and ownership check.
 func (s *Store) FinishAttempt(ctx context.Context, a Attempt, o execution.Observation, manual bool) error {
 	if o.State == "idle" {
-		if !s.IsT3(o.Session.ConnectionID) {
-			return Conflict("Wait for the harness to report execution before linking this launch.")
-		}
-		o.State = "done"
+		return Conflict("Wait for the harness to report execution before linking this launch.")
 	}
 	if err := o.Valid(); err != nil {
 		return err
@@ -237,13 +191,6 @@ func (s *Store) RejectAttempt(ctx context.Context, a Attempt, reason string) err
 		from := StateLaunching
 		return addTaskEvent(ctx, tx, a.TaskID, &from, StateBacklog, fmt.Sprintf("launch rejected before execution: %s", reason))
 	})
-}
-
-func externalParent(o execution.Observation) *string {
-	if o.Parent != nil {
-		return &o.Parent.ExternalSessionID
-	}
-	return nil
 }
 
 // WatchedSessions retains normalized active observations after they leave the

@@ -8,10 +8,43 @@ import (
 	"github.com/flexdinesh/stage/server/internal/client"
 )
 
+// t3Status is the details of GET /api/harnesses/t3/status (docs/api.md).
+type t3Status struct {
+	Connected            bool       `json:"connected"`
+	State                string     `json:"state"` // unreachable | unpaired | expired | rejected | connected
+	T3URL                string     `json:"t3Url"`
+	PublicURL            string     `json:"publicUrl"`
+	T3URLSource          string     `json:"t3UrlSource"` // env | settings | default
+	EnvironmentID        *string    `json:"environmentId"`
+	ClientID             *string    `json:"clientId"`
+	TokenExpiresAt       *time.Time `json:"tokenExpiresAt"`
+	AdminTokenConfigured bool       `json:"adminTokenConfigured"`
+	LastError            *string    `json:"lastError"`
+	LastFullSyncAt       *time.Time `json:"lastFullSyncAt"`
+	Reachable            bool       `json:"reachable"`
+	CheckedAt            *time.Time `json:"checkedAt"`
+	ProbeError           *string    `json:"probeError"`
+	T3                   *struct {
+		EnvironmentID string `json:"environmentId"`
+		Label         string `json:"label"`
+		ServerVersion string `json:"serverVersion"`
+	} `json:"t3"`
+	AutoPair struct {
+		Available bool    `json:"available"`
+		Reason    *string `json:"reason"`
+	} `json:"autoPair"`
+	Sync struct {
+		Running   bool       `json:"running"`
+		StartedAt *time.Time `json:"startedAt"`
+		Projects  int        `json:"projects"`
+		Threads   int        `json:"threads"`
+	} `json:"sync"`
+}
+
 // The T3 status panel of `stage harness t3`.
 func init() {
 	statusPrinters["t3"] = func(w io.Writer, st client.HarnessStatus, cli string) error {
-		var s client.T3Status
+		var s t3Status
 		if err := json.Unmarshal(st.Details, &s); err != nil {
 			return err
 		}
@@ -20,7 +53,7 @@ func init() {
 	}
 }
 
-func printT3Status(w io.Writer, s client.T3Status, cli string) {
+func printT3Status(w io.Writer, s t3Status, cli string) {
 	t := stateTone(s.State)
 	line(w, t, "t3 %s at %s %s", t.paint(s.State), s.T3URL, dim("("+urlSource(s.T3URLSource)+")"))
 	if s.PublicURL != s.T3URL {

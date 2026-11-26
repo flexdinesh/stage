@@ -28,18 +28,18 @@ type connection struct {
 
 func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 	e := newEnv(t, func(d *api.Deps) {
-		a, err := d.Sync.Adapter(d.Store.LegacyT3ID())
+		a, err := d.Sync.Adapter(d.Store.ActiveID(db.LocalMachine, "t3"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		client := a.(*t3.Adapter).Client
-		d.Setup = t3setup.New(t3setup.Options{Config: d.Config, Settings: d.Store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Fake: true, Logger: d.Logger,
+		withT3Setup(d, t3setup.New(t3setup.Options{Config: d.Config, Settings: d.Store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Fake: true, Logger: d.Logger,
 			OnSwitched: func(sw db.Switch) {
 				local, _ := d.Sync.Machines().Local(db.LocalMachine)
 				local.Install(sw.Old, sw.New, t3.NewConnectionAdapter(client, sw.New))
-			}})
+			}}))
 	})
-	first := e.store.LegacyT3ID()
+	first := e.store.ActiveID(db.LocalMachine, "t3")
 	if _, err := e.store.SwitchInstance(t.Context(), db.LocalMachine, t3.Descriptor, t3.FakeEnvironmentID, "box a", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 	if paired.Replaced == nil || paired.Replaced.ID != first || paired.Replaced.Active || paired.Replaced.Label != "box a" {
 		t.Fatalf("replaced %+v", paired.Replaced)
 	}
-	second := e.store.LegacyT3ID()
+	second := e.store.ActiveID(db.LocalMachine, "t3")
 	if second == first || paired.ConnectionID != second {
 		t.Fatalf("connection %d -> %d (status %d)", first, second, paired.ConnectionID)
 	}
@@ -112,14 +112,14 @@ func TestPairingAnotherT3RetiresTheConnectionAndItsLinks(t *testing.T) {
 
 func TestForgettingADisconnectedConnectionRetiresIt(t *testing.T) {
 	e := newEnv(t, func(d *api.Deps) {
-		a, err := d.Sync.Adapter(d.Store.LegacyT3ID())
+		a, err := d.Sync.Adapter(d.Store.ActiveID(db.LocalMachine, "t3"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		client := a.(*t3.Adapter).Client
-		d.Setup = t3setup.New(t3setup.Options{Config: d.Config, Settings: d.Store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Fake: true, Logger: d.Logger})
+		withT3Setup(d, t3setup.New(t3setup.Options{Config: d.Config, Settings: d.Store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(d.Store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: client, Fake: true, Logger: d.Logger}))
 	})
-	first := e.store.LegacyT3ID()
+	first := e.store.ActiveID(db.LocalMachine, "t3")
 	if _, err := e.store.SwitchInstance(t.Context(), db.LocalMachine, t3.Descriptor, t3.FakeEnvironmentID, "box a", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -143,8 +143,8 @@ func TestForgettingADisconnectedConnectionRetiresIt(t *testing.T) {
 			t.Fatalf("forgotten %+v", c)
 		}
 	}
-	if e.store.LegacyT3ID() != 0 {
-		t.Fatalf("an active T3 is left: %d", e.store.LegacyT3ID())
+	if e.store.ActiveID(db.LocalMachine, "t3") != 0 {
+		t.Fatalf("an active T3 is left: %d", e.store.ActiveID(db.LocalMachine, "t3"))
 	}
 	// Its adapter is gone: pairing T3 again never reaches it.
 	if _, ok := e.sync.Machines().Adapter(first); ok {

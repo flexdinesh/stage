@@ -36,12 +36,15 @@ func csv(s string) []string {
 // configFlags are the task configuration flags (task add/edit, schedule
 // add/edit).
 type configFlags struct {
-	connection                                                  int64
-	executionConfig                                             *agenttools.ConfigInput
-	project, title, prompt, promptFile, provider, model, effort string
-	runtime, mode, baseRef, branch, base, workspace             string
-	options, images                                             list
+	connection                         int64
+	executionConfig                    *agenttools.ConfigInput
+	project, title, prompt, promptFile string
+	baseRef, branch, base, workspace   string
+	images                             list
 }
+
+// removedConfigFlags are the T3 model flags removed with API v8.
+var removedConfigFlags = []string{"provider", "model", "effort", "option", "runtime", "mode"}
 
 func (f *configFlags) configInputFlag(c *cmd) {
 	c.fs.Func("execution-config", "harness configuration as JSON", func(raw string) error {
@@ -66,16 +69,15 @@ func (f *configFlags) register(c *cmd) {
 	c.fs.StringVar(&f.title, "title", "", "title")
 	c.fs.StringVar(&f.prompt, "prompt", "", "prompt text (- = stdin)")
 	c.fs.StringVar(&f.promptFile, "prompt-file", "", "read the prompt from a file")
-	c.fs.StringVar(&f.provider, "provider", "", "providerInstanceId")
-	c.fs.StringVar(&f.model, "model", "", "model id")
-	c.fs.StringVar(&f.effort, "effort", "", "effort option")
-	c.fs.StringVar(&f.runtime, "runtime", "", "runtime mode")
-	c.fs.StringVar(&f.mode, "mode", "", "interaction mode: default|plan")
 	c.fs.StringVar(&f.baseRef, "base-ref", "", "worktree base ref")
 	c.fs.StringVar(&f.branch, "branch", "", "worktree branch")
 	c.fs.StringVar(&f.base, "base", "", "worktree base: ref (from --base-ref) | predecessor (from a need's branch, --base-task or the sole need; unavailable predecessors block launch; without --base-ref pass --workspace worktree)")
-	c.fs.Var(&f.options, "option", "model option K=V (repeatable)")
 	c.fs.Var(&f.images, "image", "image file (repeatable)")
+	for _, name := range removedConfigFlags {
+		c.fs.Func(name, "removed", func(string) error {
+			return fmt.Errorf("--%s was removed; use --connection ID --execution-config JSON", name)
+		})
+	}
 }
 
 // readPrompt resolves --prompt (- = stdin) and --prompt-file.
@@ -93,21 +95,6 @@ func (f *configFlags) readPrompt(c *cmd) (string, bool, error) {
 	return "", false, nil
 }
 
-func (f *configFlags) optionMap() (map[string]string, error) {
-	if len(f.options) == 0 {
-		return nil, nil
-	}
-	m := map[string]string{}
-	for _, o := range f.options {
-		k, v, ok := strings.Cut(o, "=")
-		if !ok || strings.TrimSpace(k) == "" {
-			return nil, usagef("--option %q: want KEY=VALUE", o)
-		}
-		m[strings.TrimSpace(k)] = strings.TrimSpace(v)
-	}
-	return m, nil
-}
-
 func (f *configFlags) create(c *cmd) (agenttools.ConfigArgs, error) {
 	prompt, _, err := f.readPrompt(c)
 	if err != nil {
@@ -116,13 +103,8 @@ func (f *configFlags) create(c *cmd) (agenttools.ConfigArgs, error) {
 	if strings.TrimSpace(f.title) == "" || strings.TrimSpace(prompt) == "" {
 		return agenttools.ConfigArgs{}, usagef("--title and --prompt are required")
 	}
-	opts, err := f.optionMap()
-	if err != nil {
-		return agenttools.ConfigArgs{}, err
-	}
 	return agenttools.ConfigArgs{
-		WorkspaceType: f.workspace, ConnectionID: f.connection, ExecutionConfig: f.executionConfig, Project: f.project, Title: f.title, Prompt: prompt, Provider: f.provider, Model: f.model,
-		Effort: f.effort, Options: opts, RuntimeMode: f.runtime, InteractionMode: f.mode,
+		WorkspaceType: f.workspace, ConnectionID: f.connection, ExecutionConfig: f.executionConfig, Project: f.project, Title: f.title, Prompt: prompt,
 		BaseRef: f.baseRef, Branch: f.branch, Base: f.base, ImagePaths: f.images,
 	}, nil
 }
@@ -150,16 +132,10 @@ func (f *configFlags) update(c *cmd, id int64) (agenttools.UpdateArgs, error) {
 	if err != nil {
 		return agenttools.UpdateArgs{}, err
 	}
-	opts, err := f.optionMap()
-	if err != nil {
-		return agenttools.UpdateArgs{}, err
-	}
 	a := agenttools.UpdateArgs{
 		ConnectionID: f.connection, WorkspaceType: strFlag(c, "workspace", f.workspace), ExecutionConfig: f.executionConfig, ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
-		Provider: strFlag(c, "provider", f.provider), Model: strFlag(c, "model", f.model),
-		Effort: strFlag(c, "effort", f.effort), Options: opts, RuntimeMode: strFlag(c, "runtime", f.runtime),
-		InteractionMode: strFlag(c, "mode", f.mode), BaseRef: strFlag(c, "base-ref", f.baseRef),
-		Branch: strFlag(c, "branch", f.branch), Base: strFlag(c, "base", f.base),
+		BaseRef: strFlag(c, "base-ref", f.baseRef),
+		Branch:  strFlag(c, "branch", f.branch), Base: strFlag(c, "base", f.base),
 	}
 	if promptSet {
 		a.Prompt = &prompt

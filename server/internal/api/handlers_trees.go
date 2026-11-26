@@ -68,7 +68,7 @@ func (s *server) createTree(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.treeChanged()
-	writeJSON(w, http.StatusCreated, s.treeDetail(s.envID(r.Context()), tree))
+	writeJSON(w, http.StatusCreated, s.treeDetail(tree))
 	return nil
 }
 
@@ -86,7 +86,7 @@ func (s *server) writeTree(w http.ResponseWriter, r *http.Request, status int, i
 	if err != nil {
 		return err
 	}
-	writeJSON(w, status, s.treeDetail(s.envID(r.Context()), tree))
+	writeJSON(w, status, s.treeDetail(tree))
 	return nil
 }
 
@@ -178,7 +178,7 @@ func (s *server) addToTree(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.treeChanged()
-	writeJSON(w, http.StatusOK, s.treeDetail(s.envID(r.Context()), tree))
+	writeJSON(w, http.StatusOK, s.treeDetail(tree))
 	return nil
 }
 
@@ -217,7 +217,6 @@ func (s *server) startTree(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	env := s.envID(ctx)
 	started, failed := []taskJSON{}, []treeStartError{}
 	for _, taskID := range ids {
 		task, err := s.Sync.StartTask(ctx, taskID)
@@ -225,7 +224,7 @@ func (s *server) startTree(w http.ResponseWriter, r *http.Request) error {
 			failed = append(failed, treeStartError{TaskID: taskID, Error: err.Error()})
 			continue
 		}
-		started = append(started, s.task(env, task))
+		started = append(started, s.task(task))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"started": started, "errors": failed})
 	return nil

@@ -6,8 +6,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/store"
 )
 
-// CreatedTasks is a session batch: the tasks one T3 session created
-// (origin_thread_id), grouped by tree.
+// CreatedTasks is a session batch: the tasks one session created (its
+// origin session), grouped by tree.
 type CreatedTasks struct {
 	// Trees: batch tasks grouped by their tree, ordered by each group's
 	// lowest task id; tasks in a group by id.
@@ -29,10 +29,7 @@ type TreeRef struct {
 	StartMode StartMode `json:"startMode"`
 }
 
-// CreatedBy returns the batch created by T3 session threadID.
-func (s *Store) CreatedBy(ctx context.Context, threadID string) (CreatedTasks, error) {
-	return s.CreatedBySession(ctx, SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: threadID})
-}
+// CreatedBySession returns the batch created by session ref.
 func (s *Store) CreatedBySession(ctx context.Context, ref SessionRef) (CreatedTasks, error) {
 	tasks, err := read(ctx, s, func(tx store.Tx) ([]Task, error) { return tx.Tasks().CreatedBySession(ctx, ref) })
 	if err != nil {

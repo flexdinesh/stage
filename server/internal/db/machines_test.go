@@ -2,8 +2,9 @@ package db
 
 import (
 	"errors"
-	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 
 	"github.com/flexdinesh/stage/server/internal/harness"
 )

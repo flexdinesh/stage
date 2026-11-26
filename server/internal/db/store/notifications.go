@@ -32,7 +32,6 @@ type NewNotification struct {
 	Session      *SessionRef
 	Event        TaskState
 	TaskID       *int64
-	T3ThreadID   *string // legacy T3 thread id, resolved when Session is nil (not stored)
 	Title        string
 	ProjectTitle *string
 	URL          string

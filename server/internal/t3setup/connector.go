@@ -253,3 +253,14 @@ func (c *Connector) Run(ctx context.Context, action string, input json.RawMessag
 
 // Disconnect forgets the token and the saved settings (Unpair).
 func (c *Connector) Disconnect(ctx context.Context) error { return c.svc.Unpair(ctx) }
+
+// RecordFullSync is the sync service's OnConnectionSynced hook: the T3
+// status reports its machine's last successful full sync.
+func RecordFullSync(store *db.Store) func(context.Context, int64, time.Time) error {
+	return func(ctx context.Context, connection int64, at time.Time) error {
+		if store.Harness(connection) != t3.Kind {
+			return nil
+		}
+		return store.SetLastFullSync(ctx, store.ConnectionMachine(connection), at)
+	}
+}

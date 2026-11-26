@@ -96,8 +96,8 @@ func seedTask(t *testing.T, store *db.Store, state db.TaskState) db.Task {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "Say OK", Prompt: "p",
-		RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}})
+	task, err := store.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "Say OK", Prompt: "p",
+		Workspace: db.Workspace{Type: "root"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,9 +167,9 @@ func TestPayload(t *testing.T) {
 			Payload{Title: "Needs input", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
 		{"task done", event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}},
 			Payload{Title: "Done", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
-		{"thread with app project", event{thread: &t3sync.ThreadChange{ThreadID: "ext-1", ProjectID: "proj-1", Title: "Fix bug & test", To: db.StateNeedsInput}},
+		{"thread with app project", event{thread: &t3sync.ThreadChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ThreadID: "ext-1", ProjectID: "proj-1", Title: "Fix bug & test", To: db.StateNeedsInput}},
 			Payload{Title: "Needs input", Body: "Fix bug & test · stage", URL: "/?inbox", Tag: "thread-1:ext-1", Badge: 2}},
-		{"thread without app project", event{thread: &t3sync.ThreadChange{ThreadID: "ext-2", ProjectID: "proj-unknown", Title: "Other", To: db.StateFailed}},
+		{"thread without app project", event{thread: &t3sync.ThreadChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-2"}, ThreadID: "ext-2", ProjectID: "proj-unknown", Title: "Other", To: db.StateFailed}},
 			Payload{Title: "Failed", Body: "Other · proj-unknown", URL: "/?inbox", Tag: "thread-1:ext-2", Badge: 2}},
 	}
 	for _, tc := range tests {
@@ -199,7 +199,7 @@ func TestPayloadFor(t *testing.T) {
 			Payload{Title: "Done", Body: "Say OK · stage", URL: "/tasks/7", Tag: "task-7", Badge: 3}},
 		{"deleted task keeps its URL group", db.Notification{ID: 3, Event: db.StateFailed, T3ThreadID: &thread, Title: "Gone", URL: "/tasks/9"},
 			Payload{Title: "Failed", Body: "Gone", URL: "/tasks/9", Tag: "task-9", Badge: 3}},
-		{"external thread", db.Notification{ID: 4, Event: db.StateSettled, T3ThreadID: &thread, Title: "Ext", ProjectTitle: &project,
+		{"external thread", db.Notification{ID: 4, Event: db.StateSettled, ConnectionID: 1, T3ThreadID: &thread, Title: "Ext", ProjectTitle: &project,
 			URL: "/sessions/provider:session%2Fwith%25id"},
 			Payload{Title: "Settled", Body: "Ext · stage", URL: "/?inbox", Tag: "thread-1:" + thread, Badge: 3}},
 		{"identity-less", db.Notification{ID: 5, Event: db.StateNeedsInput, Title: "Old", URL: "/"},
@@ -316,12 +316,9 @@ func TestInboxRecordedWithoutSubscriptions(t *testing.T) {
 	})); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetObservedState(ctx, db.SessionRef{ConnectionID: store.LegacyT3ID(), ExternalSessionID: "ext-1"}, db.StateDone); err != nil {
-		t.Fatal(err)
-	}
 
 	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}})
-	n.handle(ctx, event{thread: &t3sync.ThreadChange{ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", To: db.StateDone}})
+	n.handle(ctx, event{thread: &t3sync.ThreadChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", To: db.StateDone}})
 
 	got, err := store.ListNotifications(ctx, 10, nil)
 	if err != nil {
@@ -336,8 +333,11 @@ func TestInboxRecordedWithoutSubscriptions(t *testing.T) {
 		tk.CurrentState == nil || *tk.CurrentState != db.StateNeedsInput || tk.ReadAt != nil {
 		t.Fatalf("task notification %+v", tk)
 	}
+	// A session no task owns: its observed title, and the title of the one
+	// Stage project its harness project is bound to.
 	if th.Event != db.StateDone || th.TaskID != nil || th.T3ThreadID == nil || *th.T3ThreadID != "ext-1" ||
-		th.Title != "External" || th.URL != "/?inbox" || th.CurrentState == nil || *th.CurrentState != db.StateDone {
+		th.Title != "External" || th.ProjectTitle == nil || *th.ProjectTitle != "stage" ||
+		th.URL != "/?inbox" || th.CurrentState == nil || *th.CurrentState != db.StateDone {
 		t.Fatalf("thread notification %+v", th)
 	}
 }
@@ -367,7 +367,7 @@ func TestNotifyEventsFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}})
-	n.handle(ctx, event{thread: &t3sync.ThreadChange{ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", To: db.StateDone}})
+	n.handle(ctx, event{thread: &t3sync.ThreadChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", To: db.StateDone}})
 	if c, r := count(), len(srv.requests()); c != 0 || r != 0 {
 		t.Fatalf("done disabled: %d notifications, %d pushes", c, r)
 	}
@@ -385,7 +385,7 @@ func TestNotifyEventsFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	n.handle(ctx, event{task: &t3sync.Change{TaskID: task.ID, To: db.StateSettled}})
-	n.handle(ctx, event{thread: &t3sync.ThreadChange{ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", To: db.StateSettled}})
+	n.handle(ctx, event{thread: &t3sync.ThreadChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ThreadID: "ext-1", ProjectID: "proj-1", Title: "External", To: db.StateSettled}})
 	if c, r := count(), len(srv.requests()); c != 3 || r != 3 {
 		t.Fatalf("settled enabled: %d notifications, %d pushes", c, r)
 	}
@@ -451,13 +451,13 @@ func TestSessionNotificationURLsEncodeThreadIDs(t *testing.T) {
 	ctx := context.Background()
 	task := seedTask(t, store, db.StateRunning)
 	id := "provider:session/with%id"
-	if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: store.LegacyT3ID(), ExternalSessionID: id}}); err != nil {
+	if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}}); err != nil {
 		t.Fatal(err)
 	}
 	want := "/?inbox"
 	for _, e := range []event{
 		{task: &t3sync.Change{TaskID: task.ID, To: db.StateNeedsInput}},
-		{thread: &t3sync.ThreadChange{ThreadID: id, Title: "External", ProjectID: "p", To: db.StateDone}},
+		{thread: &t3sync.ThreadChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}, ThreadID: id, Title: "External", ProjectID: "p", To: db.StateDone}},
 	} {
 		payload, record, err := n.payload(ctx, e)
 		wantPayload, wantRecord := want, want
@@ -479,7 +479,7 @@ func TestTaskNotificationGroupSurvivesSessionChange(t *testing.T) {
 		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone, Session: &db.SessionRef{ConnectionID: store.LegacyT3ID(), ExternalSessionID: thread}}); err != nil {
+		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone, Session: &db.SessionRef{ConnectionID: store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: thread}}); err != nil {
 			t.Fatal(err)
 		}
 		e := event{task: &t3sync.Change{TaskID: task.ID, To: db.StateDone}}

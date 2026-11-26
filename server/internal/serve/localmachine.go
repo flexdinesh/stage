@@ -79,8 +79,10 @@ func newLocalMachine(ctx context.Context, wg *sync.WaitGroup, store *db.Store, c
 		logger.Info("using T3 MCP client", "url", m.endpoint.URL, "source", m.endpoint.Source)
 	}
 	m.client = client
-	t3ID := on.ActiveID(t3.Kind)
-	m.Install(t3ID, t3ID, t3.NewConnectionAdapter(client, t3ID))
+	// No T3 connection until T3 is paired (pairing installs it: OnSwitched).
+	if t3ID := on.ActiveID(t3.Kind); t3ID != 0 {
+		m.Install(t3ID, t3ID, t3.NewConnectionAdapter(client, t3ID))
+	}
 	return m, nil
 }
 

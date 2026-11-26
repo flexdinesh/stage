@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -168,21 +169,21 @@ func caseSetNeedsRules(t *testing.T, open Factory) {
 	// Needs in different trees: refused, nothing written.
 	other := mustTask(t, s, ctx, p.ID, "other", nil)
 	otherDep := mustTask(t, s, ctx, p.ID, "other dep", []int64{other.ID})
-	if _, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "x", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
+	if _, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "x", Prompt: "p",
 		Workspace: db.Workspace{Type: "root"}, Needs: []int64{a.ID, other.ID}}); !errors.As(err, &conflict) {
 		t.Fatalf("needs in two trees: %v", err)
 	}
 	// Explicit tree: a need in another tree is refused; no needs just joins.
-	if _, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "x", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
+	if _, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "x", Prompt: "p",
 		Workspace: db.Workspace{Type: "root"}, TreeID: &tree, Needs: []int64{other.ID}}); !errors.As(err, &conflict) {
 		t.Fatalf("need outside explicit tree: %v", err)
 	}
-	joined, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "joined", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
+	joined, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "joined", Prompt: "p",
 		Workspace: db.Workspace{Type: "root"}, TreeID: otherDep.TreeID})
 	if err != nil || joined.TreeID == nil || *joined.TreeID != *otherDep.TreeID || len(joined.Needs) != 0 {
 		t.Fatalf("join explicit tree %+v %v", joined, err)
 	}
-	if _, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "x", Prompt: "p", RuntimeMode: "full-access", InteractionMode: "default",
+	if _, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "x", Prompt: "p",
 		Workspace: db.Workspace{Type: "root"}, TreeID: ptr[int64](9999)}); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("missing tree: %v", err)
 	}
@@ -623,10 +624,11 @@ func caseTreeTimesAndEvents(t *testing.T, open Factory) {
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: thread}}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: thread}}); err != nil {
 		t.Fatal(err)
 	}
-	later := time.Now().UTC().Add(time.Hour).Truncate(time.Microsecond)
+	// Observed session times count at millisecond precision (SQLite).
+	later := time.Now().UTC().Add(time.Hour).Truncate(time.Millisecond)
 	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{{ThreadID: thread, ProjectID: "proj-1", Title: "a", Status: t3.StatusRunning, CreatedAt: later, UpdatedAt: later}})); err != nil {
 		t.Fatal(err)
 	}

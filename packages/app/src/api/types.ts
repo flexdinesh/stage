@@ -16,27 +16,6 @@ export const TASK_STATES = [
 ] as const;
 export type TaskState = (typeof TASK_STATES)[number];
 
-export const THREAD_STATUSES = [
-  "idle",
-  "preparing",
-  "queued",
-  "starting",
-  "running",
-  "waiting",
-  "completed",
-  "interrupted",
-  "failed",
-  "cancelled",
-  "rolled_back",
-] as const;
-export type ThreadStatus = (typeof THREAD_STATUSES)[number];
-
-export const RUNTIME_MODES = ["approval-required", "auto-accept-edits", "auto", "full-access"] as const;
-export type RuntimeMode = (typeof RUNTIME_MODES)[number];
-
-export const INTERACTION_MODES = ["default", "plan"] as const;
-export type InteractionMode = (typeof INTERACTION_MODES)[number];
-
 export const SEND_MODES = ["auto", "queue", "steer", "restart"] as const;
 export type SendMode = (typeof SEND_MODES)[number];
 
@@ -46,8 +25,6 @@ export type StartMode = (typeof START_MODES)[number];
 
 /** A backlog tree member: blocked (a need is not settled) or ready (every need settled and manual, or no needs). */
 export type Readiness = "blocked" | "ready";
-
-export type ThreadSource = "app" | "t3";
 
 // ---- Shared ----
 
@@ -99,7 +76,7 @@ export interface Health {
   harnesses: { kind: Harness; connectionId: number; configured: boolean; connected: boolean; lastError: string | null }[];
 }
 
-// ---- T3 connection / sync / catalog ----
+// ---- T3 connection / sync ----
 
 /** Precedence: unreachable > unpaired > expired > rejected > connected. */
 export type T3State = "unreachable" | "unpaired" | "expired" | "rejected" | "connected";
@@ -177,31 +154,6 @@ export interface SyncResult {
   projects: number;
   threads: number;
   finishedAt: string;
-}
-
-export interface CatalogModelOption {
-  id: string;
-  values: (string | boolean)[];
-  default: string | boolean | null;
-}
-
-export interface CatalogModel {
-  id: string;
-  label: string;
-  options: CatalogModelOption[];
-}
-
-export interface CatalogProvider {
-  providerInstanceId: string;
-  driverKind: string;
-  displayName: string;
-  models: CatalogModel[];
-  runtimeModes: RuntimeMode[] | null;
-}
-
-export interface Catalog {
-  providers: CatalogProvider[];
-  fetchedAt: string | null;
 }
 
 // ---- Users ----
@@ -640,7 +592,6 @@ export interface TaskDetail extends Task {
   usage?: Usage;
   acceptances: Acceptance[];
   events: TaskEvent[];
-  thread: Thread | null;
   /** The task's tree; null outside one. */
   tree: TreeDetail | null;
   /** Tasks the task's origin session created; null without an origin session. */
@@ -915,11 +866,6 @@ export interface CreateTaskRequest {
   projectId: number;
   title: string;
   prompt: string;
-  providerInstanceId?: string | null;
-  model?: string | null;
-  modelOptions?: ModelOption[];
-  runtimeMode?: RuntimeMode;
-  interactionMode?: InteractionMode;
   workspace?: Workspace;
   initialNote?: string;
   /** Join this tree (default: the needs' tree, else a new tree when there are needs). */
@@ -946,11 +892,6 @@ export interface UpdateTaskRequest {
   projectId?: number;
   title?: string;
   prompt?: string;
-  providerInstanceId?: string | null;
-  model?: string | null;
-  modelOptions?: ModelOption[];
-  runtimeMode?: RuntimeMode;
-  interactionMode?: InteractionMode;
   workspace?: Workspace;
   /** Backlog only: null inherits the tree's. */
   startMode?: StartMode | null;
@@ -1082,11 +1023,6 @@ export interface CreateScheduleRequest {
   projectId: number;
   title: string;
   prompt: string;
-  providerInstanceId?: string | null;
-  model?: string | null;
-  modelOptions?: ModelOption[];
-  runtimeMode?: RuntimeMode;
-  interactionMode?: InteractionMode;
   workspace?: Workspace;
   notes?: string;
   attachmentIds?: number[];
@@ -1119,56 +1055,6 @@ export interface TaskListQuery {
   closed?: "true" | "all";
 }
 
-// ---- Threads (history) ----
-
-export interface Thread {
-  session: SessionRef;
-  connectionId: number;
-  externalSessionId: string;
-  externalProjectId: string;
-  projectId: number | null;
-  projectTitle: string | null;
-  title: string;
-  status: ThreadStatus;
-  state: TaskState;
-  archived: boolean;
-  activeRunId: string | null;
-  latestRunId: string | null;
-  settled: boolean;
-  settledAt: string | null;
-  /** Elapsed run span: first run start to newest run completion. */
-  runStartedAt: string | null;
-  runEndedAt: string | null;
-  pendingRequestCount: number;
-  model: string | null;
-  runtimeMode: RuntimeMode | null;
-  interactionMode: InteractionMode | null;
-  branch: string | null;
-  worktreePath: string | null;
-  parentThreadId: string | null;
-  relationship: string | null;
-  source: ThreadSource;
-  taskId: number | null;
-  createdAt: string;
-  updatedAt: string;
-  syncedAt: string;
-  /** Latest assistant reply as one plain line. */
-  lastWordPreview: string | null;
-  lastWordAt: string | null;
-  /** Reply excerpt (markdown); set on detail reads only, null in lists. */
-  lastWord: LastWord | null;
-}
-
-/** A thread's latest assistant reply as last synced: markdown excerpt capped at 4000 chars. */
-export interface LastWord {
-  text: string;
-  /** The reply is longer than `text`; the rest is in T3. */
-  truncated: boolean;
-  runId: string | null;
-  /** When the reply was last updated in T3. */
-  at: string | null;
-}
-
 export interface SessionPreview {
   session: SessionRef;
   task: Task | null;
@@ -1176,11 +1062,6 @@ export interface SessionPreview {
   title: string;
   workspace?: string;
   unavailableReason?: string;
-}
-
-export interface ThreadDetail {
-  thread: Thread;
-  task: Task | null;
 }
 
 /** The adopted task's first own user message. */

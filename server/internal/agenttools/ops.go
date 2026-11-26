@@ -5,7 +5,6 @@ package agenttools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -273,55 +272,43 @@ func (o *Ops) ListProjects(ctx context.Context, _ struct{}) (ProjectsOut, error)
 
 type ModelsArgs struct {
 	ProjectID    int64 `json:"projectId,omitempty" jsonschema:"Stage project for workspace-specific models and modes"`
-	ConnectionID int64 `json:"connectionId,omitempty"`
+	ConnectionID int64 `json:"connectionId" jsonschema:"harness connection from list_projects"`
 }
 type ModelsOut struct {
-	client.Catalog
 	Capabilities *execution.Capabilities `json:"capabilities,omitempty"`
 }
 
 func (o *Ops) ListModels(ctx context.Context, a ModelsArgs) (ModelsOut, error) {
-	if a.ConnectionID != 0 {
-		c, err := o.Client.ProjectCapabilities(ctx, a.ConnectionID, a.ProjectID)
-		return ModelsOut{Capabilities: &c}, err
+	if a.ConnectionID <= 0 {
+		return ModelsOut{}, errors.New("connectionId is required: choose a harness connection from list_projects")
 	}
-	c, err := o.Client.Catalog(ctx)
-	return ModelsOut{Catalog: c}, err
+	c, err := o.Client.ProjectCapabilities(ctx, a.ConnectionID, a.ProjectID)
+	return ModelsOut{Capabilities: &c}, err
 }
 
 // ---- task config shared by tasks and schedules ----
 
 // ConfigArgs is the task configuration (create_task, create_schedule).
 type ConfigArgs struct {
-	WorkspaceType   string            `json:"workspaceType,omitempty" jsonschema:"root or worktree; a harness that picks its own worktree base (OpenCode, Claude Code) takes no baseRef or branch, and Claude Code takes base=predecessor without baseRef"`
-	ConnectionID    int64             `json:"connectionId,omitempty" jsonschema:"execution destination from list_projects"`
-	ExecutionConfig *ConfigInput      `json:"executionConfig,omitempty" jsonschema:"use the selected connection model, options, permission and mode from list_models"`
-	Project         string            `json:"project,omitempty" jsonschema:"project id or unambiguous exact title; default: your session's explicitly bound project"`
-	Title           string            `json:"title" jsonschema:"short task title"`
-	Prompt          string            `json:"prompt" jsonschema:"the full prompt the agent thread starts with; self-contained"`
-	Provider        string            `json:"provider,omitempty" jsonschema:"providerInstanceId (list_models); inferred from model when omitted"`
-	Model           string            `json:"model,omitempty" jsonschema:"model id (list_models); default: the pinned or last-used model"`
-	Effort          string            `json:"effort,omitempty" jsonschema:"shortcut for options.effort, e.g. low|medium|high"`
-	Options         map[string]string `json:"options,omitempty" jsonschema:"model options by id (list_models); 'true'/'false' become booleans"`
-	RuntimeMode     string            `json:"runtimeMode,omitempty" jsonschema:"approval-required|auto-accept-edits|auto|full-access"`
-	InteractionMode string            `json:"interactionMode,omitempty" jsonschema:"default|plan"`
-	BaseRef         string            `json:"baseRef,omitempty" jsonschema:"run in a new worktree from this ref (e.g. origin/main); omitted = project root"`
-	Branch          string            `json:"branch,omitempty" jsonschema:"worktree branch name with baseRef; omit to let the selected harness choose"`
-	Base            string            `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: the worktree starts from a need's branch (baseTaskId, else the sole need); unavailable predecessors block launch; choose base=ref explicitly to use baseRef (tasks only); without baseRef pass workspaceType worktree"`
-	ImagePaths      []string          `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp, max 8) sent with the prompt; stdio/CLI only"`
+	WorkspaceType   string       `json:"workspaceType,omitempty" jsonschema:"root or worktree; a harness that picks its own worktree base (OpenCode, Claude Code) takes no baseRef or branch, and Claude Code takes base=predecessor without baseRef"`
+	ConnectionID    int64        `json:"connectionId,omitempty" jsonschema:"execution destination from list_projects"`
+	ExecutionConfig *ConfigInput `json:"executionConfig,omitempty" jsonschema:"the selected connection's model, options, permission and mode from list_models; omitted = the connection's pinned model, else the harness defaults"`
+	Project         string       `json:"project,omitempty" jsonschema:"project id or unambiguous exact title; default: your session's explicitly bound project"`
+	Title           string       `json:"title" jsonschema:"short task title"`
+	Prompt          string       `json:"prompt" jsonschema:"the full prompt the agent session starts with; self-contained"`
+	BaseRef         string       `json:"baseRef,omitempty" jsonschema:"run in a new worktree from this ref (e.g. origin/main); omitted = project root"`
+	Branch          string       `json:"branch,omitempty" jsonschema:"worktree branch name with baseRef; omit to let the selected harness choose"`
+	Base            string       `json:"base,omitempty" jsonschema:"ref (default: from baseRef) | predecessor: the worktree starts from a need's branch (baseTaskId, else the sole need); unavailable predecessors block launch; choose base=ref explicitly to use baseRef (tasks only); without baseRef pass workspaceType worktree"`
+	ImagePaths      []string     `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp, max 8) sent with the prompt; stdio/CLI only"`
 }
 
 // resolvedConfig is ConfigArgs resolved against the API.
 type resolvedConfig struct {
-	connectionID    int64
-	config          *execution.Config
-	project         db.Project
-	provider, model *string
-	options         []execution.ModelOption
-	runtimeMode     *string
-	interactionMode *string
-	workspace       *db.Workspace
-	attachmentIDs   []int64
+	connectionID  int64
+	config        *execution.Config
+	project       db.Project
+	workspace     *db.Workspace
+	attachmentIDs []int64
 }
 
 func strPtr(s string) *string {
@@ -330,78 +317,6 @@ func strPtr(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-func modelOptions(effort string, opts map[string]string) []execution.ModelOption {
-	m := map[string]string{}
-	for k, v := range opts {
-		m[k] = v
-	}
-	if e := strings.TrimSpace(effort); e != "" {
-		m["effort"] = e
-	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	out := []execution.ModelOption{}
-	for _, k := range keys {
-		v := strings.TrimSpace(m[k])
-		switch v {
-		case "true":
-			out = append(out, execution.ModelOption{ID: k, Value: execution.BoolValue(true)})
-		case "false":
-			out = append(out, execution.ModelOption{ID: k, Value: execution.BoolValue(false)})
-		default:
-			out = append(out, execution.ModelOption{ID: k, Value: execution.StringValue(v)})
-		}
-	}
-	return out
-}
-
-// resolveModel fills provider/model: explicit, provider inferred from the
-// catalog, else the connection's pinned model and options (pin, nil = none)
-// like the web app's new-task form. Runtime and interaction mode never come
-// from defaults: unset stays the harness default.
-func (o *Ops) resolveModel(ctx context.Context, a ConfigArgs, pin *execution.Config, rc *resolvedConfig) error {
-	rc.provider, rc.model = strPtr(a.Provider), strPtr(a.Model)
-	rc.runtimeMode, rc.interactionMode = strPtr(a.RuntimeMode), strPtr(a.InteractionMode)
-	if a.Effort != "" || len(a.Options) > 0 {
-		rc.options = modelOptions(a.Effort, a.Options)
-	}
-	if rc.model != nil && rc.provider == nil {
-		cat, err := o.Client.Catalog(ctx)
-		if err != nil {
-			return err
-		}
-		for _, p := range cat.Providers {
-			for _, m := range p.Models {
-				if m.ID == *rc.model {
-					id := p.ProviderInstanceID
-					rc.provider = &id
-				}
-			}
-		}
-		if rc.provider == nil {
-			return fmt.Errorf("model %q not in the catalog; see list_models", *rc.model)
-		}
-	}
-	if rc.provider != nil && rc.model == nil {
-		return errors.New("provider needs a model (list_models)")
-	}
-	if rc.model != nil || pin == nil {
-		return nil
-	}
-	// A T3 model key is the JSON pair [provider, model].
-	var pair []string
-	if json.Unmarshal([]byte(pin.Model), &pair) == nil && len(pair) == 2 && pair[0] != "" && pair[1] != "" {
-		rc.provider, rc.model = &pair[0], &pair[1]
-	}
-	if rc.options == nil {
-		rc.options = append([]execution.ModelOption{}, pin.Options...)
-	}
-	return nil
 }
 
 func workspace(baseRef, branch, base string) *db.Workspace {
@@ -506,50 +421,42 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 	if err != nil {
 		return rc, err
 	}
-	toT3 := h.isT3(rc.connectionID)
 	// Without a model choice, a new task starts with its connection's pinned model and options.
 	pin := h.newTaskConfig(rc.connectionID)
-	if a.ExecutionConfig != nil || !toT3 || (pin != nil && !a.legacyConfig()) {
-		if a.legacyConfig() {
-			return rc, errors.New("use executionConfig for the selected harness; legacy T3 configuration cannot be combined with it")
+	config := execution.Config{}
+	if a.ExecutionConfig != nil {
+		config, err = a.ExecutionConfig.config()
+		if err != nil {
+			return rc, err
 		}
-		config := execution.Config{}
-		if a.ExecutionConfig != nil {
-			config, err = a.ExecutionConfig.config()
-			if err != nil {
+	}
+	if pin != nil && config.Model == "" && len(config.Options) == 0 {
+		config.Model, config.Options = pin.Model, append([]execution.ModelOption{}, pin.Options...)
+	}
+	rc.config = &config
+	if config.Model != "" || config.Mode != "" || config.Permission != "" || len(config.Options) > 0 || a.BaseRef != "" || a.WorkspaceType == "worktree" || len(a.ImagePaths) > 0 {
+		f, err := o.Client.ProjectCapabilities(ctx, rc.connectionID, p.ID)
+		if err != nil {
+			return rc, err
+		}
+		if err := f.ValidateConfig(config); err != nil {
+			return rc, err
+		}
+		if a.BaseRef != "" || a.WorkspaceType == "worktree" {
+			if err := execution.RequireChoice("workspace", "worktree", f.Workspaces); err != nil {
 				return rc, err
 			}
 		}
-		if pin != nil && config.Model == "" && len(config.Options) == 0 {
-			config.Model, config.Options = pin.Model, append([]execution.ModelOption{}, pin.Options...)
-		}
-		rc.config = &config
-		if config.Model != "" || config.Mode != "" || config.Permission != "" || len(config.Options) > 0 || a.BaseRef != "" || a.WorkspaceType == "worktree" || len(a.ImagePaths) > 0 {
-			f, err := o.Client.ProjectCapabilities(ctx, rc.connectionID, p.ID)
-			if err != nil {
+		if a.Base == db.BasePredecessor {
+			if err := execution.RequireAvailable("predecessor base", f.Operations[execution.OpPredecessorBase]); err != nil {
 				return rc, err
 			}
-			if err := f.ValidateConfig(config); err != nil {
+		}
+		if len(a.ImagePaths) > 0 {
+			if err := execution.RequireAvailable("images", f.Operations[execution.OpImages]); err != nil {
 				return rc, err
 			}
-			if a.BaseRef != "" || a.WorkspaceType == "worktree" {
-				if err := execution.RequireChoice("workspace", "worktree", f.Workspaces); err != nil {
-					return rc, err
-				}
-			}
-			if a.Base == db.BasePredecessor {
-				if err := execution.RequireAvailable("predecessor base", f.Operations[execution.OpPredecessorBase]); err != nil {
-					return rc, err
-				}
-			}
-			if len(a.ImagePaths) > 0 {
-				if err := execution.RequireAvailable("images", f.Operations[execution.OpImages]); err != nil {
-					return rc, err
-				}
-			}
 		}
-	} else if err := o.resolveModel(ctx, a, pin, &rc); err != nil {
-		return rc, err
 	}
 	// The server checks the base against the harness's worktree policy.
 	rc.workspace = workspace(a.BaseRef, a.Branch, a.Base)
@@ -593,8 +500,8 @@ type TaskRow struct {
 	Adopted    bool           `json:"adopted,omitempty"` // tracks an existing session
 	StartAt    *time.Time     `json:"startAt,omitempty"`
 	ScheduleID *int64         `json:"scheduleId,omitempty"`
-	// LastWordPreview is the thread's latest assistant reply, one plain line
-	// (get_task has the excerpt in thread.lastWord).
+	// LastWordPreview is the session's latest assistant reply, one plain
+	// line (get_task has the full finalReply).
 	LastWordPreview *string   `json:"lastWordPreview,omitempty"`
 	UpdatedAt       time.Time `json:"updatedAt"`
 }
@@ -723,9 +630,7 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 	}
 	return o.Client.CreateTask(ctx, client.CreateTask{
 		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
-		ProviderInstanceID: rc.provider, Model: rc.model, ModelOptions: rc.options,
-		RuntimeMode: rc.runtimeMode, InteractionMode: rc.interactionMode, Workspace: rc.workspace,
-		InitialNote: strPtr(a.InitialNote), AttachmentIDs: rc.attachmentIDs,
+		Workspace: rc.workspace, InitialNote: strPtr(a.InitialNote), AttachmentIDs: rc.attachmentIDs,
 		TreeID: a.TreeID, Needs: a.Needs, NeedsSession: session, StartMode: mode.mode, OriginSession: c.Session,
 		StartLocal: strPtr(a.StartLocal), StartTz: strPtr(a.StartTz), Start: a.Start, Handoff: a.Handoff,
 	})
@@ -734,22 +639,16 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 // UpdateArgs are editable config fields (nil = unchanged). Outside backlog
 // only the title changes.
 type UpdateArgs struct {
-	WorkspaceType   *string           `json:"workspaceType,omitempty"`
-	ConnectionID    int64             `json:"connectionId,omitempty"`
-	ExecutionConfig *ConfigInput      `json:"executionConfig,omitempty"`
-	ID              int64             `json:"id"`
-	Project         *string           `json:"project,omitempty" jsonschema:"move to project (id or title)"`
-	Title           *string           `json:"title,omitempty"`
-	Prompt          *string           `json:"prompt,omitempty"`
-	Provider        *string           `json:"provider,omitempty"`
-	Model           *string           `json:"model,omitempty" jsonschema:"model id; empty string = T3 default"`
-	Effort          *string           `json:"effort,omitempty"`
-	Options         map[string]string `json:"options,omitempty" jsonschema:"replaces model options"`
-	RuntimeMode     *string           `json:"runtimeMode,omitempty"`
-	InteractionMode *string           `json:"interactionMode,omitempty"`
-	BaseRef         *string           `json:"baseRef,omitempty" jsonschema:"worktree base ref; empty string = project root"`
-	Branch          *string           `json:"branch,omitempty"`
-	Base            *string           `json:"base,omitempty" jsonschema:"ref | predecessor (worktree from a need's branch: baseTaskId, else the sole need; unavailable predecessors block launch; choose base=ref explicitly to use baseRef); without baseRef keeps the current worktree"`
+	WorkspaceType   *string      `json:"workspaceType,omitempty"`
+	ConnectionID    int64        `json:"connectionId,omitempty"`
+	ExecutionConfig *ConfigInput `json:"executionConfig,omitempty"`
+	ID              int64        `json:"id"`
+	Project         *string      `json:"project,omitempty" jsonschema:"move to project (id or title)"`
+	Title           *string      `json:"title,omitempty"`
+	Prompt          *string      `json:"prompt,omitempty"`
+	BaseRef         *string      `json:"baseRef,omitempty" jsonschema:"worktree base ref; empty string = project root"`
+	Branch          *string      `json:"branch,omitempty"`
+	Base            *string      `json:"base,omitempty" jsonschema:"ref | predecessor (worktree from a need's branch: baseTaskId, else the sole need; unavailable predecessors block launch; choose base=ref explicitly to use baseRef); without baseRef keeps the current worktree"`
 }
 
 // workspacePatch is the workspace baseRef/branch/base set (ok false without
@@ -776,14 +675,13 @@ func (a UpdateArgs) workspacePatch() (db.Workspace, bool) {
 
 func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (client.Patch, error) {
 	p := client.Patch{}
-	legacy := a.Model != nil || a.Provider != nil || a.Effort != nil || a.Options != nil || a.RuntimeMode != nil || a.InteractionMode != nil
 	if a.WorkspaceType != nil && (*a.WorkspaceType != "root" && *a.WorkspaceType != "worktree" || *a.WorkspaceType == "root" && a.BaseRef != nil && *a.BaseRef != "") {
 		return nil, errors.New("choose root without a base or choose worktree")
 	}
 	if a.ConnectionID != 0 {
 		p["connectionId"] = a.ConnectionID
 	}
-	if legacy || a.ExecutionConfig != nil {
+	if a.ExecutionConfig != nil {
 		var id, projectID int64
 		if schedule {
 			v, err := o.Client.Schedule(ctx, a.ID)
@@ -808,29 +706,20 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (cli
 			}
 			projectID = pr.ID
 		}
-		h, err := o.harnesses(ctx)
+		cfg, err := a.ExecutionConfig.config()
 		if err != nil {
 			return nil, err
 		}
-		if legacy && (a.ExecutionConfig != nil || !h.isT3(id)) {
-			return nil, errors.New("use executionConfig for this connection without legacy T3 options")
-		}
-		if a.ExecutionConfig != nil {
-			cfg, err := a.ExecutionConfig.config()
+		if cfg.Model != "" || cfg.Permission != "" || cfg.Mode != "" || len(cfg.Options) > 0 {
+			f, err := o.Client.ProjectCapabilities(ctx, id, projectID)
 			if err != nil {
 				return nil, err
 			}
-			if cfg.Model != "" || cfg.Permission != "" || cfg.Mode != "" || len(cfg.Options) > 0 {
-				f, err := o.Client.ProjectCapabilities(ctx, id, projectID)
-				if err != nil {
-					return nil, err
-				}
-				if err = f.ValidateConfig(cfg); err != nil {
-					return nil, err
-				}
+			if err = f.ValidateConfig(cfg); err != nil {
+				return nil, err
 			}
-			p["executionConfig"] = cfg
 		}
+		p["executionConfig"] = cfg
 	}
 	if a.Project != nil {
 		pr, _, err := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, *a.Project)
@@ -844,34 +733,6 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (cli
 	}
 	if a.Prompt != nil {
 		p["prompt"] = *a.Prompt
-	}
-	if a.Model != nil {
-		if strings.TrimSpace(*a.Model) == "" {
-			p["providerInstanceId"], p["model"] = nil, nil
-		} else {
-			var rc resolvedConfig
-			provider := ""
-			if a.Provider != nil {
-				provider = *a.Provider
-			}
-			if err := o.resolveModel(ctx, ConfigArgs{Provider: provider, Model: *a.Model}, nil, &rc); err != nil {
-				return nil, err
-			}
-			p["providerInstanceId"], p["model"] = rc.provider, rc.model
-		}
-	}
-	if a.Effort != nil || a.Options != nil {
-		effort := ""
-		if a.Effort != nil {
-			effort = *a.Effort
-		}
-		p["modelOptions"] = modelOptions(effort, a.Options)
-	}
-	if a.RuntimeMode != nil {
-		p["runtimeMode"] = *a.RuntimeMode
-	}
-	if a.InteractionMode != nil {
-		p["interactionMode"] = *a.InteractionMode
 	}
 	if w, ok := a.workspacePatch(); ok {
 		p["workspace"] = w
@@ -1062,9 +923,8 @@ func (o *Ops) CreateSchedule(ctx context.Context, a CreateScheduleArgs) (db.Sche
 	}
 	return o.Client.CreateSchedule(ctx, client.CreateSchedule{
 		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, Title: a.Title, Prompt: a.Prompt,
-		ProviderInstanceID: rc.provider, Model: rc.model, ModelOptions: rc.options,
-		RuntimeMode: rc.runtimeMode, InteractionMode: rc.interactionMode, Workspace: rc.workspace,
-		Notes: strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs, OriginSession: c.Session,
+		Workspace: rc.workspace,
+		Notes:     strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs, OriginSession: c.Session,
 		Cron: a.Cron, Tz: a.Tz, Paused: a.Paused,
 	})
 }
@@ -1128,7 +988,7 @@ func (o *Ops) PreviewSchedule(ctx context.Context, a PreviewArgs) (PreviewOut, e
 // RefArgs accepts one pasted reference or a connection-scoped session.
 type RefArgs struct {
 	Session *db.SessionRef `json:"session,omitempty" jsonschema:"explicit scoped session instead of ref"`
-	Ref     string         `json:"ref,omitempty" jsonschema:"what the user pasted: a stage task, tree or session link (any host; markdown link ok), a T3 thread link, #<task id> or a T3 thread id"`
+	Ref     string         `json:"ref,omitempty" jsonschema:"what the user pasted: a stage task, tree or session link (any host; markdown link ok), a harness session link, #<task id> or a session id with connectionId in session"`
 }
 
 // RefOut is read_ref: the task, tree and/or session a reference names. A
@@ -1136,13 +996,13 @@ type RefArgs struct {
 // includes the task that owns it (if any); a tree reference carries only the
 // tree.
 type RefOut struct {
-	SessionRef   *db.SessionRef       `json:"sessionRef,omitempty"`
-	Links        execution.Links      `json:"links"`
-	SessionTitle string               `json:"sessionTitle,omitempty"`
-	Kind         string               `json:"kind"` // task | tree | session
-	Task         *client.TaskDetail   `json:"task"`
-	Tree         *client.TreeDetail   `json:"tree,omitempty"`
-	Session      *client.ThreadDetail `json:"session"`
+	SessionRef   *db.SessionRef         `json:"sessionRef,omitempty"`
+	Links        execution.Links        `json:"links"`
+	SessionTitle string                 `json:"sessionTitle,omitempty"`
+	Kind         string                 `json:"kind"` // task | tree | session
+	Task         *client.TaskDetail     `json:"task"`
+	Tree         *client.TreeDetail     `json:"tree,omitempty"`
+	Session      *client.SessionContext `json:"session"`
 	// Next: how to read the full conversation.
 	Next string `json:"next,omitempty"`
 }
@@ -1176,29 +1036,18 @@ func (o *Ops) ReadRef(ctx context.Context, a RefArgs) (RefOut, error) {
 		}
 		out.Task = &t
 		out.Links = t.Links
-		if t.Thread != nil {
-			out.Session = &client.ThreadDetail{Thread: *t.Thread, Task: &t.Task}
-		}
 	}
 	if r.Session == nil {
 		out.Next = "Not launched yet: no session or conversation."
 		return out, nil
 	}
-	h, err := o.harnesses(ctx)
-	if err != nil {
-		return out, err
-	}
-	if h.isT3(r.Session.ConnectionID) {
-		if out.Task == nil {
-			d, err := o.Client.Thread(ctx, r.Session.ExternalSessionID)
-			if err != nil {
-				return out, err
-			}
-			out.Session = &d
+	if out.Task == nil {
+		d, err := o.Client.SessionContext(ctx, *r.Session)
+		if err != nil {
+			return out, err
 		}
-		out.Next = "Open in T3 or use t3_thread_read " + r.Session.ExternalSessionID + " in T3."
-	} else {
-		out.Next = "Open the session in its native harness."
+		out.Session = &d
 	}
+	out.Next = "Open the session in its native harness."
 	return out, nil
 }

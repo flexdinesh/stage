@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/db/store"
 )
 
@@ -265,7 +266,7 @@ func casePortTimeMicroseconds(t *testing.T, open Factory) {
 	s := db.NewStore(e)
 	p := mustProject(t, s, ctx, "p")
 	tz := "Asia/Kolkata"
-	task, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: "later", Prompt: "p", StartAt: &in, StartTz: &tz, RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}})
+	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: "later", Prompt: "p", StartAt: &in, StartTz: &tz, Workspace: db.Workspace{Type: "root"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +395,7 @@ func casePortUnicode(t *testing.T, open Factory) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := s.CreateTask(ctx, db.NewTask{ProjectID: p.ID, Title: text, Prompt: text, RuntimeMode: "full-access", InteractionMode: "default", Workspace: db.Workspace{Type: "root"}})
+	task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: p.ID, Title: text, Prompt: text, Workspace: db.Workspace{Type: "root"}})
 	if err != nil {
 		t.Fatal(err)
 	}

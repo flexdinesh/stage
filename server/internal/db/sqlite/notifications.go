@@ -20,16 +20,13 @@ const notificationKeySQL = `CASE
   WHEN n.session_id IS NOT NULL THEN 'thread:' || (SELECT connection_id || ':' || external_id FROM session_identities WHERE id=n.session_id)
   ELSE 'notification:' || n.id END`
 
-const notificationColumns = `COALESCE((SELECT connection_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),1), n.id, n.event, n.task_id, (SELECT external_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)), n.title, n.project_title,
+const notificationColumns = `COALESCE((SELECT connection_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),0), n.id, n.event, n.task_id, (SELECT external_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)), n.title, n.project_title,
   n.url, n.created_at, n.read_at,
   CASE WHEN n.task_id IS NOT NULL THEN tk.state
-       WHEN o.session_id IS NOT NULL THEN json_extract(o.observation,'$.state')
-       WHEN th.settled THEN 'settled'
-       ELSE th.observed_state END AS current_state`
+       WHEN o.session_id IS NOT NULL THEN json_extract(o.observation,'$.state') END AS current_state`
 
 const notificationJoins = `
 LEFT JOIN tasks tk ON tk.id = n.task_id
-LEFT JOIN threads th ON n.task_id IS NULL AND th.session_id = n.session_id
 LEFT JOIN execution_observations o ON o.session_id=n.session_id`
 
 func (r notifications) Insert(ctx context.Context, n store.NewNotification, sid *int64) (int64, error) {
@@ -162,17 +159,10 @@ func (r notifications) Prune(ctx context.Context, before time.Time) (int64, erro
 
 func (r notifications) Waiting(ctx context.Context, upToID int64) ([]store.WaitingSession, error) {
 	rows, err := r.Query(ctx, `SELECT connection_id, external_id, title, project_title, directory FROM (
- SELECT 1 AS connection_id, th.t3_thread_id AS external_id, th.title, p.title AS project_title, NULL AS directory, th.updated_at AS updated_at
- FROM threads th LEFT JOIN projects p ON p.id = COALESCE(th.stage_project_id,(SELECT min(b.project_id) FROM project_bindings b WHERE b.connection_id=COALESCE((SELECT connection_id FROM session_identities WHERE id=th.session_id),`+legacyT3SQL+`) AND b.external_project_id=th.t3_project_id AND b.active=1 HAVING count(*)=1))
- LEFT JOIN tasks tk ON tk.session_id = th.session_id
- WHERE `+externalNeedsInput+` AND NOT EXISTS (
- SELECT 1 FROM notifications n WHERE n.session_id = th.session_id AND n.id <= $1)
- UNION ALL
- SELECT si.connection_id, si.external_id, json_extract(o.observation,'$.title'), p.title, NULLIF(json_extract(o.observation,'$.directory'),''), o.observed_at
+ SELECT si.connection_id, si.external_id, json_extract(o.observation,'$.title') AS title, p.title AS project_title, NULLIF(json_extract(o.observation,'$.directory'),'') AS directory, o.observed_at AS updated_at
  FROM execution_observations o JOIN session_identities si ON si.id=o.session_id
  LEFT JOIN projects p ON p.id=(SELECT min(b.project_id) FROM project_bindings b WHERE b.active=1 AND b.connection_id=si.connection_id AND b.external_project_id=json_extract(o.observation,'$.project') HAVING count(*)=1)
- WHERE NOT EXISTS (SELECT 1 FROM threads th WHERE th.session_id=o.session_id)
- AND json_extract(o.observation,'$.state')='needs_input' AND json_extract(o.observation,'$.child')=0
+ WHERE json_extract(o.observation,'$.state')='needs_input' AND json_extract(o.observation,'$.child')=0
  AND NOT EXISTS (SELECT 1 FROM tasks tk WHERE tk.session_id=o.session_id)
  AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.session_id=o.session_id AND n.id <= $1)
  ) ORDER BY updated_at DESC, connection_id, external_id`, upToID)

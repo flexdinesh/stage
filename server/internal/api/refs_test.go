@@ -44,18 +44,25 @@ func TestResolveRef(t *testing.T) {
 			t.Fatalf("%q -> %+v", ref, got)
 		}
 	}
-	// The task's session, by stage link, T3 web link, app link and bare id:
-	// all name the owning task.
+	// The task's session, by stage link and by the T3 web and app links
+	// (resolved by the connection's adapter): all name the owning task.
 	for _, ref := range []string{
-		"http://127.0.0.1:7380/sessions/" + url.PathEscape(threadID),
+		"http://127.0.0.1:7380/connections/1/sessions/" + url.PathEscape(threadID),
 		publicURL + "/fake-env/" + url.PathEscape(threadID),
 		"t3code://threads/fake-env/" + url.PathEscape(threadID),
-		threadID,
 	} {
 		got := e.resolve(ref, 200)
 		if got.Kind != "session" || !e.isT3Session(got.Session, threadID) || got.TaskID == nil || *got.TaskID != tk.ID {
 			t.Fatalf("%q -> %+v", ref, got)
 		}
+	}
+	// A bare session id names no connection: without one it is refused.
+	e.resolve(threadID, 400)
+	e.resolve("http://127.0.0.1:7380/sessions/"+url.PathEscape(threadID), 400)
+	var bare resolved
+	e.must("GET", "/api/refs/resolve?connectionId=1&ref="+url.QueryEscape(threadID), nil, 200, &bare)
+	if bare.TaskID == nil || *bare.TaskID != tk.ID {
+		t.Fatalf("bare id with connection %+v", bare)
 	}
 
 	// A session started in T3 and not mirrored yet is read from T3.
@@ -63,22 +70,22 @@ func TestResolveRef(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got = e.resolve("http://localhost:7380/sessions/"+url.PathEscape(ext.ThreadID), 200)
+	got = e.resolve("http://localhost:7380/connections/1/sessions/"+url.PathEscape(ext.ThreadID), 200)
 	if got.Kind != "session" || !e.isT3Session(got.Session, ext.ThreadID) || got.TaskID != nil {
 		t.Fatalf("external %+v", got)
 	}
 
 	e.resolve("http://localhost:7380/tasks/9999", 404)
-	e.resolve("http://localhost:7380/sessions/nope", 404)
+	e.resolve("http://localhost:7380/connections/1/sessions/nope", 404)
 	e.resolve("https://github.com/o/r/pull/1", 400)
 	e.resolve("", 400)
 
 	// Offline: mirrored sessions still resolve; unknown ones are not found.
 	e.t3.offline.Store(true)
-	if got := e.resolve(threadID, 200); *got.TaskID != tk.ID {
+	if got := e.resolve("/connections/1/sessions/"+url.PathEscape(threadID), 200); *got.TaskID != tk.ID {
 		t.Fatalf("offline %+v", got)
 	}
-	e.resolve("never-seen", 404)
+	e.resolve("/connections/1/sessions/never-seen", 404)
 }
 
 func TestResolveTreeRef(t *testing.T) {

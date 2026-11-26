@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -42,13 +43,18 @@ func TestAdoptStateMatchesMapThreadState(t *testing.T) {
 					if err := store.UpsertThreadDetail(ctx, d); err != nil {
 						t.Fatal(err)
 					}
-					task, created, err := store.AdoptThread(ctx, db.AdoptInput{ThreadID: id})
+					task, created, err := store.AdoptThread(ctx, db.AdoptInput{Session: db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}})
 					if err != nil || !created {
 						t.Fatalf("adopt %s: %v", id, err)
 					}
-					want := db.TaskState(d.Observation().State)
+					// Idle: done once the harness reported an execution, else backlog.
+					o := d.Observation()
+					want := db.TaskState(o.State)
 					if want == "idle" {
 						want = db.StateDone
+						if o.StartedAt == nil && o.EndedAt == nil {
+							want = db.StateBacklog
+						}
 					}
 					if task.State != want {
 						t.Fatalf("status=%s latest=%q settled=%v pending=%d: adopted %s, MapThreadState %s", status, run, settled, pending, task.State, want)

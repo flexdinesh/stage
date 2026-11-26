@@ -174,6 +174,26 @@ func health(t *testing.T, a listen.Addr) client.Health {
 
 var projectSeq atomic.Int32
 
+// t3Connection is the T3 connection of the instance at a. A fresh install
+// has none: the refreshed T3 status stamps the connected T3's environment,
+// creating it.
+func t3Connection(t *testing.T, a listen.Addr) int64 {
+	t.Helper()
+	hc, base := httpFor(a)
+	res, err := hc.Get(base + "/api/harnesses/t3/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	for _, h := range health(t, a).Harnesses {
+		if h.Kind == "t3" && h.ConnectionID != 0 {
+			return h.ConnectionID
+		}
+	}
+	t.Fatal("no T3 connection")
+	return 0
+}
+
 // startTask creates a project in T3, syncs it and starts a task through a.
 func startTask(t *testing.T, fake *countingT3, a listen.Addr) client.Task {
 	t.Helper()
@@ -183,6 +203,7 @@ func startTask(t *testing.T, fake *countingT3, a listen.Addr) client.Task {
 	if err != nil {
 		t.Fatal(err)
 	}
+	conn := t3Connection(t, a)
 	hc, base := httpFor(a)
 	c := clientFor(a)
 	res, err := hc.Post(base+"/api/projects", "application/json", strings.NewReader(`{"title":"Test project"}`))
@@ -199,7 +220,7 @@ func startTask(t *testing.T, fake *countingT3, a listen.Addr) client.Task {
 	if res.StatusCode != 201 {
 		t.Fatalf("create project: %d", res.StatusCode)
 	}
-	body, _ := json.Marshal(map[string]any{"connectionId": 1, "externalProjectId": ext.ID, "workspace": root})
+	body, _ := json.Marshal(map[string]any{"connectionId": conn, "externalProjectId": ext.ID, "workspace": root})
 	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/api/projects/%d/binding", base, project.ID), bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +237,7 @@ func startTask(t *testing.T, fake *countingT3, a listen.Addr) client.Task {
 	case 409:
 		// The sync loop's discovery imported the workspace first: use the
 		// project it bound.
-		projectID = boundProject(t, c, ext.ID)
+		projectID = boundProject(t, c, conn, ext.ID)
 	default:
 		t.Fatalf("bind project: %d", res.StatusCode)
 	}
@@ -230,8 +251,8 @@ func startTask(t *testing.T, fake *countingT3, a listen.Addr) client.Task {
 	return task
 }
 
-// boundProject is the project bound to external project ext on connection 1.
-func boundProject(t *testing.T, c *client.Client, ext string) int64 {
+// boundProject is the project bound to external project ext on connection conn.
+func boundProject(t *testing.T, c *client.Client, conn int64, ext string) int64 {
 	t.Helper()
 	ps, err := c.Projects(context.Background())
 	if err != nil {
@@ -239,7 +260,7 @@ func boundProject(t *testing.T, c *client.Client, ext string) int64 {
 	}
 	for _, p := range ps {
 		for _, b := range p.Bindings {
-			if b.ConnectionID == 1 && b.ExternalProjectID == ext {
+			if b.ConnectionID == conn && b.ExternalProjectID == ext {
 				return p.ID
 			}
 		}
@@ -285,7 +306,7 @@ func TestListenerModes(t *testing.T) {
 			t.Fatalf("socket mode %v, %v", st.Mode().Perm(), err)
 		}
 		h := health(t, a)
-		if h.Service != "stage" || h.Status != "ok" || h.APIVersion != 7 || h.InstanceID != i.ready.Meta.InstanceID || h.StartedAt == nil {
+		if h.Service != "stage" || h.Status != "ok" || h.APIVersion != 8 || h.InstanceID != i.ready.Meta.InstanceID || h.StartedAt == nil {
 			t.Fatalf("health %+v", h)
 		}
 		if err := i.stop(t); err != nil {

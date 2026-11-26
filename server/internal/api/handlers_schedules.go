@@ -73,7 +73,7 @@ var errSchedulePredecessor = db.Invalid("workspace.base predecessor is not a sch
 
 func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	var req createScheduleReq
-	if err := decodeStrict(r, &req); err != nil {
+	if err := decodeConfig(r, &req, true); err != nil {
 		return err
 	}
 	if req.TreeID != nil || req.Needs != nil || req.NeedsSession != nil || req.StartMode != nil ||
@@ -83,7 +83,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := s.chooseConnection(r, &req.taskConfigReq); err != nil {
 		return err
 	}
-	in, err := req.validate(s.Store.IsT3, s.worktreeRule)
+	in, err := req.validate(s.worktreeRule)
 	if err != nil {
 		return err
 	}
@@ -104,8 +104,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	sc, err := s.Store.CreateSchedule(r.Context(), db.NewSchedule{
 		ExecutionConfig: in.ExecutionConfig, ConnectionID: in.ConnectionID,
 		ProjectID: in.ProjectID, Title: in.Title, Prompt: in.Prompt,
-		ProviderInstanceID: in.ProviderInstanceID, Model: in.Model, ModelOptions: in.ModelOptions,
-		RuntimeMode: in.RuntimeMode, InteractionMode: in.InteractionMode, Workspace: in.Workspace,
+		Workspace: in.Workspace,
 		Notes: req.Notes, AttachmentIDs: in.AttachmentIDs,
 		Cron: req.Cron, Tz: req.Tz, Paused: req.Paused, OriginSession: in.OriginSession,
 	})
@@ -130,12 +129,11 @@ func (s *server) getSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	env := s.envID(ctx)
 	out := scheduleDetailJSON{Schedule: s.scheduleJSON(sc), Runs: make([]scheduleRunJSON, len(runs))}
 	for i, run := range runs {
 		out.Runs[i] = scheduleRunJSON{ScheduleRun: run}
 		if run.Task != nil {
-			tj := s.task(env, *run.Task)
+			tj := s.task(*run.Task)
 			out.Runs[i].Task = &tj
 		}
 	}
@@ -149,7 +147,7 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	var p db.SchedulePatch
-	if err := decode(r, &p); err != nil {
+	if err := decodeConfig(r, &p, false); err != nil {
 		return err
 	}
 	current, err := s.Store.GetSchedule(r.Context(), id)
@@ -164,9 +162,6 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	if !s.Store.IsT3(connection) && (p.ProviderInstanceID.Set || p.Model.Set || p.RuntimeMode.Set || p.ModelOptions.Set || p.InteractionMode.Set) {
-		return db.Invalid("Choose harness-specific configuration.")
-	}
 	projectID := current.ProjectID
 	if p.ProjectID.Set {
 		projectID = p.ProjectID.V
@@ -180,8 +175,7 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	if err := validateConfigPatch(configPatch{
-		ConnectionID: connection, ExecutionConfig: &p.ExecutionConfig, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt, ProviderInstanceID: &p.ProviderInstanceID,
-		Model: &p.Model, ModelOptions: &p.ModelOptions, RuntimeMode: &p.RuntimeMode, InteractionMode: &p.InteractionMode,
+		ConnectionID: connection, ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt,
 		Workspace: &p.Workspace, AttachmentIDs: &p.AttachmentIDs,
 	}, s.worktreeRule); err != nil {
 		return err
@@ -238,7 +232,7 @@ func (s *server) runSchedule(w http.ResponseWriter, r *http.Request) error {
 	if task, err = s.Store.GetTask(ctx, task.ID); err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusCreated, s.task(s.envID(ctx), task))
+	writeJSON(w, http.StatusCreated, s.task(task))
 	return nil
 }
 

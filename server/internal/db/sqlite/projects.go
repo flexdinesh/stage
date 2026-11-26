@@ -15,8 +15,7 @@ func (t *tx) Projects() store.Projects { return projects{t.r} }
 
 const projectCols = `id,title,archived_at,created_at,updated_at,
  (SELECT max(a) FROM (
- SELECT max(max(updated_at,COALESCE(settled_at,updated_at))) a FROM threads WHERE stage_project_id=projects.id
- UNION ALL SELECT max(updated_at) a FROM tasks WHERE project_id=projects.id
+ SELECT max(updated_at) a FROM tasks WHERE project_id=projects.id
  UNION ALL SELECT max(created_at) FROM journal_entries WHERE task_id IN (SELECT id FROM tasks WHERE project_id=projects.id)
  OR tree_id IN (SELECT tree_id FROM tasks WHERE project_id=projects.id))),
  COALESCE((SELECT json_group_array(json_object('id',b.id,'projectId',b.project_id,'connectionId',b.connection_id,'harness',c.harness,

@@ -9,7 +9,7 @@ import { SessionActionButton } from "../components/SessionAction.tsx";
 import { RequestsPanel } from "../components/Requests.tsx";
 import { FollowUpPanel } from "../components/FollowUp.tsx";
 import { followUpView, mayFollowUp, replyPrompt } from "../lib/followup.ts";
-import { type TaskDetail, type TaskEvent, type Thread } from "../api/types.ts";
+import { type TaskDetail, type TaskEvent } from "../api/types.ts";
 import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { HandoffRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
@@ -20,7 +20,7 @@ import { StateControl } from "../components/StateControl.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { UsagePanel } from "../components/Usage.tsx";
 import { OpeningPrompt, PromptPanel } from "../components/PromptPanel.tsx";
-import { TaskStateBadge, ThreadStatusBadge, taskStateLabel } from "../components/StateBadge.tsx";
+import { TaskStateBadge, taskStateLabel } from "../components/StateBadge.tsx";
 import { ImageStrip } from "../components/Images.tsx";
 import { BatchPanel } from "../components/CreatedTasks.tsx";
 import { NoTreePanel, TreeBar, TreePanel } from "../components/trees/TreePanel.tsx";
@@ -202,8 +202,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const actionError = start.error ?? stop.error ?? duplicate.error ?? remove.error ?? archive.error;
   const archived = task.archivedAt !== null;
 
-  const pending = task.thread?.pendingRequestCount ?? 0;
-  const waiting = task.state === "needs_input" || pending > 0;
+  const waiting = task.state === "needs_input";
   // A replaced connection keeps Start / Stop visible but disabled, with the reason.
   const retired = isRetired(task);
   const live = { ...task, connectionActive: true };
@@ -407,7 +406,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
             <StatePanel task={task} className="max-lg:hidden" />
             {task.tree === null ? <NoTreePanel task={task} /> : <TreePanel task={task} tree={task.tree} />}
             <BatchPanel task={task} />
-            <ThreadPanel task={task} thread={task.thread} />
+            <ThreadPanel task={task} />
             <UsagePanel task={task} />
             <ConfigPanel task={task} />
           </div>
@@ -435,7 +434,7 @@ function StatePanel({ task, className }: { task: TaskDetail; className: string }
   );
 }
 
-function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null }) {
+function ThreadPanel({ task }: { task: TaskDetail }) {
   const destination = useSessionDestination();
   const title = `${useHarnesses().kindName(task.harness)} session`;
   const session = task.session;
@@ -454,33 +453,9 @@ function ThreadPanel({ task, thread }: { task: TaskDetail; thread: Thread | null
       </Panel>
     );
   }
-  // Sessions Stage mirrors (thread history) carry run state; others only their id.
   return (
-    <Panel title={title} meta={thread === null ? undefined : <>synced <RelTime at={thread.syncedAt} /></>}>
+    <Panel title={title}>
       <Details>
-        {thread === null ? null : (
-          <>
-            <Detail label="Status">
-              <ThreadStatusBadge status={thread.status} settled={thread.settled} />
-            </Detail>
-            <Detail label="Pending">
-              {thread.pendingRequestCount} request{thread.pendingRequestCount === 1 ? "" : "s"}
-            </Detail>
-            <Detail label="Settled">
-              {thread.settled ? (
-                <span>
-                  yes{thread.settledAt === null ? null : <span className="text-muted"> (<RelTime at={thread.settledAt} />)</span>}
-                </span>
-              ) : (
-                "no (execution metadata only)"
-              )}
-            </Detail>
-            <Detail label="Model">{thread.model ?? "-"}</Detail>
-            <Detail label="Branch">{thread.branch ?? "-"}</Detail>
-            <Detail label="Worktree">{thread.worktreePath ?? "-"}</Detail>
-            <Detail label="Synced"><RelTime at={thread.syncedAt} /></Detail>
-          </>
-        )}
         <Detail label="Session id">
           <span className="flex min-w-0 items-center gap-2">
             <span className="min-w-0 truncate" title={session.externalSessionId}>

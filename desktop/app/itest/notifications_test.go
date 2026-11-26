@@ -261,10 +261,33 @@ func (a api) read(groups ...string) {
 // fake's demo workspace.
 func (a api) project() (int64, string) { return bindDemoProject(a.t, a.do) }
 
-// The startup sync imports and binds the demo workspace; read it over both
-// bridge and socket.
+// t3Connection is the server's T3 connection. A fresh install has none: the
+// refreshed T3 status stamps the fake's environment, creating it (and
+// kicking the sync that imports the demo workspace).
+func t3Connection(t *testing.T, request func(string, string, any, int, any)) int64 {
+	t.Helper()
+	request("GET", "/api/harnesses/t3/status", nil, 200, nil)
+	var health struct {
+		Harnesses []struct {
+			Kind         string `json:"kind"`
+			ConnectionID int64  `json:"connectionId"`
+		} `json:"harnesses"`
+	}
+	request("GET", "/api/health", nil, 200, &health)
+	for _, h := range health.Harnesses {
+		if h.Kind == "t3" && h.ConnectionID != 0 {
+			return h.ConnectionID
+		}
+	}
+	t.Fatalf("no T3 connection: %+v", health.Harnesses)
+	return 0
+}
+
+// The sync imports and binds the demo workspace; read it over both bridge
+// and socket.
 func bindDemoProject(t *testing.T, request func(string, string, any, int, any)) (int64, string) {
 	t.Helper()
+	discovery := fmt.Sprintf("/api/connections/%d/projects", t3Connection(t, request))
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		var discovered struct {
@@ -272,7 +295,7 @@ func bindDemoProject(t *testing.T, request func(string, string, any, int, any)) 
 				ProjectID *int64 `json:"projectId"`
 			} `json:"projects"`
 		}
-		request("GET", "/api/connections/t3/projects", nil, 200, &discovered)
+		request("GET", discovery, nil, 200, &discovered)
 		if len(discovered.Projects) == 0 {
 			t.Fatal("fake has no workspace")
 		}

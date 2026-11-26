@@ -298,7 +298,7 @@ func caseConcurrentConnectionSwitch(t *testing.T, open Factory) {
 		}
 		var out []db.HarnessConnection
 		for _, c := range all {
-			if c.MachineID == db.LocalMachine && c.Harness == db.HarnessT3 && c.Active {
+			if c.MachineID == db.LocalMachine && c.Harness == t3.Kind && c.Active {
 				out = append(out, c)
 			}
 		}

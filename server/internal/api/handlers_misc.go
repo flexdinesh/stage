@@ -12,7 +12,7 @@ import (
 
 // ---- explicit session lookup and adoption ----
 
-// adoptThread: POST /api/connections/1/sessions/{id}/adopt {title?, initialNote?,
+// adoptThread: POST /api/connections/{connectionId}/sessions/{id}/adopt {title?, initialNote?,
 // treeId?} makes the session a task ("Track as task"): 201 new, 200 when a
 // task already owns it.
 func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
@@ -52,38 +52,7 @@ func (s *server) adoptThread(w http.ResponseWriter, r *http.Request) error {
 	if created || req.TreeID != nil {
 		s.treeChanged()
 	}
-	writeJSON(w, status, s.task(s.envID(r.Context()), task))
-	return nil
-}
-
-func (s *server) getThread(w http.ResponseWriter, r *http.Request) error {
-	t3 := s.Store.LegacyT3ID()
-	if r.PathValue("connectionId") != strconv.FormatInt(t3, 10) {
-		return s.sessionContext(w, r)
-	}
-
-	id := r.PathValue("id")
-	if s.connected(r.Context(), t3) {
-		if err := s.Sync.RefreshScopedSession(r.Context(), execution.SessionRef{ConnectionID: t3, ExternalSessionID: id}); err != nil {
-			return err
-		}
-	}
-	thread, err := s.Store.GetThread(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	env := s.envID(r.Context())
-	var task *taskJSON
-	if thread.TaskID != nil {
-		t, err := s.Store.GetTask(r.Context(), *thread.TaskID)
-		if err != nil {
-			return err
-		}
-		shaped := s.task(env, t)
-		task = &shaped
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"thread": s.thread(env, thread),
-		"task": task})
+	writeJSON(w, status, s.task(task))
 	return nil
 }
 
@@ -173,7 +142,7 @@ func (s *server) sessionContext(w http.ResponseWriter, r *http.Request) error {
 		if e != nil {
 			return e
 		}
-		shaped := s.task("", t)
+		shaped := s.task(t)
 		out.Task = &shaped
 		out.Project = &p
 		out.Title = t.Title

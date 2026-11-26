@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 )
 
 // secondUser inserts user 2 and returns a context acting as it.
@@ -80,10 +81,10 @@ func TestScheduledTaskInheritsScheduleCreator(t *testing.T) {
 	s, ctx := setup(t)
 	as2 := secondUser(t, ctx)
 	p := mustProject(t, s, ctx, "proj")
-	sc, err := s.CreateSchedule(as2, db.NewSchedule{
-		ProjectID: p.ID, Title: "nightly", Prompt: "p", RuntimeMode: "full-access",
-		InteractionMode: "default", Workspace: db.Workspace{Type: "root"},
-		Cron: "*/5 * * * *", Tz: "UTC", Notes: "remember",
+	sc, err := s.CreateSchedule(as2, db.NewSchedule{ConnectionID: dbtest.T3Connection,
+		ProjectID: p.ID, Title: "nightly", Prompt: "p",
+		Workspace: db.Workspace{Type: "root"},
+		Cron:      "*/5 * * * *", Tz: "UTC", Notes: "remember",
 	})
 	if err != nil {
 		t.Fatal(err)

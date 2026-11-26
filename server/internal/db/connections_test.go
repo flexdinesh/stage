@@ -3,8 +3,10 @@ package db
 import (
 	"context"
 	"errors"
-	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite/sqlitetest"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -74,10 +76,10 @@ func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) 
 	if err != nil || len(cs) != 2 {
 		t.Fatalf("connections %+v %v", cs, err)
 	}
-	if c := cs[0]; c.ID != 1 || c.Harness != HarnessT3 || !c.Active || c.Label != "env-a" || c.Tasks != 1 || c.Bindings != 1 {
+	if c := cs[0]; c.ID != 1 || c.Harness != "t3" || !c.Active || c.Label != "env-a" || c.Tasks != 1 || c.Bindings != 1 {
 		t.Fatalf("t3 %+v", c)
 	}
-	if c := cs[1]; c.ID != 2 || c.Harness != HarnessOpenCode || !c.Active || c.AutoComplete || c.Label != "http://oc:4096" {
+	if c := cs[1]; c.ID != 2 || c.Harness != "opencode" || !c.Active || c.AutoComplete || c.Label != "http://oc:4096" {
 		t.Fatalf("opencode %+v", c)
 	}
 	conn, err := s.GetConnection(ctx, LocalMachine)
@@ -88,7 +90,7 @@ func TestConnectionIdentityMigrationKeepsDataOnTheCurrentInstance(t *testing.T) 
 		t.Fatalf("verified %q %v", verified, err)
 	}
 	task, err := s.GetTask(ctx, 2)
-	if err != nil || task.ConnectionID != 2 || task.Harness != HarnessOpenCode || !task.ConnectionActive || task.Session == nil || task.Session.ExternalSessionID != "ses_x" {
+	if err != nil || task.ConnectionID != 2 || task.Harness != "opencode" || !task.ConnectionActive || task.Session == nil || task.Session.ExternalSessionID != "ses_x" {
 		t.Fatalf("task %+v %v", task, err)
 	}
 }
@@ -97,6 +99,7 @@ func connectionStore(t *testing.T) (*Store, context.Context, *sqlite.DB) {
 	t.Helper()
 	pool := openUnmigrated(t)
 	migrateTo(t, pool, sqlite.MaxVersion())
+	sqlitetest.SeedT3Connection(t, pool)
 	return NewStore(pool), context.Background(), pool
 }
 
@@ -111,18 +114,18 @@ func projectWithBinding(t *testing.T, s *Store, connection int64, workspace stri
 
 func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
-	first := s.LegacyT3ID()
+	first := s.ActiveID(LocalMachine, "t3")
 	// First pairing stamps the connection in place.
-	if sw, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box a", 0); err != nil || sw.Changed || s.LegacyT3ID() != first {
+	if sw, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box a", 0); err != nil || sw.Changed || s.ActiveID(LocalMachine, "t3") != first {
 		t.Fatalf("stamp %+v %v", sw, err)
 	}
 	project := projectWithBinding(t, s, first, "/w/a")
-	backlog, err := s.CreateTask(ctx, NewTask{ProjectID: project, Title: "queued", Prompt: "p", ConnectionID: first, RuntimeMode: "full-access", InteractionMode: "default", Workspace: Workspace{Type: "root"}})
+	backlog, err := s.CreateTask(ctx, NewTask{ProjectID: project, Title: "queued", Prompt: "p", ConnectionID: first, Workspace: Workspace{Type: "root"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ranTask(t, pool, project, first, "running", "thread-a")
-	schedule, err := s.CreateSchedule(ctx, NewSchedule{ProjectID: project, Title: "nightly", Prompt: "p", Cron: "0 3 * * *", Tz: "UTC", ConnectionID: first, RuntimeMode: "full-access", InteractionMode: "default", Workspace: Workspace{Type: "root"}})
+	schedule, err := s.CreateSchedule(ctx, NewSchedule{ProjectID: project, Title: "nightly", Prompt: "p", Cron: "0 3 * * *", Tz: "UTC", ConnectionID: first, Workspace: Workspace{Type: "root"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,8 +152,8 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 	if _, err := s.SetDefaultConnection(ctx, &first); err == nil {
 		t.Fatal("replaced connection accepted as the default")
 	}
-	if s.LegacyT3ID() != second || s.ConnectionActive(first) || !s.IsT3(first) {
-		t.Fatalf("active %d", s.LegacyT3ID())
+	if s.ActiveID(LocalMachine, "t3") != second || s.ConnectionActive(first) || s.Harness(first) != "t3" {
+		t.Fatalf("active %d", s.ActiveID(LocalMachine, "t3"))
 	}
 	ran, err := s.TaskBySession(ctx, SessionRef{ConnectionID: first, ExternalSessionID: "thread-a"})
 	if err != nil || ran.ConnectionID != first || ran.ConnectionActive || ran.ConnectionLabel != "box a" || ran.State != StateRunning {
@@ -172,7 +175,7 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 	if _, err := s.BindProject(ctx, ProjectBinding{ProjectID: project, ConnectionID: first, ExternalProjectID: "x", Workspace: "/x"}); !errors.As(err, &conflict) || conflict.Code != "connection_retired" {
 		t.Fatalf("bind on replaced: %v", err)
 	}
-	if _, err := s.CreateTask(ctx, NewTask{ProjectID: project, Title: "t", Prompt: "p", ConnectionID: first, RuntimeMode: "full-access", InteractionMode: "default", Workspace: Workspace{Type: "root"}}); !errors.As(err, &conflict) || conflict.Code != "connection_retired" {
+	if _, err := s.CreateTask(ctx, NewTask{ProjectID: project, Title: "t", Prompt: "p", ConnectionID: first, Workspace: Workspace{Type: "root"}}); !errors.As(err, &conflict) || conflict.Code != "connection_retired" {
 		t.Fatalf("task on replaced: %v", err)
 	}
 
@@ -205,7 +208,7 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 
 func TestForgetConnection(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
-	first := s.LegacyT3ID()
+	first := s.ActiveID(LocalMachine, "t3")
 	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box a", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +267,7 @@ func TestForgetConnection(t *testing.T) {
 func TestMovedConnectionsRetireOntoTheirReplacement(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
 	mustExec(t, pool, `INSERT INTO machines(id,label) VALUES(2,'worker')`)
-	old := s.LegacyT3ID()
+	old := s.ActiveID(LocalMachine, "t3")
 	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +277,7 @@ func TestMovedConnectionsRetireOntoTheirReplacement(t *testing.T) {
 	}
 	moved := sw.New
 	// Another identity on the worker's OpenCode never pairs with anything.
-	if _, err := s.SwitchInstance(ctx, 2, harness.Descriptor{Kind: HarnessOpenCode, Name: "OpenCode", Hosting: harness.Connected}, "http://oc", "oc", 0); err != nil {
+	if _, err := s.SwitchInstance(ctx, 2, harness.Descriptor{Kind: "opencode", Name: "OpenCode", Hosting: harness.Connected}, "http://oc", "oc", 0); err != nil {
 		t.Fatal(err)
 	}
 	moves, err := s.MovedConnections(ctx)
@@ -311,8 +314,8 @@ func TestMovedConnectionsRetireOntoTheirReplacement(t *testing.T) {
 	if err := s.RetireConnection(ctx, old, moved); !errors.As(err, &conflict) {
 		t.Fatalf("retired twice: %v", err)
 	}
-	if s.LegacyT3ID() != 0 {
-		t.Fatalf("local T3 still active: %d", s.LegacyT3ID())
+	if s.ActiveID(LocalMachine, "t3") != 0 {
+		t.Fatalf("local T3 still active: %d", s.ActiveID(LocalMachine, "t3"))
 	}
 	if n := foreignKeyViolations(t, pool); n != 0 {
 		t.Fatalf("%d foreign key violations", n)
@@ -321,7 +324,7 @@ func TestMovedConnectionsRetireOntoTheirReplacement(t *testing.T) {
 
 func TestRetireAndForgetLetsGoOfADisconnectedConnection(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
-	used := s.LegacyT3ID()
+	used := s.ActiveID(LocalMachine, "t3")
 	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +347,7 @@ func TestRetireAndForgetLetsGoOfADisconnectedConnection(t *testing.T) {
 		t.Fatalf("forgot twice: %v", err)
 	}
 	// An empty disconnected connection is deleted outright.
-	sw, err := s.SwitchInstance(ctx, LocalMachine, harness.Descriptor{Kind: HarnessOpenCode, Name: "OpenCode", Hosting: harness.Connected}, "http://oc", "oc", 0)
+	sw, err := s.SwitchInstance(ctx, LocalMachine, harness.Descriptor{Kind: "opencode", Name: "OpenCode", Hosting: harness.Connected}, "http://oc", "oc", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,13 +24,11 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
-	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/notify"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/release"
 	t3sync "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
-	"github.com/flexdinesh/stage/server/internal/t3setup"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -54,7 +52,7 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
 	// These tests complete settled tasks explicitly.
-	if _, err := store.SetAutoComplete(t.Context(), store.LegacyT3ID(), false); err != nil {
+	if _, err := store.SetAutoComplete(t.Context(), store.ActiveID(db.LocalMachine, "t3"), false); err != nil {
 		t.Fatal(err)
 	}
 	fake := t3.NewFake()
@@ -73,7 +71,7 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 	h := api.NewRouter(api.Deps{
 		Config:    config.Config{},
 		Harnesses: harness.MustRegistry(t3.Descriptor, opencode.Descriptor),
-		Store:     store, Setup: t3setup.New(t3setup.Options{Config: config.Config{}, Settings: store.OnMachine(db.LocalMachine), Identity: machine.NewStorePorts(store.OnMachine(db.LocalMachine), harness.MustRegistry(t3.Descriptor)), Client: fake, Fake: true, Logger: log}), Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:     store, Sync: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -101,7 +99,7 @@ func (e *env) project(root string) db.Project {
 // session launches a running external thread in project p.
 // t3 is session id s on the T3 connection.
 func (e *env) t3(s string) *db.SessionRef {
-	return &db.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: s}
+	return &db.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: s}
 }
 
 func (e *env) session(p db.Project, title string) string {
@@ -111,7 +109,7 @@ func (e *env) session(p db.Project, title string) string {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	if err := e.sync.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: out.ThreadID}); err != nil {
+	if err := e.sync.RefreshScopedSession(ctx, execution.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: out.ThreadID}); err != nil {
 		e.t.Fatal(err)
 	}
 	return out.ThreadID
@@ -217,7 +215,7 @@ func TestCreateTaskWithCallerContext(t *testing.T) {
 	}
 
 	var tk client.Task
-	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "Follow-up", "prompt": "do it", "afterMe": true, "effort": "high"}, &tk)
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "Follow-up", "prompt": "do it", "afterMe": true, "executionConfig": map[string]any{"model": t3.ModelKey("claude", "claude-haiku-5-5"), "options": []any{map[string]any{"id": "effort", "value": "high"}}}}, &tk)
 	if tk.ProjectID != p.ID || tk.State != db.StateBacklog || len(tk.Needs) != 1 || tk.Readiness == nil || *tk.Readiness != db.ReadinessBlocked ||
 		tk.OriginSession == nil || *tk.OriginSession != *e.t3(s) || tk.ExecutionConfig == nil || len(tk.ExecutionConfig.Options) != 1 || tk.ExecutionConfig.Options[0].ID != "effort" {
 		t.Fatalf("task %+v", tk)
@@ -282,7 +280,7 @@ func TestCreateTaskDefaultsCarryModelNotModes(t *testing.T) {
 	provider, model := "claude", "claude-haiku-5-5"
 	// The pin is the connection's; permission and mode are never stored with it.
 	pin := &execution.Config{Model: t3.ModelKey(provider, model), Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("high")}}, Permission: "approval-required", Mode: "plan"}
-	if _, err := e.store.SetNewTaskConfig(t.Context(), e.store.LegacyT3ID(), pin); err != nil {
+	if _, err := e.store.SetNewTaskConfig(t.Context(), e.store.ActiveID(db.LocalMachine, "t3"), pin); err != nil {
 		t.Fatal(err)
 	}
 	cs := connect(t, &agenttools.Ops{Client: e.client, Caller: agentctx.Caller{Cwd: "/w/defaults"}})
@@ -291,7 +289,11 @@ func TestCreateTaskDefaultsCarryModelNotModes(t *testing.T) {
 	if c := tk.ExecutionConfig; c == nil || c.Model != t3.ModelKey(provider, model) || len(c.Options) != 1 || c.Mode == "plan" || c.Permission == "approval-required" {
 		t.Fatalf("pinned config %+v", tk.ExecutionConfig)
 	}
-	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "e", "prompt": "x", "interactionMode": "plan", "runtimeMode": "auto"}, &tk)
+	// The removed T3 model arguments are refused by the tool schema.
+	if msg := call(t, cs, "create_task", map[string]any{"project": "1", "title": "e", "prompt": "x", "interactionMode": "plan", "runtimeMode": "auto"}, nil); !strings.Contains(msg, "interactionMode") {
+		t.Fatalf("removed arguments: %q", msg)
+	}
+	mustCall(t, cs, "create_task", map[string]any{"project": "1", "title": "e", "prompt": "x", "executionConfig": map[string]any{"mode": "plan", "permission": "auto"}}, &tk)
 	if c := tk.ExecutionConfig; c == nil || c.Model != t3.ModelKey(provider, model) || c.Mode != "plan" || c.Permission != "auto" {
 		t.Fatalf("explicit modes dropped: config %+v", tk.ExecutionConfig)
 	}
@@ -710,17 +712,17 @@ func TestLastWordTools(t *testing.T) {
 	}
 	_ = e.fake.SetStatus(id, t3.StatusCompleted)
 
-	if err := e.sync.RefreshScopedSession(t.Context(), execution.SessionRef{ConnectionID: e.store.LegacyT3ID(), ExternalSessionID: id}); err != nil {
+	if err := e.sync.RefreshScopedSession(t.Context(), execution.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: id}); err != nil {
 		t.Fatal(err)
 	}
 	var got client.TaskDetail
 	mustCall(t, cs, "get_task", map[string]any{"id": a.ID}, &got)
-	if got.Thread == nil || got.Thread.LastWord == nil || got.Thread.LastWord.Text != "## Done\nFixed **the race**." {
-		t.Fatalf("task thread last word %+v", got.Thread)
+	if got.FinalReply == nil || got.FinalReply.Text != "## Done\nFixed **the race**." {
+		t.Fatalf("task final reply %+v", got.FinalReply)
 	}
 	const preview = "Done Fixed the race."
 	if got.LastWordPreview == nil || *got.LastWordPreview != preview {
-		t.Fatalf("task preview %v", got.LastWordPreview)
+		t.Fatalf("task preview %q", strFromPtr(got.LastWordPreview))
 	}
 	var rows agenttools.TasksOut
 	mustCall(t, cs, "list_tasks", map[string]any{"project": fmt.Sprint(p.ID)}, &rows)
@@ -993,23 +995,27 @@ func TestReadRefTool(t *testing.T) {
 	// Task ref carries its session; session ref carries its task.
 	r = agenttools.RefOut{}
 	mustCall(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("#%d", tk.ID)}, &r)
-	if r.Kind != "task" || r.Task == nil || r.Session == nil || r.Session.Thread.T3ThreadID != threadID || !strings.Contains(r.Next, "t3_thread_read "+threadID) {
+	if r.Kind != "task" || r.Task == nil || r.SessionRef == nil || r.SessionRef.ExternalSessionID != threadID || !strings.Contains(r.Next, "native harness") {
 		t.Fatalf("task ref %+v", r)
 	}
 	r = agenttools.RefOut{}
-	mustCall(t, cs, "read_ref", map[string]any{"ref": "http://127.0.0.1:7380/sessions/" + threadID}, &r)
-	if r.Kind != "session" || r.Session == nil || r.Task == nil || r.Task.ID != tk.ID {
+	mustCall(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("http://127.0.0.1:7380/connections/%d/sessions/%s", dbtest.T3Connection, threadID)}, &r)
+	if r.Kind != "session" || r.SessionRef == nil || r.Task == nil || r.Task.ID != tk.ID {
 		t.Fatalf("session ref %+v", r)
 	}
-	if r.Task.Thread.LastWord == nil || !strings.Contains(r.Task.Thread.LastWord.Text, "token refresh") {
-		t.Fatalf("session last word %+v", r.Task.Thread.LastWord)
+	if r.Task.FinalReply == nil || !strings.Contains(r.Task.FinalReply.Text, "token refresh") {
+		t.Fatalf("session final reply %+v", r.Task.FinalReply)
+	}
+	// A bare session id names no connection.
+	if msg := call(t, cs, "read_ref", map[string]any{"ref": threadID}, nil); !strings.Contains(msg, "connectionId is required") {
+		t.Fatalf("bare session id %q", msg)
 	}
 
 	// External session: no task.
 	ext := e.session(p, "Outside")
 	r = agenttools.RefOut{}
-	mustCall(t, cs, "read_ref", map[string]any{"ref": ext}, &r)
-	if r.Kind != "session" || r.Task != nil || r.Session == nil || r.Session.Thread.Title != "Outside" {
+	mustCall(t, cs, "read_ref", map[string]any{"session": map[string]any{"connectionId": dbtest.T3Connection, "externalSessionId": ext}}, &r)
+	if r.Kind != "session" || r.Task != nil || r.Session == nil || r.Session.Title != "Outside" {
 		t.Fatalf("external ref %+v", r)
 	}
 
@@ -1059,4 +1065,11 @@ func TestGuideNamesInstalledCLI(t *testing.T) {
 	if strings.Contains(g, "{cli}") || strings.Contains(g, " stage ") {
 		t.Errorf("guide still names the default CLI:\n%s", g)
 	}
+}
+
+func strFromPtr(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
 }

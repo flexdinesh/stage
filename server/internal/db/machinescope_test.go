@@ -2,10 +2,11 @@ package db
 
 import (
 	"errors"
-	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -44,8 +45,8 @@ func TestMachineSettingsMigrationKeepsSingleMachineDataInPlace(t *testing.T) {
 	}
 	s := NewStore(pool)
 	ctx := t.Context()
-	if s.LegacyT3ID() != 1 || s.ActiveID(LocalMachine, HarnessOpenCode) != 7 {
-		t.Fatalf("connection ids t3=%d opencode=%d", s.LegacyT3ID(), s.ActiveID(LocalMachine, HarnessOpenCode))
+	if s.ActiveID(LocalMachine, "t3") != 1 || s.ActiveID(LocalMachine, "opencode") != 7 {
+		t.Fatalf("connection ids t3=%d opencode=%d", s.ActiveID(LocalMachine, "t3"), s.ActiveID(LocalMachine, "opencode"))
 	}
 	tok, err := s.LoadToken(ctx, LocalMachine)
 	if err != nil || tok.ClientID != "c" || tok.Token != "keep" {
@@ -65,7 +66,7 @@ func TestTwoMachinesEachHaveTheirOwnActiveConnectionsAndSettings(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
 	mustExec(t, pool, `INSERT INTO machines(id,label) VALUES(2,'Laptop')`)
 	const laptop int64 = 2
-	local := s.LegacyT3ID()
+	local := s.ActiveID(LocalMachine, "t3")
 	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box a", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -75,32 +76,14 @@ func TestTwoMachinesEachHaveTheirOwnActiveConnectionsAndSettings(t *testing.T) {
 		t.Fatalf("laptop T3 %+v %v", sw, err)
 	}
 	remote := sw.New
-	if s.ActiveID(LocalMachine, HarnessT3) != local || s.ActiveID(laptop, HarnessT3) != remote || s.LegacyT3ID() != local {
-		t.Fatalf("active local=%d laptop=%d legacy=%d", s.ActiveID(LocalMachine, HarnessT3), s.ActiveID(laptop, HarnessT3), s.LegacyT3ID())
+	if s.ActiveID(LocalMachine, "t3") != local || s.ActiveID(laptop, "t3") != remote || s.ActiveID(LocalMachine, "t3") != local {
+		t.Fatalf("active local=%d laptop=%d legacy=%d", s.ActiveID(LocalMachine, "t3"), s.ActiveID(laptop, "t3"), s.ActiveID(LocalMachine, "t3"))
 	}
 	if s.ConnectionMachine(remote) != laptop || s.ConnectionMachine(local) != LocalMachine || !s.ConnectionActive(local) || !s.ConnectionActive(remote) {
 		t.Fatal("connection machines")
 	}
-	if got := s.ActiveConnections(); !slices.Contains(got, ActiveConnection{ID: local, Machine: LocalMachine, Harness: HarnessT3}) || !slices.Contains(got, ActiveConnection{ID: remote, Machine: laptop, Harness: HarnessT3}) {
+	if got := s.ActiveConnections(); !slices.Contains(got, ActiveConnection{ID: local, Machine: LocalMachine, Harness: "t3"}) || !slices.Contains(got, ActiveConnection{ID: remote, Machine: laptop, Harness: "t3"}) {
 		t.Fatalf("active connections %+v", got)
-	}
-
-	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{{ThreadID: "mirror-1", ProjectID: "p", Title: "Mirror", Status: t3.StatusRunning, CreatedAt: time.Now().UTC()}})); err != nil {
-		t.Fatal(err)
-	}
-	// Another T3 connection never writes the local mirror's watcher state.
-	if err := s.SetObservedState(ctx, SessionRef{ConnectionID: remote, ExternalSessionID: "mirror-1"}, StateDone); err != nil {
-		t.Fatal(err)
-	}
-	var observed *string
-	if err := pool.QueryRow(`SELECT observed_state FROM threads WHERE t3_thread_id='mirror-1'`).Scan(&observed); err != nil || observed != nil {
-		t.Fatalf("remote wrote mirror state %v %v", observed, err)
-	}
-	if err := s.SetObservedState(ctx, SessionRef{ConnectionID: local, ExternalSessionID: "mirror-1"}, StateDone); err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.QueryRow(`SELECT observed_state FROM threads WHERE t3_thread_id='mirror-1'`).Scan(&observed); err != nil || observed == nil || *observed != string(StateDone) {
-		t.Fatalf("local mirror state %v %v", observed, err)
 	}
 
 	// Replacing the laptop's instance retires only the laptop's connection.
@@ -110,13 +93,13 @@ func TestTwoMachinesEachHaveTheirOwnActiveConnectionsAndSettings(t *testing.T) {
 		t.Fatalf("laptop replace %+v %v", sw, err)
 	}
 	replacement := sw.New
-	if s.ActiveID(LocalMachine, HarnessT3) != local || !s.ConnectionActive(local) || s.ConnectionActive(remote) {
+	if s.ActiveID(LocalMachine, "t3") != local || !s.ConnectionActive(local) || s.ConnectionActive(remote) {
 		t.Fatal("local T3 changed with the laptop's")
 	}
-	if ids, err := s.RetiredConnections(ctx, laptop, HarnessT3); err != nil || len(ids) != 1 || ids[0] != remote {
+	if ids, err := s.RetiredConnections(ctx, laptop, "t3"); err != nil || len(ids) != 1 || ids[0] != remote {
 		t.Fatalf("laptop retired %v %v", ids, err)
 	}
-	if ids, err := s.RetiredConnections(ctx, LocalMachine, HarnessT3); err != nil || len(ids) != 0 {
+	if ids, err := s.RetiredConnections(ctx, LocalMachine, "t3"); err != nil || len(ids) != 0 {
 		t.Fatalf("local retired %v %v", ids, err)
 	}
 	// A connection of another machine is never revived.
@@ -147,7 +130,7 @@ func TestTwoMachinesEachHaveTheirOwnActiveConnectionsAndSettings(t *testing.T) {
 		t.Fatalf("local token %+v %v", tok, err)
 	}
 	m := s.OnMachine(laptop)
-	if c, err := m.GetConnection(ctx); err != nil || c.T3URL == nil || *c.T3URL != "http://laptop:3773" || c.LastFullSyncAt == nil || c.ConnectionID != replacement || m.ActiveID(HarnessT3) != replacement || c.EnvironmentID == nil || *c.EnvironmentID != "env-a" {
+	if c, err := m.GetConnection(ctx); err != nil || c.T3URL == nil || *c.T3URL != "http://laptop:3773" || c.LastFullSyncAt == nil || c.ConnectionID != replacement || m.ActiveID("t3") != replacement || c.EnvironmentID == nil || *c.EnvironmentID != "env-a" {
 		t.Fatalf("laptop T3 setup %+v %v", c, err)
 	}
 	if tok, err := m.LoadToken(ctx); err != nil || tok.Token != "laptop-token" {

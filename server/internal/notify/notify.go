@@ -220,9 +220,8 @@ func PayloadFor(n db.Notification, badge int) Payload {
 }
 
 // notificationFrom is the row rec will be stored as (no id or timestamps).
-func notificationFrom(rec db.NewNotification, t3 int64) db.Notification {
-	n := db.Notification{ConnectionID: t3, Event: rec.Event, TaskID: rec.TaskID, T3ThreadID: rec.T3ThreadID,
-		Title: rec.Title, ProjectTitle: rec.ProjectTitle, URL: rec.URL}
+func notificationFrom(rec db.NewNotification) db.Notification {
+	n := db.Notification{Event: rec.Event, TaskID: rec.TaskID, Title: rec.Title, ProjectTitle: rec.ProjectTitle, URL: rec.URL}
 	if rec.Session != nil {
 		n.ConnectionID = rec.Session.ConnectionID
 		n.T3ThreadID = &rec.Session.ExternalSessionID
@@ -243,7 +242,7 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 		project := t.ProjectTitle
 		// Retain task identity across restarts and ON DELETE SET NULL. Push
 		// navigation can open the current session without changing this key.
-		rec = db.NewNotification{Event: e.task.To, TaskID: &t.ID, Session: t.Session, T3ThreadID: t.T3ThreadID,
+		rec = db.NewNotification{Event: e.task.To, TaskID: &t.ID, Session: t.Session,
 			Title: t.Title, ProjectTitle: &project, URL: "/tasks/" + id}
 	case e.ready != nil:
 		t, err := n.store.GetTask(ctx, *e.ready)
@@ -255,21 +254,20 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 		rec = db.NewNotification{Event: db.EventReady, TaskID: &t.ID, Title: t.Title, ProjectTitle: &project,
 			URL: "/tasks/" + strconv.FormatInt(t.ID, 10)}
 	case e.thread != nil:
+		// A session no task owns: its observed title and, when its harness
+		// project is bound to one Stage project, that project's title.
 		c := e.thread
-		title, project := c.Title, c.ProjectID
-		if c.Session == nil || n.store.IsT3(c.Session.ConnectionID) {
-			if th, err := n.store.GetThread(ctx, c.ThreadID); err == nil {
-				title = th.Title
-				if th.ProjectTitle != nil {
-					project = *th.ProjectTitle
-				}
-			} else if !errors.Is(err, db.ErrNotFound) {
-				return Payload{}, rec, fmt.Errorf("thread %s: %w", c.ThreadID, err)
+		project := c.ProjectID
+		if c.Session != nil {
+			title, ok, err := n.store.BoundProjectTitle(ctx, c.Session.ConnectionID, c.ProjectID)
+			if err != nil {
+				return Payload{}, rec, fmt.Errorf("session %s: %w", c.ThreadID, err)
+			}
+			if ok {
+				project = title
 			}
 		}
-		threadID := c.ThreadID
-		rec = db.NewNotification{Event: c.To, Session: c.Session, T3ThreadID: &threadID, Title: title, ProjectTitle: &project,
-			URL: "/?inbox"}
+		rec = db.NewNotification{Event: c.To, Session: c.Session, Title: c.Title, ProjectTitle: &project, URL: "/?inbox"}
 	default:
 		return Payload{}, rec, errors.New("empty event")
 	}
@@ -277,7 +275,7 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 	if err != nil {
 		return Payload{}, rec, err
 	}
-	return PayloadFor(notificationFrom(rec, n.store.LegacyT3ID()), badge), rec, nil
+	return PayloadFor(notificationFrom(rec), badge), rec, nil
 }
 
 // PublicKey is the VAPID public key (generated on first use).

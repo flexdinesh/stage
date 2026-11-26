@@ -18,8 +18,8 @@ type (
 )
 
 // NotificationKey is a loaded row's group key (the adapter computes the
-// same key in SQL). n.T3ThreadID is the
-// task's current thread only when TaskID is set, where the task key wins.
+// same key in SQL). n.T3ThreadID is the task's current session only when
+// TaskID is set, where the task key wins.
 func NotificationKey(n Notification) string {
 	switch {
 	case n.TaskID != nil:
@@ -27,12 +27,7 @@ func NotificationKey(n Notification) string {
 	case isTaskURL(n.URL):
 		return "task:" + strings.TrimPrefix(n.URL, "/tasks/")
 	case n.T3ThreadID != nil:
-		connection := n.ConnectionID
-		if connection == 0 {
-			// Rows from before connections belong to the original T3 connection.
-			connection = legacyT3ConnectionID
-		}
-		return "thread:" + strconv.FormatInt(connection, 10) + ":" + *n.T3ThreadID
+		return "thread:" + strconv.FormatInt(n.ConnectionID, 10) + ":" + *n.T3ThreadID
 	}
 	return "notification:" + strconv.FormatInt(n.ID, 10)
 }
@@ -64,11 +59,7 @@ func TagForKey(key string) string {
 func (s *Store) InsertNotification(ctx context.Context, n NewNotification) (int64, error) {
 	return write(ctx, s, func(tx store.Tx) (int64, error) {
 		var sid *int64
-		ref := n.Session
-		if ref == nil && n.T3ThreadID != nil {
-			ref = &SessionRef{ConnectionID: s.LegacyT3ID(), ExternalSessionID: *n.T3ThreadID}
-		}
-		if ref != nil {
+		if ref := n.Session; ref != nil {
 			value, err := ensureSession(ctx, tx, *ref)
 			if err != nil {
 				return 0, err
