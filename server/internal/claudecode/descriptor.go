@@ -40,7 +40,8 @@ var Descriptor = harness.Descriptor{
 		Via:       "via Claude Code removal",
 		Event:     "Completed from Claude Code removal; accepted evidence saved in Stage.",
 	}},
-	SessionHint: "A session UUID, the 8-character ID claude agents shows, or a pasted claude attach or --resume command.",
+	SessionHint:   "A session UUID, the 8-character ID claude agents shows, or a pasted claude attach or --resume command.",
+	DiscoveryHint: "Run Claude Code in the workspace folder on this machine, then refresh discovery.",
 	Setup: harness.Setup{
 		Fields: []harness.Field{
 			{ID: "binary", Label: "Claude command", Kind: harness.FieldText, Help: "Name or path of the claude executable. Blank: Stage looks on its PATH, then ~/.local/bin."},

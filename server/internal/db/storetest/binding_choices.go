@@ -37,8 +37,8 @@ func caseTaskAndScheduleWorkspaceChoices(t *testing.T, open Factory) {
 		t.Fatalf("project bindings %+v", p.Bindings)
 	}
 	primaryID, chosenID := p.Bindings[primaryAt].ID, p.Bindings[chosenAt].ID
-	wantPrimary := store.TaskWorkspace{BindingID: primaryID, Path: primary.WorkspaceRoot, Source: "primary"}
-	wantChosen := store.TaskWorkspace{BindingID: chosenID, Source: "chosen"}
+	wantPrimary := store.TaskWorkspace{BindingID: primaryID, Path: primary.WorkspaceRoot, Source: "primary", ExternalID: primary.ID}
+	wantChosen := store.TaskWorkspace{BindingID: chosenID, Source: "chosen", ExternalID: pathless.ID}
 
 	other := mustProject(t, s, ctx, "other")
 	newTask := db.NewTask{ProjectID: p.ID, ConnectionID: connection, Title: "Task", Prompt: "p"}
@@ -88,7 +88,7 @@ func caseTaskAndScheduleWorkspaceChoices(t *testing.T, open Factory) {
 		t.Fatal(err)
 	}
 	pinned, err := s.GetTask(ctx, task.ID)
-	wantPinned := store.TaskWorkspace{BindingID: chosenID, Source: "pinned"}
+	wantPinned := store.TaskWorkspace{BindingID: chosenID, Source: "pinned", ExternalID: pathless.ID}
 	if err != nil || pinned.Workspace == nil || *pinned.Workspace != wantPinned {
 		t.Fatalf("pinned task workspace %+v, %v", pinned.Workspace, err)
 	}
@@ -108,5 +108,14 @@ func caseTaskAndScheduleWorkspaceChoices(t *testing.T, open Factory) {
 	sc, err = s.UpdateSchedule(ctx, sc.ID, db.SchedulePatch{ProjectID: db.Optional[int64]{Set: true, V: other.ID}})
 	if err != nil || sc.BindingID != nil {
 		t.Fatalf("schedule after changing project %+v, %v", sc, err)
+	}
+
+	p, err = s.UnbindProject(ctx, p.ID, chosenID)
+	if err != nil || slices.ContainsFunc(p.Bindings, func(b db.ProjectBinding) bool { return b.ID == chosenID }) {
+		t.Fatalf("unbound workspace still present: %+v, %v", p.Bindings, err)
+	}
+	pinned, err = s.GetTask(ctx, task.ID)
+	if err != nil || pinned.Workspace == nil || *pinned.Workspace != wantPinned {
+		t.Fatalf("pinned task after unbinding: %+v, %v", pinned.Workspace, err)
 	}
 }

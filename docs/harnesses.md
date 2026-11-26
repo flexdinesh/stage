@@ -109,7 +109,9 @@ The [slot registry](../packages/app/src/harnesses/index.ts) selects a
 harness's setup panel, connection row, status reader and query key, and live
 chip via [`HarnessSlots`](../packages/app/src/harnesses/types.ts).
 UI code outside `packages/app/src/harnesses/` consumes the slot,
-descriptor and declared capabilities. The descriptor carries the web-address policy.
+descriptor and declared capabilities. The descriptor carries the web-address
+policy. It can supply a `discoveryHint` with workspace inventory instructions.
+Project actions use the selected workspace's connection and binding.
 
 - **Generic panel.** A kind without a custom entry uses the
   [generic slots](../packages/app/src/harnesses/generic.tsx). Define settings

@@ -1,5 +1,6 @@
 // Request bodies the task form (components/TaskForm.tsx) saves: a new task, a task edit, or a schedule.
-import type { CreateScheduleRequest, CreateTaskRequest, ExecutionConfig, StartMode, Task, UpdateTaskRequest } from "../api/types.ts";
+import type { CreateScheduleRequest, CreateTaskRequest, ExecutionConfig, ProjectBinding, StartMode, Task, TaskWorkspace, UpdateTaskRequest } from "../api/types.ts";
+import { orderedWorkspaces, workspaceBinding } from "./projects.ts";
 import { taskEditBaseline, taskEditChanges } from "./tasks.ts";
 
 /** The fields every form body carries. */
@@ -8,7 +9,29 @@ export interface TaskTemplate {
   title: string;
   prompt: string;
   connectionId: number;
+  bindingId: number | null;
   executionConfig: ExecutionConfig;
+}
+
+/** Live choices and the selected binding, including a saved choice that needs repair. */
+export function taskWorkspaceSelection(bindings: readonly ProjectBinding[], connectionId: number, bindingId: number | null) {
+  const choices = orderedWorkspaces(bindings.filter((b) => b.connectionActive && b.connectionId === connectionId && b.status === "available"));
+  const primary = workspaceBinding(bindings, connectionId);
+  const selected = bindingId === null ? primary : workspaceBinding(bindings, connectionId, bindingId);
+  const available = selected?.status === "available" ? selected : undefined;
+  const issue = bindingId === null || available !== undefined
+    ? null
+    : selected?.status === "changed"
+      ? "The selected workspace changed. Verify it in Projects or choose another workspace."
+      : selected?.status === "missing"
+        ? "The harness no longer reports the selected workspace. Choose another workspace."
+        : "The selected workspace is no longer available on this project and harness. Choose another workspace.";
+  return { choices, primary, selected, available, issue };
+}
+
+/** Display the assignment from the task itself, including pathless destinations. */
+export function taskWorkspaceLocation(workspace: TaskWorkspace): string {
+  return workspace.path || workspace.externalId || `Binding #${workspace.bindingId}`;
 }
 
 /** A tree member's start mode choice; inherit takes the tree's. */
@@ -63,7 +86,8 @@ export function taskUpdateBody(s: {
   timed: TimedStart;
 }): UpdateTaskRequest {
   if (!s.full) return { title: s.template.title };
-  const body = taskEditChanges(taskEditBaseline(s.before), { ...s.template, attachmentIds: s.attachmentIds });
+  const baseline = { ...taskEditBaseline(s.before), bindingId: s.before.bindingId ?? null };
+  const body = taskEditChanges(baseline, { ...s.template, attachmentIds: s.attachmentIds });
   if (s.handoff !== null && s.handoff !== s.before.handoff) body.handoff = s.handoff;
   if (s.treeStart !== null && s.treeStart !== (s.before.startMode ?? "inherit")) body.startMode = s.treeStart === "inherit" ? null : s.treeStart;
   if (s.timed !== null) {

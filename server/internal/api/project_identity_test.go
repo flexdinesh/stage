@@ -100,6 +100,48 @@ func TestWorkspaceInventoryReviewAndResolve(t *testing.T) {
 	}
 }
 
+func TestWorkspaceReviewKeepsSeparateOnlyForTheDismissedPair(t *testing.T) {
+	e := newEnv(t)
+	var projects []int64
+	for _, path := range []string{"/w/a", "/w/b", "/w/c"} {
+		p := e.project(path)
+		if err := e.fake.SetProject(p.T3ProjectID, func(w *t3.Project) {
+			w.Repo = "example.test/Org/Repo"
+			w.RepoPath = "."
+		}); err != nil {
+			t.Fatal(err)
+		}
+		projects = append(projects, p.ID)
+	}
+	e.must("GET", "/api/connections/1/workspaces", nil, 200, nil)
+
+	a, b, c := projects[0], projects[1], projects[2]
+	check := func(pairs [][2]int64) {
+		t.Helper()
+		var review struct {
+			Merges []struct {
+				IdentityKey string     `json:"identityKey"`
+				ProjectIDs  []int64    `json:"projectIds"`
+				Pairs       [][2]int64 `json:"pairs"`
+			}
+			Counts    db.WorkspaceReviewCounts
+			Attention int
+		}
+		e.must("GET", "/api/workspaces/review", nil, 200, &review)
+		if len(review.Merges) != 1 || review.Counts.Merges != 1 || review.Attention != 1 {
+			t.Fatalf("merge group compatibility: %+v", review)
+		}
+		group := review.Merges[0]
+		if group.IdentityKey != "remote:example.test/Org/Repo#." ||
+			!slices.Equal(group.ProjectIDs, projects) || !slices.Equal(group.Pairs, pairs) {
+			t.Fatalf("merge group %+v, want project IDs %v and pairs %v", group, projects, pairs)
+		}
+	}
+	check([][2]int64{{a, b}, {a, c}, {b, c}})
+	e.must("POST", fmt.Sprintf("/api/projects/%d/merge-dismissals", b), map[string]int64{"otherId": a}, 204, nil)
+	check([][2]int64{{a, c}, {b, c}})
+}
+
 func TestProjectBindingRoutesValidateLiveInventoryAndManagePrimary(t *testing.T) {
 	e := newEnv(t)
 	first := e.fake.AddProject("A", "/w/a")

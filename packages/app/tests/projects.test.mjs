@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { importNotice, matchProjects, projectDetail, projectsForConnection, repoLabel } from "../src/lib/projects.ts";
+import {
+  filterWorkspaceInventory, importNotice, matchProjects, orderedWorkspaces, primaryWorkspace, projectDetail,
+  projectsForConnection, projectWorkspace, repoLabel, suggestedWorkspaceFor, workspaceLocation,
+} from "../src/lib/projects.ts";
 import { fakeApi } from "./fake-transport.mjs";
 
 test("workspace inventory, pathless binding repair and specific unbind use the scoped routes", async () => {
@@ -50,7 +53,7 @@ test("a stale workspace confirmation carries the fresh preview", async () => {
 });
 
 const project = (id, title, workspaceRoot, lastActivityAt, repos = []) => ({
-  id, title, bindings: [{connectionId: 1, externalProjectId: `t3-${id}`, workspace: workspaceRoot, connectionActive: true}], archivedAt: null,
+  id, title, bindings: [{id, machineId: 1, connectionId: 1, externalProjectId: `t3-${id}`, workspace: workspaceRoot, connectionActive: true, primary: true}], archivedAt: null,
   createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z", lastActivityAt, origin: null, importedAt: null, repos,
 });
 
@@ -133,6 +136,58 @@ test("a chosen harness narrows the picker to its projects and unbound ones", () 
   assert.deepEqual(projectsForConnection(list, 2, "").map((p) => p.id), [9, 10, 11]);
   // The current selection stays listed.
   assert.deepEqual(projectsForConnection(list, 2, "1").map((p) => p.id), [1, 9, 10, 11]);
+});
+
+const row = (id, machineId, connectionId, workspace, primary = false, connectionActive = true) =>
+  ({ id, machineId, connectionId, workspace, primary, connectionActive, externalProjectId: `workspace-${id}` });
+
+test("orders workspaces by machine and connection, then primary, path and ID", () => {
+  const retired = row(9, 1, 1, "/retired", true, false);
+  const main = row(5, 1, 2, "/z", true);
+  const remote = row(1, 2, 3, "/a", true);
+  const other = row(4, 1, 2, "/branch");
+  const duplicatePath = row(3, 1, 2, "/branch");
+  const bindings = [remote, main, other, retired, duplicatePath];
+  const ordered = orderedWorkspaces(bindings);
+  assert.deepEqual(ordered.map((b) => b.id), [9, 5, 3, 4, 1]);
+  assert.equal(primaryWorkspace(ordered), main);
+  assert.equal(primaryWorkspace(ordered, 3), remote);
+  assert.equal(primaryWorkspace(ordered, 8), undefined);
+  assert.equal(projectWorkspace({ bindings }), "/z");
+  assert.equal(workspaceLocation({ ...main, workspace: "", title: "Network workspace" }), "Network workspace");
+  assert.equal(workspaceLocation({ ...main, workspace: "", title: "" }), "workspace-5");
+  assert.equal(matchProjects([{ ...stage, bindings }], "/branch")[0]?.project.id, stage.id);
+});
+
+test("preview requests and confirmations keep scope and the reviewed token", async () => {
+  const received = [];
+  const { api } = fakeApi(async (path, init) => {
+    received.push([path, JSON.parse(init.body)]);
+    return Response.json({});
+  });
+  await api.resolveWorkspaces(7, { apply: false });
+  await api.resolveWorkspaces(7, { apply: true, previewToken: "changed-workspaces" });
+  await api.mergeProject(42, { from: 43 });
+  await api.mergeProject(42, { from: 43, confirm: true, previewToken: "changed-merge" });
+  assert.deepEqual(received, [
+    ["/connections/7/resolve", { apply: false }],
+    ["/connections/7/resolve", { apply: true, previewToken: "changed-workspaces" }],
+    ["/projects/42/merge", { from: 43 }],
+    ["/projects/42/merge", { from: 43, confirm: true, previewToken: "changed-merge" }],
+  ]);
+});
+
+test("bind inventory ranks resolver suggestions and filters by the recorded repository", () => {
+  const samePath = { title: "App", externalId: "different", workspace: "/work/app", remote: "git.example/fork", projectId: null, resolution: { outcome: "new", candidates: [] } };
+  const suggestion = { ...samePath, externalId: "suggestion", remote: "git.example/app", resolution: { outcome: "review", candidates: [7] } };
+  const owned = { ...suggestion, externalId: "owned", projectId: 8 };
+  const declined = { ...suggestion, externalId: "declined", declined: true };
+  const options = { projectId: 7, previousId: undefined, repository: "", query: "app" };
+  assert.deepEqual(filterWorkspaceInventory([samePath, owned, suggestion], options), [suggestion, samePath, owned]);
+  assert.equal(suggestedWorkspaceFor(samePath, 7), false);
+  assert.equal(suggestedWorkspaceFor(owned, 7), false);
+  assert.equal(suggestedWorkspaceFor(declined, 7), false);
+  assert.deepEqual(filterWorkspaceInventory([samePath, owned, suggestion], { ...options, repository: "git.example/app" }), [suggestion, owned]);
 });
 
 const kindName = (kind) => ({ t3: "T3", opencode: "OpenCode" })[kind] ?? kind;

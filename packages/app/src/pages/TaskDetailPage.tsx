@@ -19,6 +19,7 @@ import { BlockedReason, LaunchBlockAlert, useStartTask, useStopTask } from "../c
 import { DeclaredActions } from "../components/DeclaredActions.tsx";
 import { HarnessFacts } from "../components/HarnessPresentation.tsx";
 import { workspaceBinding } from "../lib/projects.ts";
+import { taskWorkspaceLocation } from "../lib/taskForm.ts";
 import { StateControl } from "../components/StateControl.tsx";
 import { LastWordPanel } from "../components/LastWord.tsx";
 import { UsagePanel } from "../components/Usage.tsx";
@@ -498,9 +499,15 @@ function SessionPanel({ task }: { task: TaskDetail }) {
   );
 }
 
+const WORKSPACE_SOURCE = { pinned: "pinned at launch", chosen: "selected", primary: "primary" };
+
 function ConfigPanel({ task }: { task: TaskDetail }) {
   const { kindName, connection } = useHarnesses();
   const { machines } = useMachines();
+  const workspace = task.workspace;
+  const location = workspace == null
+    ? (task.bindingId == null ? null : `Binding #${task.bindingId}`)
+    : taskWorkspaceLocation(workspace);
   return (
     <Panel title="Config">
       <Details>
@@ -511,6 +518,12 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
             {isRetired(task) ? <span className="text-muted"> (replaced)</span> : null}
           </HarnessConnectionState>
         </Detail>
+        {location === null ? null : (
+          <Detail label="Workspace">
+            <span className="wrap-anywhere">{location}</span>
+            {workspace == null ? null : <span className="text-muted"> · {WORKSPACE_SOURCE[workspace.source]}</span>}
+          </Detail>
+        )}
         {task.startAt === null ? null : (
           <Detail label="Starts">
             <span title={dateTime(task.startAt)}>{wallTime(task.startAt, task.startTz ?? browserTimeZone(), { zone: true })}</span>

@@ -210,7 +210,7 @@ export interface WorkspaceResolveResult {
 
 export interface WorkspaceReview {
   workspaces: (Workspace & { reason: WorkspaceReviewReason | "new" })[];
-  merges: { identityKey: string; projectIds: number[] }[];
+  merges: { identityKey: string; projectIds: number[]; pairs: [number, number][] }[];
   counts: Record<WorkspaceReviewReason | "new" | "merges", number>;
   attention: number;
 }
@@ -332,6 +332,7 @@ export interface HarnessDescriptor {
   connectable: boolean;
   /** How its sessions are named when tracking one (the Track session field's hint); absent: the generic hint. */
   sessionHint?: string;
+  discoveryHint?: string;
 }
 /** Full sync progress and the last completed sync, when the harness reports them. */
 export interface HarnessSyncStatus {
@@ -503,6 +504,7 @@ export interface LaunchLinkPreview {
 export interface TaskWorkspace {
   bindingId: number;
   path: string;
+  externalId?: string;
   source: "pinned" | "chosen" | "primary";
 }
 

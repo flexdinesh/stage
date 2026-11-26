@@ -50,8 +50,8 @@ SELECT t.id, t.project_id, p.title, t.title, t.prompt,
  (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.session_id),
  (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),(SELECT provenance FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config,
  hc.harness,hc.active,hc.label,t.created_by_user_id,t.source_machine_id,t.binding_id,
- CASE WHEN d.binding_id IS NOT NULL THEN json_object('bindingId',d.binding_id,'path',d.workspace,'source','pinned')
-      WHEN b.id IS NOT NULL THEN json_object('bindingId',b.id,'path',b.workspace,'source',CASE WHEN t.binding_id IS NULL THEN 'primary' ELSE 'chosen' END)
+ CASE WHEN d.binding_id IS NOT NULL THEN json_object('bindingId',d.binding_id,'path',d.workspace,'source','pinned','externalId',d.external_project_id)
+      WHEN b.id IS NOT NULL THEN json_object('bindingId',b.id,'path',b.workspace,'externalId',b.external_project_id,'source',CASE WHEN t.binding_id IS NULL THEN 'primary' ELSE 'chosen' END)
  END
 FROM tasks t
 JOIN projects p ON p.id = t.project_id

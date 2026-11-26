@@ -1,7 +1,9 @@
 package db
 
 import (
+	"cmp"
 	"context"
+	"maps"
 	"slices"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
@@ -184,8 +186,9 @@ type ReviewWorkspace struct {
 }
 
 type WorkspaceMergeSuggestion struct {
-	IdentityKey string  `json:"identityKey"`
-	ProjectIDs  []int64 `json:"projectIds"`
+	IdentityKey string     `json:"identityKey"`
+	ProjectIDs  []int64    `json:"projectIds"`
+	Pairs       [][2]int64 `json:"pairs"`
 }
 
 type WorkspaceReviewCounts struct {
@@ -220,7 +223,7 @@ func (s *Store) ReviewWorkspaces(ctx context.Context) (WorkspaceReview, error) {
 		for _, pair := range dismissals {
 			dismissed[pair] = true
 		}
-		merges := map[string]map[int64]bool{}
+		merges := map[string]map[[2]int64]bool{}
 		for _, row := range state.rows {
 			if !row.ConnectionActive {
 				continue
@@ -228,14 +231,14 @@ func (s *Store) ReviewWorkspaces(ctx context.Context) (WorkspaceReview, error) {
 			v := row.Resolution
 			if v.Outcome == "bound" && row.ProjectID != nil {
 				for _, other := range v.Candidates {
-					a, b := min(*row.ProjectID, other), max(*row.ProjectID, other)
-					if dismissed[[2]int64{a, b}] {
+					pair := [2]int64{min(*row.ProjectID, other), max(*row.ProjectID, other)}
+					if dismissed[pair] {
 						continue
 					}
 					if merges[row.IdentityKey] == nil {
-						merges[row.IdentityKey] = map[int64]bool{}
+						merges[row.IdentityKey] = map[[2]int64]bool{}
 					}
-					merges[row.IdentityKey][a], merges[row.IdentityKey][b] = true, true
+					merges[row.IdentityKey][pair] = true
 				}
 			}
 			var reason string
@@ -261,23 +264,21 @@ func (s *Store) ReviewWorkspaces(ctx context.Context) (WorkspaceReview, error) {
 			}
 			out.Workspaces = append(out.Workspaces, ReviewWorkspace{Workspace: row.Workspace, Reason: reason})
 		}
-		for key, ids := range merges {
-			m := WorkspaceMergeSuggestion{IdentityKey: key}
-			for id := range ids {
-				m.ProjectIDs = append(m.ProjectIDs, id)
+		for _, key := range slices.Sorted(maps.Keys(merges)) {
+			pairs := slices.SortedFunc(maps.Keys(merges[key]), func(a, b [2]int64) int {
+				if c := cmp.Compare(a[0], b[0]); c != 0 {
+					return c
+				}
+				return cmp.Compare(a[1], b[1])
+			})
+			ids := make(map[int64]bool)
+			for _, pair := range pairs {
+				ids[pair[0]], ids[pair[1]] = true, true
 			}
-			slices.Sort(m.ProjectIDs)
-			out.Merges = append(out.Merges, m)
+			out.Merges = append(out.Merges, WorkspaceMergeSuggestion{
+				IdentityKey: key, ProjectIDs: slices.Sorted(maps.Keys(ids)), Pairs: pairs,
+			})
 		}
-		slices.SortFunc(out.Merges, func(a, b WorkspaceMergeSuggestion) int {
-			if a.IdentityKey < b.IdentityKey {
-				return -1
-			}
-			if a.IdentityKey > b.IdentityKey {
-				return 1
-			}
-			return 0
-		})
 		out.Counts.Merges = len(out.Merges)
 		out.Attention = out.Counts.Suggested + out.Counts.Ambiguous + out.Counts.Moved + out.Counts.Merges
 		return out, nil

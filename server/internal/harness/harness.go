@@ -109,6 +109,8 @@ type Descriptor struct {
 	// user tracks it (Track session); a host shows it as the field's hint.
 	// "": the host's generic copy.
 	SessionHint string `json:"sessionHint,omitempty"`
+	// DiscoveryHint explains how to make a workspace visible to this harness.
+	DiscoveryHint string `json:"discoveryHint,omitempty"`
 	// Wraps: this harness runs other harnesses' sessions (T3 runs Claude
 	// Code and Codex). Nil: it runs only its own.
 	Wraps *Wraps `json:"wraps,omitempty"`

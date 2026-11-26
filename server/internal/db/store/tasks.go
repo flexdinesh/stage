@@ -199,9 +199,10 @@ func (s HandoffSource) Label() string {
 
 // TaskWorkspace describes the workspace projected for a task or schedule.
 type TaskWorkspace struct {
-	BindingID int64  `json:"bindingId"`
-	Path      string `json:"path"`
-	Source    string `json:"source"` // pinned, chosen or primary
+	BindingID  int64  `json:"bindingId"`
+	Path       string `json:"path"`
+	Source     string `json:"source"`               // pinned, chosen or primary
+	ExternalID string `json:"externalId,omitempty"` // from the pinned launch destination
 }
 
 type LaunchDestination struct {

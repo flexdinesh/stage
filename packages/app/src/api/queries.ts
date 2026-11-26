@@ -16,6 +16,7 @@ export const keys = {
   harnesses: ["harnesses"],
   projects: ["projects"],
   workspaces: ["workspaces"],
+  projectActions: ["project-actions"],
   tasks: ["tasks"],
   task: ["task"],
   snippets: ["snippets"],
@@ -462,6 +463,21 @@ export function invalidateConnectionChange(
 export function useInvalidateWork(): () => Promise<void> {
   const qc = useQueryClient();
   return () => invalidateWork(qc);
+}
+
+/** Binding and identity changes affect discovery, placement and the harness catalogs. */
+export function useInvalidateProjects(): () => Promise<void> {
+  const qc = useQueryClient();
+  return async () => {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: keys.projects }),
+      qc.invalidateQueries({ queryKey: keys.workspaces }),
+      qc.invalidateQueries({ queryKey: keys.projectActions }),
+      qc.invalidateQueries({ queryKey: keys.snippets }),
+      qc.invalidateQueries({ queryKey: ["capabilities"] }),
+      invalidateWork(qc),
+    ]);
+  };
 }
 
 const NO_REQUESTS: SessionRequest[] = [];

@@ -17,10 +17,11 @@ A project groups tasks, trees and schedules under one title. Stage owns its ID, 
 ## Bindings
 
 A workspace has one Stage owner. A project can have several workspaces
-on a connection, with one primary. Tasks and schedules use that primary
-by default. A task or schedule can use a specific binding through the CLI.
+on a connection, with one primary. Tasks and schedules follow that primary
+by default. Their forms offer a workspace choice when the selected connection
+has several.
 
-- **Bind workspace.** Pick an existing workspace the harness reports. To bind a directory the harness has yet to list, add it in the harness, then refresh workspaces.
+- **Bind workspace.** Pick an existing workspace the harness reports. The drawer puts suggestions first, can filter by repository, and links the Stage project that already owns a workspace. Follow the harness hint if it supplies one, then refresh the inventory.
 - **Import.** Sync imports eligible workspaces. These include live T3 projects, unarchived OpenCode Git or Mercurial checkouts, Git checkouts Codex trusts, and Claude Code folders at a Git checkout's top.
 - **Unbind.** Discovery records a decline for that workspace on its connection. Binding it manually clears the decline.
 
@@ -43,12 +44,21 @@ machines. Each machine reads its own files. Directory and checkout keys
 stay local to the file host. Pathless workspaces use their connection and
 external ID. Several candidate projects require manual placement.
 
-The CLI can merge projects and split a workspace into its own project.
-A merged project's old ID still opens the surviving project.
+The Workspaces panel groups checkout addresses by machine. A network workspace
+can show its title and external ID. Offline and retired assignments remain visible.
+
+**Discovery review** lists new, suggested, ambiguous, declined and moved
+workspaces with their candidate projects. A decline stays visible without
+adding to the attention count. **Resolve now** previews changes on one connection.
+
+Use **Merge projects** in Discovery review to choose a survivor and preview
+what moves. A merged project's old ID opens the surviving project. **Split**
+on a workspace moves that workspace to a new project while the other
+workspaces and records stay.
 
 ## Archive
 
-Archive and unarchive projects in Stage. A harness archive is stored as
+Archive and unarchive projects in the **Project actions** menu. A harness archive is stored as
 workspace information. External removal preserves Stage tasks and history.
 
 ## Project scope
