@@ -21,7 +21,6 @@ import {
   Drawer,
   EmptyState,
   ErrorText,
-  ExternalLink,
   Field,
   Hint,
   InlineError,
@@ -37,6 +36,7 @@ import {
 const ReplyMarkdown = lazy(() => import("./ReplyMarkdown.tsx"));
 
 function Evidence({ evidence: e }: { evidence: AcceptedEvidence }) {
+  const sessionId = e.session?.externalSessionId ?? e.externalSessionId;
   const earlier = e.runId === null || e.replyRunId === null || e.runId !== e.replyRunId;
   return <div className="flex min-w-0 flex-col gap-3">
     <p className="text-small">Execution at capture: {taskStateLabel(e.executionState)}.</p>
@@ -51,9 +51,7 @@ function Evidence({ evidence: e }: { evidence: AcceptedEvidence }) {
       <Hint>{e.journalThroughId === 0 ? "No journal entries at capture." : `Journal context through entry #${e.journalThroughId}.`}</Hint>
       {e.treeId === null ? null : <TextLink to={`/trees/${e.treeId}?view=notes`} variant="rest">Tree #{e.treeId} journal</TextLink>}
       {e.branch === null ? null : <p className="font-mono text-meta break-all">Branch: {e.branch}</p>}
-      {/* Snapshots captured before sessions carried a connection keep only the thread id. */}
-      {(e.session?.externalSessionId ?? e.threadId) === null ? <Muted>No execution reference.</Muted> : <p className="font-mono text-meta break-all">Session: {e.session?.externalSessionId ?? e.threadId}</p>}
-      {e.artifacts.length === 0 ? <Muted>No artifact links captured.</Muted> : <ul className="mt-2 space-y-1">{e.artifacts.map((link) => <li key={link.url}><ExternalLink href={link.url} className="break-all">{link.repository || link.url}{link.number > 0 ? ` #${link.number}` : ""}</ExternalLink></li>)}</ul>}
+      {sessionId === null ? <Muted>No execution reference.</Muted> : <p className="font-mono text-meta break-all">Session: {sessionId}</p>}
     </div>
   </div>;
 }

@@ -54,7 +54,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 				if e != nil {
 					return db.Invalid("%s", e)
 				}
-				ref, err = refs.Ref{Kind: refs.KindSession, ConnectionID: native.ConnectionID, ThreadID: native.ExternalSessionID}, nil
+				ref, err = refs.Ref{Kind: refs.KindSession, ConnectionID: native.ConnectionID, SessionID: native.ExternalSessionID}, nil
 			}
 		}
 	} else if err != nil {
@@ -68,7 +68,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			}
 			if resolver, ok := execution.As[execution.LinkResolver](a); ok {
 				if native, e := resolver.ResolveLink(r.Context(), raw); e == nil {
-					ref, err = refs.Ref{Kind: refs.KindSession, ConnectionID: native.ConnectionID, ThreadID: native.ExternalSessionID}, nil
+					ref, err = refs.Ref{Kind: refs.KindSession, ConnectionID: native.ConnectionID, SessionID: native.ExternalSessionID}, nil
 				}
 			}
 		})
@@ -97,7 +97,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 		if id == 0 {
 			return db.Invalid("connectionId is required for a session id without a connection")
 		}
-		target := db.SessionRef{ConnectionID: id, ExternalSessionID: ref.ThreadID}
+		target := db.SessionRef{ConnectionID: id, ExternalSessionID: ref.SessionID}
 		out.Session = &target
 		owner, err := s.Store.TaskBySession(ctx, target)
 		if err == nil {
@@ -116,7 +116,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 		if err != nil {
-			return notFoundAs(err, fmt.Sprintf("session %s not found", ref.ThreadID))
+			return notFoundAs(err, fmt.Sprintf("session %s not found", ref.SessionID))
 		}
 		out.SessionTitle, out.Links = obs.Title, s.sessionLinks(ctx, id, &target.ExternalSessionID)
 		if obs.State != "" && obs.State != "idle" {

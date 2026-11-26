@@ -163,7 +163,7 @@ func caseClosedTreeReleasesNothing(t *testing.T, open Factory) {
 	p := mustProject(t, s, ctx, "proj-1")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
 	b := mustTask(t, s, ctx, p.ID, "b", []int64{a.ID})
-	launch(t, s, ctx, a.ID, "th-a", db.StateSettled)
+	launch(t, s, ctx, a.ID, "th-a", db.StateDone)
 	acceptTask(t, s, ctx, a.ID)
 	if _, err := s.UpdateTree(ctx, *b.TreeID, db.TreePatch{StartMode: db.Optional[db.StartMode]{Set: true, V: db.StartAuto}}); err != nil {
 		t.Fatal(err)
@@ -204,10 +204,10 @@ func caseActivityReopensTreeAndUnarchivesTask(t *testing.T, open Factory) {
 	if _, err := s.SetTreeStatus(ctx, *b.TreeID, db.TreeDone); err != nil {
 		t.Fatal(err)
 	}
-	// Settling is not activity: the tree stays done.
-	setState(t, s, ctx, a.ID, db.StateSettled)
+	// Finishing execution leaves the tree closed.
+	setState(t, s, ctx, a.ID, db.StateDone)
 	if st := getTask(t, s, ctx, b.ID); *st.TreeStatus != db.TreeDone {
-		t.Fatalf("settle reopened %+v", st)
+		t.Fatalf("done transition reopened %+v", st)
 	}
 	setState(t, s, ctx, a.ID, db.StateRunning)
 	tree, err := s.GetTree(ctx, *b.TreeID)
@@ -336,7 +336,7 @@ func caseDeleteOnlyUnstarted(t *testing.T, open Factory) {
 	}
 	x := mustTask(t, s, ctx, p.ID, "x", nil)
 	y := mustTask(t, s, ctx, p.ID, "y", []int64{x.ID})
-	launch(t, s, ctx, x.ID, "th-x", db.StateSettled)
+	launch(t, s, ctx, x.ID, "th-x", db.StateDone)
 	wantConflict(t, s.DeleteTree(ctx, *y.TreeID), "has recorded work: archive it instead")
 	if got, err := s.GetTree(ctx, *y.TreeID); err != nil || got.Deletable {
 		t.Fatalf("started tree deletable %+v %v", got.Tree, err)

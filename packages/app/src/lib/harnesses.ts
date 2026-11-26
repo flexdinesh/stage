@@ -130,10 +130,23 @@ export function retiredHint(name: string): string {
   return `Stage no longer uses its ${name} connection. Duplicate it to run again.`;
 }
 
-/** Settings PREVIOUS list: retired, not forgotten connections of one harness. */
-/** A harness's replaced, not forgotten connections (on `machineId` when given). */
-export const previousConnections = (list: readonly HarnessConnection[], h: Harness, machineId?: number) =>
-  list.filter((c) => c.harness === h && !c.active && c.forgottenAt === null && (machineId === undefined || c.machineId === machineId));
+const RESERVED_LINK_SCHEMES = new Set([
+  "http", "https", "ftp", "ftps", "mailto", "tel", "javascript", "data", "vbscript", "file", "blob", "about", "stage",
+]);
+
+/** Every descriptor's link schemes: lower case, valid, deduplicated, sorted. */
+export function linkSchemes(descriptors: readonly Pick<HarnessDescriptor, "linkSchemes">[]): string[] {
+  const schemes = new Set<string>();
+  for (const descriptor of descriptors) {
+    if (!Array.isArray(descriptor.linkSchemes)) continue;
+    for (const scheme of descriptor.linkSchemes) {
+      if (typeof scheme === "string" && /^[a-z][a-z0-9+.-]*$/.test(scheme) && !RESERVED_LINK_SCHEMES.has(scheme) && !scheme.startsWith("stage-")) {
+        schemes.add(scheme);
+      }
+    }
+  }
+  return [...schemes].toSorted();
+}
 
 /** The harness's active connection on a machine. */
 export const activeOn = (list: readonly HarnessConnection[], h: Harness, machineId: number): HarnessConnection | undefined =>

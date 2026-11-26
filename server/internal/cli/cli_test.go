@@ -160,7 +160,13 @@ func TestTaskCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.sync.RefreshScopedSession(context.Background(), execution.SessionRef{ConnectionID: h.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: out.ThreadID}); err != nil {
+	const prURL = "https://example.test/pulls/1"
+	if err := h.fake.SetThread(out.ThreadID, func(d *t3.ThreadDetail) {
+		d.PullRequests = []t3.PullRequest{{URL: prURL}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.sync.RefreshScopedSession(t.Context(), *t3Session(out.ThreadID)); err != nil {
 		t.Fatal(err)
 	}
 	h.caller = agentctx.Caller{Session: t3Session(out.ThreadID), Cwd: "/elsewhere"}
@@ -193,10 +199,18 @@ func TestTaskCommands(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, "created by connection 1 session "+out.ThreadID) || !strings.Contains(stdout, "line prompt") {
 		t.Fatalf("show: %s", stdout)
 	}
+	code, stdout, _ = h.run("", "task", "show", fmt.Sprint(tk.Needs[0]))
+	if code != 0 || !strings.Contains(stdout, out.ThreadID) || strings.Contains(stdout, "artifact") || strings.Contains(stdout, prURL) {
+		t.Fatalf("show adopted task: %d %s", code, stdout)
+	}
 	if code, _, _ = h.run("", "task", "unlink", fmt.Sprint(tk.ID)); code != 2 {
 		t.Fatalf("task unlink is gone: exit %d", code)
 	}
 
+	if code, _, stderr = h.run("", "task", "wait", fmt.Sprint(tk.ID), "--until", "settled"); code != 1 ||
+		!strings.Contains(stderr, "until: settled was removed in API v9; wait for done") {
+		t.Fatalf("wait settled: %d %s", code, stderr)
+	}
 	// wait times out with exit 3.
 	code, _, _ = h.run("", "task", "wait", fmt.Sprint(tk.ID), "--until", "running", "--timeout", "1s")
 	if code != 3 {
@@ -326,6 +340,30 @@ func TestTreeCommandsAndSessionBatch(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("✓ Started #%d [running] third", third.ID)) || strings.Contains(stdout, "fourth") {
 		t.Fatalf("tree start:\n%s", stdout)
 	}
+	ctx := t.Context()
+	launched, err := h.store.GetTask(ctx, third.ID)
+	if err != nil || launched.Session == nil {
+		t.Fatalf("started task: %+v %v", launched, err)
+	}
+	if err := h.fake.SetStatus(launched.Session.ExternalSessionID, t3.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.sync.PollActive(ctx); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := h.store.CompletionPreview(ctx, third.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.ChangeAcceptance(ctx, third.ID, db.AcceptanceRequest{
+		RequestID: "complete-third", Revision: preview.Revision, EvidenceVersion: preview.EvidenceVersion,
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ = h.run("", "tree", "ls")
+	if code != 0 || !strings.Contains(stdout, "backlog 1, completed 1") || strings.Contains(stdout, "settled") {
+		t.Fatalf("tree ls after completion: %d %s", code, stdout)
+	}
 	if code, _, _ := h.run("", "tree", "frob"); code != 2 {
 		t.Fatalf("unknown tree verb exit %d", code)
 	}
@@ -359,7 +397,7 @@ func TestSessionsAdoptCommand(t *testing.T) {
 	}
 	code, stdout, _ = h.run("", "sessions", "adopt", "--json")
 	mine := decode[agenttools.AdoptOut](t, stdout)
-	if code != 0 || mine.Created || !mine.Task.Adopted || mine.Task.T3ThreadID == nil || *mine.Task.T3ThreadID != me {
+	if code != 0 || mine.Created || !mine.Task.Adopted || mine.Task.ExternalSessionID == nil || *mine.Task.ExternalSessionID != me {
 		t.Fatalf("adopt own again: %s", stdout)
 	}
 	code, stdout, stderr = h.run("", "tree", "new", "--title", "T", fmt.Sprint(mine.Task.ID), "--json")
@@ -381,7 +419,7 @@ func TestSessionsAdoptCommand(t *testing.T) {
 		t.Fatalf("adopt initial note %+v", notes)
 	}
 	if code, _, _ := h.run("", "sessions", "adopt", "a", "b"); code != 2 {
-		t.Fatalf("two thread ids exit %d", code)
+		t.Fatalf("two session ids exit %d", code)
 	}
 }
 

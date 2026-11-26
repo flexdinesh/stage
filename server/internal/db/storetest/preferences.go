@@ -18,7 +18,7 @@ func caseNotifyEvents(t *testing.T, open Factory) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := []db.TaskState{db.StateNeedsInput, db.StateFailed, db.EventReady, db.StateDone, db.StateSettled}
+	all := []db.TaskState{db.StateNeedsInput, db.StateFailed, db.EventReady, db.StateDone}
 	if !slices.Equal(p.NotifyEvents, all) {
 		t.Fatalf("default %v, want all", p.NotifyEvents)
 	}
@@ -44,6 +44,9 @@ func caseNotifyEvents(t *testing.T, open Factory) {
 	var inv *db.InvalidError
 	if _, err := s.SetNotifyEvents(ctx, []db.TaskState{db.StateRunning}); !errors.As(err, &inv) {
 		t.Fatalf("running: %v, want InvalidError", err)
+	}
+	if _, err := s.SetNotifyEvents(ctx, []db.TaskState{"settled"}); !errors.As(err, &inv) || err.Error() != "event settled was removed in API v9; completion sends no notification (want needs_input, failed, ready or done)" {
+		t.Fatalf("removed event: %v", err)
 	}
 	if p, _ = s.GetPreferences(ctx); len(p.NotifyEvents) != 0 {
 		t.Fatalf("invalid set changed filter: %v", p.NotifyEvents)

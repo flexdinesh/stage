@@ -36,7 +36,7 @@ func TestResolveRef(t *testing.T) {
 	tk := e.task(p.ID, "Fix [login]", nil)
 	var started task
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), nil, 200, &started)
-	threadID := *started.T3ThreadID
+	threadID := *started.ExternalSessionID
 	md := fmt.Sprintf("[stage task #%d: Fix \\[login\\]](http://localhost:7380/tasks/%d)", tk.ID, tk.ID)
 	for _, ref := range []string{md, fmt.Sprintf("#%d", tk.ID)} {
 		got := e.resolve(ref, 200)

@@ -12,18 +12,17 @@ type SessionRef = execution.SessionRef
 
 // Notification is an inbox entry (docs/api.md "Notifications inbox").
 type Notification struct {
-	ConnectionID int64      `json:"connectionId"`
-	ID           int64      `json:"id"`
-	Event        TaskState  `json:"event"` // needs_input | ready | done | failed | settled
-	TaskID       *int64     `json:"taskId"`
-	T3ThreadID   *string    `json:"externalSessionId"` // the session's external id: the task's, else the notification's
-	Title        string     `json:"title"`
-	ProjectTitle *string    `json:"projectTitle"`
-	URL          string     `json:"url"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	ReadAt       *time.Time `json:"readAt"`
-	// CurrentState: the task's state, or for an external thread `settled`
-	// when settled, else its observed state. nil = unknown (deleted/unobserved).
+	ConnectionID      int64      `json:"connectionId"`
+	ID                int64      `json:"id"`
+	Event             TaskState  `json:"event"` // needs_input | ready | done | failed
+	TaskID            *int64     `json:"taskId"`
+	ExternalSessionID *string    `json:"externalSessionId"` // the session's external id: the task's, else the notification's
+	Title             string     `json:"title"`
+	ProjectTitle      *string    `json:"projectTitle"`
+	URL               string     `json:"url"`
+	CreatedAt         time.Time  `json:"createdAt"`
+	ReadAt            *time.Time `json:"readAt"`
+	// CurrentState: the task's state or an external session's observed state. nil = unknown (deleted/unobserved).
 	CurrentState *TaskState `json:"currentState"`
 }
 
@@ -37,7 +36,7 @@ type NewNotification struct {
 	URL          string
 }
 
-// NotificationGroup summarizes all retained notifications for one task/thread.
+// NotificationGroup summarizes all retained notifications for one task or session.
 type NotificationGroup struct {
 	Notification
 	Key         string `json:"key"`
@@ -54,17 +53,17 @@ type NotificationCursor struct {
 // WaitingSession is current external attention without a recorded inbox event.
 // It has no event ID or read state: reading it cannot manufacture a notification.
 type WaitingSession struct {
-	ConnectionID int64   `json:"connectionId"`
-	ThreadID     string  `json:"externalSessionId"`
-	Title        string  `json:"title"`
-	ProjectTitle *string `json:"projectTitle"`
+	ConnectionID      int64   `json:"connectionId"`
+	ExternalSessionID string  `json:"externalSessionId"`
+	Title             string  `json:"title"`
+	ProjectTitle      *string `json:"projectTitle"`
 	// Directory is the session's working folder when the harness reports
-	// one (null for T3 threads).
+	// one.
 	Directory *string `json:"directory"`
 }
 
 // Notifications is the inbox repository. A group key is
-// task:<id> | thread:<connection>:<external id> | notification:<id>.
+// task:<id> | session:<connection>:<external id> | notification:<id>.
 type Notifications interface {
 	// Insert stores n with its resolved session identity and returns its id.
 	Insert(ctx context.Context, n NewNotification, sessionID *int64) (int64, error)

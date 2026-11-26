@@ -57,16 +57,18 @@ func TestSeparateWebClientResolvesTheSameSessionOnBothOrigins(t *testing.T) {
 	}
 	ref := execution.SessionRef{ConnectionID: 2, ExternalSessionID: "ses_origin"}
 	links := a.Destinations(t.Context(), ref)
-	if !strings.HasPrefix(links.Web, cfg.WebClient+"/server/") || !strings.HasPrefix(links.Service, cfg.BrowserEndpoint+"/server/") || strings.TrimPrefix(links.Web, cfg.WebClient) != strings.TrimPrefix(links.Service, cfg.BrowserEndpoint) {
+	path, ok := strings.CutPrefix(links.Web, cfg.WebClient)
+	if !ok || !strings.HasPrefix(path, "/server/") {
 		t.Fatal(links)
 	}
-	for _, input := range []string{ref.ExternalSessionID, links.Web, links.Service} {
+	serviceURL := cfg.BrowserEndpoint + path
+	for _, input := range []string{ref.ExternalSessionID, links.Web, serviceURL} {
 		got, err := a.ResolveLink(t.Context(), input)
 		if err != nil || got != ref {
 			t.Errorf("%q: %+v, %v", input, got, err)
 		}
 	}
-	for _, input := range []string{strings.Replace(links.Web, "client.example", "foreign.example", 1), links.Web + "?token=x", strings.Replace(links.Service, "/session/", "/project/", 1)} {
+	for _, input := range []string{strings.Replace(links.Web, "client.example", "foreign.example", 1), links.Web + "?token=x", strings.Replace(serviceURL, "/session/", "/project/", 1)} {
 		if _, err := a.ResolveLink(t.Context(), input); err == nil {
 			t.Errorf("accepted %q", input)
 		}
@@ -77,7 +79,7 @@ func TestSeparateWebClientResolvesTheSameSessionOnBothOrigins(t *testing.T) {
 		t.Fatal(err)
 	}
 	direct := a.Destinations(t.Context(), ref)
-	if direct.Web != links.Service || direct.Service != "" {
+	if direct.Web != serviceURL {
 		t.Fatal(direct)
 	}
 }
@@ -121,8 +123,6 @@ func TestObservationEvidence(t *testing.T) {
 					fmt.Fprint(w, `{"data":[]}`)
 				case "/api/session/ses_test/message":
 					_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": []interface{}{map[string]interface{}{"id": "msg_done", "type": "assistant", "time": map[string]int{"created": 32, "completed": 38}, "content": []map[string]string{{"type": "reasoning", "text": "private"}, {"type": "text", "text": strings.Repeat("界", 4001)}}}}})
-				case "/api/experimental/artifacts":
-					fmt.Fprint(w, `{"location":{"directory":"/repo"},"data":[{"sessionID":"ses_test","url":"https://example.test/result"},{"sessionID":"ses_other","url":"https://example.test/wrong"}]}`)
 				default:
 					t.Errorf("unexpected request %s", r.URL)
 					http.NotFound(w, r)
@@ -143,7 +143,7 @@ func TestObservationEvidence(t *testing.T) {
 			if e != nil || o.State != tc.state {
 				t.Fatal(o, e)
 			}
-			if tc.state == "done" && (o.Reply == nil || !o.Reply.Truncated || o.Reply.Text != strings.Repeat("界", 4000) || len(o.Artifacts) != 1) {
+			if tc.state == "done" && (o.Reply == nil || !o.Reply.Truncated || o.Reply.Text != strings.Repeat("界", 4000)) {
 				t.Fatal("invalid bounded final evidence")
 			}
 		})

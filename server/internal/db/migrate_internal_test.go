@@ -160,7 +160,7 @@ func TestMigrationTrees(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !adopted.Adopted || adopted.Title != "Planner" || adopted.Prompt != "" || adopted.State != StateRunning ||
-		adopted.T3ThreadID == nil || *adopted.T3ThreadID != "sess-1" || adopted.ExecutionConfig == nil ||
+		adopted.ExternalSessionID == nil || *adopted.ExternalSessionID != "sess-1" || adopted.ExecutionConfig == nil ||
 		adopted.ExecutionConfig.Permission != "full-access" || adopted.ExecutionConfig.Model != `["codex","gpt"]` || adopted.LaunchAttempt != 1 {
 		t.Fatalf("adopted %+v", adopted)
 	}
@@ -225,19 +225,19 @@ func TestMigrationTrees(t *testing.T) {
 	if hs, _ := s.GetHandoffs(ctx, 2, 1); len(hs) != 1 || hs[0].Text != "block" || *hs[0].SourceTaskID != 1 {
 		t.Fatalf("kept handoff %+v", hs)
 	}
-	if err := s.RecordHandoff(ctx, 2, Handoff{Attempt: 1, Status: HandoffSent, SourceTaskID: ptrTo(int64(10)), SourceThreadID: "sess-1", Text: "second"}); err != nil {
+	if err := s.RecordHandoff(ctx, 2, Handoff{Attempt: 1, Status: HandoffSent, SourceTaskID: ptrTo(int64(10)), Text: "second"}); err != nil {
 		t.Fatal(err)
 	}
 	if hs, _ := s.GetHandoffs(ctx, 2, 1); len(hs) != 2 {
 		t.Fatalf("two sources %+v", hs)
 	}
 
-	// Notifications accept ready; prefs gained it.
+	// Notifications and preferences retain the ready event.
 	if _, err := s.InsertNotification(ctx, NewNotification{Event: EventReady, TaskID: ptrTo(int64(3)), Title: "Ship", URL: "/tasks/3"}); err != nil {
 		t.Fatalf("ready notification: %v", err)
 	}
 	prefs, err := s.GetPreferences(ctx)
-	if err != nil || !slices.Contains(prefs.NotifyEvents, EventReady) || len(prefs.NotifyEvents) != 5 {
+	if err != nil || !slices.Contains(prefs.NotifyEvents, EventReady) || len(prefs.NotifyEvents) != 4 {
 		t.Fatalf("prefs %+v %v", prefs.NotifyEvents, err)
 	}
 }
@@ -298,7 +298,7 @@ func TestJournalMigrationPreservesHistoryAndDiscardsLegacyNotes(t *testing.T) {
 	if tr, err := s.GetTree(ctx, 1); err != nil || tr.Deletable {
 		t.Fatalf("migration protection: %+v %v", tr, err)
 	}
-	if _, err := s.TransitionTask(ctx, Transition{TaskID: 1, To: StateSettled, Detail: "after rollout"}); err != nil {
+	if _, err := s.TransitionTask(ctx, Transition{TaskID: 1, To: StateNeedsInput, Detail: "after rollout"}); err != nil {
 		t.Fatal(err)
 	}
 	id := int64(1)
@@ -344,7 +344,7 @@ func TestLegacyScheduleTemplatesPreserveTextAcrossJournalParts(t *testing.T) {
 				var reconstructed strings.Builder
 				for i, preview := range page.Entries {
 					entry, err := s.GetJournalEntry(ctx, preview.ID)
-					if err != nil || len(entry.Text) > 16*1024 || !utf8.ValidString(entry.Text) || entry.SourceThreadID == nil || *entry.SourceThreadID != "source-session" {
+					if err != nil || len(entry.Text) > 16*1024 || !utf8.ValidString(entry.Text) || entry.SourceSession == nil || entry.SourceSession.ExternalSessionID != "source-session" {
 						t.Fatalf("invalid full note: %+v %v", entry, err)
 					}
 					text := entry.Text

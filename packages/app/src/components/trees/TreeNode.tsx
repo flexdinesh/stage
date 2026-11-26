@@ -70,7 +70,7 @@ export function NodeAction({ task, className, review = true }: { task: Task; pen
           Open in {kindName(task.harness)}
         </AppButton>
       );
-  } else if (review && task.acceptanceId === null && (task.state === "done" || task.state === "settled")) {
+  } else if (review && task.acceptanceId === null && task.state === "done") {
     action = <CompletionButton task={task} review />;
   } else if (startable) {
     action = (
@@ -135,7 +135,7 @@ export function TreeNode({
   const { pending, failed } = pendingNeeds(task, byId);
   const blocked = useLaunchGate()(task) !== null;
   const when = inState(task, undefined, { blocked });
-  const ran = task.state === "done" || task.state === "settled" ? duration(task.runStartedAt, task.runEndedAt) : null;
+  const ran = task.state === "done" ? duration(task.runStartedAt, task.runEndedAt) : null;
   const titleCls = "truncate text-ui font-medium after:absolute after:inset-0";
   const label = `#${task.id} ${task.title} · Project: ${task.projectTitle}`;
   return (

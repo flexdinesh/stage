@@ -181,7 +181,7 @@ func (d *Desktop) TestNotification(ctx context.Context) error {
 }
 
 // CloseNotifications closes the active server's shown notification with
-// tag (task-12, thread-x), or all of its notifications for "".
+// tag (task-12, session-x), or all of its notifications for "".
 func (d *Desktop) CloseNotifications(tag string) {
 	if d.h.alerts != nil {
 		d.h.alerts.CloseShown(d.h.activeID(), tag)

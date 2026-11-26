@@ -10,7 +10,7 @@ import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
 import { EmptyState, ErrorText, PageHeader, Panel, QueryState, Row, RowList, Segmented, buttonClass } from "../components/ui.tsx";
 import { scopedPageName } from "../lib/history.ts";
 import { projectWorkspace } from "../lib/projects.ts";
-import { settledSince } from "../lib/settled.ts";
+import { completedWindowStart } from "../lib/completed.ts";
 import { TREE_GROUP_KEYS, byTreeGroup, parseTreeGroup, treeClosed, treeGroup, type TreeGroupKey } from "../lib/trees.ts";
 
 /** Open: trees with work left (with the last 7 days completed); Closed: done, completed or archived trees. */
@@ -32,7 +32,7 @@ const TREE_GROUP_META: Record<TreeGroupKey, GroupMeta> = {
   failed: { title: "Failed / interrupted", stat: "Failed", short: "fail", tone: "bad", empty: "No tree has failed or interrupted tasks." },
   running: { title: "Running", stat: "Running", short: "run", tone: "run", empty: "No tree is running." },
   waiting: { title: "Waiting", stat: "Waiting", short: "wait", tone: "idle", empty: "No tree is waiting on needs." },
-  settled: { title: "Completed · last 7 days", stat: "Completed", short: "done", tone: "ok", empty: "No tree completed in the last 7 days." },
+  completed: { title: "Completed · last 7 days", stat: "Completed", short: "done", tone: "ok", empty: "No tree completed in the last 7 days." },
 };
 
 const FOLD_KEY = "stage-trees-groups";
@@ -84,17 +84,17 @@ export function TreesPage() {
 /** Open trees: Active (most pressing first) and Completed in the window; a stat cell filters to one group. */
 function OpenTrees({ selected, onSelect }: { selected: TreeGroupKey | null; onSelect: (key: string | null) => void }) {
   const scope = useScope();
-  const [since] = useState(() => settledSince());
+  const [since] = useState(() => completedWindowStart());
   // Trees with work left, plus trees completed inside the window.
-  const trees = useTrees({ settledFrom: since, ...scope.query });
+  const trees = useTrees({ completedFrom: since, ...scope.query });
   const fold = useGroupFold(FOLD_KEY);
 
   const open = (trees.data?.trees ?? []).filter((t) => t.status === "open");
-  const counts: Record<TreeGroupKey, number> = { needs: 0, done: 0, ready: 0, failed: 0, running: 0, waiting: 0, settled: 0 };
+  const counts: Record<TreeGroupKey, number> = { needs: 0, done: 0, ready: 0, failed: 0, running: 0, waiting: 0, completed: 0 };
   for (const t of open) counts[treeGroup(t)]++;
-  const active = byTreeGroup(open.filter((t) => treeGroup(t) !== "settled"));
-  const completed = open.filter((t) => treeGroup(t) === "settled").toSorted((a, b) => (b.settledAt ?? "").localeCompare(a.settledAt ?? ""));
-  const collapsed = fold.folded("settled", []);
+  const active = byTreeGroup(open.filter((t) => treeGroup(t) !== "completed"));
+  const completed = open.filter((t) => treeGroup(t) === "completed").toSorted((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""));
+  const collapsed = fold.folded("completed", []);
 
   return (
     <QueryState
@@ -126,19 +126,19 @@ function OpenTrees({ selected, onSelect }: { selected: TreeGroupKey | null; onSe
             </Panel>
             {completed.length === 0 ? null : (
               <GroupPanel
-                info={TREE_GROUP_META.settled}
+                info={TREE_GROUP_META.completed}
                 count={completed.length}
                 collapsed={collapsed}
-                onToggle={() => fold.toggle("settled", [])}
+                onToggle={() => fold.toggle("completed", [])}
               >
-                <TreeList trees={completed} emptyText={TREE_GROUP_META.settled.empty} />
+                <TreeList trees={completed} emptyText={TREE_GROUP_META.completed.empty} />
               </GroupPanel>
             )}
           </>
         ) : (
           <GroupPanel info={TREE_GROUP_META[selected]} count={counts[selected]}>
             <TreeList
-              trees={selected === "settled" ? completed : active.filter((t) => treeGroup(t) === selected)}
+              trees={selected === "completed" ? completed : active.filter((t) => treeGroup(t) === selected)}
               emptyText={TREE_GROUP_META[selected].empty}
             />
           </GroupPanel>
@@ -153,7 +153,7 @@ function ClosedTrees({ view }: { view: "closed" | "all" }) {
   const scope = useScope();
   const trees = useTrees({ status: "all", ...scope.query });
   // Closed trees: marked done, completed, or archived.
-  const list = (trees.data?.trees ?? []).filter((t) => view === "all" || treeClosed(t) || t.settledAt !== null);
+  const list = (trees.data?.trees ?? []).filter((t) => view === "all" || treeClosed(t) || t.completedAt !== null);
   const empty = view === "closed" ? "Nothing closed. Done, completed and archived trees land here." : "No trees yet. Let an agent plan one.";
   return (
     <QueryState

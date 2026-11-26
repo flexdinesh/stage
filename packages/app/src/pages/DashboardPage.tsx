@@ -21,7 +21,7 @@ import { useSessionDestination } from "../lib/hostState.ts";
 const FOLD_KEY = "stage-dashboard-groups";
 
 function NeedsOpenLink({ tasks }: { tasks: Task[] }) {
-  // App links open one thread, so only a lone task gets one.
+  // App links open one session, so only a lone task gets one.
   const destination = useSessionDestination();
   const { kindName } = useHarnesses();
   const href = tasks.length === 1 ? (tasks[0] === undefined ? null : destination(tasks[0])) : null;

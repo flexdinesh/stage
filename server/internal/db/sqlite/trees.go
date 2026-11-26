@@ -44,17 +44,17 @@ func (r trees) List(ctx context.Context, f store.TreeFilter) ([]store.Tree, erro
 	if f.ProjectID != nil {
 		w.add("EXISTS (SELECT 1 FROM tasks m WHERE m.tree_id = tr.id AND m.project_id = " + w.arg(*f.ProjectID) + ")")
 	}
-	unsettled := "EXISTS (SELECT 1 FROM tasks m WHERE m.tree_id = tr.id AND m.acceptance_id IS NULL)"
+	unaccepted := "EXISTS (SELECT 1 FROM tasks m WHERE m.tree_id = tr.id AND m.acceptance_id IS NULL)"
 	switch f.View {
 	case store.TreeViewAll:
 	case store.TreeViewDone:
-		w.add("(tr.status = 'done' OR (tr.status = 'open' AND NOT " + unsettled + "))")
+		w.add("(tr.status = 'done' OR (tr.status = 'open' AND NOT " + unaccepted + "))")
 	case store.TreeViewArchived:
 		w.add("tr.status = 'archived'")
 	default:
-		active := unsettled
-		if f.SettledFrom != nil {
-			active = "(" + active + " OR (SELECT max((SELECT accepted_at FROM task_acceptances a WHERE a.id=m.acceptance_id)) FROM tasks m WHERE m.tree_id = tr.id) >= " + w.arg(*f.SettledFrom) + ")"
+		active := unaccepted
+		if f.CompletedFrom != nil {
+			active = "(" + active + " OR (SELECT max((SELECT accepted_at FROM task_acceptances a WHERE a.id=m.acceptance_id)) FROM tasks m WHERE m.tree_id = tr.id) >= " + w.arg(*f.CompletedFrom) + ")"
 		}
 		w.add("tr.status = 'open' AND " + active)
 	}

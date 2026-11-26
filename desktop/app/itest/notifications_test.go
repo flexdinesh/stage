@@ -30,7 +30,7 @@ import (
 const notifWait = 40 * time.Second
 
 // allEvents is the server's default notification filter.
-var allEvents = []string{"needs_input", "failed", "done", "settled"}
+var allEvents = []string{"needs_input", "failed", "ready", "done"}
 
 type shown struct {
 	note alerts.Note

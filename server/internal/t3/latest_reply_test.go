@@ -177,7 +177,7 @@ func TestLatestReplyNewestWindowWithInitialRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.ItemID != "item-5" || r.RunID != "run-2" || r.MessageID != "msg-5" || r.Text != "second" || r.Truncated || r.Position != 5 || r.UpdatedAt.IsZero() {
+	if r.ItemID != "item-5" || r.RunID != "run-2" || r.Text != "second" || r.Truncated || r.UpdatedAt.IsZero() {
 		t.Fatalf("reply = %+v", r)
 	}
 	calls := tl.recorded()
@@ -206,7 +206,7 @@ func TestLatestReplyStepsBackAcrossWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Position != 120 || r.Text != "old reply" || r.RunID != "run-1" {
+	if r.ItemID != "item-120" || r.Text != "old reply" || r.RunID != "run-1" {
 		t.Fatalf("reply = %+v", r)
 	}
 	calls := tl.recorded()
@@ -229,14 +229,14 @@ func TestLatestReplyRunFilterPicksOlderReply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Position != 10 || r.Text != "from a" {
+	if r.ItemID != "item-10" || r.Text != "from a" {
 		t.Fatalf("reply = %+v", r)
 	}
 	if got := scans(t, tl.recorded()); !slices.Equal(got, []int{109, 9}) {
 		t.Fatalf("scan afterPositions = %v", got)
 	}
 	r, err = c.LatestReply(ctx, LatestReplyInput{ThreadID: "t1", ItemCount: 210})
-	if err != nil || r.Position != 200 || r.Text != "b2" {
+	if err != nil || r.ItemID != "item-200" || r.Text != "b2" {
 		t.Fatalf("any run: reply = %+v, err = %v", r, err)
 	}
 	if _, err := c.LatestReply(ctx, LatestReplyInput{ThreadID: "t1", RunID: "run-x", ItemCount: 210}); !errors.Is(err, ErrNoReply) {
@@ -249,7 +249,7 @@ func TestLatestReplySkipsInheritedNewer(t *testing.T) {
 	newTimeline(t, f, []tlItem{user(), reply("run-1", "mine"), activity(), inherited("run-p"), {typ: "assistant_message", vis: "synthetic", text: "s"}})
 	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
 	r, err := c.LatestReply(ctxT(t), LatestReplyInput{ThreadID: "t1", ItemCount: 5})
-	if err != nil || r.Position != 1 || r.Text != "mine" {
+	if err != nil || r.ItemID != "item-1" || r.Text != "mine" {
 		t.Fatalf("reply = %+v, err = %v", r, err)
 	}
 }
@@ -260,7 +260,7 @@ func TestLatestReplyPagesForwardWhenThreadGrew(t *testing.T) {
 	tl := newTimeline(t, f, fill(250, user()), []tlItem{reply("run-9", "newest")}, fill(9, activity()))
 	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
 	r, err := c.LatestReply(ctxT(t), LatestReplyInput{ThreadID: "t1", ItemCount: 50})
-	if err != nil || r.Position != 250 || r.Text != "newest" {
+	if err != nil || r.ItemID != "item-250" || r.Text != "newest" {
 		t.Fatalf("reply = %+v, err = %v", r, err)
 	}
 	if got := scans(t, tl.recorded()); !slices.Equal(got, []int{-1, 99, 199}) {

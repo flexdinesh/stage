@@ -141,7 +141,7 @@ func (a *Adapter) reply(ctx context.Context, s session, kind, order string, limi
 	if truncated {
 		text = string(chars[:limit])
 	}
-	return &execution.Reply{ItemID: m.ID, MessageID: m.ID, RunID: run, Text: text, Truncated: truncated, UpdatedAt: *millis(at)}, nil
+	return &execution.Reply{ItemID: m.ID, RunID: run, Text: text, Truncated: truncated, UpdatedAt: *millis(at)}, nil
 }
 func runID(s session) string {
 	if s.Time.Busy <= 0 {
@@ -228,7 +228,6 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 	}
 	if s.Model != nil {
 		o.Config.Model = s.Model.ProviderID + "/" + s.Model.ID
-		o.ModelLabel = o.Config.Model
 		if s.Model.Variant != "" {
 			o.Config.Options = []execution.ModelOption{{ID: "variant", Value: execution.StringValue(s.Model.Variant)}}
 		}
@@ -259,7 +258,6 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 		if e != nil {
 			return o, e
 		}
-		o.Artifacts = a.artifacts(ctx, s)
 	case s.Outcome != "" && s.Time.Busy == 0:
 		return o, errors.New("OpenCode outcome lacks execution timing")
 	}
@@ -272,22 +270,4 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 		return o, errors.New("OpenCode session changed during observation; refresh again")
 	}
 	return o, o.Valid()
-}
-
-// Artifacts are an optional, location-scoped OpenCode feature. A disabled
-// provider must not prevent delivery of a verified outcome and final reply.
-func (a *Adapter) artifacts(ctx context.Context, s session) []execution.Artifact {
-	var result envelope[[]struct{ SessionID, URL string }]
-	path := "/api/experimental/artifacts" + queryDirectory(s.Location.Directory) + "&sessionID=" + url.QueryEscape(s.ID)
-	if err := a.get(ctx, path, &result); err != nil || result.Location.Directory != s.Location.Directory {
-		return nil
-	}
-	var links []execution.Artifact
-	for _, item := range result.Data {
-		u, err := url.Parse(item.URL)
-		if err == nil && item.SessionID == s.ID && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" && u.User == nil {
-			links = append(links, execution.Artifact{URL: u.String(), Source: "opencode"})
-		}
-	}
-	return links
 }

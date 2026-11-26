@@ -76,13 +76,13 @@ func NewServer(o *Ops) *mcp.Server {
 	add(s, o, "append_note", "Append an immutable note (up to 16 KiB). Exactly one taskId/treeId, required requestId. Retry identical content with the same key. Source session comes from per-call metadata or explicit caller context; sourceTaskId must currently belong to the tree. Closed work accepts notes without reopening or scheduling.", nil, o.AppendNote)
 
 	add(s, o, "list_tasks", "List tasks (compact rows, newest activity first); open tasks by default (closed=true|all adds archived tasks and members of done or archived trees).", ro, o.ListTasks)
-	add(s, o, "get_task", "Read a task with its events, thread identity, final reply, tree (members, edges, levels), and currentHandoffs (what its launch appended, one per need).", ro, o.GetTask)
+	add(s, o, "get_task", "Read a task with its events, session identity, final reply, tree (members, edges, levels), and currentHandoffs (what its launch appended, one per need).", ro, o.GetTask)
 	add(s, o, "create_task", "Create a task: saved to backlog by default; start=true launches it now; needs/afterMe put it in a tree and wait for user completion of those tasks in Stage (in an auto tree it then launches, at once if they are already completed). Task startMode defaults to inherit: omit it unless the user asks; never set manual just to prevent that launch. Shared start policy belongs on the tree; auto|manual only for a user-requested per-task exception. Handoff (default true) appends each need's saved accepted result and available references at launch; treeId joins a tree; startLocal+startTz schedule a one-shot start.", nil, o.CreateTask)
 	add(s, o, "update_task", "Edit a task (incl. handoff on/off, startMode, executionConfig with its launch options). Outside backlog only the title changes. Needs change with set_needs.", nil, o.UpdateTask)
 	add(s, o, "delete_task", "Delete a task only when deletable (no recorded work); otherwise archive it. In a tree, its dependents take over its needs.", del, o.DeleteTask)
 	add(s, o, "archive_task", "Archive a standalone task (archived=false unarchives); not while launching, running or needing input. It leaves the default lists; activity on it unarchives it. A tree member is closed with its tree (update_tree status).", nil, o.ArchiveTask)
 	add(s, o, "start_task", "Launch an eligible task using its configured harness. Blocked tasks require user completion of their prerequisites.", nil, o.StartTask)
-	add(s, o, "stop_task", "Interrupt a task's running thread.", nil, o.StopTask)
+	add(s, o, "stop_task", "Interrupt a task's running session.", nil, o.StopTask)
 	add(s, o, "duplicate_task", "Copy a task into a new backlog task.", nil, o.DuplicateTask)
 	add(s, o, "wait_task", "Wait until a task reaches a state (default: needs input or finished) or a timeout.", ro, o.WaitTask)
 

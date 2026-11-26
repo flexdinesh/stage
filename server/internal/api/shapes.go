@@ -7,14 +7,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-type artifactLink struct {
-	Label string `json:"label"`
-	URL   string `json:"url"`
-}
-
 type taskJSON struct {
-	Links         execution.Links `json:"links"`
-	ArtifactLinks []artifactLink  `json:"artifactLinks"`
+	Links execution.Links `json:"links"`
 	db.Task
 }
 
@@ -89,7 +83,7 @@ func (s *server) task(t db.Task) taskJSON {
 		}
 		t.Launch = &a
 	}
-	out := taskJSON{ArtifactLinks: []artifactLink{}, Task: t}
+	out := taskJSON{Task: t}
 	if t.Session != nil {
 		out.Links = s.sessionLinks(context.Background(), t.ConnectionID, &t.Session.ExternalSessionID)
 	}

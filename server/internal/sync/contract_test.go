@@ -346,7 +346,7 @@ func TestContractSchedulesAndHandoffPreserveScopedConfiguration(t *testing.T) {
 			t.Fatal("schedule translated model options")
 		}
 		ref := accepted[0].Evidence.Session
-		if err = store.RecordHandoff(ctx, spawned.ID, db.Handoff{Session: ref, Attempt: 1, Status: db.HandoffSent, SourceTaskID: &source.ID, SourceThreadID: ref.ExternalSessionID, Text: "Saved result"}); err != nil {
+		if err = store.RecordHandoff(ctx, spawned.ID, db.Handoff{Session: ref, Attempt: 1, Status: db.HandoffSent, SourceTaskID: &source.ID, Text: "Saved result"}); err != nil {
 			t.Fatal(err)
 		}
 		handoffs, err := store.GetHandoffs(ctx, spawned.ID, 1)

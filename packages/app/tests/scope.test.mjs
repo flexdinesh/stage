@@ -26,8 +26,7 @@ test("attentionOf follows the Dashboard groups", () => {
   assert.equal(attentionOf(task(1, 1, "running")), "run");
   assert.equal(attentionOf(task(1, 1, "launching", { acceptanceId: 9 })), "run");
   assert.equal(attentionOf(task(1, 1, "done")), "review");
-  assert.equal(attentionOf(task(1, 1, "settled")), "review");
-  assert.equal(attentionOf(task(1, 1, "settled", { acceptanceId: 3 })), null, "completed work asks nothing");
+  assert.equal(attentionOf(task(1, 1, "done", { acceptanceId: 3 })), null, "completed work asks nothing");
   assert.equal(attentionOf(task(1, 1, "interrupted")), "failed");
   assert.equal(attentionOf(task(1, 1, "backlog", { readiness: "ready" })), "ready");
   assert.equal(attentionOf(task(1, 1, "backlog")), null);
@@ -40,7 +39,7 @@ test("projectLoads counts open work per project and skips completed tasks", () =
     task(2, 10, "running"),
     task(3, 10, "done"),
     task(4, 10, "backlog"),
-    task(5, 10, "settled", { acceptanceId: 5 }),
+    task(5, 10, "done", { acceptanceId: 5 }),
     task(6, 20, "failed"),
   ]);
   assert.deepEqual(loads.get(10), { need: 1, waiting: 1, run: 1, open: 4 });
@@ -52,7 +51,7 @@ test("projectLoads counts open work per project and skips completed tasks", () =
 test("projectLoads: open, the sidebar count, is every open task: need, waiting, running and not-ready backlog", () => {
   const loads = projectLoads([
     task(1, 10, "needs_input"),
-    task(2, 10, "settled"),
+    task(2, 10, "done"),
     task(3, 10, "backlog", { readiness: "ready" }),
     task(4, 10, "failed"),
     task(5, 10, "launching"),

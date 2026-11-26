@@ -49,23 +49,23 @@ export function AdoptSessionDrawer({
         throw new Error("Paste a session link or ID from the selected harness.");
       return api.sessionContext(resolved.session);
     },
-    onSuccess: (thread) => {
-      setPicked(thread);
-      setTitle(thread.title);
+    onSuccess: (session) => {
+      setPicked(session);
+      setTitle(session.title);
     },
   });
   const adopt = useMutation({
-    mutationFn: (thread: SessionPreview) => {
+    mutationFn: (session: SessionPreview) => {
       const body: AdoptSessionRequest = tree === undefined ? {} : { treeId: tree.id };
-      if (thread.task === null) {
-        if (thread.project === null) {
+      if (session.task === null) {
+        if (session.project === null) {
           if (projectId !== "") body.projectId = Number(projectId);
           else body.newProjectTitle = projectTitle.trim();
         }
         if (title.trim() !== "") body.title = title.trim();
         if (note.trim() !== "") body.initialNote = note;
       }
-      return api.adoptSession(thread.session, body);
+      return api.adoptSession(session.session, body);
     },
     onSuccess: async (task) => {
       await invalidate();

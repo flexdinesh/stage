@@ -1,4 +1,5 @@
 import { Marked } from "marked";
+import { linkSchemes } from "./harnesses.ts";
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
@@ -6,9 +7,12 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ESCAPES[c] ?? c);
 }
 
-/** Link schemes kept by the sanitizer besides the web ones: T3 app links and the desktop's stage deep links. */
-export const ALLOWED_URI =
-  /^(?:(?:(?:f|ht)tps?|mailto|tel|t3code|stage(?:-[a-z0-9-]+)?):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
+/** Sanitizer allow-list for web, mail and phone links, Stage deep links, relative URLs and declared harness schemes. */
+export function allowedUri(schemes: readonly string[] = []): RegExp {
+  const extras = linkSchemes([{ linkSchemes: [...schemes] }]).map((scheme) => scheme.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const allowed = ["(?:f|ht)tps?", "mailto", "tel", "stage(?:-[a-z0-9-]+)?", ...extras].join("|");
+  return new RegExp(`^(?:(?:${allowed}):|(?!\\s*[a-z][a-z0-9+.-]*:))`, "i");
+}
 
 // A bare stage deep link (stage://tasks/12, stage-dev://sessions/x); GFM autolinks only http(s), www and email.
 const DEEP_LINK = /^stage(?:-[a-z0-9-]+)?:\/\/[^\s<>()[\]"'`]+/i;

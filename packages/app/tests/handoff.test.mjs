@@ -24,10 +24,10 @@ test("backlog note shows only for a backlog task with needs and handoff on", () 
   assert.equal(pendingHandoffNote(task({ needs: [12], state: "running" })), null);
 });
 
-test("recorded source prefers the task number, then the title, then the thread id", () => {
-  assert.equal(recordedSource({ sourceTaskId: 12, sourceThreadId: "th-1", sourceTitle: "Build" }), "#12");
-  assert.equal(recordedSource({ sourceTaskId: null, sourceThreadId: "th-1", sourceTitle: "Plan auth" }), "Plan auth");
-  assert.equal(recordedSource({ sourceTaskId: null, sourceThreadId: "th-1", sourceTitle: "" }), "th-1");
+test("recorded source prefers the task number, then the title, then the external session ID", () => {
+  assert.equal(recordedSource({ sourceTaskId: 12, session: { connectionId: 1, externalSessionId: "s-1" }, sourceTitle: "Build" }), "#12");
+  assert.equal(recordedSource({ sourceTaskId: null, session: { connectionId: 1, externalSessionId: "s-1" }, sourceTitle: "Plan auth" }), "Plan auth");
+  assert.equal(recordedSource({ sourceTaskId: null, session: { connectionId: 1, externalSessionId: "s-1" }, sourceTitle: "" }), "s-1");
 });
 
 test("summary counts the appended characters", () => {

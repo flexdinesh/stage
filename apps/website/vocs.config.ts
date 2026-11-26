@@ -6,7 +6,7 @@ export default defineConfig({
   title: 'stage',
   titleTemplate: '%s | stage',
   description:
-    'Task manager for T3 Code. Queue tasks, run them as trees, schedule them, and answer threads that need input from your phone.',
+    'Task manager for T3 Code. Queue tasks, run them as trees, schedule them, and answer sessions that need input from your phone.',
   baseUrl,
   renderStrategy: 'full-static',
   colorScheme: 'light dark',

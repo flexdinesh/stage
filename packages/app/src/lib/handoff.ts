@@ -22,9 +22,9 @@ export function pendingHandoffNote(t: Needs & Pick<Task, "state" | "handoff">): 
 }
 
 /** Who a recorded handoff came from: "#12" or the session title (id fallback). */
-export function recordedSource(h: Pick<Handoff, "sourceTaskId" | "sourceThreadId" | "sourceTitle">): string {
+export function recordedSource(h: Pick<Handoff, "sourceTaskId" | "session" | "sourceTitle">): string {
   if (h.sourceTaskId !== null) return `#${h.sourceTaskId}`;
-  return h.sourceTitle === "" ? h.sourceThreadId : h.sourceTitle;
+  return h.sourceTitle === "" ? h.session?.externalSessionId ?? "" : h.sourceTitle;
 }
 
 /** One-line summary of a sent handoff: "1,234 chars appended to the prompt". */

@@ -2,6 +2,9 @@ package harness_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -51,6 +54,50 @@ func TestRegistryValidatesDescriptors(t *testing.T) {
 	}
 	if _, found := b.Closure(execution.ClosedSettled); found {
 		t.Fatal("undeclared closure")
+	}
+}
+
+func TestRegistryValidatesLinkSchemes(t *testing.T) {
+	descriptor := harness.Descriptor{Kind: "test", Name: "Test", Hosting: harness.Connected}
+	r, err := harness.NewRegistry(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutSchemes, _ := r.Lookup(descriptor.Kind)
+	raw, err := json.Marshal(withoutSchemes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(fields["linkSchemes"]); got != "[]" {
+		t.Fatalf("linkSchemes = %q, want []", got)
+	}
+
+	valid := []string{"a", "tool+v2.beta-link", "stagecraft"}
+	descriptor.LinkSchemes = valid
+	r, err = harness.NewRegistry(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withSchemes, _ := r.Lookup(descriptor.Kind)
+	if !slices.Equal(withSchemes.LinkSchemes, valid) {
+		t.Fatalf("linkSchemes = %v, want %v", withSchemes.LinkSchemes, valid)
+	}
+
+	for _, scheme := range []string{
+		"", "2tool", "Tool", "tool:", "tool_name", "tool name", "tool\n", "töol", "a",
+		"http", "https", "ftp", "ftps", "mailto", "tel", "javascript", "data", "vbscript", "file", "blob", "about", "stage", "stage-preview",
+	} {
+		t.Run(fmt.Sprintf("%q", scheme), func(t *testing.T) {
+			descriptor.LinkSchemes = []string{"a", scheme}
+			_, err := harness.NewRegistry(descriptor)
+			if want := fmt.Sprintf("harness test: invalid link scheme %q", scheme); err == nil || err.Error() != want {
+				t.Fatalf("error = %v, want %q", err, want)
+			}
+		})
 	}
 }
 

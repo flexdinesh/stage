@@ -127,9 +127,9 @@ export function TreeRow({ tree, tasks }: { tree: TreeSummary; tasks?: { open: bo
           <TextLink to={to} className="min-w-0 text-body font-medium break-words">
             {tree.title}
           </TextLink>
-          {tree.settledAt === null ? null : (
-            <Chip tone="ok" dot title={`Settled ${dateTime(tree.settledAt)}`}>
-              settled {relativeTime(tree.settledAt)}
+          {tree.completedAt === null ? null : (
+            <Chip tone="ok" dot title={`Completed ${dateTime(tree.completedAt)}`}>
+              completed {relativeTime(tree.completedAt)}
             </Chip>
           )}
           {chip === null ? null : <Chip {...(tree.closedAt === null ? {} : { title: dateTime(tree.closedAt) })}>{chip}</Chip>}
@@ -165,7 +165,7 @@ export function TreeRow({ tree, tasks }: { tree: TreeSummary; tasks?: { open: bo
             {nextActionText(next)}
           </span>
           <span className="shrink-0">
-            {tree.counts.settled}/{tree.counts.total} settled
+            {tree.counts.completed}/{tree.counts.total} completed
           </span>
         </div>
       </div>

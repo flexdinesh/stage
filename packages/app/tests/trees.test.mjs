@@ -28,7 +28,7 @@ import {
   treeRollup,
   treeMembers,
   treePosition,
-  treeSettled,
+  treeCompleted,
   treeTaskPath,
   wouldCycle,
 } from "../src/lib/trees.ts";
@@ -121,27 +121,26 @@ test("graph layout of an empty tree is empty", () => {
   assert.deepEqual(graphLayout([], size), { width: 0, height: 0, levels: [], nodes: [], edges: [] });
 });
 
-const bandMember = (state, readiness = null) => ({ state, readiness, acceptanceId: state === "settled" ? 1 : null });
+const member = (state, readiness = null, acceptanceId = null) => ({ state, readiness, acceptanceId });
+const acceptedMember = () => member("done", null, 1);
 
-test("band state: live or ready work is now, all settled is done, else waits", () => {
-  assert.equal(bandState([bandMember("settled"), bandMember("running")]), "now");
-  assert.equal(bandState([bandMember("needs_input")]), "now");
-  assert.equal(bandState([bandMember("launching")]), "now");
-  assert.equal(bandState([bandMember("backlog", "ready")]), "now");
-  assert.equal(bandState([bandMember("settled"), bandMember("settled")]), "done");
-  assert.equal(bandState([bandMember("settled"), bandMember("done")]), "waits");
-  assert.equal(bandState([bandMember("backlog", "blocked")]), "waits");
-  assert.equal(bandState([bandMember("failed")]), "waits");
+test("band state: live or ready work is now, all completed is done, else waits", () => {
+  assert.equal(bandState([acceptedMember(), member("running")]), "now");
+  assert.equal(bandState([member("needs_input")]), "now");
+  assert.equal(bandState([member("launching")]), "now");
+  assert.equal(bandState([member("backlog", "ready")]), "now");
+  assert.equal(bandState([acceptedMember(), acceptedMember()]), "done");
+  assert.equal(bandState([acceptedMember(), member("done")]), "waits");
+  assert.equal(bandState([member("backlog", "blocked")]), "waits");
+  assert.equal(bandState([member("failed")]), "waits");
   assert.equal(bandState([]), "waits");
 });
 
-test("edge state follows the need: settled met, failed kinds failed, else waiting", () => {
-  assert.equal(edgeState({ state: "settled", acceptanceId: 1 }), "met");
+test("edge state follows the need: completed met, failed kinds failed, else waiting", () => {
+  assert.equal(edgeState({ state: "done", acceptanceId: 1 }), "met");
   for (const s of ["failed", "interrupted", "cancelled"]) assert.equal(edgeState({ state: s, acceptanceId: null }), "failed");
   for (const s of ["backlog", "launching", "running", "needs_input", "done"]) assert.equal(edgeState({ state: s, acceptanceId: null }), "waiting");
 });
-
-const member = (state, readiness = null) => ({ state, readiness, acceptanceId: state === "settled" ? 1 : null });
 
 test("counts split backlog into blocked and ready", () => {
   const c = countMembers([
@@ -149,19 +148,19 @@ test("counts split backlog into blocked and ready", () => {
     member("backlog", "blocked"),
     member("backlog", "blocked"),
     member("needs_input"),
-    member("settled"),
+    acceptedMember(),
   ]);
   assert.equal(c.total, 5);
   assert.equal(c.backlog, 3);
   assert.equal(c.blocked, 2);
   assert.equal(c.ready, 1);
   assert.equal(c.needsInput, 1);
-  assert.equal(c.settled, 1);
+  assert.equal(c.completed, 1);
 });
 
 const counts = (members) => countMembers(members);
 
-test("next action priority: answer > start > retry > settle > running > waiting > done", () => {
+test("next action priority: answer > start > retry > complete > running > waiting > done", () => {
   const all = [
     member("needs_input"),
     member("backlog", "ready"),
@@ -172,19 +171,19 @@ test("next action priority: answer > start > retry > settle > running > waiting 
   ];
   const kinds = [];
   for (let i = 0; i < all.length; i++) kinds.push(treeRollup(counts(all.slice(i))).next.kind);
-  assert.deepEqual(kinds, ["answer", "start", "retry", "settle", "running", "waiting"]);
-  assert.equal(treeRollup(counts([member("settled"), member("settled")])).next.kind, "done");
+  assert.deepEqual(kinds, ["answer", "start", "retry", "complete", "running", "waiting"]);
+  assert.equal(treeRollup(counts([acceptedMember(), acceptedMember()])).next.kind, "done");
   assert.equal(treeRollup(counts([member("interrupted")])).next.kind, "retry");
 });
 
 test("segments order finished work first and drop empty states", () => {
   const r = treeRollup(
-    counts([member("backlog", "blocked"), member("running"), member("settled"), member("settled"), member("backlog", "ready")]),
+    counts([member("backlog", "blocked"), member("running"), acceptedMember(), acceptedMember(), member("backlog", "ready")]),
   );
   assert.deepEqual(
     r.segments.map((s) => [s.key, s.count, s.hollow]),
     [
-      ["settled", 2, false],
+      ["completed", 2, false],
       ["running", 1, false],
       ["ready", 1, false],
       ["waiting", 1, true],
@@ -196,7 +195,7 @@ test("segments order finished work first and drop empty states", () => {
 test("next action text", () => {
   assert.equal(nextActionText({ kind: "answer", count: 1 }), "1 needs input");
   assert.equal(nextActionText({ kind: "answer", count: 2 }), "2 need input");
-  assert.equal(nextActionText({ kind: "settle", count: 2 }), "2 to complete");
+  assert.equal(nextActionText({ kind: "complete", count: 2 }), "2 to complete");
   assert.equal(nextActionText({ kind: "done", count: 3 }), "all completed");
 });
 
@@ -268,10 +267,10 @@ test("node state reads readiness for backlog members", () => {
   assert.equal(nodeState(member("running")), "running");
 });
 
-test("a tree is settled only when every member is", () => {
-  assert.equal(treeSettled([member("settled"), member("settled")]), true);
-  assert.equal(treeSettled([member("settled"), member("done")]), false);
-  assert.equal(treeSettled([]), false);
+test("a tree is completed only when every member is", () => {
+  assert.equal(treeCompleted([acceptedMember(), acceptedMember()]), true);
+  assert.equal(treeCompleted([acceptedMember(), member("done")]), false);
+  assert.equal(treeCompleted([]), false);
 });
 
 test("new tree members: parallel roots, or a chain in the given order", () => {
@@ -285,15 +284,14 @@ const nov = (d, h, m = 0) => new Date(2026, 10, d, h, m).toISOString();
 
 test("time in state reads per state from when it was entered", () => {
   const now = new Date(2026, 10, 16, 15, 0).getTime();
-  const base = { readiness: null, stateSince: null, readyAt: null, createdAt: nov(14, 9, 12), launchedAt: null, finishedAt: null, settledAt: null };
+  const base = { readiness: null, stateSince: null, readyAt: null, createdAt: nov(14, 9, 12), launchedAt: null, finishedAt: null };
   const t = (extra) => inState({ ...base, ...extra }, now);
   assert.deepEqual(t({ state: "running", stateSince: nov(16, 14, 42) }), { text: "running 18m", at: nov(16, 14, 42) });
   // No running event yet: falls back to the launch.
   assert.equal(t({ state: "running", launchedAt: nov(16, 14, 30) }).text, "running 30m");
   assert.equal(t({ state: "needs_input", stateSince: nov(16, 14, 54) }).text, "waiting 6m");
   assert.equal(t({ state: "done", finishedAt: nov(15, 17, 0), stateSince: nov(15, 17, 5) }).text, "done 22h ago");
-  assert.equal(t({ state: "settled", settledAt: nov(15, 10, 5) }).text, "settled yesterday 10:05");
-  assert.equal(t({ state: "settled", settledAt: nov(12, 10, 5) }).text, "settled Nov 12");
+  assert.equal(t({ state: "done", acceptanceId: 1, finishedAt: nov(15, 17, 0) }).text, "done 22h ago");
   assert.equal(t({ state: "failed", stateSince: nov(16, 12, 0) }).text, "failed 3h ago");
   assert.equal(t({ state: "backlog", readiness: "ready", readyAt: nov(16, 12, 0) }).text, "ready 3h");
   // Blocked or plain backlog counts from creation when there is no later backlog event.
@@ -304,14 +302,14 @@ test("time in state reads per state from when it was entered", () => {
 
 test("closed trees: chip text, blocker and task label", () => {
   const left = countMembers([
-    { state: "settled", readiness: null, acceptanceId: 1 },
+    { state: "done", readiness: null, acceptanceId: 1 },
     { state: "cancelled", readiness: null, acceptanceId: null },
     { state: "backlog", readiness: "blocked", acceptanceId: null },
     { state: "backlog", readiness: "blocked", acceptanceId: null },
   ]);
   assert.equal(closedLabel({ status: "open" }, left), null);
   assert.equal(closedLabel({ status: "done" }, left), "done · 2 not run · 1 cancelled");
-  assert.equal(closedLabel({ status: "done" }, countMembers([{ state: "settled", readiness: null, acceptanceId: 1 }])), "done");
+  assert.equal(closedLabel({ status: "done" }, countMembers([{ state: "done", readiness: null, acceptanceId: 1 }])), "done");
   assert.equal(closedLabel({ status: "archived" }, left), "archived");
   assert.equal(treeClosed({ status: "open" }), false);
   assert.equal(treeClosed({ status: "done" }), true);
@@ -367,17 +365,17 @@ test("joinSummary: parallel root without needs, runs after them with needs", () 
 });
 
 const m = (state, extra = {}) => ({ state, readiness: null, acceptanceId: null, ...extra });
-const summary = (id, members, settledAt = null) => ({ id, counts: countMembers(members), settledAt });
+const summary = (id, members, completedAt = null) => ({ id, counts: countMembers(members), completedAt });
 
-test("treeGroup: a tree lists by its most pressing next step; settled trees are completed, empty ones wait", () => {
-  const accepted = m("settled", { acceptanceId: 1 });
+test("treeGroup: a tree lists by its most pressing next step; completed trees are completed, empty ones wait", () => {
+  const accepted = m("done", { acceptanceId: 1 });
   assert.equal(treeGroup(summary(1, [m("needs_input"), m("backlog", { readiness: "ready" })])), "needs");
-  assert.equal(treeGroup(summary(2, [m("settled"), m("running")])), "done");
+  assert.equal(treeGroup(summary(2, [m("done"), m("running")])), "done");
   assert.equal(treeGroup(summary(3, [m("backlog", { readiness: "ready" }), m("failed")])), "ready");
   assert.equal(treeGroup(summary(4, [m("interrupted"), m("running")])), "failed");
   assert.equal(treeGroup(summary(5, [accepted, m("launching")])), "running");
   assert.equal(treeGroup(summary(6, [accepted, m("backlog", { readiness: "blocked" })])), "waiting");
-  assert.equal(treeGroup(summary(7, [accepted], "2026-11-20T10:00:00Z")), "settled");
+  assert.equal(treeGroup(summary(7, [accepted], "2026-11-20T10:00:00Z")), "completed");
   assert.equal(treeGroup(summary(8, [])), "waiting");
 });
 

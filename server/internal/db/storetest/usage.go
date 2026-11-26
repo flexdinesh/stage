@@ -29,7 +29,7 @@ func caseObservationUsage(t *testing.T, open Factory) {
 		t.Helper()
 		at = at.Add(time.Second)
 		o := execution.Observation{Session: ref, Project: "/w/a", Title: "t", State: "done", ExecutionID: turn,
-			CreatedAt: at, UpdatedAt: at, Usage: u, Artifacts: []execution.Artifact{}}
+			CreatedAt: at, UpdatedAt: at, Usage: u}
 		if err := s.PutObservation(ctx, o); err != nil {
 			t.Fatal(err)
 		}

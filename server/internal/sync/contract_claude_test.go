@@ -351,11 +351,11 @@ func TestContractClaudeDiscoveredSessionsAreSilent(t *testing.T) {
 		f := claudetest.New(t)
 		store, svc, _, _ := claudeSetup(t, p, f)
 		ctx := t.Context()
-		var events []coordinator.ThreadChange
-		svc.OnThreadChange = func(_ context.Context, c coordinator.ThreadChange) { events = append(events, c) }
+		var events []coordinator.SessionChange
+		svc.OnSessionChange = func(_ context.Context, c coordinator.SessionChange) { events = append(events, c) }
 		watch := func() {
 			t.Helper()
-			if err := svc.WatchThreads(ctx); err != nil {
+			if err := svc.WatchAttention(ctx); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -367,7 +367,7 @@ func TestContractClaudeDiscoveredSessionsAreSilent(t *testing.T) {
 			}
 			got := []string{}
 			for _, r := range rows {
-				got = append(got, r.ThreadID)
+				got = append(got, r.ExternalSessionID)
 				if r.Directory == nil || *r.Directory != f.Workspace || r.ProjectTitle == nil || *r.ProjectTitle != "Repo" {
 					t.Fatalf("row %+v", r)
 				}

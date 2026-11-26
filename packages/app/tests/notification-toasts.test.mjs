@@ -6,18 +6,18 @@ const notification = (id, extra = {}) => ({
   id,
   event: "needs_input",
   taskId: 7,
-  externalSessionId: "thread-a",
+  externalSessionId: "session-a",
   title: `Event ${id}`,
   projectTitle: "Original project",
   url: "/tasks/7",
   createdAt: "2026-11-17T00:00:00Z",
   readAt: null,
   currentState: "needs_input",
-  links: { native: "t3://thread-a" },
+  links: { native: "t3://session-a" },
   ...extra,
 });
 
-for (const currentState of ["running", "done", "failed", "cancelled", "settled"]) {
+for (const currentState of ["running", "done", "failed", "cancelled"]) {
   test(`queued needs_input toast disappears when the entity is ${currentState}`, () => {
     const queued = notification(1);
     const latest = notification(1, { currentState,});
@@ -36,11 +36,11 @@ test("still-waiting toasts retain waiting state while preserving the event snaps
   const latest = notification(2, {
     title: "Renamed task",
     projectTitle: "New project",
-    url: "/sessions/thread-b",
+    url: "/sessions/session-b",
     createdAt: "2026-11-17T01:00:00Z",
     readAt: "2026-11-17T01:01:00Z",
-    externalSessionId: "thread-b",
-    links: { native: "t3://thread-b" },
+    externalSessionId: "session-b",
+    links: { native: "t3://session-b" },
   });
   assert.deepEqual(reconcileToasts([queued], [latest]), [
     { ...queued,},
@@ -76,26 +76,26 @@ test("the highest notification ID supplies live state regardless of latest row o
   })]), []);
 });
 
-test("external threads reconcile by thread ID and keep unrelated threads", () => {
+test("external sessions reconcile by session ID and keep unrelated sessions", () => {
   const resolved = notification(1, { taskId: null });
-  const waiting = notification(2, { taskId: null, externalSessionId: "thread-b" });
-  const unmatched = notification(3, { taskId: null, externalSessionId: "thread-c" });
+  const waiting = notification(2, { taskId: null, externalSessionId: "session-b" });
+  const unmatched = notification(3, { taskId: null, externalSessionId: "session-c" });
   const latest = [
-    notification(10, { taskId: null, currentState: "settled",}),
+    notification(10, { taskId: null, currentState: "done",}),
     notification(8, { taskId: null }),
-    notification(11, { taskId: null, externalSessionId: "thread-b",}),
+    notification(11, { taskId: null, externalSessionId: "session-b",}),
   ];
   assert.deepEqual(reconcileToasts([resolved, waiting, unmatched], latest), [
     { ...waiting,}, unmatched,
   ]);
 });
 
-test("task identity wins over overlapping thread IDs, including external threads", () => {
+test("task identity wins over overlapping session IDs, including external sessions", () => {
   const task = notification(1);
   const otherTask = notification(2, { taskId: 8 });
   const external = notification(3, { taskId: null });
   const latest = [
-    notification(10, { externalSessionId: "replacement-thread",}),
+    notification(10, { externalSessionId: "replacement-session",}),
     notification(20, { taskId: 8, currentState: "done",}),
     notification(30, { taskId: null,}),
   ];
@@ -105,7 +105,7 @@ test("task identity wins over overlapping thread IDs, including external threads
   ]);
 });
 
-test("notifications without a task or thread match only their own notification ID", () => {
+test("notifications without a task or session match only their own notification ID", () => {
   const queued = notification(1, { taskId: null, externalSessionId: null });
   const unmatched = notification(2, { taskId: null, externalSessionId: null });
   const latest = [
@@ -115,7 +115,7 @@ test("notifications without a task or thread match only their own notification I
   assert.deepEqual(reconcileToasts([queued, unmatched], latest), [unmatched]);
 });
 
-test("task, external thread and notification ID namespaces remain distinct", () => {
+test("task, external session and notification ID namespaces remain distinct", () => {
   const task = notification(1);
   const external = notification(2, { taskId: null, externalSessionId: "7" });
   const unbound = notification(7, { taskId: null, externalSessionId: null });
@@ -124,9 +124,9 @@ test("task, external thread and notification ID namespaces remain distinct", () 
 });
 
 test("other event types remain and refresh live fields when current state changes", () => {
-  for (const event of ["ready", "done", "failed", "settled"]) {
+  for (const event of ["ready", "done", "failed"]) {
     const queued = notification(1, { event, currentState: "done",});
-    for (const currentState of ["running", "done", "failed", "cancelled", "settled", "needs_input", null]) {
+    for (const currentState of ["running", "done", "failed", "cancelled", "needs_input", null]) {
       const latest = notification(2, { currentState,});
       assert.deepEqual(reconcileToasts([queued], [latest]), [
         { ...queued, currentState,},

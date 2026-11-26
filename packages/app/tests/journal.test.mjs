@@ -5,7 +5,7 @@ import { isNoteCategory, journalEntryId, journalEntryPath, MAX_NOTE_BYTES, noteB
 import { fakeApi } from "./fake-transport.mjs";
 
 const entry = {
-  id: 41, kind: "note", taskId: 7, treeId: null, sourceTaskId: null, sourceThreadId: null,
+  id: 41, kind: "note", taskId: 7, treeId: null, sourceTaskId: null,
   attempt: null, category: "decision", text: "Keep the record", eventType: "", fromTreeId: null,
   toTreeId: null, createdAt: "2026-11-16T00:00:00Z", truncated: false,
 };

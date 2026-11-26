@@ -29,12 +29,13 @@ type harnessesReply struct {
 		Profile harness.Profile `json:"profile"`
 	} `json:"machine"`
 	Harnesses []struct {
-		Kind      string            `json:"kind"`
-		Name      string            `json:"name"`
-		Hosting   string            `json:"hosting"`
-		Available bool              `json:"available"`
-		Reason    string            `json:"reason"`
-		Closures  []harness.Closure `json:"closures"`
+		Kind        string            `json:"kind"`
+		Name        string            `json:"name"`
+		Hosting     string            `json:"hosting"`
+		Available   bool              `json:"available"`
+		Reason      string            `json:"reason"`
+		Closures    []harness.Closure `json:"closures"`
+		LinkSchemes []string          `json:"linkSchemes"`
 	} `json:"harnesses"`
 }
 
@@ -73,6 +74,9 @@ func TestHarnessesListDescriptorsAndMachineAvailability(t *testing.T) {
 			}
 			if oc.Kind != "opencode" || !oc.Available || oc.Closures[0].Signal != "archived" {
 				t.Fatalf("opencode %+v", oc)
+			}
+			if !slices.Equal(t3h.LinkSchemes, []string{"t3code"}) || oc.LinkSchemes == nil || len(oc.LinkSchemes) != 0 {
+				t.Fatalf("link schemes: t3 %v, opencode %v", t3h.LinkSchemes, oc.LinkSchemes)
 			}
 			// Connected harnesses run anywhere; hosted ones only where the
 			// profile allows local processes, with a reason otherwise.

@@ -437,7 +437,7 @@ func (s *Service) Test(ctx context.Context) error {
 	return s.showNow(ctx, Note{ID: TestID, Title: "Stage", Body: "Test notification"})
 }
 
-// CloseShown closes server's notification for tag (task-12, thread-x,
+// CloseShown closes server's notification for tag (task-12, session-x,
 // summary), or all of that server's for "".
 func (s *Service) CloseShown(server, tag string) {
 	var closes []string

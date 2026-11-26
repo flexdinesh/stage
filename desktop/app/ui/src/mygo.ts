@@ -209,7 +209,7 @@ export const Desktop = {
   },
   /**
    * CloseNotifications closes the active server's shown notification with
-   * tag (task-12, thread-x), or all of its notifications for "".
+   * tag (task-12, session-x), or all of its notifications for "".
    */
   closeNotifications(tag: string): Promise<void> {
     return call("Desktop.CloseNotifications", tag);

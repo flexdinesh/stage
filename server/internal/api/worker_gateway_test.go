@@ -65,6 +65,11 @@ func TestWorkerGatewayRecordsForwardingMachine(t *testing.T) {
 	if !machineIs(note.SourceMachineID, j.MachineID) || note.SourceSession == nil || note.SourceSession.ExternalSessionID != "agent-1" {
 		t.Fatalf("note %+v", note)
 	}
+	var noteShape map[string]any
+	e.must("GET", fmt.Sprintf("/api/journal/%d", note.ID), nil, 200, &noteShape)
+	if _, exists := noteShape["sourceThreadId"]; exists {
+		t.Fatal("journal entry still has sourceThreadId")
+	}
 	// Reads through either path show the stored machine.
 	var got sourced
 	e.must("GET", fmt.Sprintf("/api/tasks/%d", created.ID), nil, 200, &got)

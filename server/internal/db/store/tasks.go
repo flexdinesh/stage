@@ -72,10 +72,10 @@ type Task struct {
 	Title                   string      `json:"title"`
 	Prompt                  string      `json:"prompt"`
 	State                   TaskState   `json:"state"`
-	// T3ThreadID is the session's external id (nil without a session).
-	T3ThreadID *string `json:"externalSessionId"`
-	TreeID     *int64  `json:"treeId"` // the task's tree (docs/api.md "Trees")
-	TreeTitle  *string `json:"treeTitle"`
+	// ExternalSessionID is the session's external id (nil without a session).
+	ExternalSessionID *string `json:"externalSessionId"`
+	TreeID            *int64  `json:"treeId"` // the task's tree (docs/api.md "Trees")
+	TreeTitle         *string `json:"treeTitle"`
 	// StartMode is the task's own start mode (nil = inherit the tree's);
 	// EffectiveStartMode applies the tree's (nil outside a tree without one).
 	StartMode          *StartMode `json:"startMode"`
@@ -84,26 +84,25 @@ type Task struct {
 	Readiness  *Readiness `json:"readiness"`
 	Needs      []int64    `json:"needs"`      // tasks this one needs (same tree), by id
 	Dependents []int64    `json:"dependents"` // tasks that need this one, by id
-	// Adopted: the task tracks an existing T3 session (prompt ""); it is never
+	// Adopted: the task tracks an existing harness session (prompt ""); it is never
 	// started, restarted or duplicated by stage.
-	Adopted           bool       `json:"adopted"`
-	ReadyAt           *time.Time `json:"readyAt"`    // a manual task's needs all settled (ready notification episode)
-	StartAt           *time.Time `json:"startAt"`    // one-shot start of a backlog task (scheduler launches it)
-	StartTz           *string    `json:"startTz"`    // IANA zone startAt was entered in
-	ScheduleID        *int64     `json:"scheduleId"` // recurring schedule that spawned the task
-	ScheduleTitle     *string    `json:"scheduleTitle"`
-	OriginThreadTitle *string    `json:"originSessionTitle"` // the origin session's mirrored title (null when not mirrored)
-	Handoff           bool       `json:"handoff"`            // append the needs' handoff at launch (docs/api.md "Handoff")
-	LaunchAttempt     int        `json:"launchAttempt"`
-	LastError         *string    `json:"lastError"`
-	LaunchedAt        *time.Time `json:"launchedAt"`
-	FinishedAt        *time.Time `json:"finishedAt"`
-	SettledAt         *time.Time `json:"settledAt"`
-	RunStartedAt      *time.Time `json:"runStartedAt"` // thread's elapsed run span (RunSpan)
-	RunEndedAt        *time.Time `json:"runEndedAt"`
-	LastWordPreview   *string    `json:"lastWordPreview"` // thread's latest assistant reply, plain one-line preview
-	LastWordAt        *time.Time `json:"lastWordAt"`
-	CreatedAt         time.Time  `json:"createdAt"`
+	Adopted            bool       `json:"adopted"`
+	ReadyAt            *time.Time `json:"readyAt"`    // a manual task's needs all accepted (ready notification episode)
+	StartAt            *time.Time `json:"startAt"`    // one-shot start of a backlog task (scheduler launches it)
+	StartTz            *string    `json:"startTz"`    // IANA zone startAt was entered in
+	ScheduleID         *int64     `json:"scheduleId"` // recurring schedule that spawned the task
+	ScheduleTitle      *string    `json:"scheduleTitle"`
+	OriginSessionTitle *string    `json:"originSessionTitle"` // the origin session's mirrored title (null when not mirrored)
+	Handoff            bool       `json:"handoff"`            // append the needs' handoff at launch (docs/api.md "Handoff")
+	LaunchAttempt      int        `json:"launchAttempt"`
+	LastError          *string    `json:"lastError"`
+	LaunchedAt         *time.Time `json:"launchedAt"`
+	FinishedAt         *time.Time `json:"finishedAt"`
+	RunStartedAt       *time.Time `json:"runStartedAt"` // session's elapsed run span
+	RunEndedAt         *time.Time `json:"runEndedAt"`
+	LastWordPreview    *string    `json:"lastWordPreview"` // session's latest assistant reply, plain one-line preview
+	LastWordAt         *time.Time `json:"lastWordAt"`
+	CreatedAt          time.Time  `json:"createdAt"`
 	// CreatedBy: the user who created the task (a schedule's creator for a
 	// task it spawned).
 	CreatedBy int64 `json:"createdBy"`
@@ -121,10 +120,10 @@ type Task struct {
 	// TreeStatus: its tree's status (nil outside a tree).
 	TreeStatus *TreeStatus `json:"treeStatus"`
 	// Deletable: no notes or execution history; otherwise archive only.
-	Deletable       bool       `json:"deletable"`
-	ThreadUpdatedAt *time.Time `json:"-"` // mirrored thread's updatedAt (tree activity)
-	T3ProjectID     string     `json:"-"` // project's T3 id (for launch)
-	TreeStartMode   *StartMode `json:"-"` // the tree's start mode (batch grouping)
+	Deletable        bool       `json:"deletable"`
+	SessionUpdatedAt *time.Time `json:"-"` // mirrored session's updatedAt (tree activity)
+	T3ProjectID      string     `json:"-"` // project's T3 id (for launch)
+	TreeStartMode    *StartMode `json:"-"` // the tree's start mode (batch grouping)
 }
 
 type TaskEvent struct {
@@ -176,22 +175,17 @@ type Handoff struct {
 	Attempt      int         `json:"attempt"`
 	Status       string      `json:"status"`
 	SourceTaskID *int64      `json:"sourceTaskId"`
-	// SourceThreadID: on reads, Session's external id ("" without one); on
-	// writes, legacy evidence's T3 thread id when Session is nil.
-	SourceThreadID string    `json:"sourceThreadId"`
-	SourceTitle    string    `json:"sourceTitle"`
-	Text           string    `json:"text"`   // "" when skipped
-	Reason         *string   `json:"reason"` // why skipped
-	At             time.Time `json:"at"`
+	SourceTitle  string      `json:"sourceTitle"`
+	Text         string      `json:"text"`   // "" when skipped
+	Reason       *string     `json:"reason"` // why skipped
+	At           time.Time   `json:"at"`
 }
 
 // HandoffSource is a need a launch reads: a task (TaskID set; its current
-// thread). Records from before trees may name a session (TaskID nil).
+// session). Records from before trees may name a session (TaskID nil).
 type HandoffSource struct {
-	TaskID    *int64
-	ThreadID  string
-	Title     string
-	SettledAt *time.Time // nil: finished (done) but not settled yet
+	TaskID *int64
+	Title  string
 }
 
 // Label names the source in event details and the block: `#12` or
@@ -218,9 +212,9 @@ type TaskFilter struct {
 	// Q is the Search capability (docs/storage.md "Search"): a
 	// case-insensitive substring of title or prompt, every character
 	// literal; it filters without changing the order.
-	Q           string
-	From, To    *time.Time
-	SettledFrom *time.Time // settled_at >= SettledFrom
+	Q             string
+	From, To      *time.Time
+	CompletedFrom *time.Time // accepted_at >= CompletedFrom
 	// Closed: "" or "false" (open only: not archived, tree open or none),
 	// "true" (archived, or in a done or archived tree) or "all".
 	Closed string
@@ -234,7 +228,7 @@ type Transition struct {
 	To          TaskState
 	Detail      string
 
-	BeginAttempt  bool        // launch start: attempt+1 and a new launch_request_id, clear session/error/finished/settled/start/ready_at
+	BeginAttempt  bool        // launch start: attempt+1 and a new launch_request_id, clear session/error/finished/start/ready_at
 	Session       *SessionRef // set the session (+ launched_at)
 	ObservedStart *time.Time  // first native execution of an adopted backlog session
 	LastError     *string     // set last_error

@@ -124,14 +124,14 @@ ON CONFLICT (task_id, attempt, source_task_id) DO UPDATE SET
 
 func (r attempts) Handoffs(ctx context.Context, taskID int64, attempt int) ([]store.Handoff, error) {
 	rows, err := r.Query(ctx, `
-SELECT attempt, status, source_task_id, COALESCE((SELECT external_id FROM session_identities WHERE id=task_handoffs.source_session_id),''), source_title, text, reason, created_at,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=task_handoffs.source_session_id)
+SELECT attempt, status, source_task_id, source_title, text, reason, created_at,(SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=task_handoffs.source_session_id)
 FROM task_handoffs WHERE task_id = $1 AND attempt = $2 ORDER BY source_task_id, id`, taskID, attempt)
 	if err != nil {
 		return nil, err
 	}
 	return collectRows(rows, func(r rowScanner) (store.Handoff, error) {
 		var h store.Handoff
-		err := r.Scan(&h.Attempt, &h.Status, &h.SourceTaskID, &h.SourceThreadID, &h.SourceTitle, &h.Text, &h.Reason, &h.At, &h.Session)
+		err := r.Scan(&h.Attempt, &h.Status, &h.SourceTaskID, &h.SourceTitle, &h.Text, &h.Reason, &h.At, &h.Session)
 		return h, err
 	})
 }

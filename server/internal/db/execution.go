@@ -198,3 +198,9 @@ func (s *Store) RejectAttempt(ctx context.Context, a Attempt, reason string) err
 func (s *Store) WatchedSessions(ctx context.Context, connection int64) ([]execution.SessionRef, error) {
 	return read(ctx, s, func(tx store.Tx) ([]execution.SessionRef, error) { return tx.Observations().Watched(ctx, connection) })
 }
+
+// NeedsInputCount: tasks in needs_input plus top-level sessions no task owns
+// observed needing input.
+func (s *Store) NeedsInputCount(ctx context.Context) (int, error) {
+	return read(ctx, s, func(tx store.Tx) (int, error) { return tx.Observations().NeedsInputCount(ctx) })
+}

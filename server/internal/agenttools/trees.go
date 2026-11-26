@@ -24,9 +24,9 @@ type TreeRow struct {
 	Projects  []string     `json:"projects"`
 	// States counts members by state (blocked and ready split backlog);
 	// zero counts are left out.
-	States    map[string]int `json:"states"`
-	SettledAt *time.Time     `json:"settledAt,omitempty"`
-	Status    db.TreeStatus  `json:"status"` // open | done | archived
+	States      map[string]int `json:"states"`
+	CompletedAt *time.Time     `json:"completedAt,omitempty"`
+	Status      db.TreeStatus  `json:"status"` // open | done | archived
 }
 
 func treeRow(t db.TreeSummary) TreeRow {
@@ -34,7 +34,7 @@ func treeRow(t db.TreeSummary) TreeRow {
 	states := map[string]int{}
 	for k, v := range map[string]int{
 		"blocked": c.Blocked, "ready": c.Ready, "launching": c.Launching, "running": c.Running,
-		"needs_input": c.NeedsInput, "done": c.Done, "settled": c.Settled, "failed": c.Failed,
+		"needs_input": c.NeedsInput, "done": c.Done, "completed": c.Completed, "failed": c.Failed,
 		"interrupted": c.Interrupted, "cancelled": c.Cancelled, "backlog": c.Backlog - c.Blocked - c.Ready,
 	} {
 		if v > 0 {
@@ -43,7 +43,7 @@ func treeRow(t db.TreeSummary) TreeRow {
 	}
 	return TreeRow{
 		ID: t.ID, Title: t.Title, StartMode: t.StartMode, Tasks: c.Total, Levels: t.Levels,
-		Projects: t.Projects, States: states, SettledAt: t.SettledAt, Status: t.Status,
+		Projects: t.Projects, States: states, CompletedAt: t.CompletedAt, Status: t.Status,
 	}
 }
 

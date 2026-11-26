@@ -23,9 +23,9 @@ func TestRetiredEndpointsAreNotAvailable(t *testing.T) {
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/followup", task.ID), map[string]any{"message": "retired"}, 404, nil)
 	e.must("GET", fmt.Sprintf("/api/tasks/%d/opening-prompt", task.ID), nil, 400, nil)
 	// API v8: the T3 thread read is gone; the session context remains.
-	e.must("GET", "/api/connections/1/sessions/"+*task.T3ThreadID, nil, 404, nil)
+	e.must("GET", "/api/connections/1/sessions/"+*task.ExternalSessionID, nil, 404, nil)
 	var metadata map[string]any
-	e.must("GET", "/api/connections/1/sessions/"+*task.T3ThreadID+"/context", nil, 200, &metadata)
+	e.must("GET", "/api/connections/1/sessions/"+*task.ExternalSessionID+"/context", nil, 200, &metadata)
 	for _, field := range []string{"children", "createdTasks"} {
 		if _, exists := metadata[field]; exists {
 			t.Fatalf("retired field %s", field)
@@ -37,9 +37,6 @@ func TestRetiredEndpointsAreNotAvailable(t *testing.T) {
 		if _, exists := detail[field]; exists {
 			t.Fatalf("retired field %s", field)
 		}
-	}
-	if detail["artifactLinks"] == nil {
-		t.Fatal("missing historical artifact links")
 	}
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/stop", task.ID), nil, 200, nil)
 }
@@ -108,7 +105,7 @@ func TestSilentWaitingSessionsCarryDirectoryAndCommand(t *testing.T) {
 		t.Helper()
 		o := execution.Observation{Session: execution.SessionRef{ConnectionID: conn, ExternalSessionID: id}, Project: dir, Directory: dir, Title: "Waiting " + id[:4],
 			State: "needs_input", Active: true, Links: execution.Links{Command: command}, CreatedAt: at, UpdatedAt: at,
-			Artifacts: []execution.Artifact{}, Config: execution.Config{Options: []execution.ModelOption{}}}
+			Config: execution.Config{Options: []execution.ModelOption{}}}
 		if err := e.store.PutObservation(ctx, o); err != nil {
 			t.Fatal(err)
 		}

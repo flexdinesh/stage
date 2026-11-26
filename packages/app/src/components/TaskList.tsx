@@ -6,7 +6,7 @@ import { useHarnesses, useInvalidateWork, useSessionRequests } from "../api/quer
 import { rowSessionAction } from "../lib/harnesses.ts";
 import type { Task } from "../api/types.ts";
 import { configModelText, dateTime, duration, relativeTime } from "../lib/format.ts";
-import type { SettledItem } from "../lib/settled.ts";
+import type { CompletedItem } from "../lib/completed.ts";
 import { canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
 import { HarnessName } from "./HarnessName.tsx";
 import { taskClosedLabel, treeTaskPath } from "../lib/trees.ts";
@@ -88,14 +88,14 @@ function ProjectCell({ projectId, title }: { projectId: number | null; title: st
   );
 }
 
-/** "completed 3h ago" (exact time on hover), "via T3 settle" when inferred, then "ran 35m" when the run span is known. */
-function SettledMeta({
-  settledAt,
+/** "completed 3h ago" (exact time on hover), provenance when inferred, then "ran 35m" when the run span is known. */
+function CompletedMeta({
+  completedAt,
   via,
   runStartedAt,
   runEndedAt,
 }: {
-  settledAt: string;
+  completedAt: string;
   via: string | null;
   runStartedAt: string | null;
   runEndedAt: string | null;
@@ -103,8 +103,8 @@ function SettledMeta({
   const ran = duration(runStartedAt, runEndedAt);
   return (
     <>
-      <span title={`Completed ${dateTime(settledAt)}`} className="tabular">
-        completed {relativeTime(settledAt)}
+      <span title={`Completed ${dateTime(completedAt)}`} className="tabular">
+        completed {relativeTime(completedAt)}
         {via === null ? null : ` ${via}`}
       </span>
       {ran === null ? null : (
@@ -126,9 +126,9 @@ interface RowChip {
 /**
  * The row's one chip: closed rows lead with "archived" / "tree done" / "tree archived"; then the one-shot start time
  * while timed, "needs #3 #5" while blocked on its needs, else the schedule that spawned it, else the agent session that
- * created it. Viewed from a session (`contextThreadId`), its own provenance chip is dropped.
+ * created it. Viewed from a session (`contextSessionId`), its own provenance chip is dropped.
  */
-function rowChip(task: Task, contextThreadId?: string): RowChip | null {
+function rowChip(task: Task, contextSessionId?: string): RowChip | null {
   const closed = taskClosedLabel(task);
   if (closed !== null)
     return task.archivedAt !== null || task.treeId === null
@@ -159,7 +159,7 @@ function rowChip(task: Task, contextThreadId?: string): RowChip | null {
       title: `Started by schedule: ${task.scheduleTitle ?? `#${task.scheduleId}`}`,
       icon: <IconRepeat />,
     };
-  if (task.originSession && task.originSession.externalSessionId !== contextThreadId)
+  if (task.originSession && task.originSession.externalSessionId !== contextSessionId)
     return {
       to: `/tasks/${task.id}?batch=1`,
       label: "by agent",
@@ -170,7 +170,7 @@ function rowChip(task: Task, contextThreadId?: string): RowChip | null {
 }
 
 /**
- * Waiting tasks get no Start here (Start now, which unlinks, lives on task detail). `contextThreadId`: the session
+ * Waiting tasks get no Start here (Start now, which unlinks, lives on task detail). `contextSessionId`: the session
  * page showing the row (relative run-order chip copy).
  */
 /** Task row grid (laptop columns: chip, project, title, actions, copy), shared with its skeleton. */
@@ -219,14 +219,14 @@ export function TaskRow({
   extra,
   showProject = false,
   showTree = false,
-  contextThreadId,
+  contextSessionId,
   hideStart = false,
 }: {
   task: Task;
   extra?: ReactNode;
   showProject?: boolean;
   showTree?: boolean;
-  contextThreadId?: string;
+  contextSessionId?: string;
   /** The Start lives elsewhere (a chain head's Start chain). */
   hideStart?: boolean;
 }) {
@@ -236,7 +236,7 @@ export function TaskRow({
   const since = task.launchedAt ?? task.createdAt;
   const showStart = !hideStart && canStart(task) && !isWaiting(task);
   const block = useLaunchGate()(task);
-  const chip = rowChip(task, contextThreadId);
+  const chip = rowChip(task, contextSessionId);
   // A closed tree's row chip already links it.
   const treeLink = showTree && task.treeId !== null && taskClosedLabel(task) === null ? task.treeId : null;
   const needsInput = task.state === "needs_input";
@@ -245,7 +245,7 @@ export function TaskRow({
   // Completed here a moment ago: the row stays in place with a completed chip and Undo (Dashboard linger).
   const justCompleted = useCompletionLinger().lingering.has(task.id);
   const autoMeta = autoCompletedMeta(task.completionProvenance, descriptor(task.harness));
-  const review = !justCompleted && task.acceptanceId === null && (task.state === "done" || task.state === "settled");
+  const review = !justCompleted && task.acceptanceId === null && task.state === "done";
   const quick = useQuickComplete(task);
   const undo = useUndoComplete(task);
   const confirming = review ? quick.confirm : null;
@@ -284,7 +284,7 @@ export function TaskRow({
           )}
           <span className="inline-flex flex-wrap items-center gap-x-1"><HarnessName task={task} /> · {configModelText(task.executionConfig)}</span>
           {task.completedAt !== null ? (
-            <SettledMeta settledAt={task.completedAt} via={autoMeta} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
+            <CompletedMeta completedAt={task.completedAt} via={autoMeta} runStartedAt={task.runStartedAt} runEndedAt={task.runEndedAt} />
           ) : (
             <RelTime at={since} className="tabular" />
           )}
@@ -388,8 +388,8 @@ export function TaskRow({
   );
 }
 
-/** Completed group: tasks and trees in one list (already ordered by settle time). */
-export function SettledRows({ items, emptyText, showProject = true }: { items: SettledItem[]; emptyText: string; showProject?: boolean }) {
+/** Completed group: tasks and trees in one list (already ordered by completion time). */
+export function CompletedRows({ items, emptyText, showProject = true }: { items: CompletedItem[]; emptyText: string; showProject?: boolean }) {
   if (items.length === 0) return <EmptyState inset>{emptyText}</EmptyState>;
   return (
     <RowList>

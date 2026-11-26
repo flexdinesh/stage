@@ -1,4 +1,4 @@
-// Package notify sends Web Push notifications for task and external thread
+// Package notify sends Web Push notifications for task and external session
 // state changes (docs/api.md "Notifications (Web Push)", "Notification rules").
 package notify
 
@@ -42,11 +42,11 @@ type PushError struct {
 
 func (e *PushError) Error() string { return e.Msg }
 
-// event is a queued notification: exactly one of task / thread / ready set.
+// event is a queued notification: exactly one of task / session / ready set.
 type event struct {
-	task   *workevent.TaskChange
-	thread *workevent.SessionChange
-	ready  *int64 // a manual tree member whose needs settled
+	task    *workevent.TaskChange
+	session *workevent.SessionChange
+	ready   *int64 // a manual tree member whose needs are completed
 }
 
 func (e event) to() db.TaskState {
@@ -56,7 +56,7 @@ func (e event) to() db.TaskState {
 	case e.ready != nil:
 		return db.EventReady
 	}
-	return e.thread.To
+	return e.session.To
 }
 
 // urgencyFor: high for needs input, normal otherwise.
@@ -110,22 +110,22 @@ func New(store *db.Store, publicURL string, log *slog.Logger) *Notifier {
 }
 
 // OnTransition is the sync.Service task hook: transitions into needs_input,
-// done, failed or settled are queued.
+// done or failed are queued.
 func (n *Notifier) OnTransition(_ context.Context, c workevent.TaskChange) {
 	if workevent.Notifiable(c.To) {
 		n.enqueue(event{task: &c})
 	}
 }
 
-// OnThreadChange is the sync.Service external thread hook.
-func (n *Notifier) OnThreadChange(_ context.Context, c workevent.SessionChange) {
+// OnSessionChange is the sync.Service external session hook.
+func (n *Notifier) OnSessionChange(_ context.Context, c workevent.SessionChange) {
 	if workevent.Notifiable(c.To) {
-		n.enqueue(event{thread: &c})
+		n.enqueue(event{session: &c})
 	}
 }
 
-// OnReady is the release runner hook: a manual tree member whose needs all
-// settled (the ready event).
+// OnReady is the release runner hook: a manual tree member whose needs are all
+// completed (the ready event).
 func (n *Notifier) OnReady(_ context.Context, taskID int64) {
 	n.enqueue(event{ready: &taskID})
 }
@@ -197,20 +197,17 @@ var titles = map[db.TaskState]string{
 	db.EventReady:      "Ready",
 	db.StateDone:       "Done",
 	db.StateFailed:     "Failed",
-	db.StateSettled:    "Settled",
 }
 
-// answerAnchor lands needs-input pushes on the Needs input panel.
-
 // PayloadFor is the notification shown for a stored inbox row (Web Push and
-// GET /api/notifications/stream): task rows with a thread open the session.
+// GET /api/notifications/stream): task rows with a session open the task.
 func PayloadFor(n db.Notification, badge int) Payload {
 	key := db.NotificationKey(n)
 	p := Payload{Title: titles[n.Event], Body: n.Title, URL: n.URL, Tag: db.TagForKey(key), Badge: badge}
 	if n.ProjectTitle != nil {
 		p.Body += " · " + *n.ProjectTitle
 	}
-	if strings.HasPrefix(key, "task:") && n.T3ThreadID != nil {
+	if strings.HasPrefix(key, "task:") && n.ExternalSessionID != nil {
 		p.URL = "/tasks/" + strings.TrimPrefix(key, "task:")
 	}
 	if !strings.HasPrefix(key, "task:") {
@@ -224,7 +221,7 @@ func notificationFrom(rec db.NewNotification) db.Notification {
 	n := db.Notification{Event: rec.Event, TaskID: rec.TaskID, Title: rec.Title, ProjectTitle: rec.ProjectTitle, URL: rec.URL}
 	if rec.Session != nil {
 		n.ConnectionID = rec.Session.ConnectionID
-		n.T3ThreadID = &rec.Session.ExternalSessionID
+		n.ExternalSessionID = &rec.Session.ExternalSessionID
 	}
 	return n
 }
@@ -249,19 +246,19 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 		if err != nil {
 			return Payload{}, rec, fmt.Errorf("task %d: %w", *e.ready, err)
 		}
-		// A backlog task (no thread yet): the payload opens the task.
+		// A backlog task (no session yet): the payload opens the task.
 		project := t.ProjectTitle
 		rec = db.NewNotification{Event: db.EventReady, TaskID: &t.ID, Title: t.Title, ProjectTitle: &project,
 			URL: "/tasks/" + strconv.FormatInt(t.ID, 10)}
-	case e.thread != nil:
+	case e.session != nil:
 		// A session no task owns: its observed title and, when its harness
 		// project is bound to one Stage project, that project's title.
-		c := e.thread
+		c := e.session
 		project := c.ProjectID
 		if c.Session != nil {
 			title, ok, err := n.store.BoundProjectTitle(ctx, c.Session.ConnectionID, c.ProjectID)
 			if err != nil {
-				return Payload{}, rec, fmt.Errorf("session %s: %w", c.ThreadID, err)
+				return Payload{}, rec, fmt.Errorf("session %s: %w", c.Session.ExternalSessionID, err)
 			}
 			if ok {
 				project = title
@@ -301,7 +298,7 @@ func (n *Notifier) SendTest(ctx context.Context, endpoint string) error {
 
 // topicFor is the Web Push Topic for tag: the push service keeps only the
 // latest pending message per topic. Topic allows at most 32 URL-safe base64
-// chars, so the tag is hashed (thread tags exceed it).
+// chars, so the tag is hashed (session tags exceed it).
 func topicFor(tag string) string {
 	sum := sha256.Sum256([]byte(tag))
 	return base64.RawURLEncoding.EncodeToString(sum[:])[:32]

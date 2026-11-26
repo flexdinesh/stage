@@ -12,20 +12,19 @@ type JournalOwner struct {
 }
 
 type JournalEntry struct {
-	SourceSession  *SessionRef `json:"sourceSession"`
-	ID             int64       `json:"id"`
-	Kind           string      `json:"kind"`
-	TaskID         *int64      `json:"taskId"`
-	TreeID         *int64      `json:"treeId"`
-	SourceTaskID   *int64      `json:"sourceTaskId"`
-	SourceThreadID *string     `json:"sourceThreadId"`
-	Attempt        *int        `json:"attempt"`
-	Category       string      `json:"category"`
-	Text           string      `json:"text"`
-	EventType      string      `json:"eventType"`
-	FromTreeID     *int64      `json:"fromTreeId"`
-	ToTreeID       *int64      `json:"toTreeId"`
-	CreatedAt      time.Time   `json:"createdAt"`
+	SourceSession *SessionRef `json:"sourceSession"`
+	ID            int64       `json:"id"`
+	Kind          string      `json:"kind"`
+	TaskID        *int64      `json:"taskId"`
+	TreeID        *int64      `json:"treeId"`
+	SourceTaskID  *int64      `json:"sourceTaskId"`
+	Attempt       *int        `json:"attempt"`
+	Category      string      `json:"category"`
+	Text          string      `json:"text"`
+	EventType     string      `json:"eventType"`
+	FromTreeID    *int64      `json:"fromTreeId"`
+	ToTreeID      *int64      `json:"toTreeId"`
+	CreatedAt     time.Time   `json:"createdAt"`
 	// CreatedBy: the user who wrote the note or caused the Go-written event;
 	// derived events (docs/storage.md "Journal events") carry the default
 	// user.

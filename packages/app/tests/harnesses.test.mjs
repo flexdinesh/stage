@@ -8,7 +8,7 @@ import {
   harnessLookup,
   isDisconnected,
   isRetired,
-  previousConnections,
+  linkSchemes,
   rebindCandidate,
   replacedPaths,
   retiredNotice,
@@ -208,9 +208,7 @@ test("projects list chip reads current bindings only", () => {
   assert.equal(bindingsSummary([binding(5, "t3", "/a"), binding(2, "opencode", "/b")], kindName), "T3 · OpenCode");
 });
 
-test("PREVIOUS lists a harness's retired, not forgotten connections", () => {
-  assert.deepEqual(previousConnections(list, "t3").map((c) => c.id), [1]);
-  assert.deepEqual(previousConnections(list, "opencode"), []);
+test("retired connection usage and forget copy", () => {
   assert.equal(usageText(oldT3), "4 tasks · 2 bindings");
   assert.equal(usageText({ tasks: 1, bindings: 1 }), "1 task · 1 binding");
   assert.equal(
@@ -219,14 +217,11 @@ test("PREVIOUS lists a harness's retired, not forgotten connections", () => {
   );
 });
 
-test("a machine's previous and active connections stay on that machine", () => {
+test("active connections stay scoped to their machine", () => {
   const remote = connection(9, "t3", { machineId: 2, label: "desk" });
   const remoteOld = connection(8, "t3", { machineId: 2, active: false, label: "desk-old", retiredAt: "2026-11-11T00:00:00Z" });
   const here = [t3, oldT3].map((c) => ({ ...c, machineId: 1 }));
   const all = [...here, remote, remoteOld];
-  assert.deepEqual(previousConnections(all, "t3", 1).map((c) => c.id), [1]);
-  assert.deepEqual(previousConnections(all, "t3", 2).map((c) => c.id), [8]);
-  assert.deepEqual(previousConnections(all, "t3").map((c) => c.id), [1, 8]);
   assert.equal(activeOn(all, "t3", 1)?.id, 5);
   assert.equal(activeOn(all, "t3", 2)?.id, 9);
   assert.equal(activeOn(all, "opencode", 2), undefined);
@@ -306,4 +301,14 @@ test("folderName is a folder path's last segment", () => {
   assert.equal(folderName(""), null);
   assert.equal(folderName(null), null);
   assert.equal(folderName(undefined), null);
+});
+
+test("link schemes are valid, unreserved and sorted across all descriptors", () => {
+  const schemeDescriptors = [
+    { linkSchemes: ["t3code", "agent+app", "open2.dev", "stage-local", "http", "vbscript", "javascript", "invalid scheme", "T3CODE", "7app"] },
+    { linkSchemes: ["t3code", "agent+app", "data", "file", "blob", "about", "mailto", "tel", "ftp", "ftps", "https", "stage", "open:"] },
+    {},
+  ];
+  assert.deepEqual(linkSchemes(schemeDescriptors), ["agent+app", "open2.dev", "t3code"]);
+  assert.deepEqual(linkSchemes([]), []);
 });

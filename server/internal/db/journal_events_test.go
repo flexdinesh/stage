@@ -25,7 +25,7 @@ func setState(t *testing.T, s *db.Store, ctx context.Context, id int64, to db.Ta
 	}
 }
 
-// launch launches task id under a legacy thread id and moves it to end.
+// launch launches task id under a session id and moves it to end.
 func launch(t *testing.T, s *db.Store, ctx context.Context, id int64, thread string, end db.TaskState) {
 	t.Helper()
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: id, To: db.StateLaunching, BeginAttempt: true}); err != nil {
@@ -161,13 +161,13 @@ func TestJournalEventRowsExact(t *testing.T) {
 		t.Fatalf("note protection: touched=%v tree=%s", touched, treeRow(t, ctx, tr.ID))
 	}
 
-	// Task events carry the task's session, not its legacy thread id; the
-	// API's sourceThreadId still reads the T3 session's id.
+	// Journal execution events carry the task's session.
 	since = lastJournalID(t, ctx)
-	launch(t, s, ctx, a.ID, "thread-a", db.StateDone)
+	launch(t, s, ctx, a.ID, "session-a", db.StateDone)
+	wantSession := db.SessionRef{ConnectionID: s.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: "session-a"}
 	for _, e := range journal(t, s, ctx, db.JournalOwner{TaskID: &a.ID}, db.JournalQuery{Kind: "events", Limit: 2}).Entries {
-		if e.SourceThreadID == nil || *e.SourceThreadID != "thread-a" {
-			t.Fatalf("event sourceThreadId %v", e.SourceThreadID)
+		if e.SourceSession == nil || *e.SourceSession != wantSession {
+			t.Fatalf("event source session %v", e.SourceSession)
 		}
 	}
 	wantRows(t, "launch", journalRows(t, ctx, since), []string{
@@ -274,7 +274,7 @@ func TestJournalEventRowsExact(t *testing.T) {
 	if _, err := s.UpdateTree(ctx, *h.TreeID, db.TreePatch{StartMode: db.Optional[db.StartMode]{Set: true, V: db.StartManual}}); err != nil {
 		t.Fatal(err)
 	}
-	setState(t, s, ctx, g.ID, db.StateSettled)
+	setState(t, s, ctx, g.ID, db.StateDone)
 	acceptTask(t, s, ctx, g.ID)
 	since = lastJournalID(t, ctx)
 	if _, err := s.MarkReady(ctx); err != nil {
@@ -304,7 +304,7 @@ func TestAddTaskEventKeepsState(t *testing.T) {
 	s, ctx := setup(t)
 	p := mustProject(t, s, ctx, "p")
 	a := mustTask(t, s, ctx, p.ID, "a", nil)
-	launch(t, s, ctx, a.ID, "thread-a", db.StateDone)
+	launch(t, s, ctx, a.ID, "session-a", db.StateDone)
 	if err := s.AddTaskEvent(ctx, a.ID, "Follow-up sent from Stage"); err != nil {
 		t.Fatal(err)
 	}

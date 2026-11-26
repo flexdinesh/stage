@@ -319,7 +319,7 @@
   }
   .ro-hint { font: 12px/18px var(--st-mono); color: var(--st-muted); }
 
-  /* Handoff record: hairline-ruled, no color but the PR's own state */
+  /* Handoff record: hairline-ruled */
   .ro-handoff { display: flex; flex-direction: column; gap: 7px; }
   .ro-handoff__head {
     display: flex;

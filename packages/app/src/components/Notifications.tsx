@@ -48,7 +48,7 @@ import { RowRequestControls, RowRequestLine, useRowRequest } from "./Requests.ts
 const TOAST_MS = 8000;
 const MAX_TOASTS = 3;
 
-/** A needs-input notification whose task/thread is still waiting (what the app badge counts). */
+/** A needs-input notification whose task/session is still waiting (what the app badge counts). */
 const stillWaiting = (n: Notification) => n.event === "needs_input" && n.currentState === "needs_input";
 
 /** A ready notification whose task still waits in backlog: it can be started from here. */
@@ -83,7 +83,7 @@ function StartButton({ taskId, onStarted }: { taskId: number; onStarted?: () => 
 
 const notificationPath = (n: Notification) => n.taskId === null ? "/?inbox" : `/tasks/${n.taskId}`;
 
-const projectOf = (n: Notification) => n.projectTitle ?? (n.taskId === null ? "external thread" : "");
+const projectOf = (n: Notification) => n.projectTitle ?? (n.taskId === null ? "external session" : "");
 
 // ---- Delivered notification → app ----
 
@@ -451,7 +451,7 @@ export function NotificationsDrawer({ onClose, onTrack }: { onClose: () => void;
     <Drawer title="Notifications" onClose={onClose} footer={footer ?? undefined}>
       <QueryState isPending={inbox.isPending} error={inbox.error} hasData={items.length > 0}>
         {items.length === 0 && silent.length === 0 ? (
-          <EmptyState>No notifications in the last 30 days. Needs input, failed, ready, done and settled events land here.</EmptyState>
+          <EmptyState>No notifications in the last 30 days. Needs input, failed, ready and done events land here.</EmptyState>
         ) : (
           <div className="flex flex-col gap-2">
             {silent.length === 0 ? null : <section className="border border-line">

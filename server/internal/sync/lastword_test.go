@@ -45,7 +45,7 @@ func TestLastWordReadOnlyWhenAtRestAndChanged(t *testing.T) {
 	if _, err := store.InsertProject(ctx, db.Project{Title: "p", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: "p", Workspace: "/w/p"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.AdoptThread(ctx, db.AdoptInput{Session: db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}}); err != nil {
+	if _, _, err := store.AdoptSession(ctx, db.AdoptInput{Session: db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}}); err != nil {
 		t.Fatal(err)
 	}
 	mutate := func(fn func(*t3.ThreadDetail)) {

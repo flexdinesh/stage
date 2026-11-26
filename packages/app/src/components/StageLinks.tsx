@@ -94,7 +94,7 @@ function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } 
   // A session ref without a connection names no session to resolve: it stays plain text.
   const sessionConnection = ref.kind === "session" ? (ref.connectionId ?? null) : null;
   const sessionPath = ref.kind === "session" && sessionConnection !== null ? `/connections/${sessionConnection}/sessions/${encodeURIComponent(ref.id)}` : "";
-  const thread = useQuery({
+  const session = useQuery({
     queryKey: ["session-reference",sessionPath],
     queryFn: () => api.resolveRef(sessionPath,undefined,true),
     enabled: sessionPath !== "",
@@ -105,8 +105,8 @@ function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } 
     const d = task.data;
     return { data: d === undefined ? null : { title: d.title, state: d.state, number: d.id, href: `/tasks/${d.id}` }, failed: task.isError };
   }
-  const t = thread.data;
-  return { data: t === undefined ? null : { title: t.sessionTitle || ref.id, state: t.state ?? null, number: t.taskId, href: t.taskId === null ? destination(t) : `/tasks/${t.taskId}` }, failed: thread.isError };
+  const t = session.data;
+  return { data: t === undefined ? null : { title: t.sessionTitle || ref.id, state: t.state ?? null, number: t.taskId, href: t.taskId === null ? destination(t) : `/tasks/${t.taskId}` }, failed: session.isError };
 }
 
 /** A stage link as a live chip: mono #id (or "session"), title, square state marker; opens in stage. */
@@ -175,9 +175,9 @@ export function useRefSlots(html: string, enabled: boolean): [RefObject<HTMLDivE
   return [root, portals];
 }
 
-/** A journal entry's source session; without a connection, the session the server resolves by id alone. */
-export function SourceSessionLink({ id, connectionId }: { id: string; connectionId?: number }) {
-  const { data } = useResolved(connectionId === undefined ? { kind: "session", id } : { kind: "session", id, connectionId });
+/** A journal entry's source session. */
+export function SourceSessionLink({ id, connectionId }: { id: string; connectionId: number }) {
+  const { data } = useResolved({ kind: "session", id, connectionId });
   if (data?.href == null) return <span title={id}>source session</span>;
   return <a href={data.href} className={linkClass("rest")}>source session</a>;
 }

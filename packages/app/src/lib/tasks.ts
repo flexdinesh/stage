@@ -12,7 +12,7 @@ export const isWaiting = (t: Task) => t.readiness === "blocked";
 
 /** "#12", or "#3, #5": the tasks a task needs, for copy. */
 export const waitTarget = (t: Pick<Task, "needs">) => t.needs.map((id) => `#${id}`).join(", ");
-/** Thread is live: stop allowed, delete refused. */
+/** Session is live: stop allowed, delete refused. */
 export const isActive = (t: Task) => ACTIVE.includes(t.state);
 export const canStop = (t: Task) => !isRetired(t) && t.externalSessionId !== null && isActive(t);
 /** Stage edits launch settings only for work it can start. */
@@ -24,7 +24,7 @@ export const isFinal = (t: Task) => t.acceptanceId !== null;
 export type StatusChip = TaskState | "completed" | "to_review" | "ready" | "blocked";
 
 /** Execution states a completed task's chip leaves unsaid: the run it accepted, or no run at all. */
-const QUIET_WHEN_COMPLETED: readonly TaskState[] = ["backlog", "done", "settled"];
+const QUIET_WHEN_COMPLETED: readonly TaskState[] = ["backlog", "done"];
 
 /**
  * A task's status chips, acceptance first. Completed: "completed", plus the execution state only once execution moved
@@ -33,7 +33,7 @@ const QUIET_WHEN_COMPLETED: readonly TaskState[] = ["backlog", "done", "settled"
  */
 export function statusChips(t: Pick<Task, "state" | "readiness" | "acceptanceId">, { blocked = false }: { blocked?: boolean } = {}): StatusChip[] {
   if (t.acceptanceId !== null) return QUIET_WHEN_COMPLETED.includes(t.state) ? ["completed"] : ["completed", t.state];
-  if (t.state === "done" || t.state === "settled") return ["to_review"];
+  if (t.state === "done") return ["to_review"];
   // A ready task its connection cannot launch (launchBlock) is not ready: it reads backlog.
   if (t.state === "backlog" && t.readiness !== null) return [blocked && t.readiness === "ready" ? "backlog" : t.readiness];
   return [t.state];

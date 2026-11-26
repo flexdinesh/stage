@@ -120,7 +120,7 @@ func TestNotificationStreamNoCursorThenLive(t *testing.T) {
 	if h, id := readHello(t, events); h.LatestID != old || h.Reset || id != fmt.Sprint(old) {
 		t.Fatalf("hello %+v id %s", h, id)
 	}
-	if u := decodeEvent[unreadEvent](t, nextSSE(t, events, true), "unread"); fmt.Sprint(u.Tags) != "[thread-1:ext-1]" || u.Badge != 0 {
+	if u := decodeEvent[unreadEvent](t, nextSSE(t, events, true), "unread"); fmt.Sprint(u.Tags) != "[session-1:ext-1]" || u.Badge != 0 {
 		t.Fatalf("unread %+v", u)
 	}
 
@@ -129,16 +129,16 @@ func TestNotificationStreamNoCursorThenLive(t *testing.T) {
 	hub.Signal()
 	ev := nextSSE(t, events, true)
 	row := decodeEvent[streamRow](t, ev, "notification")
-	if row.ID != id || ev.id != fmt.Sprint(id) || row.Tag != "thread-1:ext-2" || row.Title != "Done" {
+	if row.ID != id || ev.id != fmt.Sprint(id) || row.Tag != "session-1:ext-2" || row.Title != "Done" {
 		t.Fatalf("live row %+v id %s", row, ev.id)
 	}
-	if u := decodeEvent[unreadEvent](t, nextSSE(t, events, true), "unread"); fmt.Sprint(u.Tags) != "[thread-1:ext-1 thread-1:ext-2]" {
+	if u := decodeEvent[unreadEvent](t, nextSSE(t, events, true), "unread"); fmt.Sprint(u.Tags) != "[session-1:ext-1 session-1:ext-2]" {
 		t.Fatalf("live unread %+v", u)
 	}
 
 	// Reading a group (on any device) sends a snapshot without its tag.
-	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{"thread:1:ext-1"}}, 204, nil)
-	if u := decodeEvent[unreadEvent](t, nextSSE(t, events, true), "unread"); fmt.Sprint(u.Tags) != "[thread-1:ext-2]" {
+	e.must("POST", "/api/notifications/read", map[string]any{"groups": []string{"session:1:ext-1"}}, 204, nil)
+	if u := decodeEvent[unreadEvent](t, nextSSE(t, events, true), "unread"); fmt.Sprint(u.Tags) != "[session-1:ext-2]" {
 		t.Fatalf("unread after read %+v", u)
 	}
 	// A wake with nothing changed sends nothing; the next ping is next.
@@ -189,7 +189,7 @@ func TestNotificationStreamReplay(t *testing.T) {
 		t.Fatalf("thread row %+v", got)
 	}
 	u := decodeEvent[unreadEvent](t, nextSSE(t, events, true), "unread")
-	if fmt.Sprint(u.Tags) != fmt.Sprintf("[task-%d thread-1:ext-2]", tk.ID) || u.Badge != 1 {
+	if fmt.Sprint(u.Tags) != fmt.Sprintf("[session-1:ext-2 task-%d]", tk.ID) || u.Badge != 1 {
 		t.Fatalf("unread %+v", u)
 	}
 

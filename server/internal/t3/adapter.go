@@ -221,7 +221,21 @@ func (d ThreadDetail) Observation() execution.Observation {
 	if d.PendingRequestCount > 0 {
 		state = "needs_input"
 	}
-	o := execution.Observation{ModelLabel: d.Model, Session: execution.SessionRef{ConnectionID: 1, ExternalSessionID: d.ThreadID}, Project: d.ProjectID, Title: d.Title, State: state, Active: state == "running" || state == "needs_input", Archived: d.Archived, Child: d.RelationshipToParent == "subagent", Branch: strings.TrimSpace(d.Branch), Directory: d.WorktreePath, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt, ExecutionID: d.LatestRunID, Artifacts: d.PullRequests, Config: threadConfig(d.ProviderInstanceID, d.Model, nil, string(d.RuntimeMode), string(d.InteractionMode)), Links: execution.Links{App: d.Link}}
+	o := execution.Observation{
+		Session:     execution.SessionRef{ConnectionID: 1, ExternalSessionID: d.ThreadID},
+		Project:     d.ProjectID,
+		Title:       d.Title,
+		State:       state,
+		Active:      state == "running" || state == "needs_input",
+		Archived:    d.Archived,
+		Child:       d.RelationshipToParent == "subagent",
+		Branch:      strings.TrimSpace(d.Branch),
+		Directory:   d.WorktreePath,
+		CreatedAt:   d.CreatedAt,
+		UpdatedAt:   d.UpdatedAt,
+		ExecutionID: d.LatestRunID,
+		Config:      threadConfig(d.ProviderInstanceID, d.Model, nil, string(d.RuntimeMode), string(d.InteractionMode)),
+	}
 	if d.ParentThreadID != "" {
 		o.Parent = &execution.SessionRef{ConnectionID: 1, ExternalSessionID: d.ParentThreadID}
 	}
@@ -270,9 +284,6 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 		o.Parent.ConnectionID = ref.ConnectionID
 	}
 	o.Links = a.Destinations(ctx, ref)
-	if o.Links.App == "" {
-		o.Links.App = d.Link
-	}
 	if err = o.Valid(); err != nil {
 		return o, err
 	}

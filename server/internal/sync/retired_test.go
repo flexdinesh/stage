@@ -69,7 +69,7 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 	if err := svc.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.WatchThreads(ctx); err != nil {
+	if err := svc.WatchAttention(ctx); err != nil {
 		t.Fatal(err)
 	}
 	before, err := store.GetTask(ctx, task.ID)
@@ -92,7 +92,7 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 	if err := svc.PollActive(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.WatchThreads(ctx); err != nil {
+	if err := svc.WatchAttention(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.FullSync(ctx); err != nil {

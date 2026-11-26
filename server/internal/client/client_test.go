@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/config"
@@ -90,7 +91,7 @@ func TestAPIVersionGate(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := New(srv.URL)
-	for _, v := range []string{"", "8"} { // older server without the header; same version
+	for _, v := range []string{"", "9"} { // older server without the header; same version
 		version = v
 		if _, err := c.Projects(context.Background()); err != nil {
 			t.Fatalf("version %q: %v", v, err)
@@ -99,8 +100,23 @@ func TestAPIVersionGate(t *testing.T) {
 	version = "1"
 	_, err := c.Projects(context.Background())
 	var ve *VersionError
-	if !errors.As(err, &ve) || ve.Server != "1" || !strings.Contains(err.Error(), "API v1, this client v8") {
+	if !errors.As(err, &ve) || ve.Server != "1" || !strings.Contains(err.Error(), "API v1, this client v9") {
 		t.Fatalf("mismatch: %v", err)
+	}
+}
+
+func TestTreesQueryCompletedFrom(t *testing.T) {
+	since := time.Date(2026, 11, 26, 18, 0, 0, 0, time.FixedZone("AEST", 10*60*60))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if r.URL.Path != "/api/trees" || q.Get("completedFrom") != "2026-11-26T08:00:00Z" || q.Has("settledFrom") {
+			t.Errorf("unexpected request: %s", r.URL)
+		}
+		_, _ = w.Write([]byte(`{"trees":[]}`))
+	}))
+	defer srv.Close()
+	if _, err := New(srv.URL).Trees(t.Context(), TreeQuery{CompletedFrom: &since}); err != nil {
+		t.Fatal(err)
 	}
 }
 

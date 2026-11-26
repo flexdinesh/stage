@@ -34,23 +34,23 @@ func TestAcceptanceAloneReleasesAndFreezesEvidence(t *testing.T) {
 	p := e.project("/w/acceptance")
 	a := e.task(p.ID, "source", map[string]any{"start": true})
 	b := e.task(p.ID, "dependent", map[string]any{"needs": []int64{a.ID}, "startMode": "auto"})
-	_ = e.fake.SetReply(*a.T3ThreadID, t3.Reply{Text: "accepted reply", ItemID: "reply-1"})
+	_ = e.fake.SetReply(*a.ExternalSessionID, t3.Reply{Text: "accepted reply", ItemID: "reply-1"})
 	for _, status := range []t3.ThreadStatus{t3.StatusCompleted, t3.StatusIdle} {
-		_ = e.fake.SetStatus(*a.T3ThreadID, status)
+		_ = e.fake.SetStatus(*a.ExternalSessionID, status)
 		e.poll()
 		_ = e.runner.Reconcile(ctx)
 		if got := e.getTask(b.ID); got.LaunchAttempt != 0 {
 			t.Fatal("execution released dependency")
 		}
 	}
-	_ = e.fake.Settle(*a.T3ThreadID)
+	_ = e.fake.Settle(*a.ExternalSessionID)
 	e.poll()
 	_ = e.runner.Reconcile(ctx)
 	if got := e.getTask(b.ID); got.LaunchAttempt != 0 {
 		t.Fatal("settlement released dependency")
 	}
 	var preview db.CompletionPreview
-	e.t3.failReadFor.Store(a.T3ThreadID)
+	e.t3.failReadFor.Store(a.ExternalSessionID)
 	e.t3.failReply.Store(true)
 	e.must("GET", fmt.Sprintf("/api/tasks/%d/completion-preview", a.ID), nil, 200, &preview)
 	request := db.AcceptanceRequest{RequestID: "accept-once", Revision: preview.Revision, EvidenceVersion: preview.EvidenceVersion, Note: "Reviewed locally."}
@@ -58,11 +58,31 @@ func TestAcceptanceAloneReleasesAndFreezesEvidence(t *testing.T) {
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/complete", a.ID), request, 200, &first)
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/complete", a.ID), request, 200, &again)
 	var detail struct {
-		Acceptances []db.Acceptance `json:"acceptances"`
+		FinalReply  map[string]any `json:"finalReply"`
+		Acceptances []struct {
+			Evidence map[string]any `json:"evidence"`
+		} `json:"acceptances"`
 	}
 	e.must("GET", fmt.Sprintf("/api/tasks/%d", a.ID), nil, 200, &detail)
-	if len(detail.Acceptances) != 1 || detail.Acceptances[0].Evidence.Reply == nil || *detail.Acceptances[0].Evidence.Reply != "accepted reply" {
+	if len(detail.Acceptances) != 1 || detail.Acceptances[0].Evidence["reply"] != "accepted reply" {
 		t.Fatal("accepted result unavailable with source offline")
+	}
+	evidence := detail.Acceptances[0].Evidence
+	if evidence["externalSessionId"] != *a.ExternalSessionID || evidence["sessionLink"] != a.Links.Web {
+		t.Fatalf("accepted session evidence %+v", evidence)
+	}
+	for _, field := range []string{"threadId", "threadLink", "artifacts", "historicalSettledAt"} {
+		if _, exists := evidence[field]; exists {
+			t.Fatalf("accepted evidence still has %s", field)
+		}
+	}
+	if detail.FinalReply["itemId"] != "reply-1" || detail.FinalReply["text"] != "accepted reply" {
+		t.Fatalf("final reply %+v", detail.FinalReply)
+	}
+	for _, field := range []string{"messageId", "position"} {
+		if _, exists := detail.FinalReply[field]; exists {
+			t.Fatalf("final reply still has %s", field)
+		}
 	}
 	if first.AcceptanceID == nil || again.AcceptanceID == nil || *first.AcceptanceID != *again.AcceptanceID {
 		t.Fatal("duplicate acceptance")
@@ -188,13 +208,13 @@ func TestAcceptanceEligibilityAndStaleEvidence(t *testing.T) {
 	var preview db.CompletionPreview
 	e.must("GET", fmt.Sprintf("/api/tasks/%d/completion-preview", a.ID), nil, 200, &preview)
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/complete", a.ID), db.AcceptanceRequest{RequestID: "active", Revision: preview.Revision, EvidenceVersion: preview.EvidenceVersion}, 409, nil)
-	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusInterrupted)
+	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusInterrupted)
 	e.poll()
 	e.must("GET", fmt.Sprintf("/api/tasks/%d/completion-preview", a.ID), nil, 200, &preview)
 	e.must("PATCH", fmt.Sprintf("/api/tasks/%d", a.ID), map[string]any{"title": "changed"}, 200, nil)
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/complete", a.ID), db.AcceptanceRequest{RequestID: "stale", Revision: preview.Revision, EvidenceVersion: preview.EvidenceVersion}, 409, nil)
 	e.complete(a.ID)
-	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusRunning)
+	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusRunning)
 	e.poll()
 	got, err := e.store.GetTask(context.Background(), a.ID)
 	if err != nil || got.AcceptanceID == nil || got.State != db.StateRunning {
@@ -250,7 +270,7 @@ func TestHarnessSettleInfersCompletionOncePerExecution(t *testing.T) {
 	p := e.project("/w/infer")
 	a := e.task(p.ID, "source", map[string]any{"start": true})
 	b := e.task(p.ID, "dependent", map[string]any{"needs": []int64{a.ID}, "startMode": "auto"})
-	thread := *a.T3ThreadID
+	thread := *a.ExternalSessionID
 	_ = e.fake.Settle(thread)
 	e.poll()
 	if len(e.acceptances(a.ID)) != 0 {
@@ -306,8 +326,8 @@ func TestHarnessSettleDoesNotCompleteUnsuccessfulOrDisabled(t *testing.T) {
 	p := e.project("/w/no-infer")
 	for _, status := range []t3.ThreadStatus{t3.StatusFailed, t3.StatusInterrupted} {
 		a := e.task(p.ID, string(status), map[string]any{"start": true})
-		_ = e.fake.SetStatus(*a.T3ThreadID, status)
-		_ = e.fake.Settle(*a.T3ThreadID)
+		_ = e.fake.SetStatus(*a.ExternalSessionID, status)
+		_ = e.fake.Settle(*a.ExternalSessionID)
 		e.poll()
 		if got := e.getTask(a.ID); got.State != string(status) || len(e.acceptances(a.ID)) != 0 {
 			t.Fatalf("%s settle completed task", status)
@@ -315,20 +335,20 @@ func TestHarnessSettleDoesNotCompleteUnsuccessfulOrDisabled(t *testing.T) {
 	}
 	e.autoComplete(1, false)
 	a := e.task(p.ID, "disabled", map[string]any{"start": true})
-	_ = e.fake.SetStatus(*a.T3ThreadID, t3.StatusCompleted)
-	_ = e.fake.Settle(*a.T3ThreadID)
+	_ = e.fake.SetStatus(*a.ExternalSessionID, t3.StatusCompleted)
+	_ = e.fake.Settle(*a.ExternalSessionID)
 	e.poll()
 	if len(e.acceptances(a.ID)) != 0 {
 		t.Fatal("disabled connection completed task")
 	}
 	// A user reopen suppresses a later settle of the same execution.
 	reopened := e.task(p.ID, "reopened", map[string]any{"start": true})
-	_ = e.fake.SetStatus(*reopened.T3ThreadID, t3.StatusCompleted)
+	_ = e.fake.SetStatus(*reopened.ExternalSessionID, t3.StatusCompleted)
 	e.poll()
 	e.complete(reopened.ID)
 	e.reopen(reopened.ID)
 	e.autoComplete(1, true)
-	_ = e.fake.Settle(*reopened.T3ThreadID)
+	_ = e.fake.Settle(*reopened.ExternalSessionID)
 	e.poll()
 	if got := e.acceptances(reopened.ID); len(got) != 1 || got[0].Provenance != "user" {
 		t.Fatalf("settle after reopen completed: %+v", got)

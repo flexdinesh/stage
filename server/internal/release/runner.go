@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
-// Launcher starts a task in T3 (sync.Service.LaunchTask).
+// Launcher starts a task in its harness (sync.Service.LaunchTask).
 type Launcher interface {
 	LaunchTask(ctx context.Context, id int64) (db.Task, error)
 }
@@ -52,10 +52,9 @@ func NewRunner(store *db.Store, launcher Launcher, log *slog.Logger) *Runner {
 	}
 }
 
-// OnTransition is the sync.Service hook: a task settling may release its
-// dependents, and a launch ends a readiness episode.
-func (r *Runner) OnTransition(_ context.Context, c t3sync.Change) {
-	if c.To == db.StateSettled || c.From == db.StateBacklog {
+// OnTransition reconciles when a launch ends a readiness episode.
+func (r *Runner) OnTransition(_ context.Context, c workevent.TaskChange) {
+	if c.From == db.StateBacklog {
 		r.Kick()
 	}
 }
@@ -108,7 +107,7 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 			continue // started or changed concurrently
 		}
 		if err != nil {
-			errs = append(errs, err) // T3 failure: the task is failed with lastError
+			errs = append(errs, err) // The task is failed with lastError.
 		}
 	}
 	ready, err := r.store.MarkReady(ctx)

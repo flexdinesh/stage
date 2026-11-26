@@ -59,7 +59,7 @@ func TestWaitingSessionTitlesFromObservation(t *testing.T) {
 		t.Fatalf("waiting %+v %v", waiting, err)
 	}
 	w := waiting[0]
-	if w.ConnectionID != conn || w.ThreadID != "ses-1" || w.Title != "Plan the release" || w.ProjectTitle == nil || *w.ProjectTitle != "Stage P" {
+	if w.ConnectionID != conn || w.ExternalSessionID != "ses-1" || w.Title != "Plan the release" || w.ProjectTitle == nil || *w.ProjectTitle != "Stage P" {
 		t.Fatalf("waiting session %+v", w)
 	}
 }

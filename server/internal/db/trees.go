@@ -82,7 +82,7 @@ type TreeDetail struct {
 }
 
 // TreeTimes: StartedAt is the first member launch (nil before any);
-// LastActivityAt includes tree, member, thread and journal activity.
+// LastActivityAt includes tree, member, session and journal activity.
 // ListTrees orders by it.
 type TreeTimes struct {
 	StartedAt      *time.Time `json:"startedAt"`
@@ -107,7 +107,7 @@ func treeTimes(t Tree, members []Task) TreeTimes {
 			tt.StartedAt = m.LaunchedAt
 		}
 		later(&m.UpdatedAt)
-		later(m.ThreadUpdatedAt)
+		later(m.SessionUpdatedAt)
 	}
 	return tt
 }
@@ -123,7 +123,7 @@ type TreeCounts struct {
 	Running     int `json:"running"`
 	NeedsInput  int `json:"needsInput"`
 	Done        int `json:"done"`
-	Settled     int `json:"settled"`
+	Completed   int `json:"completed"`
 	Failed      int `json:"failed"`
 	Interrupted int `json:"interrupted"`
 	Cancelled   int `json:"cancelled"`
@@ -136,8 +136,8 @@ type TreeSummary struct {
 	Counts   TreeCounts `json:"counts"`
 	Levels   int        `json:"levels"`
 	Projects []string   `json:"projects"` // member project titles, sorted
-	// SettledAt: every member settled; the latest settle (nil otherwise).
-	SettledAt *time.Time `json:"settledAt"`
+	// CompletedAt: latest acceptance when every member is completed (nil otherwise).
+	CompletedAt *time.Time `json:"completedAt"`
 }
 
 // TreeView picks trees by lifecycle.
@@ -352,7 +352,7 @@ func summarize(t Tree, members []Task, edges []TreeEdge) TreeSummary {
 		c.Total++
 		switch {
 		case m.AcceptanceID != nil:
-			c.Settled++
+			c.Completed++
 			if m.CompletedAt != nil && (latest == nil || m.CompletedAt.After(*latest)) {
 				latest = m.CompletedAt
 			}
@@ -370,7 +370,7 @@ func summarize(t Tree, members []Task, edges []TreeEdge) TreeSummary {
 			c.Running++
 		case m.State == StateNeedsInput:
 			c.NeedsInput++
-		case m.State == StateDone || m.State == StateSettled:
+		case m.State == StateDone:
 			c.Done++
 		case m.State == StateFailed:
 			c.Failed++
@@ -384,8 +384,8 @@ func summarize(t Tree, members []Task, edges []TreeEdge) TreeSummary {
 		}
 	}
 	slices.Sort(sum.Projects)
-	if c.Total > 0 && c.Settled == c.Total {
-		sum.SettledAt = latest
+	if c.Total > 0 && c.Completed == c.Total {
+		sum.CompletedAt = latest
 	}
 	sum.Levels = len(TreeLevels(idsOf(members), edges))
 	return sum
@@ -630,11 +630,6 @@ func (s *Store) MarkReady(ctx context.Context) ([]int64, error) {
 	return ids, err
 }
 
-// UnsettledNeeds: task id's needs that are not accepted, by id.
-func (s *Store) UnsettledNeeds(ctx context.Context, id int64) ([]int64, error) {
-	return read(ctx, s, func(tx store.Tx) ([]int64, error) { return tx.Acceptances().UnacceptedNeeds(ctx, id) })
-}
-
 func treeExists(ctx context.Context, tx store.Tx, id int64) error {
 	ok, err := tx.Trees().Exists(ctx, id)
 	if err != nil {
@@ -788,7 +783,7 @@ func spliceOutTo(ctx context.Context, tx store.Tx, id int64, destination *int64)
 // setNeeds replaces id's needs (docs/api.md "Tree rules"; 409 unless noted):
 // needs change only in backlog (an unchanged set is a no-op in any state);
 // not with a start time (400); each need exists (404), is not the task, is
-// in the task's tree, and does not (transitively) need the task. A settled
+// in the task's tree, and does not (transitively) need the task. A completed
 // need is allowed.
 func setNeeds(ctx context.Context, tx store.Tx, id int64, needs []int64) error {
 	tr := tx.Trees()

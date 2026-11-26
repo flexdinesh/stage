@@ -17,11 +17,11 @@ type Preferences struct {
 }
 
 // EventReady is the ready notification event: a manual tree member whose
-// needs all settled. A pseudo-state: never a task's state, not in TaskStates.
+// needs all accepted. A pseudo-state: never a task's state, not in TaskStates.
 const EventReady TaskState = "ready"
 
 // NotificationEvents: the events that can notify, in display order.
-var NotificationEvents = []TaskState{StateNeedsInput, StateFailed, EventReady, StateDone, StateSettled}
+var NotificationEvents = []TaskState{StateNeedsInput, StateFailed, EventReady, StateDone}
 
 func (s *Store) GetPreferences(ctx context.Context) (Preferences, error) {
 	return read(ctx, s, func(tx store.Tx) (Preferences, error) { return getPreferences(ctx, tx) })
@@ -44,8 +44,11 @@ func getPreferences(ctx context.Context, tx store.Tx) (Preferences, error) {
 // order). ErrInvalid for a state that cannot notify.
 func (s *Store) SetNotifyEvents(ctx context.Context, events []TaskState) (Preferences, error) {
 	for _, e := range events {
+		if e == "settled" {
+			return Preferences{}, Invalid("event settled was removed in API v9; completion sends no notification (want needs_input, failed, ready or done)")
+		}
 		if !slices.Contains(NotificationEvents, e) {
-			return Preferences{}, Invalid("invalid event %q (want needs_input, failed, ready, done or settled)", e)
+			return Preferences{}, Invalid("invalid event %q (want needs_input, failed, ready or done)", e)
 		}
 	}
 	stored := make([]string, 0, len(events))

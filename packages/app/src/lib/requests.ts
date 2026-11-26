@@ -104,6 +104,6 @@ export const requestsPath = (taskId: number) => `/tasks/${taskId}#${REQUESTS_ANC
 /** A failed answer: `expired` when the request is no longer pending (answered in the harness, timed out), else an error to show. */
 export const respondFailure = (error: unknown): "expired" | "error" => (error instanceof ApiError && error.status === 404 ? "expired" : "error");
 
-/** Settled answers' copy; `harness` is its display name. */
+/** Copy for answered or expired requests; `harness` is its display name. */
 export const answeredText = (harness: string) => `Answered · waiting for ${harness}`;
 export const expiredText = (harness: string) => `Already answered in ${harness} or expired`;

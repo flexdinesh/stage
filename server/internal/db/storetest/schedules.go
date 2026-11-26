@@ -157,7 +157,7 @@ func caseFireSchedule(t *testing.T, open Factory) {
 		t.Fatalf("active skip = %+v", r)
 	}
 
-	// Done but unsettled does not block.
+	// A done run allows the next scheduled run before acceptance.
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone}); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func caseFireSchedule(t *testing.T, open Factory) {
 	}
 
 	// Server down for an hour: one missed row, nothing spawned, next is in the future.
-	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: 2, To: db.StateSettled}); err != nil {
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: 2, To: db.StateDone}); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = s.GetSchedule(ctx, sc.ID)

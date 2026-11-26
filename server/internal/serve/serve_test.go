@@ -245,7 +245,7 @@ func startTask(t *testing.T, fake *countingT3, a listen.Addr) client.Task {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if task.T3ThreadID == nil {
+	if task.ExternalSessionID == nil {
 		t.Fatalf("task not launched: %+v", task)
 	}
 	return task
@@ -306,7 +306,7 @@ func TestListenerModes(t *testing.T) {
 			t.Fatalf("socket mode %v, %v", st.Mode().Perm(), err)
 		}
 		h := health(t, a)
-		if h.Service != "stage" || h.Status != "ok" || h.APIVersion != 8 || h.InstanceID != i.ready.Meta.InstanceID || h.StartedAt == nil {
+		if h.Service != "stage" || h.Status != "ok" || h.APIVersion != 9 || h.InstanceID != i.ready.Meta.InstanceID || h.StartedAt == nil {
 			t.Fatalf("health %+v", h)
 		}
 		if err := i.stop(t); err != nil {
@@ -337,7 +337,7 @@ func TestListenerModes(t *testing.T) {
 		}
 		task := startTask(t, fake, u)
 		got, err := clientFor(tc).Task(context.Background(), task.ID)
-		if err != nil || got.T3ThreadID == nil || *got.T3ThreadID != *task.T3ThreadID {
+		if err != nil || got.ExternalSessionID == nil || *got.ExternalSessionID != *task.ExternalSessionID {
 			t.Fatalf("task created over unix not visible over tcp: %+v, %v", got, err)
 		}
 		st, err := os.Lstat(sock)
@@ -518,7 +518,7 @@ func TestRestartKeepsStateWithoutRelaunch(t *testing.T) {
 	}
 	j := start(t, cfg(t, data, "unix:"+sock), fake)
 	got, err := clientFor(j.ready.Listeners[0]).Task(context.Background(), task.ID)
-	if err != nil || got.T3ThreadID == nil || *got.T3ThreadID != *task.T3ThreadID {
+	if err != nil || got.ExternalSessionID == nil || *got.ExternalSessionID != *task.ExternalSessionID {
 		t.Fatalf("task after restart %+v, %v", got, err)
 	}
 	// Give the poller, link runner and scheduler a moment to act.

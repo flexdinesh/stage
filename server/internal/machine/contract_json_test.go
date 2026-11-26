@@ -26,7 +26,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 	later := at.Add(time.Hour)
 	str := "s"
 	cost := 1.5
-	ref := execution.SessionRef{ConnectionID: 7, ExternalSessionID: "thread-1"}
+	ref := execution.SessionRef{ConnectionID: 7, ExternalSessionID: "session-1"}
 	avail := execution.Availability{Available: true, Reason: "why"}
 	choice := execution.Choice{ID: "c", Label: "C", Availability: avail}
 	def := execution.BoolValue(true)
@@ -34,14 +34,13 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		DependsOn: &execution.OptionDependency{Option: "worktree", Value: execution.BoolValue(true)}}
 	cfg := execution.Config{Model: "brain-7", Options: []execution.ModelOption{{ID: "effort", Value: execution.StringValue("high")}, {ID: "fast", Value: execution.BoolValue(true)}}, Permission: "full-access", Mode: "plan"}
 	observation := execution.Observation{
-		ModelLabel: "Brain 7", Parent: &execution.SessionRef{ConnectionID: 7, ExternalSessionID: "parent"}, Config: cfg, Session: ref,
+		Parent: &execution.SessionRef{ConnectionID: 7, ExternalSessionID: "parent"}, Config: cfg, Session: ref,
 		Project: "p", Title: "t", State: "running", Active: true, Archived: true, Child: true, Branch: "feat", Directory: "/w",
-		Links:     execution.Links{Service: "svc", Web: "https://web", App: "https://app", Native: "t3code://x", Command: "t3 resume x"},
+		Links:     execution.Links{Web: "https://web", Native: "t3code://x", Command: "t3 resume x"},
 		CreatedAt: at, UpdatedAt: later, StartedAt: &at, EndedAt: &later, ExecutionID: "run-1",
-		Reply:     &execution.Reply{ItemID: "i", RunID: "r", MessageID: "m", Text: "done", Truncated: true, Position: 2, UpdatedAt: at},
-		Usage:     &execution.Usage{Turns: 2, InputTokens: 3, CacheReadTokens: 4, CacheWriteTokens: 5, OutputTokens: 6, WorkingMs: 7, CostUSD: &cost},
-		Artifacts: []execution.Artifact{{Host: "github.com", Repository: "o/r", Number: 3, URL: "https://github.com/o/r/pull/3", Source: "reply", State: "open"}},
-		Closed:    &execution.Closure{Signal: execution.ClosedSettled}, StateReason: execution.ReasonOwnerExited, Origin: "cli",
+		Reply:  &execution.Reply{ItemID: "i", RunID: "r", Text: "done", Truncated: true, UpdatedAt: at},
+		Usage:  &execution.Usage{Turns: 2, InputTokens: 3, CacheReadTokens: 4, CacheWriteTokens: 5, OutputTokens: 6, WorkingMs: 7, CostUSD: &cost},
+		Closed: &execution.Closure{Signal: execution.ClosedSettled}, StateReason: execution.ReasonOwnerExited, Origin: "cli",
 	}
 	binding := db.ProjectBinding{ID: 1, ProjectID: 2, ConnectionID: 7, Harness: "kind", ExternalProjectID: "p", Workspace: "/w", Revision: 3, Status: "available", ObservedWorkspace: &str, ConnectionActive: true, ConnectionLabel: "box", Origin: db.BindingPath}
 	samples := map[string]any{
@@ -63,8 +62,10 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 			RequestID: "req-1", ConnectionID: 7, Project: "p", Directory: "/w", Title: "t", Prompt: "do it", Config: cfg,
 			Images: []execution.Image{{Name: "a.png", MimeType: "image/png", Data: []byte{0, 1, 2}}}, Marker: execution.LaunchMarker("req-1"),
 		},
-		"Checkpoint":  execution.Checkpoint{Version: 2, Data: json.RawMessage(`{"thread":"t-1"}`)},
+		"Checkpoint":  execution.Checkpoint{Version: 2, Data: json.RawMessage(`{"session":"session-1"}`)},
 		"Observation": observation,
+		"Links":       observation.Links,
+		"Reply":       *observation.Reply,
 		"Credential":  execution.Credential{ClientID: "client", Token: "tok", ExpiresAt: at},
 		"Request": execution.Request{ID: "q", Kind: "question", Title: "Pick", Detail: "one", Preview: "go test", Options: []execution.Choice{choice}, TextOption: "c",
 			Questions: []execution.Question{{ID: "0", Header: "H", Prompt: "Which?", Options: []execution.QuestionOption{{Label: "A", Description: "a"}}, Multi: true, Custom: true}}, CreatedAt: at},

@@ -214,13 +214,13 @@ export function RequestCard({
  */
 export function RequestsPanel({ taskId, requests, harness, needsInput }: { taskId: number; requests: readonly SessionRequest[]; harness: string; needsInput: boolean }) {
   const respond = useRespondRequest(taskId);
-  const [settled, setSettled] = useState<ReadonlyMap<string, { request: SessionRequest; outcome: RequestOutcome }>>(new Map());
+  const [resolved, setResolved] = useState<ReadonlyMap<string, { request: SessionRequest; outcome: RequestOutcome }>>(new Map());
   const [failed, setFailed] = useState<{ id: string; error: unknown } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const { hash } = useLocation();
-  const open = requests.filter((r) => !settled.has(r.id));
+  const open = requests.filter((r) => !resolved.has(r.id));
   const pendingCount = open.length;
-  const shown = needsInput ? [...open, ...settled.values()] : [];
+  const shown = needsInput ? [...open, ...resolved.values()] : [];
   const visible = shown.length > 0;
 
   useEffect(() => {
@@ -235,9 +235,9 @@ export function RequestsPanel({ taskId, requests, harness, needsInput }: { taskI
     respond.mutate(
       { requestId: request.id, response },
       {
-        onSuccess: () => setSettled((m) => new Map(m).set(request.id, { request, outcome: "answered" })),
+        onSuccess: () => setResolved((m) => new Map(m).set(request.id, { request, outcome: "answered" })),
         onError: (error) =>
-          respondFailure(error) === "expired" ? setSettled((m) => new Map(m).set(request.id, { request, outcome: "expired" })) : setFailed({ id: request.id, error }),
+          respondFailure(error) === "expired" ? setResolved((m) => new Map(m).set(request.id, { request, outcome: "expired" })) : setFailed({ id: request.id, error }),
       },
     );
   };

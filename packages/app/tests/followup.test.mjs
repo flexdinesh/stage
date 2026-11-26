@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { MAX_MESSAGE_BYTES, busyHint, followUpView, isSendKey, mayFollowUp, replyPrompt, sendable, tooLong } from "../src/lib/followup.ts";
 
 const task = (state, more = {}) => ({ state, externalSessionId: "3923bfbc-e1ce-4823-a36c-cc0922208074", connectionActive: true, ...more });
-const offered = { offered: true, requestsSettled: true, requestCount: 0 };
+const offered = { offered: true, requestsReady: true, requestCount: 0 };
 
 test("a finished session takes a follow-up under Last word", () => {
   assert.deepEqual(followUpView(task("done"), offered), { placement: "after-reply", title: "Follow up", busy: false });
@@ -15,7 +15,7 @@ test("a turn that ended asking you leads with Reply", () => {
 
 test("open requests, or requests not read yet, leave needs input to the Requests panel", () => {
   assert.equal(followUpView(task("needs_input"), { ...offered, requestCount: 1 }), null);
-  assert.equal(followUpView(task("needs_input"), { ...offered, requestsSettled: false }), null);
+  assert.equal(followUpView(task("needs_input"), { ...offered, requestsReady: false }), null);
 });
 
 test("a working session shows the composer with Send waiting", () => {
@@ -25,7 +25,7 @@ test("a working session shows the composer with Send waiting", () => {
 });
 
 test("states that can't take a message have no composer", () => {
-  for (const state of ["backlog", "failed", "interrupted", "cancelled", "settled"]) {
+  for (const state of ["backlog", "failed", "interrupted", "cancelled"]) {
     assert.equal(followUpView(task(state), offered), null, state);
     assert.equal(mayFollowUp(state), false, state);
   }

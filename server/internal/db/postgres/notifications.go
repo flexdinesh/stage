@@ -14,12 +14,12 @@ type notifications struct{ *runner }
 
 func (t *tx) Notifications() store.Notifications { return notifications{t.r} }
 
-// The task URL survives ON DELETE SET NULL and restarts onto a different thread.
-// Titles are snapshots and cannot identify a task or an external thread.
+// The task URL survives ON DELETE SET NULL and restarts onto a different session.
+// Titles are snapshots and cannot identify a task or an external session.
 const notificationKeySQL = `CASE
   WHEN n.task_id IS NOT NULL THEN 'task:' || n.task_id
   WHEN n.url ~ '^/tasks/[0-9]+$' THEN 'task:' || substr(n.url, 8)
-  WHEN n.session_id IS NOT NULL THEN 'thread:' || (SELECT connection_id || ':' || external_id FROM session_identities WHERE id=n.session_id)
+  WHEN n.session_id IS NOT NULL THEN 'session:' || (SELECT connection_id || ':' || external_id FROM session_identities WHERE id=n.session_id)
   ELSE 'notification:' || n.id END`
 
 const notificationColumns = `COALESCE((SELECT connection_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),0), n.id, n.event, n.task_id, (SELECT external_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)), n.title, n.project_title,
@@ -56,7 +56,7 @@ func scanNotifications(rows *rowSet) ([]store.Notification, error) {
 	out := []store.Notification{}
 	for rows.Next() {
 		var n store.Notification
-		if err := rows.Scan(&n.ConnectionID, &n.ID, &n.Event, &n.TaskID, &n.T3ThreadID, &n.Title, &n.ProjectTitle,
+		if err := rows.Scan(&n.ConnectionID, &n.ID, &n.Event, &n.TaskID, &n.ExternalSessionID, &n.Title, &n.ProjectTitle,
 			&n.URL, &n.CreatedAt, &n.ReadAt, &n.CurrentState); err != nil {
 			return nil, err
 		}
@@ -119,7 +119,7 @@ LIMIT $1`, limit, waiting, beforeID, upToID)
 	out := []store.NotificationGroup{}
 	for rows.Next() {
 		var g store.NotificationGroup
-		if err := rows.Scan(&g.ConnectionID, &g.ID, &g.Event, &g.TaskID, &g.T3ThreadID, &g.Title, &g.ProjectTitle,
+		if err := rows.Scan(&g.ConnectionID, &g.ID, &g.Event, &g.TaskID, &g.ExternalSessionID, &g.Title, &g.ProjectTitle,
 			&g.URL, &g.CreatedAt, &g.ReadAt, &g.CurrentState, &g.Key, &g.EventCount, &g.UnreadCount); err != nil {
 			return nil, err
 		}
@@ -175,7 +175,7 @@ func (r notifications) Waiting(ctx context.Context, upToID int64) ([]store.Waiti
 	out := []store.WaitingSession{}
 	for rows.Next() {
 		var row store.WaitingSession
-		if err := rows.Scan(&row.ConnectionID, &row.ThreadID, &row.Title, &row.ProjectTitle, &row.Directory); err != nil {
+		if err := rows.Scan(&row.ConnectionID, &row.ExternalSessionID, &row.Title, &row.ProjectTitle, &row.Directory); err != nil {
 			return nil, err
 		}
 		out = append(out, row)

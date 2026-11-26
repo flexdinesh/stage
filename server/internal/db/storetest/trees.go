@@ -208,12 +208,12 @@ func caseSetNeedsRules(t *testing.T, open Factory) {
 	if got := needs(t, s, ctx, c.ID, solo.ID, b.ID, b.ID); !slices.Equal(got.Needs, []int64{b.ID, solo.ID}) {
 		t.Fatalf("dedupe %v", got.Needs)
 	}
-	// A settled need is allowed.
-	setState(t, s, ctx, solo.ID, db.StateSettled)
+	// A completed need is allowed.
+	setState(t, s, ctx, solo.ID, db.StateDone)
 	acceptTask(t, s, ctx, solo.ID)
 	d := mustTask(t, s, ctx, p.ID, "d", []int64{solo.ID})
 	if !slices.Equal(d.Needs, []int64{solo.ID}) {
-		t.Fatalf("settled need %+v", d)
+		t.Fatalf("completed need %+v", d)
 	}
 	// Needs change only in backlog; the same set is a no-op in any state.
 	setState(t, s, ctx, c.ID, db.StateRunning)
@@ -375,16 +375,15 @@ func caseReadinessAndLaunchable(t *testing.T, open Factory) {
 		t.Fatalf("initial a=%s b=%s", ra, rb)
 	}
 	if ids := launchable(); len(ids) != 0 {
-		t.Fatalf("launchable before settle %v", ids)
+		t.Fatalf("launchable before acceptance %v", ids)
 	}
 	setState(t, s, ctx, a.ID, db.StateRunning)
 	setState(t, s, ctx, a.ID, db.StateDone)
 	if ra, rb := readiness(getTask(t, s, ctx, a.ID)), readiness(getTask(t, s, ctx, b.ID)); ra != "-" || rb != "blocked" {
-		t.Fatalf("done but unsettled a=%s b=%s", ra, rb)
+		t.Fatalf("done but unaccepted a=%s b=%s", ra, rb)
 	}
-	setState(t, s, ctx, a.ID, db.StateSettled)
 	acceptTask(t, s, ctx, a.ID)
-	// Auto with needs settled: no readiness, launchable.
+	// Auto with needs accepted: no readiness, launchable.
 	if rb := readiness(getTask(t, s, ctx, b.ID)); rb != "-" {
 		t.Fatalf("auto released b=%s", rb)
 	}
@@ -472,9 +471,9 @@ func caseMarkReadyOnce(t *testing.T, open Factory) {
 	}
 	// The ready root (no needs) never notifies.
 	if ids := mark(); len(ids) != 0 {
-		t.Fatalf("before settle %v", ids)
+		t.Fatalf("before acceptance %v", ids)
 	}
-	setState(t, s, ctx, a.ID, db.StateSettled)
+	setState(t, s, ctx, a.ID, db.StateDone)
 	acceptTask(t, s, ctx, a.ID)
 	if ids := mark(); !slices.Equal(ids, []int64{b.ID}) {
 		t.Fatalf("first mark %v", ids)
@@ -485,7 +484,7 @@ func caseMarkReadyOnce(t *testing.T, open Factory) {
 	if ids := mark(); len(ids) != 0 || readyEvents() != 1 {
 		t.Fatalf("second mark %v, %d events", ids, readyEvents())
 	}
-	// Blocked again (a new unsettled need): the episode ends; the next settle
+	// Blocked again (a new uncompleted need): the episode ends; the next acceptance
 	// starts a new one.
 	c := mustTask(t, s, ctx, p.ID, "c", nil)
 	needs(t, s, ctx, b.ID, a.ID, c.ID)
@@ -495,7 +494,7 @@ func caseMarkReadyOnce(t *testing.T, open Factory) {
 	if got := getTask(t, s, ctx, b.ID); got.ReadyAt != nil {
 		t.Fatalf("blocked b keeps readyAt %+v", got.ReadyAt)
 	}
-	setState(t, s, ctx, c.ID, db.StateSettled)
+	setState(t, s, ctx, c.ID, db.StateDone)
 	acceptTask(t, s, ctx, c.ID)
 	if ids := mark(); !slices.Equal(ids, []int64{b.ID}) || readyEvents() != 2 {
 		t.Fatalf("new episode %v, %d events", ids, readyEvents())
@@ -526,9 +525,9 @@ func caseListTreesRollup(t *testing.T, open Factory) {
 	x := mustTask(t, s, ctx, q.ID, "x", nil)
 	y := mustTask(t, s, ctx, q.ID, "y", []int64{x.ID})
 	done := *y.TreeID
-	setState(t, s, ctx, x.ID, db.StateSettled)
+	setState(t, s, ctx, x.ID, db.StateDone)
 	acceptTask(t, s, ctx, x.ID)
-	setState(t, s, ctx, y.ID, db.StateSettled)
+	setState(t, s, ctx, y.ID, db.StateDone)
 	acceptTask(t, s, ctx, y.ID)
 
 	list := func(f db.TreeFilter) []db.TreeSummary {
@@ -552,7 +551,7 @@ func caseListTreesRollup(t *testing.T, open Factory) {
 	}
 	sum := got[0]
 	want := db.TreeCounts{Total: 4, Backlog: 3, Blocked: 2, Ready: 1, Running: 1}
-	if sum.Counts != want || sum.Levels != 3 || !slices.Equal(sum.Projects, []string{"alpha", "beta"}) || sum.SettledAt != nil || sum.Title != "a" {
+	if sum.Counts != want || sum.Levels != 3 || !slices.Equal(sum.Projects, []string{"alpha", "beta"}) || sum.CompletedAt != nil || sum.Title != "a" {
 		t.Fatalf("rollup %+v", sum)
 	}
 	_ = c
@@ -560,18 +559,18 @@ func caseListTreesRollup(t *testing.T, open Factory) {
 		t.Fatalf("all trees %v", ids(got))
 	}
 	past := time.Now().Add(-time.Hour)
-	got = list(db.TreeFilter{SettledFrom: &past})
+	got = list(db.TreeFilter{CompletedFrom: &past})
 	if !slices.Contains(ids(got), done) || len(got) != 2 {
-		t.Fatalf("settled from past %v", ids(got))
+		t.Fatalf("completed from past %v", ids(got))
 	}
 	for _, sm := range got {
-		if sm.ID == done && (sm.SettledAt == nil || sm.Counts.Settled != 2) {
+		if sm.ID == done && (sm.CompletedAt == nil || sm.Counts.Completed != 2) {
 			t.Fatalf("completed tree %+v", sm)
 		}
 	}
 	future := time.Now().Add(time.Hour)
-	if got := list(db.TreeFilter{SettledFrom: &future}); !slices.Equal(ids(got), []int64{active}) {
-		t.Fatalf("settled from future %v", ids(got))
+	if got := list(db.TreeFilter{CompletedFrom: &future}); !slices.Equal(ids(got), []int64{active}) {
+		t.Fatalf("completed from future %v", ids(got))
 	}
 	if got := list(db.TreeFilter{View: db.TreeViewAll, ProjectID: &q.ID}); len(got) != 2 {
 		t.Fatalf("project beta %v", ids(got))
@@ -614,10 +613,11 @@ func caseTreeTimesAndEvents(t *testing.T, open Factory) {
 	}
 	// Observed session times count at millisecond precision (SQLite).
 	later := time.Now().UTC().Add(time.Hour).Truncate(time.Millisecond)
-	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{{ThreadID: thread, ProjectID: "proj-1", Title: "a", Status: t3.StatusRunning, CreatedAt: later, UpdatedAt: later}})); err != nil {
+	detail := t3.ThreadDetail{Thread: t3.Thread{ThreadID: thread, ProjectID: "proj-1", Title: "a", Status: t3.StatusRunning, CreatedAt: later, UpdatedAt: later}}
+	if err := s.PutObservation(ctx, detail.Observation()); err != nil {
 		t.Fatal(err)
 	}
-	setState(t, s, ctx, x.ID, db.StateRunning) // member update, older than the thread's
+	setState(t, s, ctx, x.ID, db.StateRunning) // member update, older than the session's
 	got = list()
 	if got[0].ID != first || got[0].StartedAt == nil || !got[0].LastActivityAt.Equal(later) {
 		t.Fatalf("thread activity leads: %+v", got)

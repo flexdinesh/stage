@@ -16,8 +16,6 @@ const (
 	// handoffReplyMaxChars and handoffReplyMinChars bound one need's cap.
 	handoffReplyMaxChars = 4000
 	handoffReplyMinChars = 1000
-	// handoffReadTimeout bounds the optional predecessor workspace read.
-	handoffReadTimeout = 20 * time.Second
 )
 
 // replyCap is each need's final-reply cap when n needs hand off.
@@ -50,11 +48,7 @@ func (s *Service) prepareHandoff(ctx context.Context, task db.Task) (string, err
 			continue
 		}
 		block := ComposeAcceptedHandoff(source, replyCap(len(sources)))
-		thread := ""
-		if source.Evidence.ThreadID != nil {
-			thread = *source.Evidence.ThreadID
-		}
-		h := db.Handoff{Session: source.Evidence.Session, Attempt: task.LaunchAttempt, Status: db.HandoffSent, SourceTaskID: &source.TaskID, SourceThreadID: thread, SourceTitle: source.Evidence.Title, Text: block}
+		h := db.Handoff{Session: source.Evidence.Session, Attempt: task.LaunchAttempt, Status: db.HandoffSent, SourceTaskID: &source.TaskID, SourceTitle: source.Evidence.Title, Text: block}
 		if err := s.store.RecordHandoff(ctx, task.ID, h); err != nil {
 			return "", err
 		}
@@ -74,20 +68,15 @@ func ComposeAcceptedHandoff(a db.Acceptance, maxChars int) string {
 		fmt.Fprintf(&b, "Tree at acceptance: #%d.\n", *e.TreeID)
 	}
 	if e.Session != nil {
-		fmt.Fprintf(&b, "Harness session: %s %s (connection %d)\n", e.Session.ExternalSessionID, deref(e.ThreadLink), e.Session.ConnectionID)
-	} else if e.ThreadID != nil {
-		fmt.Fprintf(&b, "Harness session: %s %s\n", *e.ThreadID, deref(e.ThreadLink))
+		fmt.Fprintf(&b, "Harness session: %s %s (connection %d)\n", e.Session.ExternalSessionID, deref(e.SessionLink), e.Session.ConnectionID)
+	} else if e.ExternalSessionID != nil {
+		fmt.Fprintf(&b, "Harness session: %s %s\n", *e.ExternalSessionID, deref(e.SessionLink))
 	}
 	if e.Branch != nil {
 		fmt.Fprintf(&b, "Branch: %s\n", *e.Branch)
 	}
 	if e.WorktreePath != nil {
 		fmt.Fprintf(&b, "Worktree: %s\n", *e.WorktreePath)
-	}
-	for _, link := range e.Artifacts {
-		if link.URL != "" {
-			fmt.Fprintf(&b, "Artifact: %s\n", link.URL)
-		}
 	}
 	if e.Reply == nil || strings.TrimSpace(*e.Reply) == "" {
 		b.WriteString("Final reply: missing at acceptance.\n")

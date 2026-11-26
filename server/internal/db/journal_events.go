@@ -17,7 +17,7 @@ import (
 // writes in this file.
 
 // workStates record work on the task that enters them.
-var workStates = []TaskState{StateLaunching, StateRunning, StateNeedsInput, StateDone, StateSettled, StateFailed, StateInterrupted}
+var workStates = []TaskState{StateLaunching, StateRunning, StateNeedsInput, StateDone, StateFailed, StateInterrupted}
 
 // addTaskEvent appends a task event and journals it in the task and its
 // tree at the event's time, under the task's session and attempt; work

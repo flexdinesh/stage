@@ -31,7 +31,7 @@ type TreeEdge struct {
 }
 
 // TreeView picks trees by lifecycle: active (open with a member not
-// settled), done (marked done, or open with every member settled),
+// completed), done (marked done, or open with every member completed),
 // archived, or all.
 type TreeView string
 
@@ -46,11 +46,11 @@ const (
 var TreeViews = []string{string(TreeViewActive), string(TreeViewDone), string(TreeViewArchived), string(TreeViewAll)}
 
 // TreeFilter selects trees: View ("" = active); with active, open trees
-// completed at or after SettledFrom are listed too.
+// completed at or after CompletedFrom are listed too.
 type TreeFilter struct {
-	View        TreeView
-	SettledFrom *time.Time
-	ProjectID   *int64 // a member is in this project
+	View          TreeView
+	CompletedFrom *time.Time
+	ProjectID     *int64 // a member is in this project
 }
 
 // NeedInfo is a need's tree and title.

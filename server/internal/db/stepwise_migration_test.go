@@ -73,6 +73,10 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	},
 	33: {{"workspaces become launch options", seedV0032(launchOptionsSeed...), checkV0033LaunchOptions}},
 	34: {{"workspace columns and launch bases dropped", seedV0032(launchBasesSeed...), checkV0034DropWorkspaces}},
+	35: {
+		{"legacy states and preference entries removed", seedV0035DropSettled, checkV0035DropSettled},
+		{"empty preference filter retained", seedV0032(`UPDATE preferences SET notify_events='["settled"]'`), checkV0035EmptyPreferences},
+	},
 }
 
 // TestStepwiseMigrations is the upgrade coverage (no releases exist yet):
@@ -750,4 +754,71 @@ func checkV0034DropWorkspaces(t *testing.T, pool *sqlite.DB) {
 	wantRows(t, pool, `SELECT id||' '||json_extract(execution_config,'$.options') FROM tasks`, `1 [{"id":"worktree","value":true}]`)
 	wantRows(t, pool, `SELECT count(*) FROM schedules`, "1")
 	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,connection_id) VALUES(2,1,'New','p',2)`)
+}
+
+const v0035Evidence = `{ "threadId" : "legacy-1", "threadLink": "https://example.com/session", "executionState":"settled", "reply":"kept", "artifacts":[{"label":"old"}], "historicalSettledAt":"2026-11-03T00:00:00Z" }`
+const v0035Request = `{ "requestId" : "original", "revision": 1, "note": "kept" }`
+
+func seedV0035DropSettled(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	mustExec(t, pool, `INSERT INTO harness_connections(id,harness,machine_id) VALUES(5,'t3',1)`)
+	mustExec(t, pool, `INSERT INTO projects(id,title) VALUES(1,'P')`)
+	mustExec(t, pool, `INSERT INTO session_identities(id,connection_id,external_id) VALUES(6,5,'legacy-1')`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,finished_at,settled_at,connection_id,session_id) VALUES
+ (7,1,'Historical needle','p','settled','2026-11-01T00:00:00.000000Z','2026-11-03T00:00:00.000000Z',5,6),
+ (8,1,'Reopened','p','settled',NULL,'2026-11-04T00:00:00.000000Z',5,NULL),
+ (99,1,'Deleted','p','done',NULL,NULL,5,NULL)`)
+	mustExec(t, pool, `DELETE FROM tasks WHERE id=99`)
+	mustExec(t, pool, `INSERT INTO task_acceptances(id,task_id,provenance,evidence,source_session_id) VALUES
+ (11,7,'historical_settlement',?,6),(12,8,'historical_settlement','{}',NULL)`, v0035Evidence)
+	mustExec(t, pool, `UPDATE tasks SET acceptance_id=11,acceptance_revision=1 WHERE id=7`)
+	mustExec(t, pool, `UPDATE tasks SET acceptance_revision=2 WHERE id=8`)
+	mustExec(t, pool, `INSERT INTO acceptance_requests VALUES(7,'original',?,'{"revision":1,"acceptanceId":11}')`, v0035Request)
+	mustExec(t, pool, `INSERT INTO task_events(id,task_id,from_state,to_state,detail) VALUES
+ (1,7,'running','settled','original settled detail'),(2,8,'settled','running','original reopened detail')`)
+	mustExec(t, pool, `INSERT INTO journal_entries(id,kind,task_id,text,request_id) VALUES(1,'note',7,'original settled note','n')`)
+	mustExec(t, pool, `INSERT INTO notifications(id,event,task_id,title,url,session_id) VALUES
+ (15,'settled',7,'legacy','/tasks/7',6),(98,'done',NULL,'deleted','/tasks/99',NULL)`)
+	mustExec(t, pool, `DELETE FROM notifications WHERE id=98`)
+	mustExec(t, pool, `UPDATE preferences SET default_connection_id=5, notify_events='["done","settled","needs_input","settled","ready","failed"]'`)
+}
+
+func checkV0035DropSettled(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	wantRows(t, pool, `SELECT id,state,finished_at,acceptance_id,acceptance_revision FROM tasks ORDER BY id`,
+		"7|done|2026-11-01T00:00:00.000000Z|11|1", "8|done|2026-11-04T00:00:00.000000Z|NULL|2")
+	if columnExists(t, pool, "tasks", "settled_at") {
+		t.Fatal("tasks.settled_at still exists")
+	}
+	wantRows(t, pool, `SELECT task_id,from_state,to_state,detail FROM task_events ORDER BY id`,
+		"7|running|done|original settled detail", "8|done|running|original reopened detail")
+	wantRows(t, pool, `SELECT text FROM journal_entries WHERE id=1`, "original settled note")
+	wantRows(t, pool, `SELECT id,event,task_id,session_id FROM notifications`, "15|done|7|6")
+	wantRows(t, pool, `SELECT default_connection_id,notify_events FROM preferences`, `5|["done","needs_input","ready","failed"]`)
+	wantRows(t, pool, `SELECT evidence FROM task_acceptances WHERE id=11`, v0035Evidence)
+	wantRows(t, pool, `SELECT input FROM acceptance_requests WHERE request_id='original'`, v0035Request)
+	for _, q := range []string{
+		`INSERT INTO tasks(project_id,title,prompt,state,connection_id) VALUES(1,'T','p','settled',5)`,
+		`INSERT INTO notifications(event,title,url) VALUES('settled','T','/tasks/7')`,
+	} {
+		if _, err := pool.Exec(q); err == nil || !strings.Contains(err.Error(), "CHECK constraint failed") {
+			t.Fatalf("%s: want CHECK violation, got %v", q, err)
+		}
+	}
+
+	wantRows(t, pool, `SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH 'needle' ORDER BY rowid`, "7")
+	mustExec(t, pool, `INSERT INTO tasks(project_id,title,prompt,connection_id) VALUES(1,'New needle','p',5)`)
+	wantRows(t, pool, `SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH 'needle' ORDER BY rowid`, "7", "100")
+	mustExec(t, pool, `UPDATE tasks SET title='Updated' WHERE id=100`)
+	wantRows(t, pool, `SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH 'updated'`, "100")
+	mustExec(t, pool, `DELETE FROM tasks WHERE id=100`)
+	wantRows(t, pool, `SELECT rowid FROM tasks_fts WHERE tasks_fts MATCH 'updated'`)
+	mustExec(t, pool, `INSERT INTO notifications(event,title,url) VALUES('done','New','/tasks/100')`)
+	wantRows(t, pool, `SELECT max(id) FROM notifications`, "99")
+	wantRows(t, pool, `PRAGMA foreign_keys`, "1")
+	wantRows(t, pool, `PRAGMA foreign_key_check`)
+}
+
+func checkV0035EmptyPreferences(t *testing.T, pool *sqlite.DB) {
+	wantRows(t, pool, `SELECT notify_events FROM preferences`, "[]")
 }

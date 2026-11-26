@@ -1,13 +1,11 @@
 import type { Project, Task, TaskState } from "../api/types.ts";
 
 /**
- * Open work the Dashboard, Tasks view and sidebar read: every state a group lists. Settled tasks are kept for review
- * (settled in the harness, not yet completed in Stage) and the Completed window.
+ * Open work the Dashboard, Tasks view and sidebar read, including finished work awaiting review.
  */
 export const LIVE_STATES: readonly TaskState[] = [
   "needs_input",
   "done",
-  "settled",
   "backlog",
   "launching",
   "running",
@@ -22,7 +20,7 @@ export function attentionOf(t: Pick<Task, "state" | "readiness" | "acceptanceId"
   if (t.state === "needs_input") return "need";
   if (t.state === "launching" || t.state === "running") return "run";
   if (t.acceptanceId !== null) return null;
-  if (t.state === "done" || t.state === "settled") return "review";
+  if (t.state === "done") return "review";
   if (t.state === "failed" || t.state === "interrupted") return "failed";
   if (t.state === "backlog" && t.readiness === "ready") return "ready";
   return null;

@@ -35,7 +35,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/release"
 	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/schedule"
-	t3sync "github.com/flexdinesh/stage/server/internal/sync"
+	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/t3setup"
 	"github.com/flexdinesh/stage/server/internal/webui"
@@ -43,7 +43,7 @@ import (
 )
 
 // ShutdownTimeout lets in-flight launches (bounded at 90s) record their
-// thread: a kill mid-launch leaves the task failed with the outcome unknown.
+// session: a kill mid-launch leaves the task failed with the outcome unknown.
 // Service managers' stop timeouts (compose stop_grace_period) must exceed it.
 const ShutdownTimeout = 100 * time.Second
 
@@ -203,7 +203,7 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	machines := machine.MustSet(local)
-	syncSvc := t3sync.NewForMachines(store, machines, logger)
+	syncSvc := coordinator.NewForMachines(store, machines, logger)
 	syncSvc.Harnesses = harnesses
 	syncSvc.PublicURL = cfg.PublicURL
 	syncSvc.CLI = cliName
@@ -240,16 +240,16 @@ func Run(ctx context.Context, o Options) error {
 	inbox := notify.NewHub(ctx)
 	notifier.Inbox = inbox
 	// Hooks only queue work; set before RecoverLaunching emits transitions.
-	syncSvc.OnTransition = func(ctx context.Context, c t3sync.Change) {
+	syncSvc.OnTransition = func(ctx context.Context, c coordinator.Change) {
 		releases.Each(func(r *release.Runner) { r.OnTransition(ctx, c) })
 		notifier.OnTransition(ctx, c)
 		inbox.Signal()
 	}
-	syncSvc.OnThreadChange = notifier.OnThreadChange
+	syncSvc.OnSessionChange = notifier.OnSessionChange
 	syncSvc.OnAccepted = kickTrees
 	if err := local.compose(ctx, store, cfg, harnesses, syncSvc.Kick, func(connection int64) t3setup.SyncProgress {
 		p := syncSvc.Progress(connection)
-		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Threads}
+		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Sessions}
 	}, logger); err != nil {
 		return err
 	}
@@ -280,7 +280,7 @@ func Run(ctx context.Context, o Options) error {
 	// record (never storing harness credentials).
 	progress := func(connection int64) t3setup.SyncProgress {
 		p := syncSvc.Progress(connection)
-		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Threads}
+		return t3setup.SyncProgress{Running: p.Running, StartedAt: p.StartedAt, Projects: p.Projects, Threads: p.Sessions}
 	}
 	hosts.SetSetup(remoteSetupHooks(store, harnesses, progress, syncSvc.Kick))
 	remote.ServeSetup(channels, func(machineID int64) machine.StorePorts {

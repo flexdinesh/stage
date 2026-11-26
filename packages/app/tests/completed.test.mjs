@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { duration } from "../src/lib/format.ts";
-import { mergeSettled } from "../src/lib/settled.ts";
+import { mergeCompleted } from "../src/lib/completed.ts";
 
 const at = (s) => new Date(Date.UTC(2026, 10, 10) + s * 1000).toISOString();
 
@@ -21,11 +21,11 @@ test("duration is null without both ends or for reversed spans", () => {
   assert.equal(duration("nope", "2026-11-10T00:00:00Z"), null);
 });
 
-const task = (id, settledAt) => ({ id, completedAt: settledAt });
-test("completed trees interleave with settled tasks", () => {
-  const merged = mergeSettled(
+const task = (id, completedAt) => ({ id, completedAt });
+test("completed trees interleave with completed tasks", () => {
+  const merged = mergeCompleted(
     [task(1, "2026-11-10T01:00:00Z")],
-    [{ id: 7, settledAt: "2026-11-10T02:00:00Z" }],
+    [{ id: 7, completedAt: "2026-11-10T02:00:00Z" }],
   );
   assert.deepEqual(
     merged.map((i) => (i.kind === "task" ? i.task.id : `tree ${i.tree.id}`)),

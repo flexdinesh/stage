@@ -17,9 +17,6 @@ func init() {
 	register("TransitionTask", caseTransitionTask)
 	register("UpdateTaskRestrictions", caseUpdateTaskRestrictions)
 	register("TransitionLaunchGuards", caseTransitionLaunchGuards)
-	register("UpsertThreadsKeepsDetailColumns", caseUpsertThreadsKeepsDetailColumns)
-	register("RunSpan", caseRunSpan)
-	register("UpsertThreadDetailStoresRunSpan", caseUpsertThreadDetailStoresRunSpan)
 	register("ProjectLastActivity", caseProjectLastActivity)
 }
 
@@ -126,7 +123,7 @@ func caseTransitionTask(t *testing.T, open Factory) {
 	if err != nil || !res.Changed || res.Attempt != 1 {
 		t.Fatalf("begin attempt: %+v %v", res, err)
 	}
-	thread := "thread-1"
+	thread := "session-1"
 	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, Session: &db.SessionRef{ConnectionID: s.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: thread}}); err != nil {
 		t.Fatal(err)
 	}
@@ -134,25 +131,24 @@ func caseTransitionTask(t *testing.T, open Factory) {
 		t.Fatal(err)
 	}
 	got, _ := s.GetTask(ctx, task.ID)
-	if got.FinishedAt == nil || got.SettledAt != nil || got.LaunchedAt == nil || got.T3ThreadID == nil || *got.T3ThreadID != thread {
+	if got.FinishedAt == nil || got.LaunchedAt == nil || got.ExternalSessionID == nil || *got.ExternalSessionID != thread {
 		t.Fatalf("after done: %+v", got)
 	}
 	finished := *got.FinishedAt
 	// needs_input then done again: finishedAt keeps first entry.
 	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateNeedsInput})
 	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone})
-	_, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateSettled, Detail: "thread settled"})
 	got, _ = s.GetTask(ctx, task.ID)
-	if !got.FinishedAt.Equal(finished) || got.SettledAt == nil || got.State != db.StateSettled {
-		t.Fatalf("after settled: %+v", got)
+	if !got.FinishedAt.Equal(finished) || got.State != db.StateDone {
+		t.Fatalf("after done again: %+v", got)
 	}
 	// Same-state transition is a no-op.
-	res, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateSettled})
+	res, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone})
 	if res.Changed {
 		t.Fatal("same-state transition must not apply")
 	}
 	events, _ := s.TaskEvents(ctx, task.ID)
-	want := []db.TaskState{db.StateBacklog, db.StateLaunching, db.StateRunning, db.StateDone, db.StateNeedsInput, db.StateDone, db.StateSettled}
+	want := []db.TaskState{db.StateBacklog, db.StateLaunching, db.StateRunning, db.StateDone, db.StateNeedsInput, db.StateDone}
 	if len(events) != len(want) {
 		t.Fatalf("events %d, want %d: %+v", len(events), len(want), events)
 	}
@@ -165,10 +161,10 @@ func caseTransitionTask(t *testing.T, open Factory) {
 		t.Fatalf("creation event %+v", events[0])
 	}
 
-	// Relaunch resets thread and timestamps.
+	// Relaunch resets session and timestamps.
 	res, _ = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateLaunching, BeginAttempt: true})
 	got, _ = s.GetTask(ctx, task.ID)
-	if res.Attempt != 2 || got.T3ThreadID != nil || got.FinishedAt != nil || got.SettledAt != nil {
+	if res.Attempt != 2 || got.ExternalSessionID != nil || got.FinishedAt != nil {
 		t.Fatalf("relaunch: %+v", got)
 	}
 
@@ -219,92 +215,6 @@ func caseTransitionLaunchGuards(t *testing.T, open Factory) {
 	}
 }
 
-func caseUpsertThreadsKeepsDetailColumns(t *testing.T, open Factory) {
-	s, ctx := setup(t, open)
-	now := time.Now().UTC()
-	d := t3.ThreadDetail{
-		Thread:              t3.Thread{ThreadID: "th-1", ProjectID: "proj-1", Title: "x", Status: t3.StatusRunning, CreatedAt: now, UpdatedAt: now},
-		Branch:              "feat",
-		WorktreePath:        "/wt",
-		PendingRequestCount: 2,
-	}
-	if err := s.UpsertThreadDetail(ctx, d); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{{ThreadID: "th-1", ProjectID: "proj-1", Title: "renamed", Status: t3.StatusCompleted, CreatedAt: now, UpdatedAt: now}})); err != nil {
-		t.Fatal(err)
-	}
-	o, err := s.Observation(ctx, session("th-1"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if o.Title != "renamed" || o.State != "done" || o.Branch != "feat" || o.Directory != "/wt" {
-		t.Fatalf("observation %+v", o)
-	}
-	if _, err := s.TaskBySession(ctx, session("th-1")); !errors.Is(err, db.ErrNotFound) {
-		t.Fatalf("an observed session is not a task: %v", err)
-	}
-}
-
-func caseRunSpan(t *testing.T, open Factory) {
-	base := time.Date(2026, 11, 10, 1, 0, 0, 0, time.UTC)
-	at := func(m int) *time.Time { v := base.Add(time.Duration(m) * time.Minute); return &v }
-	run := func(req int, start, done *time.Time) t3.Run {
-		return t3.Run{RequestedAt: *at(req), StartedAt: start, CompletedAt: done}
-	}
-	created := base.Add(-time.Minute)
-	cases := []struct {
-		name       string
-		d          t3.ThreadDetail
-		start, end *time.Time
-	}{
-		{"no runs", t3.ThreadDetail{}, nil, nil},
-		{"one run", t3.ThreadDetail{RunCount: 1, RecentRuns: []t3.Run{run(0, at(1), at(5))}}, at(1), at(5)},
-		{"first start to last completion", t3.ThreadDetail{RunCount: 3, RecentRuns: []t3.Run{
-			run(30, at(30), at(35)), run(20, nil, at(21)), run(0, at(1), at(2)),
-		}}, at(1), at(35)},
-		{"oldest never started uses requestedAt", t3.ThreadDetail{RunCount: 2, RecentRuns: []t3.Run{
-			run(10, at(10), at(12)), run(0, nil, at(1)),
-		}}, at(0), at(12)},
-		{"newest incomplete", t3.ThreadDetail{RunCount: 1, RecentRuns: []t3.Run{run(0, at(1), nil)}}, at(1), nil},
-		{"older runs not read fall back to createdAt", t3.ThreadDetail{
-			Thread: t3.Thread{CreatedAt: created}, RunCount: 60, RecentRuns: []t3.Run{run(30, at(30), at(40))},
-		}, &created, at(40)},
-	}
-	eq := func(a, b *time.Time) bool { return (a == nil) == (b == nil) && (a == nil || a.Equal(*b)) }
-	for _, c := range cases {
-		start, end := db.RunSpan(c.d)
-		if !eq(start, c.start) || !eq(end, c.end) {
-			t.Errorf("%s: span %v..%v, want %v..%v", c.name, start, end, c.start, c.end)
-		}
-	}
-}
-
-func caseUpsertThreadDetailStoresRunSpan(t *testing.T, open Factory) {
-	s, ctx := setup(t, open)
-	now := time.Now().UTC().Truncate(time.Millisecond)
-	started, done := now.Add(-10*time.Minute), now.Add(-2*time.Minute)
-	d := t3.ThreadDetail{
-		Thread:     t3.Thread{ThreadID: "th-span", ProjectID: "proj-1", Title: "x", Status: t3.StatusCompleted, CreatedAt: started, UpdatedAt: now},
-		RunCount:   1,
-		RecentRuns: []t3.Run{{RunID: "r1", Status: t3.StatusCompleted, RequestedAt: started, StartedAt: &started, CompletedAt: &done}},
-	}
-	if err := s.UpsertThreadDetail(ctx, d); err != nil {
-		t.Fatal(err)
-	}
-	// A list upsert leaves the span alone.
-	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{d.Thread})); err != nil {
-		t.Fatal(err)
-	}
-	o, err := s.Observation(ctx, session("th-span"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if o.StartedAt == nil || !o.StartedAt.Equal(started) || o.EndedAt == nil || !o.EndedAt.Equal(done) {
-		t.Fatalf("span %v..%v, want %v..%v", o.StartedAt, o.EndedAt, started, done)
-	}
-}
-
 func caseProjectLastActivity(t *testing.T, open Factory) {
 	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-1")
@@ -314,9 +224,8 @@ func caseProjectLastActivity(t *testing.T, open Factory) {
 	// Observed sessions are not project activity: only Stage's tasks and
 	// journal are.
 	created := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
-	if err := s.UpsertThreads(ctx, t3.Observations([]t3.Thread{
-		{ThreadID: "th-1", ProjectID: "proj-1", Status: t3.StatusCompleted, CreatedAt: created, UpdatedAt: created.Add(time.Hour)},
-	})); err != nil {
+	detail := t3.ThreadDetail{Thread: t3.Thread{ThreadID: "th-1", ProjectID: "proj-1", Status: t3.StatusCompleted, CreatedAt: created, UpdatedAt: created.Add(time.Hour)}}
+	if err := s.PutObservation(ctx, detail.Observation()); err != nil {
 		t.Fatal(err)
 	}
 	p, err := s.GetProject(ctx, p.ID)

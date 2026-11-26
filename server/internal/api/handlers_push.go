@@ -126,6 +126,9 @@ func (s *server) listNotifications(w http.ResponseWriter, r *http.Request) error
 	// One extra row tells whether an older page exists.
 	var rows []db.Notification
 	if key := q.Get("group"); key != "" {
+		if err := validateNotificationGroupKey(key); err != nil {
+			return err
+		}
 		rows, err = s.Store.ListNotificationHistory(r.Context(), key, limit+1, before)
 	} else {
 		rows, err = s.Store.ListNotifications(r.Context(), limit+1, before)
@@ -145,7 +148,7 @@ func (s *server) listNotifications(w http.ResponseWriter, r *http.Request) error
 	}
 	out := make([]notificationJSON, len(rows))
 	for i, n := range rows {
-		out[i] = notificationJSON{Notification: n, Links: s.sessionLinks(r.Context(), n.ConnectionID, n.T3ThreadID)}
+		out[i] = notificationJSON{Notification: n, Links: s.sessionLinks(r.Context(), n.ConnectionID, n.ExternalSessionID)}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"notifications": out, "unread": unread, "nextBefore": nextBefore})
 	return nil
@@ -211,7 +214,7 @@ func (s *server) listNotificationGroups(w http.ResponseWriter, r *http.Request) 
 	}
 	out := make([]notificationGroupJSON, len(rows))
 	for i, g := range rows {
-		out[i] = notificationGroupJSON{NotificationGroup: g, Links: s.sessionLinks(r.Context(), g.ConnectionID, g.T3ThreadID)}
+		out[i] = notificationGroupJSON{NotificationGroup: g, Links: s.sessionLinks(r.Context(), g.ConnectionID, g.ExternalSessionID)}
 	}
 	waiting, err := s.Store.WaitingWithoutNotifications(r.Context(), latestID)
 	if err != nil {
@@ -219,7 +222,7 @@ func (s *server) listNotificationGroups(w http.ResponseWriter, r *http.Request) 
 	}
 	silent := make([]waitingSessionJSON, len(waiting))
 	for i, row := range waiting {
-		silent[i] = waitingSessionJSON{WaitingSession: row, Links: s.sessionLinks(r.Context(), row.ConnectionID, &row.ThreadID)}
+		silent[i] = waitingSessionJSON{WaitingSession: row, Links: s.sessionLinks(r.Context(), row.ConnectionID, &row.ExternalSessionID)}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"waitingSessions": silent,
@@ -247,6 +250,9 @@ func (s *server) readNotifications(w http.ResponseWriter, r *http.Request) error
 			if strings.TrimSpace(g) == "" {
 				return db.Invalid("groups must not contain empty keys")
 			}
+			if err := validateNotificationGroupKey(g); err != nil {
+				return err
+			}
 		}
 		if err := s.Store.MarkNotificationGroupsRead(r.Context(), b.Groups); err != nil {
 			return err
@@ -264,6 +270,13 @@ func (s *server) readNotifications(w http.ResponseWriter, r *http.Request) error
 }
 
 const maxReadGroups = 20
+
+func validateNotificationGroupKey(key string) error {
+	if strings.HasPrefix(key, "thread:") {
+		return db.Invalid("group key thread:... was renamed in API v9; use session:<connectionId>:<externalSessionId>")
+	}
+	return nil
+}
 
 func (s *server) unreadNotificationTags(w http.ResponseWriter, r *http.Request) error {
 	tags, err := s.Store.UnreadNotificationTags(r.Context())

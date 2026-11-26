@@ -32,10 +32,8 @@ type Health struct {
 	CheckedAt time.Time `json:"checkedAt"`
 }
 type Links struct {
-	Service string `json:"service,omitempty"`
-	Web     string `json:"web,omitempty"`
-	App     string `json:"app,omitempty"`
-	Native  string `json:"native,omitempty"`
+	Web    string `json:"web,omitempty"`
+	Native string `json:"native,omitempty"`
 	// Command is a shell command that resumes the session in the harness's
 	// own client (a harness without a web or app destination); hosts offer
 	// to copy it.
@@ -266,10 +264,8 @@ type SaveCheckpoint func(context.Context, Checkpoint) error
 type Reply struct {
 	ItemID    string    `json:"itemId"`
 	RunID     string    `json:"runId"`
-	MessageID string    `json:"messageId"`
 	Text      string    `json:"text"`
 	Truncated bool      `json:"truncated"`
-	Position  int       `json:"position"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
@@ -290,17 +286,7 @@ type Usage struct {
 	CostUSD *float64 `json:"costUsd"`
 }
 
-// Artifact retains historical PR JSON without exposing PR tracking operations.
-type Artifact struct {
-	Host       string `json:"host"`
-	Repository string `json:"repository"`
-	Number     int    `json:"number"`
-	URL        string `json:"url"`
-	Source     string `json:"source"`
-	State      string `json:"state"`
-}
 type Observation struct {
-	ModelLabel  string      `json:"modelLabel"`
 	Parent      *SessionRef `json:"parent,omitempty"`
 	Config      Config      `json:"config"`
 	Session     SessionRef  `json:"session"`
@@ -320,7 +306,6 @@ type Observation struct {
 	ExecutionID string      `json:"executionId"`
 	Reply       *Reply      `json:"reply,omitempty"`
 	Usage       *Usage      `json:"usage,omitempty"` // nil: the harness reports none (or has not yet)
-	Artifacts   []Artifact  `json:"artifacts"`
 	Closed      *Closure    `json:"closed,omitempty"`
 	// StateReason qualifies State; "" when the state speaks for itself.
 	StateReason string `json:"stateReason,omitempty"`
@@ -348,9 +333,6 @@ const (
 type Closure struct {
 	Signal string `json:"signal"`
 }
-type Source interface{ Observation() Observation }
-
-func (o Observation) Observation() Observation { return o }
 
 type Credential struct {
 	ClientID  string    `json:"clientId"`

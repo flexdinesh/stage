@@ -114,7 +114,7 @@ func (a *Adapter) observation(t thread, last *turn, archived bool) (execution.Ob
 		o.Parent = &execution.SessionRef{ConnectionID: a.connection, ExternalSessionID: *t.ParentThreadID}
 	}
 	if t.Model != nil {
-		o.Config.Model, o.ModelLabel = *t.Model, *t.Model
+		o.Config.Model = *t.Model
 	}
 	if archived {
 		o.Closed = &execution.Closure{Signal: execution.ClosedArchived}
@@ -200,7 +200,7 @@ func bounded(itemID, runID, text string, limit int, at *time.Time) *execution.Re
 	if truncated {
 		text = string(r[:limit])
 	}
-	rep := &execution.Reply{ItemID: itemID, MessageID: itemID, RunID: runID, Text: text, Truncated: truncated}
+	rep := &execution.Reply{ItemID: itemID, RunID: runID, Text: text, Truncated: truncated}
 	if at != nil {
 		rep.UpdatedAt = *at
 	}

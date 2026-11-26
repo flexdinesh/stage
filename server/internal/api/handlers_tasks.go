@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +21,9 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	}
 	f.States = multi(q, "state")
 	for _, st := range f.States {
+		if st == "settled" {
+			return db.Invalid("state settled was removed in API v9; use state done (completedAt marks acceptance)")
+		}
 		if err := validEnum("state", st, taskStateStrings()); err != nil {
 			return err
 		}
@@ -46,7 +48,7 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	if f.To, err = queryTime(q, "to", time.UTC); err != nil {
 		return err
 	}
-	if f.SettledFrom, err = queryTime(q, "settledFrom", time.UTC); err != nil {
+	if f.CompletedFrom, err = queryCompletedFrom(q); err != nil {
 		return err
 	}
 	switch v := strings.TrimSpace(q.Get("closed")); v {
@@ -283,15 +285,6 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 			if obs.Branch != "" || obs.Directory != "" {
 				out.Reported = &reportedJSON{Branch: obs.Branch, Directory: obs.Directory}
 			}
-			for _, link := range obs.Artifacts {
-				if link.URL != "" && !slices.ContainsFunc(out.ArtifactLinks, func(a artifactLink) bool { return a.URL == link.URL }) {
-					label := link.Repository
-					if link.Number > 0 {
-						label += "#" + strconv.Itoa(link.Number)
-					}
-					out.ArtifactLinks = append(out.ArtifactLinks, artifactLink{Label: label, URL: link.URL})
-				}
-			}
 		} else if !errors.Is(e, db.ErrNotFound) {
 			return e
 		}
@@ -472,8 +465,8 @@ func (s *server) startTask(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// threadTask loads a task that must have a thread (409 otherwise).
-func (s *server) threadTask(r *http.Request) (db.Task, error) {
+// sessionTask loads a task that must have an execution session (409 otherwise).
+func (s *server) sessionTask(r *http.Request) (db.Task, error) {
 	id, err := pathID(r)
 	if err != nil {
 		return db.Task{}, err
@@ -489,7 +482,7 @@ func (s *server) threadTask(r *http.Request) (db.Task, error) {
 }
 
 func (s *server) stopTask(w http.ResponseWriter, r *http.Request) error {
-	task, err := s.threadTask(r)
+	task, err := s.sessionTask(r)
 	if err != nil {
 		return err
 	}
@@ -503,7 +496,7 @@ func (s *server) stopTask(w http.ResponseWriter, r *http.Request) error {
 	return s.touchAndWrite(w, r, task.ID)
 }
 
-// touchAndWrite bumps updated_at (re-arms polling), polls the thread once so
+// touchAndWrite bumps updated_at (re-arms polling), polls the session once so
 // a short run is not missed between 5s poller ticks, and writes the task.
 func (s *server) touchAndWrite(w http.ResponseWriter, r *http.Request, id int64) error {
 	ctx := r.Context()
@@ -515,7 +508,7 @@ func (s *server) touchAndWrite(w http.ResponseWriter, r *http.Request, id int64)
 		return err
 	}
 	if err := s.Sync.PollTask(ctx, task); err != nil {
-		s.log.Warn("poll after thread action", "task", id, "err", err)
+		s.log.Warn("poll after session action", "task", id, "err", err)
 	} else if task, err = s.Store.GetTask(ctx, id); err != nil {
 		return err
 	}

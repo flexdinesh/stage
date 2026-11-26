@@ -215,7 +215,7 @@ func (c *MCPClient) findReply(ctx context.Context, threadID, runID string, itemC
 // replyText reads up to budget UTF-16 units of item's text, paging by
 // itemId + textOffset (T3 caps a page at itemCharsMax).
 func (c *MCPClient) replyText(ctx context.Context, threadID string, item wireTimelineItem, budget int) (Reply, error) {
-	r := Reply{ItemID: item.ItemID, RunID: item.RunID, MessageID: item.MessageID, Position: item.Position, UpdatedAt: item.UpdatedAt.Time}
+	r := Reply{ItemID: item.ItemID, RunID: item.RunID, UpdatedAt: item.UpdatedAt.Time}
 	var text strings.Builder
 	offset := 0
 	for i := 0; budget > 0 && i < maxPages; i++ {

@@ -4,14 +4,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-// listTrees: GET /api/trees?status=&all=1&settledFrom=&project= (docs/api.md
+// listTrees: GET /api/trees?status=&all=1&completedFrom=&project= (docs/api.md
 // "Trees"): status active (default; plus open trees completed since
-// settledFrom) | done | archived | all; all=1 is status=all.
+// completedFrom) | done | archived | all; all=1 is status=all.
 func (s *server) listTrees(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	var f db.TreeFilter
@@ -29,7 +28,7 @@ func (s *server) listTrees(w http.ResponseWriter, r *http.Request) error {
 		}
 		f.View = db.TreeView(v)
 	}
-	if f.SettledFrom, err = queryTime(q, "settledFrom", time.UTC); err != nil {
+	if f.CompletedFrom, err = queryCompletedFrom(q); err != nil {
 		return err
 	}
 	if f.ProjectID, err = queryInt64(q, "project"); err != nil {

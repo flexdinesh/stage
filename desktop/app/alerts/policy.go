@@ -13,11 +13,11 @@ import (
 // Item is one inbox row from the stream (`notification` event).
 type Item struct {
 	ID int64
-	// Event: needs_input, done, failed or settled.
+	// Event: needs_input, failed, ready or done.
 	Event     string
 	CreatedAt time.Time
 	Read      bool
-	// Tag is the group (task-<n>, thread-<id>), "" for identity-less rows.
+	// Tag is the group (task-<n>, session-<id>), "" for identity-less rows.
 	Tag   string
 	Title string
 	Body  string
@@ -79,7 +79,7 @@ func PlanCatchUp(items []Item, now time.Time, window time.Duration, max int) (sh
 
 // Target is the app path a click on notification id opens: its known URL
 // (from the shown notification) when nav.AlertPath allows it, else the
-// path derived from the ID (task-N → /tasks/N, thread-X → /?inbox,
+// path derived from the ID (task-N → /tasks/N, session-X → /?inbox,
 // summary → /?inbox, test → /settings), else /.
 func Target(id string, known map[string]string) string {
 	if u, ok := known[id]; ok {
@@ -95,7 +95,7 @@ func Target(id string, known map[string]string) string {
 		derived = "/settings"
 	case strings.HasPrefix(id, "task-"):
 		derived = "/tasks/" + strings.TrimPrefix(id, "task-")
-	case strings.HasPrefix(id, "thread-"):
+	case strings.HasPrefix(id, "session-"):
 		derived = "/?inbox"
 	}
 	if p, ok := nav.AlertPath(derived); ok {
@@ -104,10 +104,10 @@ func Target(id string, known map[string]string) string {
 	return "/"
 }
 
-// isGroupTag reports whether id is a task- or thread- group (closed when
+// isGroupTag reports whether id is a task- or session- group (closed when
 // its group has no unread rows).
 func isGroupTag(id string) bool {
-	return strings.HasPrefix(id, "task-") || strings.HasPrefix(id, "thread-")
+	return strings.HasPrefix(id, "task-") || strings.HasPrefix(id, "session-")
 }
 
 // parseTime parses a stream createdAt (RFC 3339, with or without

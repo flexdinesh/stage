@@ -17,12 +17,12 @@ that disagrees with this file updates it in the same PR.
 | [Single owner](#single-owner) | as described on both engines (#403, in `serve` #405) | |
 | [Encodings](#encodings) and [errors](#errors) | as described on both engines (#403) | |
 | [Search](#search) | as described on both engines (#404): SQLite FTS5 trigram (0029), Postgres `pg_trgm` GIN (0029) | |
-| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 34; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 34 (0030 `claude_settings`, #372; 0031 `codex_settings`, #384; 0032 `no_default_harness`, #420; 0033 `launch_options` and 0034 `drop_workspaces`, #420); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
+| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 35; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 35 (0030 `claude_settings`, #372; 0031 `codex_settings`, #384; 0032 `no_default_harness`, #420; 0033 `launch_options` and 0034 `drop_workspaces`, #420; 0035 `drop_settled`); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
 | [Backups](#backups) | as described on both engines (#403) | |
 | [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) and `serve` on Postgres (#405) | |
 | [Data copy and cutover](#data-copy-and-cutover) | as described (#406): `stage db copy` (`internal/db/datacopy` over the copy ports), cutover and rollback runbook | |
 | [Docker image and compose example](#docker-image-and-compose-example) | as described (#407) | |
-| [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); every other Drop row dropped from SQLite (#417: 0027 backfill, 0028 contract); the Postgres baseline omits them (#403); the `threads` mirror dropped on both engines (0032, #420); task and schedule `workspace` and `task_launch_bases` dropped (0034, #420) | |
+| [Legacy columns](#legacy-columns-and-compatibility-triggers) | audited (#402); load-bearing trigger logic in Go and those triggers dropped (#399, 0026); every other Drop row dropped from SQLite (#417: 0027 backfill, 0028 contract); the Postgres baseline omits them (#403); the `threads` mirror dropped on both engines (0032, #420); task and schedule `workspace` and `task_launch_bases` dropped (0034, #420); `tasks.settled_at` dropped (0035) | |
 | [Design only](#design-only-queue-events-leases) | Queue decided: [ADR 0004](adr/0004-queue-port.md) (#408), not built | Events, Leases: #409 |
 
 ## Engines and selection
@@ -168,7 +168,7 @@ migration 0026 (#399).
 
 | Cause (helper) | Derived rows |
 | --- | --- |
-| Task event (`addTaskEvent`) | event `task_created` (no from state), `task_state_changed` (detail plus ` (from -> to)`) or `task_event` (same state), on the task and its tree, at the task event's time, with the task's session and launch attempt; the task records work when launched, adopted or entering launching, running, needs input, done, settled, failed or interrupted, and a task with recorded work protects its tree |
+| Task event (`addTaskEvent`) | event `task_created` (no from state), `task_state_changed` (detail plus ` (from -> to)`) or `task_event` (same state), on the task and its tree, at the task event's time, with the task's session and launch attempt; the task records work when launched, adopted or entering launching, running, needs input, done, failed or interrupted, and a task with recorded work protects its tree |
 | Note (`insertNote`) | protects its task and tree; the tree's `updated_at` becomes the note's time |
 | Tree created, config, status (`insertTree`, `updateTree`, `setTreeStatus`, `archiveDissolved`) | `tree_created` (title), `tree_config_changed` (`Title: a -> b; start mode: x -> y`, only when either changed), `tree_status_changed` (`old -> new`, only on a change) |
 | Membership (`setMembership`, `detachMembers`) | `task_moved` (task title, from and to tree) in the old and the new tree; both trees' membership revision + 1, `updated_at` now, recorded work carried over; an emptied old tree is archived (closed now), with its status event |
@@ -422,6 +422,23 @@ and paging. (Thread search was removed with API v3.)
   scenarios on both engines (each harness kind, root and worktree, T3
   predecessor tasks with and without a stored base ref and their journal
   text, attempts, schedules; columns and table gone).
+  0035 `drop_settled` (API v9, contract): converts task state `settled` to
+  `done`, using `settled_at` only when `finished_at` is null. Current acceptance
+  IDs stay as recorded, so accepted tasks stay completed and reopened tasks
+  remain unaccepted. Task event state columns and notification events map to
+  `done`, while event details, journal text and stored acceptance evidence
+  and request bytes stay intact. Both engines remove the `settled` preference
+  entry, preserving the order of the rest and allowing an empty array.
+  Both remove `settled` from the task and notification CHECK constraints and
+  drop `tasks.settled_at`. Postgres uses a new preference column default
+  `["needs_input","failed","done"]`. SQLite keeps its original default literal
+  `["needs_input","failed","done","settled"]`. The preferences singleton already
+  exists, and reads filter by `NotificationEvents`. SQLite rebuilds tasks and
+  notifications with their ID sequences and indexes, restores the task FTS
+  triggers and rebuilds the FTS index. Paired migration tests seed 0034 data
+  and check normalization, retained acceptance, preference ordering and
+  identical evidence bytes. SQLite also checks title search, foreign keys and
+  subsequent ID allocation.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -748,7 +765,8 @@ MCP or CLI. Test-only callers are noted where they are the only ones.
 | `tasks.after_thread_id`, `after_task_id`, constraint `tasks_one_wait` | None; 0003 nulled both and dropped their indexes | Dropped (0028) | None (`tasks_start_pair` stays) |
 | `tasks.launch_reuse` | Always 0 outside tests (`ReuseAttempt` is test-only, `ReusesLaunch` has no caller); 0009 moved reuse into `execution_attempts` | Dropped (0028) | Remove the reads and `ReuseAttempt` |
 | `tasks` and `schedules`: `provider_instance_id`, `model`, `model_options`, `runtime_mode`, `interaction_mode` | Primary storage for the legacy T3 model inputs: stored raw on create and update, copied by duplicate and schedule spawn, translated only on read (`LegacyModel`/`LegacyConfig` in `api/shapes.go`, `sync/service.go`) | Legacy storage: Dropped (0027, 0028) | Translate legacy inputs to `execution_config` on write; backfill `execution_config` where NULL. API inputs may stay, translated |
-| `tasks.launch_request_id`, `settled_at`, `handoff` | Launch intents, task API | Keep | None |
+| `tasks.launch_request_id`, `handoff` | Launch intents, task API | Keep | None |
+| `tasks.settled_at` | Historical finish timestamp | Dropped (0035) | Backfill missing `finished_at` when converting state `settled` to `done` |
 | `schedules.origin_thread_id` | Insert column, never set by a caller; `COALESCE` puts it first, into a `json:"-"` field | Dropped (0028) | `origin_session_id` already backfilled (0008) |
 | `threads.t3_thread_id`, `t3_project_id`, `status`, `parent_thread_id` | The T3 mirror's key and live fields, written by `PutObservation` and read by the session API, push and binding lookup | Keep | None |
 | `threads.provider_instance_id`, `creation_source`, `run_count` | No writer; old values still appear in session JSON | Dropped (0028) | Remove them from `threadSelect` and the session API shape |

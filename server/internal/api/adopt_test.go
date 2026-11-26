@@ -93,7 +93,7 @@ func TestAdoptSession(t *testing.T) {
 		t.Fatalf("adoption lost the session's execution config: %+v", a.Config)
 	}
 	if !a.Adopted || a.Prompt != "" || a.Title != "Planner" || a.State != "running" || a.ProjectID != p.ID ||
-		a.T3ThreadID == nil || *a.T3ThreadID != s || a.LaunchAttempt != 1 || a.TreeID != nil {
+		a.ExternalSessionID == nil || *a.ExternalSessionID != s || a.LaunchAttempt != 1 || a.TreeID != nil {
 		t.Fatalf("adopted %+v", a)
 	}
 	var again agentTask
@@ -175,7 +175,7 @@ func TestTaskNeedsSession(t *testing.T) {
 		t.Fatalf("a %+v", a)
 	}
 	caller := e.getTask(a.Needs[0])
-	if !caller.Adopted || caller.T3ThreadID == nil || *caller.T3ThreadID != s || caller.State != "running" ||
+	if !caller.Adopted || caller.ExternalSessionID == nil || *caller.ExternalSessionID != s || caller.State != "running" ||
 		!slices.Equal(b.Needs, a.Needs) || b.TreeID == nil || *b.TreeID != *a.TreeID || caller.Tree == nil || caller.Tree.Title != "Agent session" {
 		t.Fatalf("caller task %+v, b %+v", caller, b)
 	}
@@ -201,7 +201,7 @@ func TestTaskNeedsSession(t *testing.T) {
 	e.reconcile()
 	for _, id := range []int64{a.ID, b.ID} {
 		got := e.getTask(id)
-		if got.State != "running" || got.T3ThreadID == nil || *got.T3ThreadID == s || len(got.Needs) != 1 {
+		if got.State != "running" || got.ExternalSessionID == nil || *got.ExternalSessionID == s || len(got.Needs) != 1 {
 			t.Fatalf("after settle task %d must run, keeping its needs: %+v", id, got)
 		}
 	}
@@ -253,8 +253,8 @@ func TestNeedsSessionOwnedByTask(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/after-task-session")
 	a := e.agentTask(p.ID, "a", map[string]any{"start": true}, 201)
-	b := e.agentTask(p.ID, "b", map[string]any{"needsSession": e.t3Session(*a.T3ThreadID)}, 201)
-	c := e.agentTask(p.ID, "c", map[string]any{"needsSession": e.t3Session(*a.T3ThreadID)}, 201)
+	b := e.agentTask(p.ID, "b", map[string]any{"needsSession": e.t3Session(*a.ExternalSessionID)}, 201)
+	c := e.agentTask(p.ID, "c", map[string]any{"needsSession": e.t3Session(*a.ExternalSessionID)}, 201)
 	if !slices.Equal(b.Needs, []int64{a.ID}) || !slices.Equal(c.Needs, []int64{a.ID}) || b.Adopted {
 		t.Fatalf("b and c need task %d: %+v %+v", a.ID, b, c)
 	}

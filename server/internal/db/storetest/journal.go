@@ -489,7 +489,7 @@ func caseJournalTreeMutationEvents(t *testing.T, open Factory) {
 	if _, err := s.SetNeeds(ctx, b.ID, []int64{a.ID}); err != nil {
 		t.Fatal(err)
 	}
-	launch(t, s, ctx, a.ID, "execution-thread", db.StateDone)
+	launch(t, s, ctx, a.ID, "execution-session", db.StateDone)
 	if _, err := s.SetTreeStatus(ctx, tr.ID, db.TreeDone); err != nil {
 		t.Fatal(err)
 	}
@@ -500,14 +500,14 @@ func caseJournalTreeMutationEvents(t *testing.T, open Factory) {
 	counts := map[string]int{}
 	for _, e := range page.Entries {
 		counts[e.EventType]++
-		if e.TaskID != nil && *e.TaskID == a.ID && e.SourceThreadID != nil && *e.SourceThreadID == "execution-thread" {
+		if e.TaskID != nil && *e.TaskID == a.ID && e.SourceSession != nil && *e.SourceSession == session("execution-session") {
 			if e.Attempt == nil || *e.Attempt != 1 || e.TreeID == nil || *e.TreeID != tr.ID {
 				t.Fatalf("execution provenance %+v", e)
 			}
-			counts["thread_provenance"]++
+			counts["session_provenance"]++
 		}
 	}
-	for kind, n := range map[string]int{"tree_created": 1, "tree_config_changed": 1, "needs_changed": 1, "tree_status_changed": 1, "task_moved": 2, "thread_provenance": 2} {
+	for kind, n := range map[string]int{"tree_created": 1, "tree_config_changed": 1, "needs_changed": 1, "tree_status_changed": 1, "task_moved": 2, "session_provenance": 2} {
 		if counts[kind] != n {
 			t.Fatalf("%s events: %d, want %d; %+v", kind, counts[kind], n, page)
 		}
