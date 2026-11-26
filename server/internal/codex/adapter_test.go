@@ -14,6 +14,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/codex/codextest"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/machine"
 )
 
 const conn = 4
@@ -337,6 +338,9 @@ func TestWorkspacesAreTrustedProjectsWithGitImportable(t *testing.T) {
 		t.Fatal(err)
 	}
 	sub := filepath.Join(repo, "web")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	plain := t.TempDir()
 	r.srv.Trust(sub, "trusted")
 	r.srv.Trust(plain, "trusted")
@@ -345,6 +349,15 @@ func TestWorkspacesAreTrustedProjectsWithGitImportable(t *testing.T) {
 	ws, err := r.adapter.Workspaces(t.Context())
 	if err != nil || len(ws) != 2 {
 		t.Fatalf("%+v %v", ws, err)
+	}
+	// Harness facts only: the machine's ops read the Git evidence.
+	for _, w := range ws {
+		if !w.Local || w.ImportIf != execution.ImportInCheckout || w.Importable || w.Repo != "" {
+			t.Fatalf("harness facts %+v", w)
+		}
+	}
+	if ws, err = (machine.LocalOps{}).Inventory(t.Context(), ws, nil); err != nil {
+		t.Fatal(err)
 	}
 	for _, w := range ws {
 		switch w.WorkspaceRoot {

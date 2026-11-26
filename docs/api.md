@@ -312,9 +312,12 @@ Refresh external workspace discovery and task-owned sessions, then import delibe
 
 Stage owns project IDs, titles and archive state. Creating a project needs no
 harness. Discovery never renames or deletes Stage projects. The sync pass imports
-deliberate harness projects: a matching workspace path binds to the existing
-project, a new path creates one, and a discovered project with no tasks follows
-its harness archive until a user archives or unarchives it
+deliberate harness projects through the project identity ladder: a matching
+workspace path on the same machine binds to the existing project, the one
+project bound on another machine to the same Git origin remote and subproject
+gains it, ambiguous matches wait for a manual bind, a new workspace creates a
+project, and a discovered project with no tasks follows its harness archive
+until a user archives or unarchives it
 ([architecture.md](architecture.md#project-import)). Existing T3 projects keep
 their Stage IDs and migrate to explicit bindings.
 
@@ -358,7 +361,7 @@ includes tracked sessions, tasks and journals.
   decision 11): add it in the harness, then refresh discovery. It answers
   404.
 
-Use `GET /api/shared-paths` to read declared filesystem mappings. PUT to the same route with `{connectionId, harnessRoot, stageRoot}` to set a mapping. An empty Stage root removes it. `POST /api/projects/:id/bindings/:connectionId/match` checks live inventory and returns `{bound, suggestions, projects}`. A unique shared Git common directory and subproject on the same machine can bind. A Git remote match (with the same subproject when both are known) requires confirmation. DELETE the scoped binding to unbind.
+Use `GET /api/shared-paths` to read declared filesystem mappings. PUT to the same route with `{connectionId, harnessRoot, stageRoot}` to set a mapping. An empty Stage root removes it. `POST /api/projects/:id/bindings/:connectionId/match` checks live inventory and returns `{bound, suggestions, projects}` (`suggestions`: the reason per external project id). It walks the same ladder as import: the same path, or a shared Git common directory and subproject (below a shared path, or in place for a harness local to its machine), on the same machine, or the same Git origin remote and subproject as the one project bound on another machine, binds when it places exactly one unbound workspace in this project. Any other Git remote match (with the same subproject when both are known) requires confirmation. DELETE the scoped binding to unbind.
 
 OpenCode's setup: fields `endpoint`, `browserEndpoint`, `webClient`, `username`, `password` and `newInstance`; actions `connect-local` (`{newInstance}`) and `pair` (`{link, newInstance}`); disconnect. `GET /api/harnesses/opencode/status` `details` reports connectionId, state (`unconfigured`, `connected`, `unavailable`, or `rejected` when the service answers 401/403), diagnostic reason, checkedAt, endpoint, browserEndpoint, webClient, hasCredentials, and:
 

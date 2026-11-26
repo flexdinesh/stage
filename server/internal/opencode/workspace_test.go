@@ -10,6 +10,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/machine"
 )
 
 // OpenCode declares every operation, and why it lacks one.
@@ -87,11 +88,19 @@ func TestWorkspacesImportableAndRepo(t *testing.T) {
 		if ws[0].ActiveAt == nil || ws[0].Title != filepath.Base(repo) {
 			t.Fatalf("workspace %+v", ws[0])
 		}
+		// Harness facts only: a local service's paths are the machine's,
+		// whose ops read the Git evidence.
+		if ws[0].Local != local || ws[0].Repo != "" || ws[0].ImportIf != "" {
+			t.Fatalf("local=%v workspace %+v", local, ws[0])
+		}
+		if ws, err = (machine.LocalOps{}).Inventory(t.Context(), ws, nil); err != nil {
+			t.Fatal(err)
+		}
 		want, wantPath := "", ""
 		if local {
 			want, wantPath = "github.com/o/r", "."
 		}
-		if ws[0].Repo != want || ws[0].RepoPath != wantPath {
+		if ws[0].Repo != want || ws[0].RepoPath != wantPath || !ws[0].Importable {
 			t.Fatalf("local=%v repo %q path %q", local, ws[0].Repo, ws[0].RepoPath)
 		}
 	}

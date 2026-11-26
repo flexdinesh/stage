@@ -276,8 +276,9 @@ func (s *Set) Connectors(reg *harness.Registry) (harness.Connectors, error) {
 // Every argument and result is JSON-serializable, so a remote machine can
 // carry the calls over its worker channel.
 type Ops interface {
-	// Inventory fills each workspace's missing Repo from the checkout the
-	// machine sees through roots (one connection's shared paths).
+	// Inventory reads each workspace's Git evidence (Repo, RepoPath, and
+	// Importable under ImportIf) from the checkout the machine sees through
+	// roots (one connection's shared paths; RootsFor adds a local path).
 	Inventory(ctx context.Context, ws []execution.WorkspaceInfo, roots []SharedRoot) ([]execution.WorkspaceInfo, error)
 	// Checkout is the Git evidence for a harness-side directory under
 	// roots (zero when it is under none, or unreadable).

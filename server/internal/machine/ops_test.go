@@ -116,3 +116,61 @@ func TestLocalCheckoutRequiresExplicitSharedRoots(t *testing.T) {
 		t.Fatalf("other repository %+v", o)
 	}
 }
+
+// A workspace local to the machine is read in place with no declared
+// shared path; a remote one never is. ImportIf decides Importable from the
+// files: a checkout's top, or anywhere inside one, and never a plain
+// directory, with or without an origin remote.
+func TestLocalInventoryReadsLocalWorkspacesInPlace(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, bare, plain := filepath.Join(root, "app"), filepath.Join(root, "bare"), filepath.Join(root, "notes")
+	sub := filepath.Join(repo, "packages", "web")
+	for _, d := range []string{sub, bare, plain} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(t, repo, "init", "-q")
+	git(t, repo, "remote", "add", "origin", "git@github.com:o/app.git")
+	git(t, bare, "init", "-q")
+	ws := func(dir string, rule execution.ImportRule, local bool) execution.WorkspaceInfo {
+		return execution.WorkspaceInfo{ID: dir, WorkspaceRoot: dir, Local: local, ImportIf: rule}
+	}
+	in := []execution.WorkspaceInfo{
+		ws(repo, execution.ImportCheckoutTop, true),
+		ws(sub, execution.ImportCheckoutTop, true),
+		ws(sub, execution.ImportInCheckout, true),
+		ws(bare, execution.ImportCheckoutTop, true),
+		ws(plain, execution.ImportInCheckout, true),
+		ws(repo, "", false),
+		{ID: "harness", WorkspaceRoot: repo, Local: true, Importable: true},
+	}
+	out, err := machine.LocalOps{}.Inventory(t.Context(), in, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type got struct {
+		importable     bool
+		repo, repoPath string
+	}
+	want := []got{
+		{true, "github.com/o/app", "."},
+		{false, "github.com/o/app", "packages/web"},
+		{true, "github.com/o/app", "packages/web"},
+		{true, "", ""},
+		{false, "", ""},
+		{false, "", ""},
+		{true, "github.com/o/app", "."},
+	}
+	for i, w := range out {
+		if g := (got{w.Importable, w.Repo, w.RepoPath}); g != want[i] {
+			t.Errorf("%d %s: %+v, want %+v", i, w.WorkspaceRoot, g, want[i])
+		}
+	}
+	if roots := machine.RootsFor(in[5], nil); len(roots) != 0 {
+		t.Fatalf("remote workspace roots %+v", roots)
+	}
+}

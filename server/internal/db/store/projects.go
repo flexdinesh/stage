@@ -64,6 +64,14 @@ type ImportCandidate struct {
 	ExternalID, Title, Workspace, Repo, RepoPath string
 }
 
+// Claim is an active binding with what discovery stored about its
+// workspace (Repo and RepoPath "" when unknown), the project identity
+// ladder's evidence (projectmatch).
+type Claim struct {
+	BindingID, ProjectID, ConnectionID, MachineID int64
+	Workspace, Repo, RepoPath                     string
+}
+
 // ProjectArchive selects projects by archive state.
 type ProjectArchive int
 
@@ -124,13 +132,9 @@ type Projects interface {
 	// ImportCandidates: available, importable, unarchived, undeclined,
 	// unbound workspaces, by workspace then most recently active.
 	ImportCandidates(ctx context.Context, connectionID int64) ([]ImportCandidate, error)
-	// PathOwners: projects actively bound at workspace on machine.
-	PathOwners(ctx context.Context, workspace string, machine int64) ([]int64, error)
-	// RemoteOwners: projects actively bound on another machine to a
-	// workspace with this repo and subproject path.
-	RemoteOwners(ctx context.Context, machine int64, repo, repoPath string) ([]int64, error)
-	// PlacedOn: the project has an active binding on machine.
-	PlacedOn(ctx context.Context, projectID, machine int64) (bool, error)
+	// Claims are every active binding, retired connections' included, by
+	// project then binding.
+	Claims(ctx context.Context) ([]Claim, error)
 	// FollowArchive mirrors harness archives onto discovered projects.
 	FollowArchive(ctx context.Context) (archived, unarchived int, err error)
 	ImportSummaries(ctx context.Context, since time.Time) ([]ImportSummary, error)

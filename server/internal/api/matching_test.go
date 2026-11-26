@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -142,9 +145,10 @@ func TestMatchNeverProvesACheckoutAcrossMachines(t *testing.T) {
 	}
 }
 
-// A remote suggestion needs the same subproject when both sides know it, so
-// a monorepo sibling is never proposed.
-func TestMatchRemoteSuggestionRequiresSameSubproject(t *testing.T) {
+// Across machines the same remote and subproject is the project's only
+// match, so it binds (ADR 0007 decision 11); an unknown subproject only
+// suggests, and a monorepo sibling is never proposed.
+func TestMatchRemoteAcrossMachinesRequiresSameSubproject(t *testing.T) {
 	var temp dbtest.DB
 	pool := temp.Reset(t)
 	store := db.NewStore(pool)
@@ -183,7 +187,75 @@ func TestMatchRemoteSuggestionRequiresSameSubproject(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Bound != nil || out.Suggestions[same.ID] == "" || out.Suggestions[sibling.ID] != "" || out.Suggestions[unknown.ID] == "" {
+	if out.Bound == nil || out.Suggestions[same.ID] != "Same Git remote and subproject on another machine" || out.Suggestions[sibling.ID] != "" || out.Suggestions[unknown.ID] != "Same Git remote. Confirm the checkout." {
 		t.Fatalf("suggestions %+v", out)
+	}
+	if i := slices.IndexFunc(out.Bound.Bindings, func(b db.ProjectBinding) bool { return b.ConnectionID == connection }); i < 0 || out.Bound.Bindings[i].ExternalProjectID != same.ID {
+		t.Fatalf("bound %+v", out.Bound.Bindings)
+	}
+}
+
+// Workspaces local to the machine (hosted harnesses, a local service) need
+// no declared shared path: the machine's ops read them in place. The same
+// path, or another worktree of the same checkout and subproject, binds.
+func TestMatchLocalWorkspacesByPathOrCheckout(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, worktree := filepath.Join(root, "app"), filepath.Join(root, "app-wt")
+	git := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s %v", args, out, err)
+		}
+	}
+	git("init", "-q", repo)
+	git("-C", repo, "-c", "user.name=s", "-c", "user.email=s@example.invalid", "commit", "-q", "--allow-empty", "-m", "init")
+	git("-C", repo, "worktree", "add", "-q", worktree)
+	for _, tc := range []struct{ dir, reason string }{
+		{repo, "Same path on this machine"},
+		{worktree, "Shared Git checkout and subproject"},
+	} {
+		t.Run(filepath.Base(tc.dir), func(t *testing.T) {
+			var temp dbtest.DB
+			pool := temp.Reset(t)
+			store := db.NewStore(pool)
+			ctx := t.Context()
+			var owner int64
+			if err := pool.QueryRowContext(ctx, "INSERT INTO harness_connections(harness,machine_id) VALUES('claude',1) RETURNING id").Scan(&owner); err != nil {
+				t.Fatal(err)
+			}
+			connection, err := store.EnsureOpenCode(ctx, db.LocalMachine)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := execution.WorkspaceInfo{ID: repo, WorkspaceRoot: repo, Local: true}
+			target := execution.WorkspaceInfo{ID: "oc", WorkspaceRoot: tc.dir, Local: true}
+			p, err := store.InsertProject(ctx, db.Project{Title: "App", Bindings: []db.ProjectBinding{{ConnectionID: owner, ExternalProjectID: source.ID, Workspace: source.WorkspaceRoot}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			service := &server{Deps: Deps{Store: store, Sync: coordinator.NewWithAdapters(store, map[int64]execution.Adapter{owner: workspaceInventory{rows: []execution.WorkspaceInfo{source}}, connection: workspaceInventory{rows: []execution.WorkspaceInfo{target}}}, nil)}}
+			req := httptest.NewRequest("POST", "/", nil)
+			req.SetPathValue("id", strconv.FormatInt(p.ID, 10))
+			req.SetPathValue("connectionId", strconv.FormatInt(connection, 10))
+			rec := httptest.NewRecorder()
+			if err := service.matchWorkspace(rec, req); err != nil {
+				t.Fatal(err)
+			}
+			var out struct {
+				Bound       *db.Project
+				Suggestions map[string]string
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+				t.Fatal(err)
+			}
+			if out.Bound == nil || out.Suggestions[target.ID] != tc.reason {
+				t.Fatalf("match %+v", out)
+			}
+		})
 	}
 }

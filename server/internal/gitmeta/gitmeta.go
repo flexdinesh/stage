@@ -57,23 +57,33 @@ func OriginRepo(dir string) string {
 // at the top). Both are "" when stop does not contain dir or the nearest
 // checkout has no usable origin.
 func Checkout(dir, stop string) (repo, sub string) {
+	top := Top(dir, stop)
+	if top == "" {
+		return "", ""
+	}
+	if repo = OriginRepo(top); repo == "" {
+		return "", ""
+	}
+	rel, err := filepath.Rel(top, filepath.Clean(dir))
+	if err != nil {
+		return "", ""
+	}
+	return repo, filepath.ToSlash(rel)
+}
+
+// Top is the nearest directory at or above dir holding .git, never above
+// stop ("" when there is none or stop does not contain dir).
+func Top(dir, stop string) string {
 	dir, stop = filepath.Clean(dir), filepath.Clean(stop)
 	if _, ok := beneath(stop, dir); !ok {
-		return "", ""
+		return ""
 	}
 	for top := dir; ; top = filepath.Dir(top) {
 		if _, err := os.Stat(filepath.Join(top, ".git")); err == nil {
-			if repo = OriginRepo(top); repo == "" {
-				return "", ""
-			}
-			rel, err := filepath.Rel(top, dir)
-			if err != nil {
-				return "", ""
-			}
-			return repo, filepath.ToSlash(rel)
+			return top
 		}
 		if top == stop || top == filepath.Dir(top) {
-			return "", ""
+			return ""
 		}
 	}
 }

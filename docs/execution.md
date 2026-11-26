@@ -80,14 +80,22 @@ not allow.
   adapter)` (the install port; nil disconnects); its change hook moves the
   coordinator (`sync.Service.ConnectionsChanged`) and resyncs the runners.
 - **Ops.** `machine.Ops` is the harness-neutral fs and process work that
-  must run where the harness runs: `Inventory` fills `WorkspaceInfo.Repo`
-  and `RepoPath` through the connection's shared roots (`gitmeta.Checkout`,
-  never walking above a root), and `Checkout` returns
+  must run where the harness runs, and the only place Stage reads Git
+  evidence ([ADR 0007](adr/0007-harness-boundary.md) decision 11; adapters
+  report harness facts only, and a test keeps `gitmeta`'s readers inside
+  `machine`). Both read a workspace through `machine.RootsFor`: the
+  connection's shared roots, then, for a workspace the adapter marks
+  `Local` (a hosted harness's folders, a local OpenCode service's
+  projects), the path itself. `Inventory` fills `WorkspaceInfo.Repo` and
+  `RepoPath` without a git binary (`gitmeta.Checkout`, never walking above
+  a root; a Repo the harness reported stays) and decides `Importable` for
+  a harness that imports Git checkouts (`ImportIf`: `checkoutTop` for
+  Claude Code, `inCheckout` for Codex). `Checkout` returns
   `machine.CheckoutEvidence` (the Git common directory as a device:inode
   key, the subproject and its slash path, and the normalized remote) for
-  workspace matching. The
-  main server loads shared paths and compares evidence; only evidence from
-  the same machine proves a checkout. `machine.LocalOps` runs them here.
+  the match action. The main server loads shared paths and walks the
+  project identity ladder (`projectmatch`); only evidence from the same
+  machine proves a checkout. `machine.LocalOps` runs them here.
 - **Setup ports.** `opencodesetup.Ports` and the `t3setup.Options` ports
   replace the store. Settings: OpenCode's `config.OpenCodeSetup`
   (non-secret) and `config.OpenCodeCredential` (secret), loaded and saved
@@ -156,8 +164,9 @@ suite cannot tell a remote machine from the local one.
 - **Health.** Offline answers at once with the reason (offline, or needs
   update); an online answer is reused for 5s.
 - **Ops.** `ops.inventory` and `ops.checkout` run `machine.LocalOps` on the
-  worker with the shared roots the main server loads; evidence is still
-  compared on the main server, within one machine.
+  worker with the shared roots the main server loads (a `Local` workspace,
+  such as a worker's Claude Code folder, is read in place there); evidence
+  is still compared on the main server, within one machine.
 - **Errors.** `execution.ErrUnavailable`, `ErrNotFound`, `ErrNoReply`,
   `Rejected` and `Refused` keep their meaning (`unavailable`, `not_found`,
   `no_reply`, `rejected`, `refused`). Offline, `not_hosted`, `unsupported` and an older worker
@@ -713,8 +722,9 @@ to run on that machine.
   `turn_duration` records (finished turns). No cost: Claude records none for
   a background session. None before the first turn or without a transcript.
 - **Inventory** is the `projects` of Claude's state file (`~/.claude.json`,
-  or `.claude.json` in a `CLAUDE_CONFIG_DIR`); a Git checkout's top is
-  importable, worktrees under `.claude/worktrees` are left out. No file is
+  or `.claude.json` in a `CLAUDE_CONFIG_DIR`), local to the machine; a Git
+  checkout's top is importable (the machine's ops decide,
+  `ImportCheckoutTop`), worktrees under `.claude/worktrees` are left out. No file is
   an empty inventory; an unreadable or malformed one is an error, so
   discovery keeps the last one. Run Claude in a folder once to list it.
 - **Features.** Models: Claude's default, `opus`, `sonnet`, `haiku`,
@@ -809,8 +819,9 @@ credentials and never writes Codex's config.
   the daemon down. Every failure is `execution.ErrUnavailable` with the
   problem; an unknown method names the method and asks for a Codex update.
 - **Inventory.** Workspaces are the projects Codex trusts
-  (`config/read`); a Git checkout is importable (trust a project in Codex to
-  list it). One workspace mode, the project checkout.
+  (`config/read`), local to the machine; a directory inside a Git checkout
+  is importable (the machine's ops decide, `ImportInCheckout`; trust a
+  project in Codex to list it). One workspace mode, the project checkout.
 - **Launch (`reserved`).** Validation rejects before any effect (non-root
   workspace, missing directory, non-image attachment, invalid option or
   permission). `thread/start`, checkpoint the thread id, best-effort
