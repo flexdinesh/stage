@@ -11,9 +11,11 @@ package workersetup
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -24,6 +26,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/codexsetup"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/opencode"
 	"github.com/flexdinesh/stage/server/internal/opencodesetup"
@@ -62,7 +65,7 @@ type Setup struct {
 	log *slog.Logger
 
 	mu       sync.Mutex
-	composed bool
+	composed map[string]bool
 }
 
 // Attach composes o.Host's connection setup each time a channel session
@@ -72,7 +75,7 @@ func Attach(o Options) *Setup {
 	if o.Logger == nil {
 		o.Logger = slog.Default()
 	}
-	s := &Setup{o: o, log: o.Logger.With("component", "workersetup")}
+	s := &Setup{o: o, log: o.Logger.With("component", "workersetup"), composed: map[string]bool{}}
 	if w := o.Config.WarnRemovedEnv(); w != "" {
 		s.log.Warn(w)
 	}
@@ -80,44 +83,72 @@ func Attach(o Options) *Setup {
 	return s
 }
 
-// compose builds the setup (no-op once composed). ctx is the worker's: the
-// setups' background work ends with it.
-func (s *Setup) compose(ctx context.Context) {
+// compose installs the allowed connectors supported by this server before ready.
+// The worker owns the lifetime of each installed connector.
+func (s *Setup) compose(ctx context.Context, serverKinds []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.composed || ctx.Err() != nil {
-		return
+	local, ports := s.o.Host.Local(), s.o.Ports
+	for _, setup := range []struct {
+		descriptor harness.Descriptor
+		build      func() (harness.Connector, error)
+	}{
+		{t3.Descriptor, func() (harness.Connector, error) { return s.t3(ctx) }},
+		{opencode.Descriptor, func() (harness.Connector, error) {
+			service, err := opencodesetup.New(ctx, opencodesetup.Ports{
+				Settings: ports, Identity: ports, Install: local.Install,
+				Active: func(ctx context.Context) (int64, error) { return ports.Active(ctx, opencode.Kind) },
+			}, s.log)
+			if err != nil {
+				return nil, err
+			}
+			return opencodesetup.NewConnector(service), nil
+		}},
+		{claudecode.Descriptor, func() (harness.Connector, error) {
+			service, err := s.claude(ctx, ports, local.Install)
+			if err != nil {
+				return nil, err
+			}
+			return claudecodesetup.NewConnector(service), nil
+		}},
+		{codex.Descriptor, func() (harness.Connector, error) {
+			service, err := s.codex(ctx, ports, local.Install)
+			if err != nil {
+				return nil, err
+			}
+			return codexsetup.NewConnector(service), nil
+		}},
+	} {
+		d := setup.descriptor
+		if s.composed[d.Kind] || !local.Allows(d).Available || !slices.Contains(serverKinds, d.Kind) {
+			continue
+		}
+		connector, err := setup.build()
+		if errors.Is(err, errNotServed) {
+			s.log.Warn("main machine does not serve harness setup", "kind", d.Kind, "err", err)
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", d.Name, err)
+		}
+		local.SetConnector(d.Kind, connector)
+		s.composed[d.Kind] = true
 	}
-	if err := s.build(ctx); err != nil {
-		s.log.Warn("compose harness setup; retrying when the channel reconnects", "err", err)
-		return
-	}
-	s.composed = true
-	s.o.Host.SetReady()
-	s.log.Info("harness setup ready")
+	return nil
 }
 
-func (s *Setup) build(ctx context.Context) error {
+func (s *Setup) t3(ctx context.Context) (harness.Connector, error) {
 	local, ports, cfg := s.o.Host.Local(), s.o.Ports, s.o.Config
 	call, cancel := context.WithTimeout(ctx, remote.CallTimeout)
 	defer cancel()
 	conn, err := ports.GetConnection(call)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	// The client's background loop ends with the worker, or now when the
-	// setup is not composed.
-	clientCtx, stopClient := context.WithCancel(ctx)
-	ok := false
-	defer func() {
-		if !ok {
-			stopClient()
-		}
-	}()
 	endpoint := t3setup.Resolve(conn)
 	admin, err := ports.LoadT3AdminToken(call)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	client := s.o.T3
 	switch {
@@ -135,20 +166,11 @@ func (s *Setup) build(ctx context.Context) error {
 			Store: ports, HTTPClient: &http.Client{Timeout: 60 * time.Second}, Logger: s.log,
 		})
 		go func() {
-			mc.Run(clientCtx)
+			mc.Run(ctx)
 			mc.Close()
 		}()
 		client = mc
 		s.log.Info("using T3 MCP client", "url", endpoint.URL, "source", endpoint.Source)
-	}
-	openCode, err := opencodesetup.New(ctx, opencodesetup.Ports{
-		Settings: ports, Identity: ports, Install: local.Install,
-		// The machine's OpenCode connection is created by the first service
-		// that connects.
-		Active: func(ctx context.Context) (int64, error) { return ports.Active(ctx, opencode.Kind) },
-	}, s.log)
-	if err != nil {
-		return err
 	}
 	t3Setup := t3setup.New(t3setup.Options{
 		Config: cfg, Settings: ports, Identity: ports, Client: client, Endpoint: endpoint, Fake: t3setup.IsFake(client), Logger: s.log,
@@ -161,38 +183,9 @@ func (s *Setup) build(ctx context.Context) error {
 	if conn.ConnectionID != 0 {
 		local.Install(conn.ConnectionID, conn.ConnectionID, t3.NewConnectionAdapter(client, conn.ConnectionID))
 	}
-	// Claude Code runs as local processes: only where this machine's
-	// profile allows them.
-	var claude *claudecodesetup.Service
-	if local.Allows(claudecode.Descriptor).Available {
-		if claude, err = s.claude(ctx, ports, local.Install); err != nil {
-			return err
-		}
-	}
-	// Codex's daemon runs on this machine too: the same rule. Stage starts
-	// it on demand and never stops it.
-	var cdx *codexsetup.Service
-	if local.Allows(codex.Descriptor).Available {
-		if cdx, err = s.codex(ctx, ports, local.Install); err != nil {
-			return err
-		}
-	}
-	local.SetConnector(t3.Kind, t3setup.NewConnector(t3Setup, nil))
-	local.SetConnector(opencode.Kind, opencodesetup.NewConnector(openCode))
-	if claude != nil {
-		local.SetConnector(claudecode.Kind, claudecodesetup.NewConnector(claude))
-	}
-	if cdx != nil {
-		local.SetConnector(codex.Kind, codexsetup.NewConnector(cdx))
-	}
-	ok = true
-	return nil
+	return t3setup.NewConnector(t3Setup, nil), nil
 }
 
-// claude builds Claude Code's setup over the main server's record (no
-// secrets). An older main server that does not serve Claude's settings
-// leaves it out (nil), so T3 and OpenCode still compose; the main server
-// then reports the machine as needing an update for Claude Code.
 func (s *Setup) claude(ctx context.Context, ports Ports, install machine.Install) (*claudecodesetup.Service, error) {
 	o := claudecodesetup.Options{Scope: claudecode.ScopeAvailable()}
 	if s.o.Claude != nil {
@@ -202,20 +195,10 @@ func (s *Setup) claude(ctx context.Context, ports Ports, install machine.Install
 	if o.StateDir == "" && s.o.StateDir != "" {
 		o.StateDir = filepath.Join(s.o.StateDir, "claude")
 	}
-	c, err := claudecodesetup.New(ctx, claudecodesetup.Ports{Settings: ports, Identity: ports, Install: install}, o)
-	if errors.Is(err, errNotServed) {
-		s.log.Warn("the Stage server does not set up Claude Code yet; update it to use Claude Code on this machine", "err", err)
-		return nil, nil
-	}
-	return c, err
+	return claudecodesetup.New(ctx, claudecodesetup.Ports{Settings: ports, Identity: ports, Install: install}, o)
 }
 
-// codex builds Codex's setup over the main server's record (no secrets:
-// `codex login` on this machine). An older main server that does not serve
-// Codex's settings leaves it out (nil), so the other harnesses still
-// compose; the main server then reports the machine as needing an update
-// for Codex. The daemon connection closes with the worker; the daemon
-// keeps running.
+// codex uses the worker's own daemon and keeps it running when Stage exits.
 func (s *Setup) codex(ctx context.Context, ports Ports, install machine.Install) (*codexsetup.Service, error) {
 	var o codexsetup.Options
 	if s.o.Codex != nil {
@@ -227,10 +210,6 @@ func (s *Setup) codex(ctx context.Context, ports Ports, install machine.Install)
 	}
 	o.Logger = s.log
 	c, err := codexsetup.New(ctx, o)
-	if errors.Is(err, errNotServed) {
-		s.log.Warn("the Stage server does not set up Codex yet; update it to use Codex on this machine", "err", err)
-		return nil, nil
-	}
 	if err != nil {
 		return nil, err
 	}

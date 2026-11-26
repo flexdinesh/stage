@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -17,8 +18,14 @@ import (
 // OpenCode save keeps only the setup. switched runs after an instance
 // switch moved or created a connection (may be nil).
 func ServeSetup(hub *workerchan.Hub, ports func(machineID int64) machine.StorePorts, switched func(machineID int64, sw db.Switch)) {
+	initializing := []string{KindT3Get, KindT3LastError, KindOpenCodeGet, KindClaudeGet, KindCodexGet,
+		KindIdentityActive, KindIdentitySet, KindIdentitySwitch}
 	handle := func(kind string, fn func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error)) {
-		hub.Handle(kind, func(ctx context.Context, machineID int64, env workerchan.Envelope) (any, error) {
+		register := hub.Handle
+		if slices.Contains(initializing, kind) {
+			register = hub.HandleInitialization
+		}
+		register(kind, func(ctx context.Context, machineID int64, env workerchan.Envelope) (any, error) {
 			out, err := fn(ctx, ports(machineID), env.Body)
 			if err != nil {
 				return nil, EncodeSetupError(err)

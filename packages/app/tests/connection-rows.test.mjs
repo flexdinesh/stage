@@ -22,6 +22,7 @@ test("setup runs on the main machine and on online workers only", () => {
   assert.equal(machineLive({ ...main, status: "offline" }), true);
   assert.equal(machineLive(studio), true);
   assert.equal(machineLive({ ...studio, status: "offline" }), false);
+  assert.equal(machineLive({ ...studio, status: "negotiating" }), false);
   assert.equal(machineLive({ ...studio, status: "needs_update" }), false);
 });
 
@@ -58,7 +59,7 @@ test("add options: connectable harnesses only; connected ones are listed disable
   assert.deepEqual(connectShortcuts(addConnectionOptions(KINDS, [{ harness: "t3", disconnected: true }])), [{ kind: "opencode", label: "Connect OpenCode" }]);
 });
 
-test("Add connection is disabled offline, on another API version, while checking, and when nothing is left", () => {
+test("Add connection is disabled when a machine cannot serve setup or has nothing to add", () => {
   const some = addConnectionOptions(KINDS, [{ harness: "t3" }]);
   const all = addConnectionOptions(KINDS, [{ harness: "t3" }, { harness: "opencode" }]);
   assert.equal(addConnectionReason(main, some), null);
@@ -66,7 +67,8 @@ test("Add connection is disabled offline, on another API version, while checking
   assert.equal(addConnectionReason(main, null), "checking harnesses");
   assert.equal(addConnectionReason(main, []), "no harness to connect");
   assert.equal(addConnectionReason({ ...studio, status: "offline" }, some), "studio is offline");
-  assert.equal(addConnectionReason({ ...studio, status: "needs_update" }, some), "studio needs an update");
+  assert.equal(addConnectionReason({ ...studio, status: "negotiating", statusReason: "Waiting for studio to finish connecting." }, some), "Waiting for studio to finish connecting.");
+  assert.equal(addConnectionReason({ ...studio, status: "needs_update", statusReason: "Update Stage on the main machine." }, some), "Update Stage on the main machine.");
 });
 
 test("add options: hosted harnesses are listed; one the machine cannot run is disabled with its full reason", () => {

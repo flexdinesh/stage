@@ -3,7 +3,7 @@
 // one never set up (configured false, nothing on it) is not a row.
 import type { Harness, HarnessConnection, HarnessDescriptor, Machine } from "../api/types.ts";
 import { isDisconnected } from "./harnesses.ts";
-import { machineSetupState } from "./machines.ts";
+import { machineSetupAlert, machineSetupState } from "./machines.ts";
 
 export interface ConnectionRowModel {
   id: number;
@@ -73,15 +73,16 @@ export function connectShortcuts(options: readonly AddConnectionOption[] | null)
 const ROW_REASONS: readonly (string | null)[] = ["already connected", "disconnected; reconnect it"];
 
 /**
- * Why Add connection is disabled on the machine (offline, needs an update, nothing left to add); null when enabled.
+ * Why Add connection is disabled; null when enabled.
  * It stays enabled while a harness is listed as unavailable (`detail`), so its reason can be read in the menu.
  */
-export function addConnectionReason(m: Pick<Machine, "kind" | "status" | "label">, options: readonly AddConnectionOption[] | null): string | null {
+export function addConnectionReason(m: Pick<Machine, "kind" | "status" | "label" | "statusReason">, options: readonly AddConnectionOption[] | null): string | null {
   switch (machineSetupState(m)) {
     case "offline":
       return `${m.label} is offline`;
+    case "negotiating":
     case "needs_update":
-      return `${m.label} needs an update`;
+      return machineSetupAlert(m);
     case "ready":
       break;
   }

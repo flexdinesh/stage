@@ -36,11 +36,10 @@ func Revoked(err error) bool {
 	return errors.As(err, &he) && he.Status == http.StatusUnauthorized
 }
 
-// VersionMismatch reports whether err is the server refusing this worker's
-// API version.
+// VersionMismatch reports a worker channel protocol incompatibility.
 func VersionMismatch(err error) bool {
 	var he *HTTPError
-	return errors.As(err, &he) && he.Status == http.StatusConflict && he.Code == "api_version_mismatch"
+	return errors.As(err, &he) && he.Status == http.StatusConflict && he.Code == workerchan.CodeProtocolMismatch
 }
 
 // api calls the main server's worker routes.
@@ -125,10 +124,11 @@ func checkStatus(res *http.Response) error {
 // RemoteMachine is GET /api/worker/machine: this machine as the main server
 // sees it.
 type RemoteMachine struct {
-	ID         int64      `json:"id"`
-	Label      string     `json:"label"`
-	Status     string     `json:"status"`
-	Online     bool       `json:"online"`
-	LastSeenAt *time.Time `json:"lastSeenAt"`
-	Version    *string    `json:"version"`
+	ID           int64      `json:"id"`
+	Label        string     `json:"label"`
+	Status       string     `json:"status"`
+	StatusReason string     `json:"statusReason"`
+	Online       bool       `json:"online"`
+	LastSeenAt   *time.Time `json:"lastSeenAt"`
+	Version      *string    `json:"version"`
 }

@@ -648,9 +648,6 @@ func TestInteractiveLinks(t *testing.T) {
 	if err != nil || o.State != "needs_input" || o.Links != (execution.Links{}) {
 		t.Fatalf("live %+v %v", o, err)
 	}
-	if l := a.Destinations(t.Context(), ref); l != (execution.Links{}) {
-		t.Fatalf("destinations %+v", l)
-	}
 	f.Remove(term)
 	if o, err = a.Observe(t.Context(), ref); err != nil || o.Links.Command != "cd "+f.Workspace+" && claude --resume "+term {
 		t.Fatalf("exited %+v %v", o, err)

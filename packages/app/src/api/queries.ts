@@ -48,10 +48,14 @@ type Connections = { connections: HarnessConnection[] };
 
 const NO_MACHINES: Machine[] = [];
 
-/** Machines not removed, local first (polled: presence and last seen move on their own). */
+/** Machines not removed, local first (poll faster while a worker is negotiating). */
 export function useMachines() {
   const api = useApi();
-  const q = useQuery({ queryKey: keys.machines, queryFn: api.machines, refetchInterval: POLL.slow });
+  const q = useQuery({
+    queryKey: keys.machines,
+    queryFn: api.machines,
+    refetchInterval: (query) => (query.state.data?.machines.some((m) => m.status === "negotiating") ? POLL.live : POLL.slow),
+  });
   return { ...q, machines: q.data?.machines ?? NO_MACHINES };
 }
 
@@ -91,12 +95,12 @@ export function useHarnessDescriptors() {
 }
 
 /** The harness scope's machine and its harness kinds with what it can run and set up (GET /api/machines/{id}/harnesses; the local machine's are useHarnessDescriptors). */
-export function useScopedHarnessDescriptors() {
+export function useScopedHarnessDescriptors(enabled: boolean) {
   const api = useHarnessApi();
   const key = useScopedKey();
   const local = useHarnessScope().machineId === null;
   // A remote machine's kinds follow what its worker hosts: re-read after a while, refreshed by connection changes.
-  return useQuery({ queryKey: key(keys.harnesses), queryFn: api.harnesses, staleTime: local ? Infinity : 30_000 });
+  return useQuery({ queryKey: key(keys.harnesses), queryFn: api.harnesses, enabled, staleTime: local ? Infinity : 30_000 });
 }
 
 /** Harness lookups by connection id (name, harness, active, label), by kind (descriptor) and the active connection per harness. */

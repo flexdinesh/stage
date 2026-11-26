@@ -8,16 +8,17 @@ import (
 
 // Machine is an entry of GET /api/machines (docs/api.md "Machines").
 type Machine struct {
-	ID          int64      `json:"id"`
-	Label       string     `json:"label"`
-	Kind        string     `json:"kind"` // local | remote
-	Online      bool       `json:"online"`
-	Status      string     `json:"status"` // online | offline | needs_update
-	LastSeenAt  *time.Time `json:"lastSeenAt"`
-	Version     *string    `json:"version"`
-	CreatedBy   int64      `json:"createdBy"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	Connections []struct {
+	ID           int64      `json:"id"`
+	Label        string     `json:"label"`
+	Kind         string     `json:"kind"` // local | remote
+	Online       bool       `json:"online"`
+	Status       string     `json:"status"` // online | offline | negotiating | needs_update
+	StatusReason string     `json:"statusReason,omitempty"`
+	LastSeenAt   *time.Time `json:"lastSeenAt"`
+	Version      *string    `json:"version"`
+	CreatedBy    int64      `json:"createdBy"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	Connections  []struct {
 		ID      int64  `json:"id"`
 		Harness string `json:"harness"`
 		Label   string `json:"label"`

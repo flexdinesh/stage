@@ -31,8 +31,6 @@ type Adapter struct {
 	models    []model
 	modelsAt  time.Time
 	modelsErr error
-	// dirs are threads' directories seen by Observe and Launch.
-	dirs map[string]string
 }
 
 // Cache windows: health is read on every sync tick; the model catalog
@@ -270,18 +268,6 @@ func title(dir string) string {
 		}
 	}
 	return base
-}
-
-// Destinations: Codex has no web or app destination; the resume command
-// attaches the user's terminal to the thread (live, through the daemon).
-func (a *Adapter) Destinations(_ context.Context, ref execution.SessionRef) execution.Links {
-	if !a.valid(ref) {
-		return execution.Links{}
-	}
-	a.mu.Lock()
-	dir := a.dirs[ref.ExternalSessionID]
-	a.mu.Unlock()
-	return execution.Links{Command: a.resumeIn(dir, ref.ExternalSessionID)}
 }
 
 // resumeIn is the resume command run from the thread's directory.

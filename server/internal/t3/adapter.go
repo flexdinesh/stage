@@ -283,7 +283,7 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 	if o.Parent != nil {
 		o.Parent.ConnectionID = ref.ConnectionID
 	}
-	o.Links = a.Destinations(ctx, ref)
+	o.Links = a.sessionLinks(ctx, ref)
 	if err = o.Valid(); err != nil {
 		return o, err
 	}
@@ -329,19 +329,22 @@ func (a *Adapter) Attention(ctx context.Context) ([]execution.SessionRef, error)
 	}
 	return nil, errors.New("T3 attention limit exceeded")
 }
-func (a *Adapter) Destinations(ctx context.Context, ref execution.SessionRef) execution.Links {
+func (a *Adapter) sessionLinks(ctx context.Context, ref execution.SessionRef) execution.Links {
 	if ref.ConnectionID != a.ConnectionID {
 		return execution.Links{}
 	}
 	env := a.Client.Status(ctx).EnvironmentID
-	web := ""
+	return execution.Links{Web: a.webThreadURL(env, ref.ExternalSessionID), Native: AppThreadURL(env, ref.ExternalSessionID)}
+}
+
+func (a *Adapter) webThreadURL(env, id string) string {
 	switch c := a.Client.(type) {
 	case interface{ PublicURL() string }:
-		web = WebThreadURL(c.PublicURL(), env, ref.ExternalSessionID)
+		return WebThreadURL(c.PublicURL(), env, id)
 	case interface{ WebBase() string }: // the fake (T3_FAKE)
-		web = WebThreadURL(c.WebBase(), env, ref.ExternalSessionID)
+		return WebThreadURL(c.WebBase(), env, id)
 	}
-	return execution.Links{Web: web, Native: AppThreadURL(env, ref.ExternalSessionID)}
+	return ""
 }
 func (a *Adapter) Opening(ctx context.Context, ref execution.SessionRef, full bool) (*execution.Reply, error) {
 	r := OpeningReader{T3: a.Client}
@@ -488,12 +491,13 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, checkpoint ex
 	if err = persist(); err != nil {
 		return execution.Observation{}, err
 	}
-	o, err := a.Observe(ctx, execution.SessionRef{ConnectionID: in.ConnectionID, ExternalSessionID: out.ThreadID})
+	ref := execution.SessionRef{ConnectionID: in.ConnectionID, ExternalSessionID: out.ThreadID}
+	o, err := a.Observe(ctx, ref)
 	if err == nil {
 		return o, nil
 	}
 	now := time.Now().UTC()
-	return execution.Observation{Session: execution.SessionRef{ConnectionID: in.ConnectionID, ExternalSessionID: out.ThreadID}, Project: in.Project, Title: in.Title, State: "running", Active: true, CreatedAt: now, UpdatedAt: now, ExecutionID: out.RunID, Links: a.Destinations(ctx, execution.SessionRef{ConnectionID: in.ConnectionID, ExternalSessionID: out.ThreadID})}, nil
+	return execution.Observation{Session: ref, Project: in.Project, Title: in.Title, State: "running", Active: true, CreatedAt: now, UpdatedAt: now, ExecutionID: out.RunID, Links: a.sessionLinks(ctx, ref)}, nil
 }
 
 var _ execution.Adapter = (*Adapter)(nil)
@@ -511,7 +515,7 @@ func (a *Adapter) ResolveLink(ctx context.Context, raw string) (execution.Sessio
 			id = parts[1]
 		}
 	} else {
-		base := a.Destinations(ctx, execution.SessionRef{ConnectionID: a.ConnectionID, ExternalSessionID: "stage-link-placeholder"}).Web
+		base := a.webThreadURL(env, "stage-link-placeholder")
 		b, e := url.Parse(base)
 		if e == nil && base != "" && strings.EqualFold(u.Scheme, b.Scheme) && strings.EqualFold(u.Host, b.Host) {
 			prefix := strings.TrimSuffix(b.EscapedPath(), "stage-link-placeholder")

@@ -823,6 +823,11 @@ by Go decode) and is `jsonb`.
 | `tasks`/`schedules.model_options`, `threads.pull_requests`, `threads.recent_runs`, `question_responses.answers` | Dropped (see Columns) | none |
 | `tasks.workspace`, `schedules.workspace` | Dropped (0034, #420; moved into `execution_config` options by 0033) | none |
 
+Session links come from the latest observation in either placement. An
+unconfirmed attempt retains its saved resume command when its observation
+could not be stored. Existing attempt and acceptance evidence keep their
+stored format.
+
 `journal_entries.text` and `journal_launch_context.instructions` are plain
 text, not JSON, and stay `text`.
 

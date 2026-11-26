@@ -39,9 +39,6 @@ func (f fakeBase) Attention(context.Context) ([]execution.SessionRef, error) { r
 func (f fakeBase) Opening(context.Context, execution.SessionRef, bool) (*execution.Reply, error) {
 	return nil, execution.ErrUnavailable
 }
-func (f fakeBase) Destinations(context.Context, execution.SessionRef) execution.Links {
-	return execution.Links{}
-}
 func (f fakeBase) Stop(context.Context, execution.SessionRef) error { return nil }
 
 type assignedHarness struct {

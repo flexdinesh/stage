@@ -566,26 +566,6 @@ func (a *Adapter) links(s session) execution.Links {
 	return execution.Links{Command: "claude --resume " + s.id}
 }
 
-// Destinations reads only the cached session list and the transcript.
-func (a *Adapter) Destinations(ctx context.Context, ref execution.SessionRef) execution.Links {
-	if ref.ConnectionID != a.conn || !validUUID(ref.ExternalSessionID) {
-		return execution.Links{}
-	}
-	s := session{id: ref.ExternalSessionID}
-	if es, ok := a.roster.cached(); ok {
-		s.entry, s.listed = findSession(es, s.id)
-	}
-	a.authMu.Lock()
-	root := a.auth.auth.ProjectsDirectory
-	a.authMu.Unlock()
-	if p, ok := transcriptPath(root, s.entry.Cwd, s.id); ok {
-		if t, err := ReadHead(p); err == nil {
-			s.transcript, s.hasLog = t, true
-		}
-	}
-	return a.links(s)
-}
-
 // ResolveLink takes a session UUID or the 8-character id `claude agents`
 // shows (also inside a pasted `claude attach` or `--resume` command).
 func (a *Adapter) ResolveLink(ctx context.Context, raw string) (execution.SessionRef, error) {

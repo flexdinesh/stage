@@ -2,7 +2,7 @@
 // Disconnect), its Add connection menu, and the Manage drawer holding the harness's setup panel. Rows never expand;
 // Disconnect confirms inline under its row. On phone the whole row opens Manage (Disconnect lives in the drawer).
 // A disconnected connection stays a row (Reconnect, Forget) until it is forgotten or connected again.
-// A machine whose setup cannot run (offline, another API version) lists its connections on record, read-only.
+// A machine whose setup cannot run lists its connections on record, read-only.
 // Logic: lib/connectionRows.ts.
 import { useState } from "react";
 import { useForgetConnection, useHarnesses, usePreferences, useScopedHarnessDescriptors } from "../api/queries.ts";
@@ -10,6 +10,7 @@ import type { HarnessDescriptor, Machine } from "../api/types.ts";
 import { harnessSlots } from "../harnesses/index.ts";
 import { addConnectionOptions, addConnectionReason, connectShortcuts, connectionRows, machineLive, type ConnectionRowModel } from "../lib/connectionRows.ts";
 import { forgetPrompt, usageText } from "../lib/harnesses.ts";
+import { machineSetupAlert, machineStatusLabel } from "../lib/machines.ts";
 import { ConnectionCapabilities } from "./ConnectionCapabilities.tsx";
 import { ConnectionRow, MachineScope } from "./ConnectionRow.tsx";
 import { Button, ConfirmInline, Drawer, Hint, Menu, MenuItem, RowList, useMenu } from "./ui.tsx";
@@ -20,7 +21,7 @@ export { MachineScope } from "./ConnectionRow.tsx";
 export function useMachineConnections(machine: Machine) {
   const harnesses = useHarnesses();
   const live = machineLive(machine);
-  const descriptors = useScopedHarnessDescriptors();
+  const descriptors = useScopedHarnessDescriptors(live);
   const rows = connectionRows(machine, harnesses.connection);
   const kinds = live ? (descriptors.data?.harnesses ?? null) : [];
   const options = kinds === null ? null : addConnectionOptions(kinds, rows);
@@ -101,15 +102,20 @@ export function ConnectionRowList({ machine, connections, onManage }: { machine:
 /** The Manage drawer: the harness's own setup panel(s) on the machine. */
 export function ManageDrawer({ machine, target, onClose }: { machine: Machine; target: ManageTarget; onClose: () => void }) {
   const { Setup } = harnessSlots(target.descriptor.kind);
+  const alert = machineSetupAlert(machine);
   return (
     <Drawer title={`${target.descriptor.name} on ${machine.label}`} onClose={onClose}>
-      <MachineScope machine={machine}>
-        <div className="flex flex-col gap-3.5">
-          <Setup descriptor={target.descriptor} />
-          {target.disconnected === undefined ? <ConnectionCapabilities descriptor={target.descriptor} /> : null}
-          {target.disconnected === undefined ? null : <ForgetDisconnected row={target.disconnected} name={target.descriptor.name} onForgotten={onClose} />}
-        </div>
-      </MachineScope>
+      {alert === null ? (
+        <MachineScope machine={machine}>
+          <div className="flex flex-col gap-3.5">
+            <Setup descriptor={target.descriptor} />
+            {target.disconnected === undefined ? <ConnectionCapabilities descriptor={target.descriptor} /> : null}
+            {target.disconnected === undefined ? null : <ForgetDisconnected row={target.disconnected} name={target.descriptor.name} onForgotten={onClose} />}
+          </div>
+        </MachineScope>
+      ) : (
+        <Hint className="wrap-anywhere">{alert}</Hint>
+      )}
     </Drawer>
   );
 }
@@ -183,7 +189,7 @@ function RecordedRow({ machine, row, isDefault }: { machine: Machine; row: Conne
       name={kindName(row.harness)}
       machine={machine}
       detail={row.label === "" ? `connection #${row.id}` : `${row.label} · on record`}
-      chip={{ tone: "idle", label: machine.status === "needs_update" ? "needs update" : "offline" }}
+      chip={{ tone: "idle", label: machineLive(machine) ? "on record" : machineStatusLabel(machine.status) }}
       disconnect={null}
       isDefault={isDefault}
     />

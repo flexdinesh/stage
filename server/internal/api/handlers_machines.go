@@ -11,7 +11,6 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/db"
-	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
 // Machines and worker auth (docs/api.md "Machines", docs/runtime.md
@@ -28,11 +27,10 @@ type machineInfoJSON struct {
 	Kind string `json:"kind"`
 	// Online: local always; remote while its worker channel is live.
 	Online bool `json:"online"`
-	// Status is online, offline or needs_update (its worker presented a
-	// valid token with another API version and none matching connected
-	// since).
-	Status     string     `json:"status"`
-	LastSeenAt *time.Time `json:"lastSeenAt"`
+	// Status reflects the worker channel handshake and presence.
+	Status       string     `json:"status"`
+	StatusReason string     `json:"statusReason,omitempty"`
+	LastSeenAt   *time.Time `json:"lastSeenAt"`
 	// Version is the build the machine runs (null when unknown).
 	Version     *string                `json:"version"`
 	CreatedBy   int64                  `json:"createdBy"`
@@ -44,6 +42,7 @@ type machineInfoJSON struct {
 const (
 	machineOnline      = "online"
 	machineOffline     = "offline"
+	machineNegotiating = "negotiating"
 	machineNeedsUpdate = "needs_update"
 )
 
@@ -53,7 +52,7 @@ func (s *server) toMachineJSON(m db.MachineInfo) machineInfoJSON {
 		CreatedBy: m.CreatedBy, CreatedAt: m.CreatedAt, Connections: m.Connections,
 	}
 	version := m.Version
-	if m.ID == db.LocalMachine {
+	if m.ID == s.Sync.Machines().DefaultID() {
 		out.Kind, out.Online, out.Status, version = "local", true, machineOnline, buildinfo.Version
 	} else {
 		p := s.Channels.Presence(m.ID)
@@ -69,6 +68,18 @@ func (s *server) toMachineJSON(m db.MachineInfo) machineInfoJSON {
 			}
 		case p.NeedsUpdate != nil:
 			out.Status = machineNeedsUpdate
+			out.StatusReason = p.NeedsUpdate.Reason
+			if !p.NeedsUpdate.ServerOlder {
+				out.StatusReason = fmt.Sprintf("Update Stage on %s. Its worker channel protocol is older than the main machine's.", m.Label)
+			}
+			if p.NeedsUpdate.Version != "" {
+				version = p.NeedsUpdate.Version
+			}
+		case p.Negotiating:
+			out.Status, out.StatusReason = machineNegotiating, "The Stage worker is negotiating capabilities and preparing harness setup."
+			if p.Version != "" {
+				version = p.Version
+			}
 		}
 	}
 	if version != "" {
@@ -289,21 +300,13 @@ func RejectMachineTokens(h http.Handler) http.Handler {
 	})
 }
 
-// worker guards a worker route. Every worker route requires the client's
-// Stage-Api-Version to equal the server's (409 api_version_mismatch).
-// authed routes require a valid machine token (401, WWW-Authenticate:
-// Bearer) and put its machine on the request context; the join route takes
-// only a pairing code and refuses an Authorization header (400).
-func (s *server) worker(authed bool, fn func(http.ResponseWriter, *http.Request) error) http.Handler {
+// worker guards a worker route. Channel routes negotiate their own protocol.
+// Other worker routes check the product API version. Authenticated routes
+// require a machine token; join accepts only a pairing code.
+func (s *server) worker(authed, checkAPI bool, fn func(http.ResponseWriter, *http.Request) error) http.Handler {
 	want := strconv.Itoa(buildinfo.APIVersion)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get(buildinfo.APIVersionHeader); got != want {
-			// A machine whose worker holds a valid token "needs update".
-			if authed {
-				if id, err := s.Store.AuthenticateMachine(r.Context(), bearer(r)); err == nil {
-					s.Channels.MarkNeedsUpdate(id, got, r.Header.Get(workerchan.VersionHeader))
-				}
-			}
+		if got := r.Header.Get(buildinfo.APIVersionHeader); checkAPI && got != want {
 			writeJSON(w, http.StatusConflict, map[string]string{
 				"error": fmt.Sprintf("API version mismatch: this server speaks %s, the worker sent %q; install the same Stage version on both", want, got),
 				"code":  "api_version_mismatch",
@@ -350,8 +353,8 @@ func writeAuthErr(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-// machineReachable: the machine's setup answers now (the local machine, or a
-// worker online on this API version).
+// machineReachable reports whether the local host or a ready worker can answer.
 func (s *server) machineReachable(machine int64) bool {
-	return machine == db.LocalMachine || s.Channels.Presence(machine).Online
+	m, ok := s.Sync.Machines().Get(machine)
+	return ok && m.Online()
 }

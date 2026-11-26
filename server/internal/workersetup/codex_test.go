@@ -85,7 +85,7 @@ func TestRemoteCodexConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	}
 	r.wait("adapter on the new connection", func() bool {
 		_, ok := m.Adapter(id)
-		return ok && m.Described()
+		return ok && m.Online()
 	})
 	if h := m.Adapters()[id].Health(ctx); !h.Available {
 		t.Fatalf("adapter health %+v", h)
@@ -118,10 +118,6 @@ func TestRemoteCodexConnectsAndRunsATaskOverTheChannel(t *testing.T) {
 	if err != nil || o.Reply == nil || o.Reply.Text != "Fixed." || o.Links.Command != "cd "+codexDir+" && "+bin+" resume "+thread {
 		t.Fatalf("stored observation %+v %v", o, err)
 	}
-	if links := m.Adapters()[id].Destinations(ctx, *got.Session); links != (execution.Links{}) {
-		t.Fatalf("remote destinations %+v", links)
-	}
-
 	if err := c.Disconnect(ctx); err != nil {
 		t.Fatal(err)
 	}

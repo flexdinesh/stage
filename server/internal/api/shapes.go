@@ -71,39 +71,34 @@ func (s *server) createdTasks(c db.CreatedTasks) createdTasksJSON {
 }
 
 func (s *server) task(t db.Task) taskJSON {
-	if a, e := s.Store.Attempt(context.Background(), t.ID, t.LaunchAttempt); e == nil {
-		if a.Session != nil {
-			links := s.sessionLinks(context.Background(), a.Session.ConnectionID, &a.Session.ExternalSessionID)
-			// No destination and no stored observation: the resume command
-			// the attempt kept.
-			if links == (execution.Links{}) && a.Session.Links != nil {
-				links = *a.Session.Links
-			}
-			a.Session.Links = &links
-		}
-		t.Launch = &a
-	}
+	ctx := context.Background()
+	s.loadTaskAttempt(ctx, &t)
 	out := taskJSON{Task: t}
 	if t.Session != nil {
-		out.Links = s.sessionLinks(context.Background(), t.ConnectionID, &t.Session.ExternalSessionID)
+		out.Links = s.sessionLinks(ctx, t.Session.ConnectionID, &t.Session.ExternalSessionID)
 	}
 	return out
 }
 
-// sessionLinks are the session's links: its adapter's destinations (an
-// in-process adapter's resume command too), else its stored observation's
-// (a remote machine's adapter resolves none without a call).
+func (s *server) loadTaskAttempt(ctx context.Context, t *db.Task) {
+	if a, e := s.Store.Attempt(ctx, t.ID, t.LaunchAttempt); e == nil {
+		if a.Session != nil {
+			if o, err := s.Store.Observation(ctx, a.Session.SessionRef); err == nil {
+				a.Session.Links = &o.Links
+			} else if a.Session.Links == nil {
+				a.Session.Links = &execution.Links{}
+			}
+		}
+		t.Launch = &a
+	}
+}
+
+// sessionLinks returns the links from the session's latest stored observation.
 func (s *server) sessionLinks(ctx context.Context, id int64, external *string) execution.Links {
 	if external == nil {
 		return execution.Links{}
 	}
 	ref := db.SessionRef{ConnectionID: id, ExternalSessionID: *external}
-	if a, err := s.Sync.Adapter(id); err == nil {
-		links := a.Destinations(ctx, ref)
-		if links.Web != "" || links.Native != "" || links.Command != "" {
-			return links
-		}
-	}
 	if o, err := s.Store.Observation(ctx, ref); err == nil {
 		return o.Links
 	}

@@ -77,7 +77,7 @@ func (s *server) resolveConnection(w http.ResponseWriter, r *http.Request) error
 	if !ok {
 		return &db.InvalidError{Msg: fmt.Sprintf("harness: unknown kind %q", kind)}
 	}
-	machine := db.LocalMachine
+	machine := s.Sync.Machines().DefaultID()
 	if m := db.ActingMachine(r.Context()); m != nil {
 		machine = *m
 	}
@@ -128,16 +128,12 @@ func (s *server) forgetConnection(w http.ResponseWriter, r *http.Request) error 
 	}
 	if !c.Active {
 		err = s.Store.ForgetConnection(r.Context(), id)
-	} else if !s.machineReachable(c.MachineID) {
+	} else if m, ok := s.Sync.Machines().Get(c.MachineID); !ok || !m.Online() {
 		err = db.Conflict("This connection's machine is offline. Forget it once the machine is back.")
 	} else if s.configured(r.Context(), c).Configured {
 		err = db.Conflict("This connection is in use. Disconnect it first.")
 	} else if err = s.Store.RetireAndForget(r.Context(), id); err == nil {
-		// Never polled or launched on again, even once the harness is set up
-		// anew (a remote machine's adapters follow the record).
-		if l, ok := s.Sync.Machines().Local(c.MachineID); ok {
-			l.Retired(id)
-		}
+		m.Retired(id)
 	}
 	if err != nil {
 		return err

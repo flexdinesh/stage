@@ -277,11 +277,12 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	out := taskDetailJSON{taskJSON: s.task(task), Events: events, CurrentHandoffs: []db.Handoff{}}
+	s.loadTaskAttempt(ctx, &task)
+	out := taskDetailJSON{taskJSON: taskJSON{Task: task}, Events: events, CurrentHandoffs: []db.Handoff{}}
 	if task.Session != nil {
 		obs, e := s.Store.Observation(ctx, *task.Session)
 		if e == nil {
-			out.FinalReply, out.Usage = obs.Reply, obs.Usage
+			out.Links, out.FinalReply, out.Usage = obs.Links, obs.Reply, obs.Usage
 			if obs.Branch != "" || obs.Directory != "" {
 				out.Reported = &reportedJSON{Branch: obs.Branch, Directory: obs.Directory}
 			}

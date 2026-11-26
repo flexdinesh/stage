@@ -155,12 +155,15 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 	if err != nil || !slices.Contains(attention, ref) {
 		t.Fatalf("pending form absent from attention: %v %v", attention, err)
 	}
-	dest := a.Destinations(ctx, ref)
-	verified, e := a.ResolveLink(ctx, dest.Web)
-	if e != nil || verified != ref {
-		t.Fatal(dest, e)
+	observation, e := a.Observe(ctx, ref)
+	if e != nil {
+		t.Fatal(e)
 	}
-	resp, e := http.Get(dest.Web)
+	verified, e := a.ResolveLink(ctx, observation.Links.Web)
+	if e != nil || verified != ref {
+		t.Fatal(observation.Links, e)
+	}
+	resp, e := http.Get(observation.Links.Web)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -173,7 +176,7 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 	path := "/api/connections/2/sessions/" + id
 	preview := httptest.NewRecorder()
 	router.ServeHTTP(preview, httptest.NewRequest("GET", path, nil))
-	if preview.Code != 200 || !strings.Contains(preview.Body.String(), dest.Web) {
+	if preview.Code != 200 || !strings.Contains(preview.Body.String(), observation.Links.Web) {
 		t.Fatalf("adoption preview: %d %s", preview.Code, preview.Body.String())
 	}
 	for _, status := range []int{201, 200} {
@@ -373,8 +376,7 @@ func TestClientContract(t *testing.T) {
 			if writes != 0 {
 				t.Fatal("health check wrote to server")
 			}
-			ref := execution.SessionRef{ConnectionID: 2, ExternalSessionID: "ses_123"}
-			link := a.Destinations(t.Context(), ref).Web
+			link := a.sessionWebURL("ses_123")
 			if _, e = a.ResolveLink(t.Context(), strings.Replace(link, srv.URL, "https://other.invalid", 1)); e == nil {
 				t.Fatal("accepted another connection")
 			}

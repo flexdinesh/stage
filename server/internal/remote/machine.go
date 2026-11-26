@@ -31,10 +31,10 @@ type Machine struct {
 	hosts *Hosts
 
 	mu       sync.Mutex
-	desc     *Description
+	snapshot *workerchan.Ready
+	desc     description
 	adapters map[int64]*Adapter
-	// sums are the worker's last connector summaries by kind (describe, or
-	// a setup call's status).
+	// sums are connector summaries from the latest snapshot or status call.
 	sums       map[string]harness.Summary
 	connectors map[string]*Connector
 }
@@ -58,45 +58,66 @@ func (m *Machine) offline() (string, bool) {
 	case p.Online:
 		return "", false
 	case p.NeedsUpdate != nil:
-		return "Its machine needs an update: the Stage worker there speaks another API version.", true
+		return p.NeedsUpdate.Reason, true
+	case p.Negotiating:
+		return workerchan.ErrNegotiating.Error(), true
 	}
 	return "Its machine is offline: the Stage worker there is not connected.", true
 }
 
-// Profile is the worker's hosting policy as it last described it (a
-// foreground server's until then).
+// refreshSnapshot updates the cached connector summaries when a new ready
+// snapshot arrives. It retains the last-known summaries while disconnected.
+// Call with m.mu held.
+func (m *Machine) refreshSnapshot() *workerchan.Ready {
+	if m.hub == nil {
+		return nil
+	}
+	snapshot, _ := m.hub.Advertisement(m.id)
+	if snapshot != nil && snapshot != m.snapshot {
+		m.snapshot = snapshot
+		m.desc = description{}
+		_ = json.Unmarshal(snapshot.Details, &m.desc)
+		clear(m.sums)
+		for _, c := range m.desc.Connectors {
+			m.sums[c.Kind] = c.Summary
+		}
+	}
+	return snapshot
+}
+
+// Profile is the last worker profile, or the foreground server default.
 func (m *Machine) Profile() harness.Profile {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.desc == nil {
+	m.refreshSnapshot()
+	if m.desc.Profile.Kind == "" {
 		return harness.Profile{Kind: harness.ProfileServer}
 	}
 	return m.desc.Profile
 }
 
-// Allows: connected harnesses always; a hosted one as the worker's
-// profile allows it (harness.Profile.Allows), with the fix in the worker's
-// terms, and once its setup is ready only if the worker set it up (an
-// older worker sets up no Claude Code or Codex). Until the worker
-// described the machine its profile is unknown: allowed, so the calls
-// themselves answer offline or still starting.
+// Allows combines placement policy with the current worker's declared kinds.
 func (m *Machine) Allows(d harness.Descriptor) execution.Availability {
 	m.mu.Lock()
-	desc := m.desc
+	snapshot := m.refreshSnapshot()
+	profile := m.desc.Profile
 	m.mu.Unlock()
-	if desc == nil {
-		return execution.Availability{Available: true}
-	}
-	if desc.Profile.Allows(d).Available {
-		if d.Hosting == harness.Hosted && desc.SetupReady && !slices.ContainsFunc(desc.Connectors, func(c ConnectorState) bool { return c.Kind == d.Kind }) {
-			return execution.Availability{Reason: d.Name + " can't run on this machine: its Stage worker doesn't set it up. Update Stage on that machine."}
+	if snapshot == nil {
+		if m.hub != nil && m.hub.Presence(m.id).Negotiating {
+			return execution.Availability{Reason: workerchan.ErrNegotiating.Error()}
 		}
 		return execution.Availability{Available: true}
 	}
-	if desc.Profile.Kind == harness.ProfileContainer {
-		return execution.Availability{Reason: d.Name + " can't run in a container: run this machine's Stage worker outside Docker."}
+	if !profile.Allows(d).Available {
+		if profile.Kind == harness.ProfileContainer {
+			return execution.Availability{Reason: d.Name + " can't run in a container: run this machine's Stage worker outside Docker."}
+		}
+		return execution.Availability{Reason: d.Name + " runs on this machine only when its Stage worker allows local harnesses: use the worker service, or run stage worker run --local-harnesses."}
 	}
-	return execution.Availability{Reason: d.Name + " runs on this machine only when its Stage worker allows local harnesses: use the worker service, or run stage worker run --local-harnesses."}
+	if !slices.Contains(snapshot.Kinds, d.Kind) {
+		return execution.Availability{Reason: d.Name + " can't run on this machine: its Stage worker doesn't set it up. Update Stage on that machine."}
+	}
+	return execution.Availability{Available: true}
 }
 
 func (m *Machine) active(connection int64) bool {
@@ -166,52 +187,16 @@ func (m *Machine) Connectors() map[string]harness.Connector {
 
 func (m *Machine) Ops() machine.Ops { return ops{m} }
 
-// traits are the optional interfaces the worker's adapter for connection
-// implements; known is false until the worker described that connection
-// (a connection installed after the last describe is assumed capable, as
-// before the first describe: its calls answer for themselves).
-func (m *Machine) traits(connection int64) (traits []string, known bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.desc == nil {
-		return nil, false
-	}
-	for _, h := range m.desc.Connections {
-		if h.ConnectionID == connection {
-			return h.Traits, true
+// traits are proven only by the current ready snapshot.
+func (m *Machine) traits(connection int64) []string {
+	snapshot, _ := m.hub.Advertisement(m.id)
+	if snapshot != nil {
+		for _, c := range snapshot.Connections {
+			if c.ConnectionID == connection {
+				return c.Traits
+			}
 		}
 	}
-	return nil, false
-}
-
-// Described reports whether the worker described the machine since this
-// server started.
-func (m *Machine) Described() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.desc != nil
-}
-
-// Describe asks the worker what it hosts (machine.describe) and keeps the
-// answer: traits and profile.
-func (m *Machine) Describe(ctx context.Context) error {
-	raw, err := m.hub.Call(ctx, m.id, KindDescribe, 0, nil, CallTimeout)
-	if err = decodeError(err); err != nil {
-		return err
-	}
-	var d Description
-	if err := jsonUnmarshal(raw, &d); err != nil {
-		return err
-	}
-	m.mu.Lock()
-	m.desc = &d
-	if d.SetupReady {
-		clear(m.sums)
-		for _, c := range d.Connectors {
-			m.sums[c.Kind] = c.Summary
-		}
-	}
-	m.mu.Unlock()
 	return nil
 }
 
@@ -240,7 +225,7 @@ func (o ops) call(ctx context.Context, kind string, body, out any) error {
 
 // Hosts keeps a machine.Set's remote machines in step with the main
 // server's record: a machine that joins is hosted, a removed one is not,
-// and each worker that connects (or reports a change) is described.
+// and worker ready snapshots trigger a refresh.
 type Hosts struct {
 	set   *machine.Set
 	hub   *workerchan.Hub
@@ -255,10 +240,12 @@ type Hosts struct {
 
 // SetSetup gives hosted machines connection setup for hooks.Kinds. Call it
 // before the first Join.
-func (h *Hosts) SetSetup(hooks SetupHooks) { h.setup = hooks }
+func (h *Hosts) SetSetup(hooks SetupHooks) {
+	h.setup = hooks
+	h.hub.SetHarnessKinds(hooks.Kinds)
+}
 
-// NewHosts hosts remote machines in set over hub and registers the hub's
-// attach hook and machine.changed handler. changed may be nil.
+// NewHosts hosts remote machines in set and follows their ready snapshots.
 func NewHosts(set *machine.Set, hub *workerchan.Hub, conns Connections, changed func(), log *slog.Logger) *Hosts {
 	if log == nil {
 		log = slog.Default()
@@ -267,10 +254,11 @@ func NewHosts(set *machine.Set, hub *workerchan.Hub, conns Connections, changed 
 		changed = func() {}
 	}
 	h := &Hosts{set: set, hub: hub, conns: conns, log: log, changed: changed}
-	hub.OnAttach(h.describe)
-	hub.Handle(KindChanged, func(_ context.Context, id int64, _ workerchan.Envelope) (any, error) {
-		go h.describe(id)
-		return Empty{}, nil
+	hub.SetCallbackKinds([]string{KindCheckpointSave, KindLaunchImage, KindObservation})
+	hub.OnReady(func(id int64) {
+		if _, ok := h.Machine(id); ok {
+			h.changed()
+		}
 	})
 	return h
 }
@@ -287,9 +275,6 @@ func (h *Hosts) Join(id int64) {
 		return
 	}
 	h.changed()
-	if h.hub.Presence(id).Online {
-		go h.describe(id)
-	}
 }
 
 // Leave stops hosting remote machine id (it was removed).
@@ -307,20 +292,6 @@ func (h *Hosts) Machine(id int64) (*Machine, bool) {
 	}
 	r, ok := m.(*Machine)
 	return r, ok
-}
-
-func (h *Hosts) describe(id int64) {
-	m, ok := h.Machine(id)
-	if !ok {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), CallTimeout)
-	defer cancel()
-	if err := m.Describe(ctx); err != nil {
-		h.log.Warn("describe remote machine", "machine", id, "err", err)
-	}
-	// Reconnected or changed: poll its connections now.
-	h.changed()
 }
 
 // jsonUnmarshal decodes a worker reply.

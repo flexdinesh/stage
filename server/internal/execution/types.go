@@ -408,5 +408,4 @@ type Adapter interface {
 	Stop(context.Context, SessionRef) error
 	Attention(context.Context) ([]SessionRef, error)
 	Opening(context.Context, SessionRef, bool) (*Reply, error)
-	Destinations(context.Context, SessionRef) Links
 }

@@ -30,7 +30,7 @@ type harnessJSON struct {
 // harnessMachine is the {id} path value's machine (none: the local
 // machine, the /api/harnesses alias); 404 when unknown or removed.
 func (s *server) harnessMachine(r *http.Request) (db.MachineInfo, error) {
-	id := db.LocalMachine
+	id := s.Sync.Machines().DefaultID()
 	if r.PathValue("id") != "" {
 		var err error
 		if id, err = pathID(r); err != nil {
@@ -127,6 +127,7 @@ func (s *server) writeConnectionStatus(w http.ResponseWriter, ctx context.Contex
 	if err != nil {
 		return err
 	}
+	st.Summary = s.harnessSummary(st.Summary)
 	if st.Fields == nil {
 		st.Fields = []harness.FieldState{}
 	}
@@ -141,6 +142,13 @@ func (s *server) writeConnectionStatus(w http.ResponseWriter, ctx context.Contex
 	}
 	writeJSON(w, http.StatusOK, out)
 	return nil
+}
+
+func (s *server) harnessSummary(summary harness.Summary) harness.Summary {
+	if summary.Configured && summary.LastError == "" {
+		summary.LastError = s.Sync.StreamError(summary.ConnectionID)
+	}
+	return summary
 }
 
 // harnessStatus is GET /api/harnesses/{kind}/status (refreshes a stale probe).

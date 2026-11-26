@@ -1,6 +1,7 @@
 package execution_test
 
 import (
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -14,7 +15,7 @@ import (
 // implements them all in Go and reports which ones its worker's adapter
 // has (execution.Partial), so a type assertion would offer what the
 // harness lacks: product code uses execution.As instead.
-var optional = map[string]bool{"LinkResolver": true, "WorkspaceFeatures": true, "Correlator": true, "EventSource": true, "Interactive": true}
+var optional = execution.OptionalInterfaces()
 
 func TestOptionalInterfacesUseAs(t *testing.T) {
 	root, err := filepath.Abs("..")

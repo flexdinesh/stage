@@ -38,49 +38,17 @@ type Service struct {
 	// OnConnectionSynced runs after a connection's full sync succeeded
 	// (the composition records it where a harness's setup shows it).
 	OnConnectionSynced                                             func(ctx context.Context, connection int64, at time.Time) error
-	Harnesses                                                      *harness.Registry              // descriptors by kind; completion is inferred only from a declared closure
-	PublicURL                                                      string                         // STAGE_PUBLIC_URL, named in launch journal instructions when set
-	CLI                                                            string                         // installed CLI name (install.CLIName), named in launch journal instructions
-	Gateways                                                       func(machineID int64) []string // a remote machine's agent gateway URLs (workerchan.Hub.Gateways), named in its launch journal instructions; nil: none known
+	Harnesses                                                      *harness.Registry // descriptors by kind; completion is inferred only from a declared closure
+	PublicURL                                                      string            // STAGE_PUBLIC_URL, named in launch journal instructions when set
+	CLI                                                            string            // installed CLI name (install.CLIName), named in launch journal instructions
 	FullSyncEvery, PollEvery, StalePollEvery, LaunchAttemptTimeout time.Duration
 	syncs                                                          gosync.Map // connection ID to *syncState (full syncs)
+	streamErrors                                                   gosync.Map // connection ID to *atomic.Pointer[string]
 	lastStalePoll                                                  gosync.Map // connection ID to *atomic.Int64
 	kickSync                                                       chan struct{}
 	locks                                                          gosync.Map
 	started                                                        time.Time
 	watchSeeded                                                    gosync.Map // connection IDs with a successful first observation pass
-}
-
-// hostsAll is the profile of a machine handed its adapters directly: it
-// hosts whatever it was given.
-var hostsAll = harness.Profile{Kind: harness.ProfileServer, LocalProcesses: true}
-
-// NewWithAdapters hosts adapters on in-process machines, each on its
-// connection's machine (tests and fixed compositions).
-func NewWithAdapters(store *db.Store, adapters map[int64]execution.Adapter, log *slog.Logger) *Service {
-	locals := map[int64]*machine.Local{}
-	for id, a := range adapters {
-		m := store.ConnectionMachine(id)
-		if m == 0 {
-			m = db.LocalMachine
-		}
-		if locals[m] == nil {
-			locals[m] = machine.NewLocal(m, hostsAll, nil)
-		}
-		locals[m].Install(id, id, a)
-	}
-	if locals[db.LocalMachine] == nil {
-		locals[db.LocalMachine] = machine.NewLocal(db.LocalMachine, hostsAll, nil)
-	}
-	ms := make([]machine.Machine, 0, len(locals))
-	for _, l := range locals {
-		ms = append(ms, l)
-	}
-	s := NewForMachines(store, machine.MustSet(ms...), log)
-	for _, l := range locals {
-		l.OnChange(s.ConnectionsChanged)
-	}
-	return s
 }
 
 // NewForMachines coordinates the harnesses machines host. Each in-process
@@ -133,6 +101,7 @@ func (s *Service) Adapter(id int64) (execution.Adapter, error) {
 // from connection old to next (an install, a replaced instance or a
 // disconnect): old is no longer polled, watched or launched on.
 func (s *Service) ConnectionsChanged(old, next int64) {
+	s.streamErrors.Delete(old)
 	if old != next {
 		s.watchSeeded.Delete(old)
 	}
@@ -212,7 +181,10 @@ func (s *Service) Run(ctx context.Context) {
 			workers[id] = refresh
 			wg.Add(4)
 			go loop(s.FullSyncEvery, refresh, func(ctx context.Context) error { _, err := s.syncConnection(ctx, id); return err })
-			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.Stream(ctx, id) })
+			go loop(s.PollEvery, nil, func(ctx context.Context) error {
+				_ = s.Stream(ctx, id) // Stream records and logs its own failures.
+				return nil
+			})
 			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.pollConnection(ctx, id) })
 			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.watchAttention(ctx, id) })
 		}
@@ -501,15 +473,46 @@ func (s *Service) Stream(ctx context.Context, id int64) error {
 	}
 	src, ok := execution.As[execution.EventSource](a)
 	if !ok {
+		// An offline worker cannot advertise traits. Keep the last failure
+		// until that machine can answer or the connection changes.
+		if m, found := s.machines.Get(s.store.ConnectionMachine(id)); found && m.Online() {
+			s.streamErrors.Delete(id)
+		}
 		return nil
 	}
-	return src.Events(ctx, func(ctx context.Context, o execution.Observation) error {
+	v, _ := s.streamErrors.LoadOrStore(id, &atomic.Pointer[string]{})
+	status := v.(*atomic.Pointer[string])
+	err = src.Events(ctx, func(ctx context.Context, o execution.Observation) error {
 		if o.Session.ConnectionID != id {
 			return errors.New("pushed observation names another connection")
 		}
 		_, err := s.Ingest(ctx, o)
+		if err == nil {
+			status.Store(nil)
+		}
 		return err
 	})
+	if ctx.Err() == nil {
+		if err == nil {
+			status.Store(nil)
+		} else if current, _ := s.streamErrors.Load(id); current == status {
+			msg := err.Error()
+			status.Store(&msg)
+			s.log.Warn("observation stream", "connection", id, "err", err)
+		}
+	}
+	return err
+}
+
+// StreamError is the latest event stream failure for a connection, cleared
+// when the stream recovers. Polling continues independently.
+func (s *Service) StreamError(id int64) string {
+	if v, ok := s.streamErrors.Load(id); ok {
+		if msg := v.(*atomic.Pointer[string]).Load(); msg != nil {
+			return *msg
+		}
+	}
+	return ""
 }
 
 // Ingested is what Ingest did with a pushed observation.
@@ -554,13 +557,8 @@ func (s *Service) closure(kind string, o execution.Observation) (harness.Closure
 // httpAPI names the HTTP API for a session on connection's machine: the
 // public URL locally, the worker's agent gateway on a remote machine.
 func (s *Service) httpAPI(connection int64) string {
-	m := s.store.ConnectionMachine(connection)
-	remote := m != 0 && m != db.LocalMachine
-	var gateway []string
-	if remote && s.Gateways != nil {
-		gateway = s.Gateways(m)
-	}
-	return httpAPI(s.PublicURL, remote, gateway)
+	remote, gateways := s.machines.AgentGateways(s.store.ConnectionMachine(connection))
+	return httpAPI(s.PublicURL, remote, gateways)
 }
 
 // attribution is kind's caller attribution (zero when unknown).
@@ -609,7 +607,7 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 		return t, harnessErr(e)
 	}
 	if op := features.Operations[execution.OpLaunch]; !op.Available {
-		return t, db.Conflict("Launch unavailable: %s", op.Reason)
+		return t, &db.ConflictError{Code: "operation_unavailable", Msg: "Launch unavailable: " + op.Reason}
 	}
 	d, _ := s.descriptor(t.Harness)
 	correlated := d.Launch == harness.LaunchCorrelated

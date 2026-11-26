@@ -163,7 +163,6 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, cp execution.
 		if err := r.save(ctx, save); err != nil {
 			return zero, err
 		}
-		a.remember(r.Thread, in.Directory)
 		if title := strings.TrimSpace(in.Title); title != "" {
 			// The name is cosmetic: a failure leaves Codex's preview.
 			_ = a.client.call(ctx, "thread/name/set", map[string]any{"threadId": r.Thread, "name": title}, nil)

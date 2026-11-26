@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/machine"
+	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
 )
 
@@ -55,9 +57,6 @@ func (p *probe) Attention(context.Context) ([]execution.SessionRef, error) {
 }
 func (p *probe) Opening(context.Context, execution.SessionRef, bool) (*execution.Reply, error) {
 	return nil, execution.ErrNoReply
-}
-func (p *probe) Destinations(_ context.Context, ref execution.SessionRef) execution.Links {
-	return execution.Links{Web: "https://probe.invalid/" + ref.ExternalSessionID}
 }
 func (p *probe) ResolveLink(_ context.Context, link string) (execution.SessionRef, error) {
 	return execution.SessionRef{ConnectionID: 5, ExternalSessionID: strings.TrimPrefix(link, "probe:")}, nil
@@ -173,7 +172,7 @@ func TestLaunchImagesAreFetchedByTheWorker(t *testing.T) {
 	}
 }
 
-func TestProxyTraitsDestinationsAndErrors(t *testing.T) {
+func TestProxyTraitsAndErrors(t *testing.T) {
 	p := &probe{}
 	rig := remotetest.New(t, 2, map[int64]execution.Adapter{5: p})
 	a := rig.Adapter(5)
@@ -193,9 +192,6 @@ func TestProxyTraitsDestinationsAndErrors(t *testing.T) {
 	lr, _ := execution.As[execution.LinkResolver](a)
 	if ref, err := lr.ResolveLink(t.Context(), "probe:s1"); err != nil || ref.ExternalSessionID != "s1" {
 		t.Fatal(ref, err)
-	}
-	if links := a.Destinations(t.Context(), execution.SessionRef{ConnectionID: 5, ExternalSessionID: "s1"}); links != (execution.Links{}) {
-		t.Fatal("destinations made a call", links)
 	}
 	if h := a.Health(t.Context()); !h.Available || h.Identity != "probe-1" {
 		t.Fatal(h)
@@ -221,6 +217,9 @@ func TestProxyTraitsDestinationsAndErrors(t *testing.T) {
 		t.Fatal("profile", got)
 	}
 	rig.StopWorker()
+	if has[execution.LinkResolver](a) {
+		t.Fatal("proxy offers a trait after the session ended")
+	}
 	if h := a.Health(t.Context()); h.Available || !strings.Contains(h.Reason, "offline") || h.Identity != "probe-1" {
 		t.Fatal("offline health", h)
 	}
@@ -230,6 +229,44 @@ func TestProxyTraitsDestinationsAndErrors(t *testing.T) {
 	var rejected *execution.Rejected
 	if _, err := a.Launch(t.Context(), execution.Intent{ConnectionID: 5}, execution.Checkpoint{}, nil); errors.As(err, &rejected) || !errors.Is(err, execution.ErrUnavailable) {
 		t.Fatal("offline launch must be unavailable, never rejected", err)
+	}
+}
+
+func TestMissingRequestKindKeepsOtherOperationsAvailable(t *testing.T) {
+	rig := remotetest.New(t, 2, map[int64]execution.Adapter{5: &probe{}})
+	a := rig.Adapter(5)
+	rig.StopWorker()
+	rig.SetMissingRequestKinds(remote.KindResolveLink)
+	rig.StartWorker()
+	lr, ok := execution.As[execution.LinkResolver](a)
+	if !ok {
+		t.Fatal("worker's trait announcement was lost")
+	}
+	var conflict *db.ConflictError
+	if _, err := lr.ResolveLink(t.Context(), "probe:s1"); !errors.As(err, &conflict) || conflict.Code != "operation_unavailable" || errors.Is(err, execution.ErrUnavailable) {
+		t.Fatalf("missing request kind: %v", err)
+	}
+	if h := a.Health(t.Context()); !h.Available || !rig.Machine().Online() {
+		t.Fatalf("unrelated health: %+v", h)
+	}
+	if _, err := a.Observe(t.Context(), execution.SessionRef{ConnectionID: 5, ExternalSessionID: "s1"}); err != nil {
+		t.Fatalf("unrelated observation: %v", err)
+	}
+	proxy := a.(*remote.Adapter)
+	if _, err := proxy.Requests(t.Context(), execution.SessionRef{ConnectionID: 5, ExternalSessionID: "s1"}); !errors.As(err, &conflict) || conflict.Code != "operation_unavailable" || errors.Is(err, execution.ErrUnavailable) {
+		t.Fatalf("unannounced trait call: %v", err)
+	}
+}
+
+func TestMissingLaunchKindLimitsDeclaredLaunchAvailability(t *testing.T) {
+	rig := remotetest.New(t, 2, map[int64]execution.Adapter{5: &probe{}})
+	a := rig.Adapter(5)
+	rig.StopWorker()
+	rig.SetMissingRequestKinds(remote.KindLaunch)
+	rig.StartWorker()
+	c, err := a.Features(t.Context())
+	if op := c.Operations[execution.OpLaunch]; err != nil || op.Available || op.Reason == "" || !rig.Machine().Online() {
+		t.Fatalf("launch availability %+v, features error %v", op, err)
 	}
 }
 

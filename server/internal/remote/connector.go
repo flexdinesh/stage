@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -19,7 +20,7 @@ const (
 )
 
 // UnavailableError: a remote machine's connection setup cannot answer now
-// (offline, another API version, or its worker is still starting). It
+// (offline, incompatible channel, or negotiating). It
 // wraps execution.ErrUnavailable: an offline machine is an offline
 // harness, never a failure.
 type UnavailableError struct {
@@ -60,14 +61,18 @@ var _ harness.Connector = (*Connector)(nil)
 func (m *Machine) summary(kind string) harness.Summary {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.refreshSnapshot()
 	return m.sums[kind]
 }
 
 // remember keeps a status's summary as kind's last report.
-func (m *Machine) remember(kind string, s harness.Summary) {
+func (m *Machine) remember(session, kind string, s harness.Summary) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.sums[kind] = s
+	if m.hub.SessionID(m.id) == session {
+		m.refreshSnapshot()
+		m.sums[kind] = s
+	}
 }
 
 // unavailable is why the machine's setup cannot answer now (nil: it can).
@@ -76,8 +81,10 @@ func (m *Machine) unavailable() error {
 	switch {
 	case p.Online:
 		return nil
+	case p.Negotiating:
+		return &UnavailableError{Code: CodeMachineStarting, Message: workerchan.ErrNegotiating.Error()}
 	case p.NeedsUpdate != nil:
-		return &UnavailableError{Code: CodeMachineNeedsUpdate, Message: "This machine needs an update: its Stage worker speaks another API version. Install the same Stage version as this server there."}
+		return &UnavailableError{Code: CodeMachineNeedsUpdate, Message: p.NeedsUpdate.Reason}
 	}
 	return &UnavailableError{Code: CodeMachineOffline, Message: "This machine is offline: its Stage worker is not connected. Its harness setup returns when it reconnects."}
 }
@@ -101,6 +108,13 @@ func (c *Connector) call(ctx context.Context, kind string, r ConnectorRequest) (
 	if err := c.m.unavailable(); err != nil {
 		return ConnectorStatus{}, err
 	}
+	snapshot, session := c.m.hub.Advertisement(c.m.id)
+	if snapshot == nil {
+		return ConnectorStatus{}, &UnavailableError{Code: CodeMachineStarting, Message: workerchan.ErrNegotiating.Error()}
+	}
+	if !slices.Contains(snapshot.Kinds, c.kind) {
+		return ConnectorStatus{}, &UnavailableError{Code: CodeMachineNeedsUpdate, Message: "Update Stage on the worker machine to set up " + c.kind + "."}
+	}
 	r.Kind = c.kind
 	raw, err := c.m.hub.Call(ctx, c.m.id, kind, 0, r, CallTimeout)
 	if err != nil {
@@ -110,7 +124,7 @@ func (c *Connector) call(ctx context.Context, kind string, r ConnectorRequest) (
 	if err := jsonUnmarshal(raw, &out); err != nil {
 		return ConnectorStatus{}, err
 	}
-	c.m.remember(c.kind, out.Status.Summary)
+	c.m.remember(session, c.kind, out.Status.Summary)
 	if h := c.m.hosts; h != nil && h.setup.Decorate != nil {
 		h.setup.Decorate(c.m.id, c.kind, &out.Status)
 	}
@@ -149,8 +163,6 @@ func (c *Connector) mutate(ctx context.Context, kind, action string, r Connector
 		if h.setup.Changed != nil {
 			h.setup.Changed(c.m.id, c.kind, action)
 		}
-		// The worker may have installed or moved an adapter: describe again.
-		go h.describe(c.m.id)
 	}
 	return out.Result, nil
 }

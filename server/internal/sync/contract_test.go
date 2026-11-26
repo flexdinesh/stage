@@ -29,6 +29,7 @@ type documentHarness struct {
 	document                                string
 	phase                                   string
 	closed                                  string // closure signal, "" for none
+	links                                   *execution.Links
 	input                                   execution.Intent
 }
 
@@ -63,6 +64,9 @@ func (f *documentHarness) Observe(_ context.Context, ref execution.SessionRef) (
 	}
 	now := time.Now().UTC()
 	o := execution.Observation{Session: ref, Project: "collection-z", Title: "Document", State: state, Active: state == "running", CreatedAt: now, UpdatedAt: now, ExecutionID: "worker:99", Config: f.input.Config, Links: execution.Links{Web: "https://documents.invalid/view/" + ref.ExternalSessionID}}
+	if f.links != nil {
+		o.Links = *f.links
+	}
 	if state == "done" {
 		o.Reply = &execution.Reply{Text: "Saved result", ItemID: "paragraph:3", RunID: "worker:99", UpdatedAt: now}
 	}
@@ -117,9 +121,6 @@ func (f *documentHarness) Stop(context.Context, execution.SessionRef) error {
 func (f *documentHarness) Attention(context.Context) ([]execution.SessionRef, error) { return nil, nil }
 func (f *documentHarness) Opening(context.Context, execution.SessionRef, bool) (*execution.Reply, error) {
 	return nil, execution.ErrUnavailable
-}
-func (f *documentHarness) Destinations(context.Context, execution.SessionRef) execution.Links {
-	return execution.Links{}
 }
 func contractSetup(t *testing.T, p placement) (*db.Store, *documentHarness, *coordinator.Service, db.Task) {
 	t.Helper()

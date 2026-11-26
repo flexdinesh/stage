@@ -118,7 +118,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return notFoundAs(err, fmt.Sprintf("session %s not found", ref.SessionID))
 		}
-		out.SessionTitle, out.Links = obs.Title, s.sessionLinks(ctx, id, &target.ExternalSessionID)
+		out.SessionTitle, out.Links = obs.Title, obs.Links
 		if obs.State != "" && obs.State != "idle" {
 			state := db.TaskState(obs.State)
 			out.State = &state

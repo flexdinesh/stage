@@ -170,7 +170,7 @@ export interface HostTarget {
  * - `starting`: the worker service is starting
  * - `online`: running and connected to its main server
  * - `offline`: joined but not connected (service stopped, or main server unreachable)
- * - `needs_update`: the main server speaks another API version
+ * - `needs_update`: the main server and worker need compatible channel protocol versions
  * - `removed`: the main server removed this machine (its token is revoked)
  * - `failed`: the worker service failed
  */

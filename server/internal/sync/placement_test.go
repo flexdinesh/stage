@@ -1,12 +1,14 @@
 package sync_test
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
 	coordinator "github.com/flexdinesh/stage/server/internal/sync"
 )
@@ -51,6 +53,24 @@ func (p placement) coordinator(t *testing.T, store *db.Store, adapters map[int64
 	if !p.remote {
 		return coordinator.NewWithAdapters(store, adapters, log)
 	}
-	rig := remotetest.New(t, remoteMachine, adapters)
+	rig := newContractWorker(t, store, adapters)
 	return coordinator.NewForMachines(store, rig.Set(), log)
+}
+
+type contractConnector struct{ harness.Connector }
+
+func (contractConnector) Summary(context.Context) harness.Summary { return harness.Summary{} }
+
+// The worker advertises the harness kinds its adapters belong to.
+func newContractWorker(t *testing.T, store *db.Store, adapters map[int64]execution.Adapter) *remotetest.Rig {
+	t.Helper()
+	connectors := make(map[string]harness.Connector)
+	for id := range adapters {
+		kind := store.Harness(id)
+		if kind == "" {
+			t.Fatalf("connection %d has no harness", id)
+		}
+		connectors[kind] = contractConnector{}
+	}
+	return remotetest.NewWithConnectors(t, remoteMachine, adapters, connectors)
 }

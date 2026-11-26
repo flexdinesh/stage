@@ -104,10 +104,15 @@ func (s *server) pingMachine(w http.ResponseWriter, r *http.Request) error {
 	switch {
 	case errors.Is(err, workerchan.ErrOffline):
 		return &db.ConflictError{Code: "machine_offline", Msg: "The machine is offline: its worker is not connected."}
+	case errors.Is(err, workerchan.ErrNegotiating):
+		return &db.ConflictError{Code: "machine_setup_starting", Msg: err.Error()}
 	case errors.Is(err, workerchan.ErrLostReply):
 		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": err.Error(), "code": "lost_reply"})
 		return nil
 	case errors.As(err, &re):
+		if re.Code == workerchan.CodeOperationUnavailable {
+			return &db.ConflictError{Code: re.Code, Msg: re.Message}
+		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": re.Error(), "code": re.Code})
 		return nil
 	case err != nil:

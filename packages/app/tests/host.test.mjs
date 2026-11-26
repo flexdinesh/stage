@@ -215,6 +215,7 @@ test("worker tones, lines and banner follow its status", () => {
   assert.equal(workerBanner(worker({ status: "offline" })), "plain");
   for (const s of ["needs_update", "removed", "failed"]) assert.equal(workerBanner(worker({ status: s })), "bad");
   assert.equal(workerHeadline(worker({ status: "removed" })), "Studio removed this machine");
+  assert.equal(workerHeadline(worker({ status: "needs_update" })), "Stage update required");
   assert.equal(workerHeadline(worker({ status: "offline" })), "This machine's worker is offline");
 });
 

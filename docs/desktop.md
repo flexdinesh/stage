@@ -166,9 +166,9 @@ active remote whose `publicUrl` it is); otherwise the URL's host.
 | Status | When | Marker |
 | --- | --- | --- |
 | `starting` | the worker service is starting | run |
-| `online` | running, channel to the main server up | ok |
+| `online` | running, channel to the main server ready | ok |
 | `offline` | running but not connected (main server unreachable; it reconnects by itself), or the service is stopped | idle |
-| `needs_update` | the main server speaks another API version | bad |
+| `needs_update` | the worker and main server have disjoint channel protocol ranges; the message names the side to update | bad |
 | `removed` | the main server removed this machine (token revoked; the worker stopped) | bad |
 | `failed` | the service failed, or the service manager is unreachable | bad |
 

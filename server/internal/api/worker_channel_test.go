@@ -10,14 +10,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
 type statusOut struct {
-	ID     int64  `json:"id"`
-	Online bool   `json:"online"`
-	Status string `json:"status"`
+	ID           int64  `json:"id"`
+	Online       bool   `json:"online"`
+	Status       string `json:"status"`
+	StatusReason string `json:"statusReason"`
 }
 
 // stream opens GET /api/worker/channel on srv and returns the hello and a
@@ -28,7 +30,10 @@ func stream(t *testing.T, srv *httptest.Server, token string) (workerchan.Hello,
 	for k, v := range workerHeaders(token) {
 		req.Header.Set(k, v)
 	}
+	req.Header.Set(buildinfo.APIVersionHeader, "42")
 	req.Header.Set(workerchan.VersionHeader, "7.7.7")
+	req.Header.Set(workerchan.ProtocolMinHeader, "1")
+	req.Header.Set(workerchan.ProtocolMaxHeader, "3")
 	res, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -57,6 +62,7 @@ func post(t *testing.T, srv *httptest.Server, token, session string, env workerc
 	for k, v := range workerHeaders(token) {
 		req.Header.Set(k, v)
 	}
+	req.Header.Set(buildinfo.APIVersionHeader, "42")
 	if session != "" {
 		req.Header.Set(workerchan.SessionHeader, session)
 	}
@@ -89,8 +95,24 @@ func TestWorkerChannelRoundTrip(t *testing.T) {
 
 	hello, rd, closeStream := stream(t, srv, j.Token)
 	defer closeStream()
-	if hello.MachineID != j.MachineID {
+	if hello.MachineID != j.MachineID || hello.ProtocolVersion != workerchan.ProtocolVersion || hello.ProtocolRange != workerchan.CurrentRange() {
 		t.Fatalf("hello %+v", hello)
+	}
+	e.must("GET", path, nil, 200, &m)
+	if m.Online || m.Status != "negotiating" || m.StatusReason == "" {
+		t.Fatalf("before ready %+v", m)
+	}
+	ready := workerchan.Envelope{Kind: workerchan.KindReady,
+		Body: json.RawMessage(`{"kinds":[],"channelKinds":["ping"],"connections":[]}`)}
+	if res, body := post(t, srv, "bad token", hello.Session, ready); res.StatusCode != 401 {
+		t.Fatalf("unauthenticated ready %d %s", res.StatusCode, body)
+	}
+	e.must("GET", path, nil, 200, &m)
+	if m.Online || m.Status != "negotiating" {
+		t.Fatalf("unauthenticated ready changed state %+v", m)
+	}
+	if res, body := post(t, srv, j.Token, hello.Session, ready); res.StatusCode != 204 {
+		t.Fatalf("ready %d %s", res.StatusCode, body)
 	}
 	var mv machineOut
 	e.must("GET", path, nil, 200, &mv)
@@ -152,31 +174,65 @@ func TestWorkerChannelRoundTrip(t *testing.T) {
 	if res, _ := post(t, srv, j.Token, hello.Session, workerchan.Envelope{Kind: workerchan.KindHeartbeat}); res.StatusCode != 409 {
 		t.Fatalf("replaced session %d", res.StatusCode)
 	}
+	if res, _ := post(t, srv, j.Token, hello.Session, ready); res.StatusCode != 409 {
+		t.Fatalf("replaced ready %d", res.StatusCode)
+	}
+	e.must("GET", path, nil, 200, &m)
+	if m.Online || m.Status != "negotiating" {
+		t.Fatalf("replaced ready changed state %+v", m)
+	}
 	if res, _ := post(t, srv, j.Token, hello2.Session, workerchan.Envelope{Kind: workerchan.KindHeartbeat}); res.StatusCode != 204 {
 		t.Fatalf("new session %d", res.StatusCode)
 	}
 }
 
-func TestWorkerChannelV8NeedsUpdate(t *testing.T) {
-	e := newEnv(t, withPublicURL)
-	j := e.join("old")
-	h := map[string]string{"Authorization": "Bearer " + j.Token, buildinfo.APIVersionHeader: "8", workerchan.VersionHeader: "0.1.0"}
-	var out errOut
-	if rec := raw(t, e.h, "GET", "/api/worker/channel", h, nil, &out); rec.Code != 409 || out.Code != "api_version_mismatch" || rec.Header().Get(buildinfo.APIVersionHeader) != "9" {
-		t.Fatalf("mismatch %d %+v", rec.Code, out)
-	}
-	var m statusOut
-	e.must("GET", fmt.Sprintf("/api/machines/%d", j.MachineID), nil, 200, &m)
-	if m.Status != "needs_update" || m.Online {
-		t.Fatalf("status %+v", m)
-	}
-	// Without a valid token, a mismatch marks nothing.
-	k := e.join("other")
-	h["Authorization"] = "Bearer stage_mt_999_x"
-	raw(t, e.h, "GET", "/api/worker/channel", h, nil, nil)
-	e.must("GET", fmt.Sprintf("/api/machines/%d", k.MachineID), nil, 200, &m)
-	if m.Status != "offline" {
-		t.Fatalf("unrelated machine %+v", m)
+func TestWorkerChannelRangeRejection(t *testing.T) {
+	for _, tc := range []struct {
+		name, min, max, reason, code string
+		want                         int
+		server                       workerchan.VersionRange
+	}{
+		{"legacy", "", "", "Update Stage on laptop", workerchan.CodeProtocolMismatch, 409, workerchan.CurrentRange()},
+		{"server older", "2", "3", "Update Stage on the main machine", workerchan.CodeProtocolMismatch, 409, workerchan.CurrentRange()},
+		{"worker older", "1", "2", "Update Stage on laptop", workerchan.CodeProtocolMismatch, 409, workerchan.VersionRange{Min: 3, Max: 4}},
+		{"non-integer", "a", "2", "", "invalid_channel_protocol", 400, workerchan.CurrentRange()},
+		{"zero", "0", "2", "", "invalid_channel_protocol", 400, workerchan.CurrentRange()},
+		{"inverted", "2", "1", "", "invalid_channel_protocol", 400, workerchan.CurrentRange()},
+		{"partial", "1", "", "", "invalid_channel_protocol", 400, workerchan.CurrentRange()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, withPublicURL, func(d *api.Deps) {
+				d.Channels = workerchan.NewHub(t.Context(), workerchan.Options{ProtocolRange: tc.server})
+			})
+			j := e.join("laptop")
+			h := map[string]string{buildinfo.APIVersionHeader: "9", workerchan.VersionHeader: "0.1.0"}
+			if tc.min != "" {
+				h[workerchan.ProtocolMinHeader] = tc.min
+			}
+			if tc.max != "" {
+				h[workerchan.ProtocolMaxHeader] = tc.max
+			}
+			path := fmt.Sprintf("/api/machines/%d", j.MachineID)
+			var m statusOut
+			h["Authorization"] = "Bearer stage_mt_999_x"
+			if rec := raw(t, e.h, "GET", "/api/worker/channel", h, nil, nil); rec.Code != 401 {
+				t.Fatalf("unauthenticated opening: %d", rec.Code)
+			}
+			e.must("GET", path, nil, 200, &m)
+			if m.Status != "offline" {
+				t.Fatalf("unauthenticated opening changed presence %+v", m)
+			}
+			h["Authorization"] = "Bearer " + j.Token
+			var out errOut
+			if rec := raw(t, e.h, "GET", "/api/worker/channel", h, nil, &out); rec.Code != tc.want || out.Code != tc.code {
+				t.Fatalf("opening %d %+v", rec.Code, out)
+			}
+			e.must("GET", path, nil, 200, &m)
+			if m.Online || (tc.reason == "" && m.Status != "offline") ||
+				(tc.reason != "" && (m.Status != "needs_update" || !strings.Contains(m.StatusReason, tc.reason))) {
+				t.Fatalf("status %+v", m)
+			}
+		})
 	}
 }
 

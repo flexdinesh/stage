@@ -107,8 +107,9 @@ A machine runs harnesses ([ADR 0002](adr/0002-machines-and-workers.md)). Machine
   "id": 2,
   "label": "work laptop",
   "kind": "remote",              // local (id 1) | remote
-  "online": false,               // local: always true; remote: its worker channel is live
-  "status": "offline",           // online | offline | needs_update (its worker last connected with another apiVersion; cleared when it connects again)
+  "online": false,               // local: always true; remote: live, ready worker channel
+  "status": "offline",           // online | offline | negotiating | needs_update
+  // statusReason, when present, explains negotiation or identifies which side to update
   "lastSeenAt": "2026-11-22T10:00:00Z",  // null for the local machine; remote: last worker contact (join, channel connect and disconnect, at most once a minute while connected)
   "version": "v1.5.0",           // the build it runs: the server's for local; null when unknown
   "createdBy": 1,                // the user who created its pairing code
@@ -130,7 +131,7 @@ Body (strict) `{ "label": string }`: trimmed, nonblank, at most 100 characters. 
 Remove a remote machine. 204. Its token hashes are deleted, so its worker gets 401 on its next request. Its active connections retire as history under the rules of a replaced instance ([architecture.md](architecture.md#project-and-session-identity)): a connection something references (a binding, a session, a task or a schedule) keeps its tasks, sessions and bindings, never polled or launched on (409 `connection_retired`), and can be forgotten (`DELETE /api/connections/{id}`); an unreferenced one is deleted. Unlaunched tasks and schedules stay on the retired connection until moved. The row is kept, hidden, so history keeps its label. 409 `local_machine` for machine 1. 404 unknown or already removed.
 
 ### `POST /api/machines/{id}/ping`
-A round trip through the machine's worker channel. 200 `{ "machineId": 2, "latencyMs": 3, "version": "v1.5.0" }` (`version`: the build the worker reports). Machine 1 answers at once (`latencyMs` 0, the server's version). 409 `machine_offline` without a live channel; 504 `lost_reply` when no reply came within 10s (the channel dropped or the worker did not answer); 502 with the worker's error `code` when it answered with an error. 404 unknown or removed.
+A round trip through the machine's worker channel. 200 `{ "machineId": 2, "latencyMs": 3, "version": "v1.5.0" }` (`version`: the build the worker reports). Machine 1 answers at once (`latencyMs` 0, the server's version). 409 `machine_offline` without a live channel, `machine_setup_starting` before ready, or `operation_unavailable` when the worker omits ping; 504 `lost_reply` when no reply came within 10s (the channel dropped or the worker did not answer); 502 with the worker's error `code` when it answered with an error. 404 unknown or removed.
 
 ### `POST /api/machines/pairings`
 Create a one-time pairing code that adds a machine. Body (strict, may be empty) `{ "label"?: string }` (the new machine's name; default: the name the worker suggests, else `Machine <id>`). 201, `Cache-Control: no-store`:
@@ -164,7 +165,7 @@ Revoke a code that was not redeemed: it can no longer add a machine. 204. 404 un
 
 Called by `stage worker` on a remote machine, never by the UI. They are the only routes an authenticating reverse proxy passes through without user auth: the pairing code or machine token is their auth ([runtime.md](runtime.md#worker-routes)). They still pass the request origin policy. Every worker route:
 
-- requires `Stage-Api-Version` equal to the server's `apiVersion`; missing or different: 409 `{error, code: "api_version_mismatch"}` (also on join, so a machine is never created for a worker that cannot connect);
+- except the channel GET and POST, requires `Stage-Api-Version` equal to the server's `apiVersion`; missing or different: 409 `{error, code: "api_version_mismatch"}`;
 - except join, requires `Authorization: Bearer <machine token>`. Missing: 401 `machine_token_required` with `WWW-Authenticate: Bearer realm="stage-worker"`. Malformed, wrong, or its machine removed: 401 `machine_token_invalid` with `error="invalid_token"`. An unknown worker path needs a token before it gets 404.
 
 A machine token (`stage_mt_<id>_<secret>`, 256 random bits) is a machine principal, not a user. One exists per machine; the server stores only its SHA-256 and compares in constant time. It is accepted only here: `Authorization: Bearer stage_mt_...` on any other `/api` route or on `/mcp` gets 401 `machine_token_not_accepted`. Other `Authorization` values (a proxy's own) are ignored there.
@@ -183,16 +184,16 @@ The machine the token names: 200 `Machine`. A worker uses it to check its token 
 The machine removes itself (`stage worker leave`): 204, with the effects of `DELETE /api/machines/{id}` (token revoked, open channel closed, connections retired).
 
 #### `GET /api/worker/channel`
-The worker channel's down half ([runtime.md](runtime.md#worker-channel), [ADR 0002](adr/0002-machines-and-workers.md)): a `text/event-stream` that stays open. Request headers: `Stage-Version` (the worker's build, recorded as the machine's `version`) and `Stage-Worker-Gateway` (its agent gateway listener URLs, comma-separated, e.g. `unix:///run/user/1000/stage/stage.sock,http://127.0.0.1:7381`; kept in memory for the session and named in launch instructions, see [Agent interface](#agent-interface)). Events:
+The worker channel's down half is a `text/event-stream` ([runtime.md](runtime.md#worker-channel)). Send inclusive integer bounds in `Stage-Channel-Protocol-Min` and `Stage-Channel-Protocol-Max`, with min at least 1 and max at least min. Invalid bounds return 400 `invalid_channel_protocol`. A disjoint range or a legacy worker with no range returns 409 `channel_protocol_mismatch` after token authentication. `Stage-Version` identifies the worker build. `Stage-Worker-Gateway` lists its agent gateway listener URLs, comma-separated.
 
-- `hello` first: `{ "session": "...", "machineId": 2, "heartbeatSec": 15, "timeoutSec": 45 }`.
-- `rpc`: an envelope `{ "id", "kind", "deadline"?, "connectionId"?, "call"?, "body"?, "error"? }`. `kind` is a call or `cancel` (the caller gave up on call `id`). Calls: `ping`; the remote machine's adapter calls `adapter.health|features|featuresForWorkspace|workspaces|observe|launch|stop|attention|opening|resolveLink|correlate|events|requests|respond|send` (`connectionId` names the connection), its ops `ops.inventory|checkout`, and `machine.describe` (`{ profile, connections: [{ connectionId, traits }] }`). Bodies and error codes: [execution.md](execution.md#remote-machines).
+- `hello`: `{ "session": "...", "machineId": 2, "protocolRange": { "min": 1, "max": 1 }, "protocolVersion": 1, "kinds": [], "channelKinds": [], "heartbeatSec": 15, "timeoutSec": 45 }`. The version is the highest shared version.
+- `rpc`: an envelope `{ "id", "kind", "deadline"?, "connectionId"?, "call"?, "body"?, "error"? }`. Calls include `ping`, the worker's advertised `adapter.*`, `ops.*` and `connector.*`, and `cancel` for a caller that stopped waiting. [Request bodies and errors](execution.md#remote-machines).
 - `: keepalive` comments every 15s.
 
-A newer stream of the same machine replaces this one (the old stream ends). Removing the machine ends it at once.
+A newer stream replaces the old session. Removing the machine closes it.
 
 #### `POST /api/worker/channel`
-The up half: one envelope per request (at most 32 MiB), header `Stage-Channel-Session: <hello.session>` (400 without it). `kind`: `heartbeat` (about every 15s) or `result` (a reply to an `rpc` call, by `id`; late, duplicate or unknown ids are dropped): 204. A worker-initiated call gets 200 with a `result` envelope: `ping`, `machine.changed` (what the worker hosts changed; the server describes it again), and callbacks that name the waiting `rpc` call in `call`: `checkpoint.save` and `launch.image` (of `adapter.launch`), `events.observation` (of `adapter.events`). A callback whose call no longer waits gets a result with error `call_ended`. A session that was replaced or ended: 409 `channel_replaced` (reconnect the stream). Any message counts as contact.
+The up half takes one envelope (at most 32 MiB), with `Stage-Channel-Session: <hello.session>`. `ready` carries `body: {kinds, channelKinds, connections: [{connectionId, traits}], details?}`. It publishes or replaces capabilities after composition (204). `heartbeat` (every 15s) and `result` (reply by id) also return 204. A worker-initiated call gets a `result` envelope (200). Launch and events callbacks name the waiting request in `call`; when it stops waiting they get `call_ended`. A replaced or ended session returns 409 `channel_replaced`.
 
 #### `/api/worker/gateway/api/...` and `/api/worker/gateway/mcp`
 A worker's agent gateway forwards the local `/api/...` and `/mcp` requests of agents on its machine here ([runtime.md](runtime.md#agent-gateway)), any method, with the machine token and `Stage-Api-Version` (the worker route checks above apply first). The server serves the rest of the path as that same request on its own `/api` or `/mcp`, with the same handlers, bodies, statuses and streams, and with the token's machine as the forwarding machine: writes record it as `sourceMachineId` ([Users](#users)). The `Authorization` header is dropped before the inner request; `Stage-Caller-Session` and body caller fields (`callerSession`, `sourceSession`, `originSession`) pass unchanged.
@@ -828,7 +829,7 @@ Adopted tasks only (400 otherwise). Returns `{item: {itemId, runId, text, trunca
 
 ## API v9 changes
 
-The server and workers roll forward together at API v9. A worker on v8 is refused with 409 `api_version_mismatch` and shows **Needs update** until upgraded. Later breaking changes in this coordinated harness foundation series also ship as v9.
+The server and workers roll forward together at API v9. Worker channel compatibility uses its own protocol range. A legacy worker shows **Needs update** until upgraded. Later breaking changes in this coordinated harness foundation series also ship as v9.
 
 - Tasks use `done` for finished execution and `completedAt` for acceptance. Tasks drop `settledAt` and `artifactLinks`. Task and tree lists accept `completedFrom`. Tree summaries and MCP tree rows use `completedAt` and `completed` in their counts.
 - Journal and handoff records drop `sourceThreadId`. Use `sourceSession` on journal entries and `session` on handoffs. Accepted evidence uses `externalSessionId` and `sessionLink` and drops `artifacts` and `historicalSettledAt`. The storage reader handles older evidence.

@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"reflect"
 	"time"
 )
 
@@ -97,72 +98,69 @@ type Interactive interface {
 	Send(context.Context, SessionRef, Message) error
 }
 
-// Traits name the optional interfaces, as a remote machine reports which
-// ones its adapter implements.
-const (
-	TraitLinkResolver      = "linkResolver"
-	TraitWorkspaceFeatures = "workspaceFeatures"
-	TraitCorrelator        = "correlator"
-	TraitEventSource       = "eventSource"
-	TraitInteractive       = "interactive"
-)
-
-// Partial is an adapter that implements every optional interface in Go but
-// forwards to one that may implement only some (a remote machine's proxy).
-// Implements reports whether the forwarded adapter has trait.
+// Partial forwards optional interfaces only when the peer declares their traits.
 type Partial interface {
 	Implements(trait string) bool
 }
 
-// As is a's optional interface T. Product code uses it instead of a type
-// assertion, so a Partial adapter offers only what it forwards to.
-func As[T any](a Adapter) (T, bool) {
-	t, ok := any(a).(T)
-	if !ok {
-		return t, false
-	}
-	if p, ok := a.(Partial); ok {
-		if trait := traitOf[T](); trait != "" && !p.Implements(trait) {
-			var zero T
-			return zero, false
-		}
-	}
-	return t, true
+type optionalTrait struct {
+	name string
+	typ  reflect.Type
+	has  func(Adapter) bool
 }
 
-func traitOf[T any]() string {
-	switch any((*T)(nil)).(type) {
-	case *LinkResolver:
-		return TraitLinkResolver
-	case *WorkspaceFeatures:
-		return TraitWorkspaceFeatures
-	case *Correlator:
-		return TraitCorrelator
-	case *EventSource:
-		return TraitEventSource
-	case *Interactive:
-		return TraitInteractive
+func registerTrait[T any](name string) optionalTrait {
+	return optionalTrait{name: name, typ: reflect.TypeFor[T](), has: func(a Adapter) bool {
+		_, ok := any(a).(T)
+		return ok
+	}}
+}
+
+var optionalTraits = []optionalTrait{
+	registerTrait[LinkResolver]("linkResolver"),
+	registerTrait[WorkspaceFeatures]("workspaceFeatures"),
+	registerTrait[Correlator]("correlator"),
+	registerTrait[EventSource]("eventSource"),
+	registerTrait[Interactive]("interactive"),
+}
+
+func (t optionalTrait) offered(a Adapter) bool {
+	p, partial := a.(Partial)
+	return !partial || p.Implements(t.name)
+}
+
+// TraitOf is the channel name for the registered optional interface T.
+func TraitOf[T any]() string {
+	typ := reflect.TypeFor[T]()
+	for _, trait := range optionalTraits {
+		if trait.typ == typ {
+			return trait.name
+		}
 	}
 	return ""
 }
 
-// Traits are the optional interfaces a implements, in a fixed order.
+// As reads an optional interface. A partial adapter must declare a registered
+// trait even when its Go type implements the interface.
+func As[T any](a Adapter) (T, bool) {
+	t, ok := any(a).(T)
+	if p, partial := a.(Partial); ok && partial {
+		name := TraitOf[T]()
+		if name == "" || !p.Implements(name) {
+			var zero T
+			return zero, false
+		}
+	}
+	return t, ok
+}
+
+// Traits returns the registered optional interfaces the adapter offers.
 func Traits(a Adapter) []string {
 	out := []string{}
-	if _, ok := As[LinkResolver](a); ok {
-		out = append(out, TraitLinkResolver)
-	}
-	if _, ok := As[WorkspaceFeatures](a); ok {
-		out = append(out, TraitWorkspaceFeatures)
-	}
-	if _, ok := As[Correlator](a); ok {
-		out = append(out, TraitCorrelator)
-	}
-	if _, ok := As[EventSource](a); ok {
-		out = append(out, TraitEventSource)
-	}
-	if _, ok := As[Interactive](a); ok {
-		out = append(out, TraitInteractive)
+	for _, trait := range optionalTraits {
+		if trait.has(a) && trait.offered(a) {
+			out = append(out, trait.name)
+		}
 	}
 	return out
 }

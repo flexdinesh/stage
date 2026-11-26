@@ -25,7 +25,7 @@ const (
 	// WorkerOffline: joined, but not connected (the service is stopped,
 	// or the main server is unreachable).
 	WorkerOffline WorkerStatus = "offline"
-	// WorkerNeedsUpdate: the main server speaks another API version.
+	// WorkerNeedsUpdate: the worker and main server have no shared channel protocol.
 	WorkerNeedsUpdate WorkerStatus = "needs_update"
 	// WorkerRemoved: the main server removed this machine (token revoked).
 	WorkerRemoved WorkerStatus = "removed"
@@ -201,8 +201,10 @@ func (l *Launcher) workerFrom(s *workerService) *Worker {
 		w.Fix = "Leave to clean up, then join again to serve it."
 	case sw.State == "needs_update":
 		w.Status = WorkerNeedsUpdate
-		w.Message = w.ServerName + " runs another Stage version than this app."
-		w.Fix = "Update Stage on one of the machines so both match, then restart the worker."
+		w.Message = sw.LastError
+		if w.Message == "" {
+			w.Message = "The worker and main machine need a shared channel protocol version."
+		}
 	case s.State == "failed" || s.State == "unknown":
 		w.Status = WorkerFailed
 		w.Message = "The worker service failed."

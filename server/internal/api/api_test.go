@@ -1401,7 +1401,7 @@ func TestNotificationsInbox(t *testing.T) {
 		pg.NextBefore == nil || *pg.NextBefore != ids[1] {
 		t.Fatalf("first page %+v", pg)
 	}
-	if l := pg.Notifications[0].Links; l.Native != t3.AppThreadURL(t3.FakeEnvironmentID, thread) || l.Web == "" {
+	if l := pg.Notifications[0].Links; l != (links{}) {
 		t.Fatalf("notification links %+v", l)
 	}
 	e.must("GET", fmt.Sprintf("/api/notifications?limit=2&before=%d", *pg.NextBefore), nil, 200, &pg)
@@ -1463,6 +1463,17 @@ func TestNotificationGroups(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	threads := []string{"ext-1", "ext-2"}
+	for _, thread := range threads {
+		now := time.Now().UTC()
+		o := execution.Observation{
+			Session: db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread},
+			Project: "test", State: "done", CreatedAt: now, UpdatedAt: now,
+			Links: execution.Links{Web: "https://worker.example/" + thread, Native: t3.AppThreadURL(t3.FakeEnvironmentID, thread)},
+		}
+		if err := e.store.PutObservation(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var latest int64
 	for _, thread := range []string{threads[0], threads[1], threads[0]} {
 		id, err := e.store.InsertNotification(ctx, db.NewNotification{
@@ -1488,7 +1499,7 @@ func TestNotificationGroups(t *testing.T) {
 		pg.Groups[0].UnreadCount != 2 || pg.LatestID != latest || pg.Unread != 3 || pg.NextCursor == nil {
 		t.Fatalf("first group page: %+v", pg)
 	}
-	if l := pg.Groups[0].Links; l.Native != t3.AppThreadURL(t3.FakeEnvironmentID, threads[0]) || l.Web == "" {
+	if l := pg.Groups[0].Links; l.Native != t3.AppThreadURL(t3.FakeEnvironmentID, threads[0]) || l.Web != "https://worker.example/"+threads[0] {
 		t.Fatalf("group links: %+v", l)
 	}
 	e.must("GET", "/api/notifications/groups?limit=1&cursor="+url.QueryEscape(*pg.NextCursor), nil, 200, &pg)
