@@ -104,6 +104,29 @@ test("launch repair sends structured preview and revision-guarded attach request
  ]);
 });
 
+test("session actions list on the task and dispatch an encoded action with explicit confirmation", async () => {
+  const seen = [];
+  const actions = [{ id: "inspect/session", target: "session", label: "Inspect session" }];
+  const result = { message: "Session inspected." };
+  const { api } = fakeApi(async (path, init) => {
+    seen.push({
+      path,
+      method: init.method,
+      confirmed: init.headers["Stage-Action-Confirmed"],
+      body: init.body === undefined ? undefined : JSON.parse(init.body),
+    });
+    return Response.json(init.method === "GET" ? actions : result);
+  });
+  assert.deepEqual(await api.taskActions(17), actions);
+  assert.deepEqual(await api.runTaskAction(17, actions[0].id, { detailed: true }, false), result);
+  assert.deepEqual(await api.runTaskAction(17, actions[0].id, { detailed: true }, true), result);
+  assert.deepEqual(seen, [
+    { path: "/tasks/17/actions", method: "GET", confirmed: undefined, body: undefined },
+    { path: "/tasks/17/actions/inspect%2Fsession", method: "POST", confirmed: undefined, body: { detailed: true } },
+    { path: "/tasks/17/actions/inspect%2Fsession", method: "POST", confirmed: "1", body: { detailed: true } },
+  ]);
+});
+
 test("setAutoComplete PUTs the flag to the connection and returns it", async () => {
   let seen;
   const connection = { id: 2, configured: true, harness: "opencode", autoComplete: true };

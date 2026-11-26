@@ -67,6 +67,18 @@ func (r connections) Get(ctx context.Context, id int64) (store.HarnessConnection
 	return scanConnection(r.QueryRow(ctx, `SELECT `+connectionCols+` FROM harness_connections c WHERE id=$1`, id))
 }
 
+func (r connections) ConnectionFacts(ctx context.Context, id int64) (string, error) {
+	var facts string
+	err := r.QueryRow(ctx, `SELECT COALESCE(last_known_facts,'[]') FROM harness_connections WHERE id=$1 AND forgotten_at IS NULL`, id).Scan(&facts)
+	return facts, notFound(err)
+}
+
+func (r connections) SaveConnectionFacts(ctx context.Context, id int64, facts string) error {
+	_, err := r.Exec(ctx, `UPDATE harness_connections SET last_known_facts=$2
+	    WHERE id=$1 AND active AND (last_known_facts IS NULL OR last_known_facts<>$2)`, id, facts)
+	return err
+}
+
 func (r connections) SetAutoComplete(ctx context.Context, id int64, on bool) error {
 	_, err := r.Exec(ctx, `UPDATE harness_connections SET auto_complete=$2 WHERE id=$1`, id, on)
 	return err

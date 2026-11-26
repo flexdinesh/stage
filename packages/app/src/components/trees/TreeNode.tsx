@@ -1,8 +1,6 @@
-import { useMutation } from "@tanstack/react-query";
 import { type ReactNode } from "react";
-import { useHarnesses, useInvalidateWork } from "../../api/queries.ts";
+import { useHarnesses } from "../../api/queries.ts";
 import type { Task } from "../../api/types.ts";
-import { useApi } from "../../platform/context.tsx";
 import { canStart, statusChips } from "../../lib/tasks.ts";
 import { dateTime, duration } from "../../lib/format.ts";
 import { inState } from "../../lib/trees.ts";
@@ -11,7 +9,7 @@ import { AppButton, Button, Chip, IdTag, InlineError, Meta, TextButton, TextLink
 import { CompletionButton } from "../Completion.tsx";
 import { isRetired } from "../../lib/harnesses.ts";
 import { HarnessName } from "../HarnessName.tsx";
-import { BlockedReason, useLaunchGate } from "../LaunchGate.tsx";
+import { BlockedReason, useLaunchGate, useStartTask } from "../LaunchGate.tsx";
 import { useSessionDestination } from "../../lib/hostState.ts";
 
 const ids = (list: readonly number[]) => list.map((id) => `#${id}`).join(", ");
@@ -53,14 +51,11 @@ export function pendingNeeds(task: Pick<Task, "needs">, byId: ReadonlyMap<number
  * A done or archived tree offers no Start or Retry.
  */
 export function NodeAction({ task, className, review = true }: { task: Task; pending: readonly number[]; className?: string; review?: boolean }) {
-  const api = useApi();
   const { kindName } = useHarnesses();
-  const invalidate = useInvalidateWork();
-  const start = useMutation({ mutationFn: () => api.startTask(task.id), onSettled: invalidate });
+  const { start, block } = useStartTask(task);
   const cls = cx("relative z-[2]", className);
   const error = errorText(start.error);
   const startable = canStart(task) && (task.treeStatus === null || task.treeStatus === "open");
-  const block = useLaunchGate()(task);
   const appLink = useSessionDestination()(task);
   let action: ReactNode = null;
   if (task.state === "needs_input") {
@@ -74,7 +69,7 @@ export function NodeAction({ task, className, review = true }: { task: Task; pen
     action = <CompletionButton task={task} review />;
   } else if (startable) {
     action = (
-      <BlockedReason reason={block?.reason} className={cls}>
+      <BlockedReason reason={block?.reason} className={cls} showOnPhone>
         <Button
           small
           variant={task.state === "backlog" ? "primary" : "secondary"}

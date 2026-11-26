@@ -17,7 +17,7 @@ that disagrees with this file updates it in the same PR.
 | [Single owner](#single-owner) | as described on both engines (#403, in `serve` #405) | |
 | [Encodings](#encodings) and [errors](#errors) | as described on both engines (#403) | |
 | [Search](#search) | as described on both engines (#404): SQLite FTS5 trigram (0029), Postgres `pg_trgm` GIN (0029) | |
-| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 36; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 36 (0030 `claude_settings`, #372; 0031 `codex_settings`, #384; 0032 `no_default_harness`, #420; 0033 `launch_options` and 0034 `drop_workspaces`, #420; 0035 `drop_settled`; 0036 `harness_setup`); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
+| [Migrations](#migrations) | per-engine dirs and Go backfills as described (#401): SQLite `server/internal/db/sqlite/migrations` head 37; Postgres `server/internal/db/postgres/migrations` from the baseline `0028_baseline.sql` (#403), head 37 (0030 `claude_settings`, #372; 0031 `codex_settings`, #384; 0032 `no_default_harness`, #420; 0033 `launch_options` and 0034 `drop_workspaces`, #420; 0035 `drop_settled`; 0036 `harness_setup`; 0037 `connection_facts`); no Go backfills yet (#417's 0027 is SQL: SQLite-only history below the baseline); [journal events](#journal-events) written by Go (#399) | |
 | [Backups](#backups) | as described on both engines (#403) | |
 | [Checks](#checks) | as described (#185, #398, #400, #401); `check:postgres` runs the Postgres schema parity, step-wise, adapter and `storetest` suites on Postgres (#403) and `serve` on Postgres (#405) | |
 | [Data copy and cutover](#data-copy-and-cutover) | as described (#406): `stage db copy` (`internal/db/datacopy` over the copy ports), cutover and rollback runbook | |
@@ -465,7 +465,11 @@ and paging. (Thread search was removed with API v3.)
   sync timestamps and partial credentials survive even without an active
   connection. The unconfigured local baseline documents become empty objects,
   with defaults supplied by their modules. Connection rows and references are
-  untouched.
+  untouched. The additive 0037 `connection_facts` migration adds nullable
+  `last_known_facts` to each connection. The server saves sanitized display
+  facts from a connected status response and can read them without contacting
+  the worker. Older connections begin without a snapshot. A replacement starts
+  its own snapshot, and a forgotten connection's snapshot is excluded from reads.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.

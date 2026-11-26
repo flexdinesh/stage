@@ -153,8 +153,10 @@ type Option struct {
 	// Label names the option in the harness's own words ("" reads as ID).
 	Label string `json:"label,omitempty"`
 	// Values: a choice's values; a boolean's true and false; none for text.
-	Values  []OptionValue `json:"values"`
-	Default *OptionValue  `json:"default"`
+	Values []OptionValue `json:"values"`
+	// ValueLabels optionally names a choice's string values in the harness's words.
+	ValueLabels map[string]string `json:"valueLabels,omitempty"`
+	Default     *OptionValue      `json:"default"`
 	// DependsOn: the option applies only while another option (of the
 	// same config) has this value, e.g. baseRef only with worktree true.
 	DependsOn *OptionDependency `json:"dependsOn,omitempty"`

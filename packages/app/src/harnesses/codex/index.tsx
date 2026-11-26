@@ -1,4 +1,5 @@
 // Codex's registry entry: its setup panel, Settings row and status reader.
+import { connectionStatusChip } from "../../lib/connections.ts";
 import { ConnectionRow } from "../../components/ConnectionRow.tsx";
 import { statusRead } from "../../lib/connections.ts";
 import { statusSlots } from "../status.ts";
@@ -11,12 +12,11 @@ export const CODEX_SLOTS: HarnessSlots = {
   Setup: CodexSetup,
   Row: CodexRow,
   ...statusSlots(CODEX_STATUS),
+  handledSetupActions: (id) => id === "connect" || id === "check",
   statusKey: () => CODEX_STATUS_KEY,
-  // Sessions resume through a copied command; there is no address to set.
-  webAddress: false,
 };
 
-function CodexRow({ descriptor, machine, onManage, isDefault }: ConnectionRowProps) {
+function CodexRow({ descriptor, machine, onManage, isDefault, overflow }: ConnectionRowProps) {
   const read = statusRead(useCodexStatus());
   const summary = codexSummary(read);
   const disconnect = useDisconnectCodex();
@@ -25,10 +25,11 @@ function CodexRow({ descriptor, machine, onManage, isDefault }: ConnectionRowPro
     <ConnectionRow
       name={descriptor.name}
       machine={machine}
-      detail={s === undefined ? (read.error ?? "") : codexRowDetail(s)}
-      chip={{ tone: summary.tone, label: summary.state }}
+      detail={s === undefined ? (read.error ?? "") : (s.reason || codexRowDetail(s))}
+      chip={s === undefined ? { tone: summary.tone, label: summary.state } : connectionStatusChip(s)}
       onManage={onManage}
       isDefault={isDefault}
+      overflow={overflow}
       disconnect={
         s === undefined || !s.configured
           ? null

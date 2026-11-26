@@ -81,6 +81,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{"settings, secrets and status copied", seedV0036HarnessSetup, checkV0036HarnessSetup},
 		{"unconfigured defaults retained", nil, checkV0036HarnessSetupDefaults},
 	},
+	37: {{"existing connection and task evidence retained", seedV0037ConnectionFacts, checkV0037ConnectionFacts}},
 }
 
 // TestStepwiseMigrations is the upgrade coverage (no releases exist yet):
@@ -825,4 +826,15 @@ func checkV0035DropSettled(t *testing.T, pool *sqlite.DB) {
 
 func checkV0035EmptyPreferences(t *testing.T, pool *sqlite.DB) {
 	wantRows(t, pool, `SELECT notify_events FROM preferences`, "[]")
+}
+
+func seedV0037ConnectionFacts(t *testing.T, pool *sqlite.DB) {
+	mustExec(t, pool, `INSERT INTO harness_connections(id,machine_id,harness,identity,label) VALUES(42,1,'opencode','instance','Desk')`)
+	mustExec(t, pool, `INSERT INTO projects(id,title) VALUES(1,'P')`)
+	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,connection_id,execution_config) VALUES(1,1,'T','p',42,'{"options":[{"id":"worktree","value":false}]}')`)
+}
+
+func checkV0037ConnectionFacts(t *testing.T, pool *sqlite.DB) {
+	wantRows(t, pool, `SELECT id,identity,label,last_known_facts FROM harness_connections WHERE id=42`, "42|instance|Desk|NULL")
+	wantRows(t, pool, `SELECT connection_id,json_extract(execution_config,'$.options[0].value') FROM tasks WHERE id=1`, "42|0")
 }

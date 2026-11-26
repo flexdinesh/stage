@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { incompatibleSettings, optionAccepts, optionApplies, optionKind, optionLabel, optionValue, setOption, shownOptions } from "../src/lib/options.ts";
+import { incompatibleSettings, optionAccepts, optionApplies, optionKind, optionLabel, optionValue, optionValueLabel, setOption, shownOptions } from "../src/lib/options.ts";
 
 // A harness that declares a worktree with a base ref and branch, as T3 does; HarnessFields renders them by kind.
 const worktree = { id: "worktree", kind: "boolean", label: "New worktree", values: [true, false], default: false };
@@ -21,6 +21,20 @@ test("label: the harness's words, else the id", () => {
   assert.equal(optionLabel(worktree), "New worktree");
   assert.equal(optionLabel({ id: "fast" }), "fast");
   assert.equal(optionLabel({ id: "fast", label: "" }), "fast");
+});
+
+test("option values preserve raw ids and display only declared labels", () => {
+  const option = { valueLabels: { xhigh: "Extra high", low: "" } };
+  assert.equal(optionValueLabel(option, "xhigh"), "Extra high");
+  assert.equal(optionValueLabel(option, "low"), "low");
+  assert.equal(optionValueLabel(option, "toString"), "toString");
+  assert.equal(optionValueLabel(option, false), "Off");
+});
+
+test("clearing a boolean override omits the key while Off stays explicit", () => {
+  const off = setOption([], all, "worktree", false);
+  assert.deepEqual(off, [{ id: "worktree", value: false }]);
+  assert.deepEqual(setOption(off, all, "worktree", undefined), []);
 });
 
 test("value: the selection, else the default", () => {

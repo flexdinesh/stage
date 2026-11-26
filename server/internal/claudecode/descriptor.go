@@ -46,11 +46,11 @@ var Descriptor = harness.Descriptor{
 			{ID: "binary", Label: "Claude command", Kind: harness.FieldText, Help: "Name or path of the claude executable. Blank: Stage looks on its PATH, then ~/.local/bin."},
 		},
 		Actions: []execution.Action{{
-			ID: ActionConnect, Label: "Connect",
+			ID: ActionConnect, Label: "Connect", Primary: true,
 			Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
 			Availability: execution.Availability{Available: true},
 		}, {
-			ID: ActionCheck, Label: "Check connection",
+			ID: ActionCheck, Label: "Check again",
 			Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
 			Availability: execution.Availability{Available: true},
 		}},

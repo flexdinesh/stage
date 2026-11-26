@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnections, useHarnesses, useInvalidateWork, useMachines, useProjects } from "../../api/queries.ts";
 import { connectionOptions } from "../../lib/machines.ts";
@@ -9,6 +9,15 @@ import { useApi } from "../../platform/context.tsx";
 import { ProjectCombobox } from "../ProjectSelect.tsx";
 import { SnippetTextarea } from "../SnippetPicker.tsx";
 import { Button, Drawer, ErrorText, Field, InlineError, Input, Meta, Muted, Panel, Combobox } from "../ui.tsx";
+import { BlockedReason, LaunchBlockAlert, useOperationGate } from "../LaunchGate.tsx";
+
+export function useTrackSessionBlock(): string | null {
+  const connections = useConnections();
+  const gate = useOperationGate();
+  if (connections.data === undefined) return connections.error?.message ?? "Checking harness connections.";
+  const blocks = connections.data.connections.filter((c) => c.active).map((c) => gate(c.id, "adopt"));
+  return blocks.includes(null) ? null : blocks[0]?.reason ?? "Connect a harness in Settings to track sessions.";
+}
 
 /**
  * Explicit lookup only. Preview never adopts a session. `initial` (a waiting session from the inbox) fills the
@@ -29,10 +38,12 @@ export function AdoptSessionDrawer({
   const projects = useProjects();
   const connections = useConnections();
   const harnessNames = useHarnesses();
+  const gate = useOperationGate();
   const { machines } = useMachines();
   const [chosen, setConnection] = useState(initial === undefined ? "" : String(initial.connectionId));
-  const available = connections.data?.connections.filter((c) => c.active && c.configured) ?? [];
+  const available = connections.data?.connections.filter((c) => c.active) ?? [];
   const connection = chosen || (available.length === 1 ? String(available[0]?.id) : "");
+  const block = connection === "" ? null : gate(Number(connection), "adopt");
   const sessionHint = harnessNames.descriptor(harnessNames.harness(Number(connection)) ?? "")?.sessionHint;
   const [projectId, setProjectId] = useState("");
   const [projectTitle, setProjectTitle] = useState("");
@@ -44,6 +55,8 @@ export function AdoptSessionDrawer({
   const [note, setNote] = useState("");
   const preview = useMutation({
     mutationFn: async () => {
+      if (block !== null) throw new Error(block.reason);
+      if (connection === "" || ref.trim() === "") throw new Error("Choose a harness and enter a session link or ID.");
       const resolved = await api.resolveRef(ref.trim(), Number(connection));
       if (resolved.session?.connectionId !== Number(connection))
         throw new Error("Paste a session link or ID from the selected harness.");
@@ -56,6 +69,9 @@ export function AdoptSessionDrawer({
   });
   const adopt = useMutation({
     mutationFn: (session: SessionPreview) => {
+      const adoptionBlock = gate(session.session.connectionId, "adopt");
+      if (adoptionBlock !== null) throw new Error(adoptionBlock.reason);
+      if (session.unavailableReason) throw new Error(session.unavailableReason);
       const body: AdoptSessionRequest = tree === undefined ? {} : { treeId: tree.id };
       if (session.task === null) {
         if (session.project === null) {
@@ -76,10 +92,13 @@ export function AdoptSessionDrawer({
   });
   // Preview the handed-over session once, on open.
   const previewMutate = preview.mutate;
-  const prefilled = initial !== undefined;
+  const prefilled = useRef(initial !== undefined);
+  const canPreview = block === null && connection !== "" && ref.trim() !== "";
   useEffect(() => {
-    if (prefilled) previewMutate();
-  }, [prefilled, previewMutate]);
+    if (!prefilled.current || !canPreview) return;
+    prefilled.current = false;
+    previewMutate();
+  }, [canPreview, previewMutate]);
   const eligible = picked !== null && !picked.unavailableReason;
   return (
     <Drawer
@@ -89,12 +108,12 @@ export function AdoptSessionDrawer({
         <Button
           variant="primary"
           disabled={
-            !eligible ||
+            block !== null || !eligible ||
             (picked?.project === null && projectId === "" && projectTitle.trim() === "")
           }
           busy={adopt.isPending}
           onClick={() => {
-            if (picked !== null) adopt.mutate(picked);
+            if (picked !== null && block === null) adopt.mutate(picked);
           }}
         >
           {tree !== undefined
@@ -111,7 +130,7 @@ export function AdoptSessionDrawer({
           className="flex flex-col gap-2"
           onSubmit={(event) => {
             event.preventDefault();
-            preview.mutate();
+            if (canPreview && !preview.isPending && !adopt.isPending) preview.mutate();
           }}
         >
           <Field label="Harness">
@@ -121,6 +140,7 @@ export function AdoptSessionDrawer({
                 value={connection}
                 disabled={preview.isPending || adopt.isPending}
                 onChange={(next) => {
+                  prefilled.current = false;
                   setConnection(next);
                   setPicked(null);
                   preview.reset();
@@ -130,7 +150,10 @@ export function AdoptSessionDrawer({
                 showTag
                 options={[
                   { value: "", label: "Choose harness" },
-                  ...connectionOptions(available, machines, harnessNames.kindName),
+                  ...connectionOptions(available, machines, harnessNames.kindName).map((option) => ({
+                    ...option,
+                    detail: gate(Number(option.value), "adopt")?.reason,
+                  })),
                 ]}
               />
             )}
@@ -143,6 +166,7 @@ export function AdoptSessionDrawer({
                 value={ref}
                 disabled={preview.isPending || adopt.isPending}
                 onChange={(event) => {
+                  prefilled.current = false;
                   setRef(event.target.value);
                   setPicked(null);
                   preview.reset();
@@ -153,12 +177,13 @@ export function AdoptSessionDrawer({
           </Field>
           <Button
             type="submit"
-            disabled={!connection || ref.trim() === ""}
+            disabled={!canPreview || adopt.isPending}
             busy={preview.isPending}
           >
             Preview session
           </Button>
         </form>
+        {block === null ? null : <LaunchBlockAlert block={block} tone="plain" />}
         <ErrorText error={preview.error ?? adopt.error} />
         {picked === null ? null : (
           <>
@@ -245,9 +270,12 @@ export function AdoptSessionDrawer({
 
 export function TrackSessionButton() {
   const [open, setOpen] = useState(false);
+  const reason = useTrackSessionBlock();
   return (
     <>
-      <Button onClick={() => setOpen(true)}>Track session</Button>
+      <BlockedReason reason={reason ?? undefined} showOnPhone>
+        <Button disabled={reason !== null} onClick={() => setOpen(true)}>Track session</Button>
+      </BlockedReason>
       {open ? <AdoptSessionDrawer onClose={() => setOpen(false)} /> : null}
     </>
   );

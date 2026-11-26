@@ -93,6 +93,8 @@ type Descriptor struct {
 	// LinkSchemes are the URL schemes of the harness's own app links
 	// (Links.Native, links in replies), lower case, without ":".
 	LinkSchemes []string `json:"linkSchemes"`
+	// WebAddress lets the UI offer browser address setup when a session has no link.
+	WebAddress bool `json:"webAddress,omitempty"`
 	// Setup is the connection setup schema.
 	Setup Setup `json:"setup"`
 	// Attribution is how an agent running on this harness tells Stage its

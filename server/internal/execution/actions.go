@@ -59,6 +59,7 @@ type Action struct {
 	Target       ActionTarget `json:"target"`
 	Input        []Field      `json:"input,omitempty"`
 	Confirm      string       `json:"confirm,omitempty"`
+	Primary      bool         `json:"primary,omitempty"`
 	Destructive  bool         `json:"destructive"`
 	Callers      []Caller     `json:"callers"`
 	Availability Availability `json:"availability"`

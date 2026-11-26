@@ -37,7 +37,7 @@ var seedSQL = []string{
 	`INSERT INTO pairing_codes (secret_hash, label, created_by_user_id, expires_at, redeemed_at, machine_id) VALUES (X'FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00', 'pair', 1, '2026-11-03T00:00:00.000000Z', '2026-11-02T23:00:00.500000Z', 2)`,
 	// A paired T3 connection 1 (migration 0032 removes the unused seed).
 	`INSERT INTO harness_connections (id, machine_id, harness, identity, stable_identity) VALUES (1, 1, 't3', 'env-1', 1)`,
-	`INSERT INTO harness_connections (id, machine_id, harness, auto_complete, identity, stable_identity, label, active, new_task_config) VALUES (2, 1, 'opencode', 0, 'oc-1', 1, 'OpenCode', 1, '{"b": 1, "a": [1.0, 2e0, -0.5]}')`,
+	`INSERT INTO harness_connections (id, machine_id, harness, auto_complete, identity, stable_identity, label, active, new_task_config, last_known_facts) VALUES (2, 1, 'opencode', 0, 'oc-1', 1, 'OpenCode', 1, '{"b": 1, "a": [1.0, 2e0, -0.5]}', '[{"id":"version","label":"Version","value":"2.3"}]')`,
 	`INSERT INTO harness_connections (id, machine_id, harness, active, retired_at, forgotten_at) VALUES (3, 2, 't3', 0, '2026-11-04T01:02:03.456789Z', '2026-11-04T02:00:00.000000Z')`,
 	`INSERT INTO session_identities (id, connection_id, external_id) VALUES (1, 1, 'thread-1'), (2, 2, 'oc-session')`,
 	`INSERT INTO shared_paths (connection_id, harness_root, stage_root) VALUES (2, '/h', '/s')`,

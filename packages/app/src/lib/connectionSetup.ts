@@ -1,6 +1,6 @@
 // Generic harness connection setup forms (harnesses/generic.tsx):
 // form values from a setup schema and the request bodies they send.
-import type { HarnessStatus, SetupField } from "../api/types.ts";
+import type { HarnessAction, HarnessStatus, SetupField } from "../api/types.ts";
 
 export type SetupValues = Record<string, string | boolean>;
 type FieldStates = HarnessStatus["fields"];
@@ -10,7 +10,7 @@ export function initialValues(fields: SetupField[], current: FieldStates): Setup
   const out: SetupValues = {};
   for (const f of fields) {
     const v = current.find((s) => s.id === f.id);
-    out[f.id] = f.kind === "bool" ? false : f.kind === "secret" ? "" : (v?.value ?? "");
+    out[f.id] = f.kind === "bool" ? v?.value === "true" : f.kind === "secret" ? "" : (v?.value ?? "");
   }
   return out;
 }
@@ -23,7 +23,7 @@ export function settingsBody(fields: SetupField[], current: FieldStates, values:
     const v = values[f.id];
     if (v === undefined) continue;
     if (f.kind === "bool") {
-      if (v === true) body[f.id] = true;
+      if (v !== (st?.value === "true")) body[f.id] = v;
     } else if (f.kind === "secret") {
       if (v !== "") body[f.id] = v;
     } else if (v !== (st?.value ?? "")) {
@@ -38,7 +38,23 @@ export function actionBody(fields: SetupField[], values: SetupValues): Record<st
   const body: Record<string, unknown> = {};
   for (const f of fields) {
     const v = values[f.id];
-    if (f.kind === "bool" ? v === true : v !== undefined && v !== "") body[f.id] = v;
+    if (f.kind === "bool" ? v === true || (f.required && v === false) : v !== undefined && v !== "") body[f.id] = v;
   }
   return body;
+}
+
+/** A submitted secret field empties immediately, including when a request fails. */
+export function clearSecrets(fields: readonly SetupField[], values: SetupValues): SetupValues {
+  const next = { ...values };
+  for (const f of fields) if (f.kind === "secret") next[f.id] = "";
+  return next;
+}
+
+/** Static declarations supply identity and schema. Live setup status can further restrict availability. */
+export function availableSetupActions(actions: readonly HarnessAction[], states: HarnessStatus["actions"]): HarnessAction[] {
+  return actions.filter((action) => action.target === "connection" && action.callers.includes("user")).map((action) => {
+    const state = states.find((entry) => entry.id === action.id);
+    if (!action.availability.available || state?.available !== false) return action;
+    return { ...action, availability: { available: false, reason: state.reason || "This action is unavailable." } };
+  });
 }

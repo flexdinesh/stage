@@ -3,16 +3,17 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { invalidateConnectionChange } from "../../api/queries.ts";
-import type { ReplacedConnection } from "../../api/types.ts";
+import type { HarnessFact, ReplacedConnection } from "../../api/types.ts";
 import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
 import { useHarnessApi, useScopedKey, useSetupCopy } from "../../api/harnessScope.tsx";
 import { useApi } from "../../platform/context.tsx";
 import { AutoCompleteToggle } from "../../components/Completion.tsx";
 import { NewTaskDefaults } from "../../components/NewTaskDefaults.tsx";
 import { Step, Steps } from "../../components/Steps.tsx";
-import { Alert, Button, ConfirmInline, Chip, Detail, Details, ErrorText, Field, Hint, InlineError, Input, Muted, Panel, QueryState, CommandBox } from "../../components/ui.tsx";
+import { CheckConnection, ConfirmConnectionAction, HarnessFacts, HarnessFix, HarnessStatusChip, ReplacedConnectionNotice } from "../../components/HarnessPresentation.tsx";
+import { Alert, Button, ErrorText, Field, Hint, Input, Muted, Panel, QueryState } from "../../components/ui.tsx";
 import { T3_KIND, t3Api } from "./api.ts";
-import { T3_STATE_TONE, codeReason, disconnectAvailability, primaryAction, replacedNotice, savedBrowserUrl, setupSteps, t3Configured, t3DisconnectPrompt, t3Identity, t3SettingsChanges } from "./onboarding.ts";
+import { codeReason, disconnectAvailability, primaryAction, savedBrowserUrl, setupSteps, t3Configured, t3DisconnectPrompt, t3SettingsChanges } from "./onboarding.ts";
 import { T3_STATUS_KEY, useT3Status } from "./queries.ts";
 import type { T3SettingsRequest, T3Status } from "./types.ts";
 
@@ -38,7 +39,7 @@ function CodeForm({ primary, onPaired }: { primary: boolean; onPaired?: (s: T3St
   const setStatus = useSetStatus();
   const [code, setCode] = useState("");
   const pair = useMutation({
-    mutationFn: () => api.pair({ code: code.trim() }),
+    mutationFn: (value: string) => api.pair({ code: value }),
     onSuccess: (s) => {
       setCode("");
       setStatus(s);
@@ -47,7 +48,9 @@ function CodeForm({ primary, onPaired }: { primary: boolean; onPaired?: (s: T3St
   });
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (code.trim() !== "") pair.mutate();
+    if (code.trim() === "" || pair.isPending) return;
+    pair.mutate(code.trim());
+    setCode("");
   };
   return (
     <form onSubmit={submit} className="flex flex-col gap-2">
@@ -66,7 +69,7 @@ function CodeForm({ primary, onPaired }: { primary: boolean; onPaired?: (s: T3St
           )}
         </Field>
         <Button type="submit" variant={primary ? "primary" : "secondary"} busy={pair.isPending} disabled={code.trim() === ""}>
-          Pair
+          Pair with code
         </Button>
       </div>
       <ErrorText error={pair.error} />
@@ -80,7 +83,7 @@ function CodeForm({ primary, onPaired }: { primary: boolean; onPaired?: (s: T3St
  * `primary` is false where pairing is not the region's main action (Settings
  * while connected).
  */
-export function PairActions({ status, primary = true }: { status: T3Status; primary?: boolean }) {
+export function PairActions({ status, primary = true, showFix = true }: { status: T3Status; primary?: boolean; showFix?: boolean }) {
   const api = t3Api(useHarnessApi());
   const copy = useSetupCopy();
   const setStatus = useSetStatus();
@@ -95,13 +98,13 @@ export function PairActions({ status, primary = true }: { status: T3Status; prim
       onPaired(s);
     },
   });
-  const notice = replaced === null ? null : <Alert tone="plain">{replacedNotice(replaced)}</Alert>;
+  const notice = <ReplacedConnectionNotice replaced={replaced} />;
   if (!status.autoPair.available) {
     return (
       <div className="flex flex-col gap-3">
         {notice}
         <Muted>{codeReason(status.autoPair.reason)}</Muted>
-        {status.autoPair.reason === "fake" ? null : <CommandBox command="t3 pair" />}
+        {!showFix || status.autoPair.reason === "fake" ? null : <HarnessFix fix={{ text: "Generate a pairing code on the T3 host.", command: "t3 pair" }} />}
         <CodeForm primary={primary} onPaired={onPaired} />
       </div>
     );
@@ -113,7 +116,7 @@ export function PairActions({ status, primary = true }: { status: T3Status; prim
       {notice}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <Button variant={primary ? "primary" : "secondary"} busy={auto.isPending} onClick={() => auto.mutate()}>
-          Pair with T3
+          Pair automatically
         </Button>
         <span className="font-mono text-meta text-muted">uses the t3 CLI on {copy.machine}</span>
       </div>
@@ -158,7 +161,9 @@ export function T3SettingsForm({ status, urlOnly = false }: { status: T3Status; 
   const busy = (which: SettingsSave["which"]) => save.isPending && save.variables?.which === which;
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (changed) save.mutate({ which: "save", body });
+    if (!changed || save.isPending) return;
+    save.mutate({ which: "save", body });
+    setToken("");
   };
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
@@ -242,24 +247,15 @@ export function T3SettingsForm({ status, urlOnly = false }: { status: T3Status; 
 
 /** Disconnect (Settings T3 connection footer): forgets the token and settings after an inline confirm; pairing this T3 again resumes. */
 export function DisconnectT3({ status }: { status: T3Status }) {
-  const [confirm, setConfirm] = useState(false);
-  const disconnect = useDisconnectT3(() => setConfirm(false));
+  const disconnect = useDisconnectT3();
   if (disconnectAvailability(status) === "hidden") return null;
-  return (
-    <div className="flex flex-col gap-2 border-t border-line pt-3">
-      <div className="flex justify-end">
-        <Button small variant="danger" disabled={confirm} onClick={() => setConfirm(true)}>
-          Disconnect
-        </Button>
-      </div>
-      {confirm ? (
-        <ConfirmInline danger confirmLabel="Disconnect" busy={disconnect.isPending} onConfirm={() => disconnect.mutate()} onCancel={() => setConfirm(false)}>
-          {t3DisconnectPrompt(status, shortDate)}
-        </ConfirmInline>
-      ) : null}
-      <ErrorText error={disconnect.error} />
-    </div>
-  );
+  return <ConfirmConnectionAction action={{
+    prompt: t3DisconnectPrompt(status, shortDate),
+    busy: disconnect.isPending,
+    error: disconnect.error,
+    run: (done) => disconnect.mutate(undefined, { onSuccess: done }),
+    reset: disconnect.reset,
+  }} />;
 }
 
 /** Disconnects T3 on the harness scope's machine and shows the new status at once. */
@@ -301,18 +297,8 @@ function ReachFix({ status, retry }: { status: T3Status; retry: ReturnType<typeo
   const copy = useSetupCopy();
   return (
     <div className="flex flex-col gap-3">
-      <Muted>Start T3 on {copy.machine}, or change the T3 URL to point stage at the T3 server.</Muted>
-      <CommandBox command="t3 serve" />
-      {retry === null ? null : (
-        <>
-          <div>
-            <Button variant="primary" busy={retry.isPending} onClick={() => retry.mutate()}>
-              Retry
-            </Button>
-          </div>
-          <ErrorText error={retry.error} />
-        </>
-      )}
+      <HarnessFix fix={{ text: `Start T3 on ${copy.machine}, or update the T3 URL.`, command: "t3 serve" }} />
+      {retry === null ? null : <CheckConnection run={() => retry.mutateAsync()} />}
       <div className="border-t border-line pt-3">
         <T3SettingsForm status={status} urlOnly />
       </div>
@@ -367,47 +353,37 @@ const when = (iso: string | null) => (iso === null ? "-" : `${dateTime(iso)} (${
 /** The T3 setup panel in Settings (its registry entry's Setup); the status card once T3 is set up. */
 export function T3ConnectionPanel() {
   const status = useT3Status();
+  const api = t3Api(useHarnessApi());
+  const setStatus = useSetStatus();
+  const check = () => api.status(true).then(setStatus);
   return (
-    <QueryState isPending={status.isPending} error={status.error} hasData={status.data !== undefined}>
+    <QueryState isPending={status.isPending} error={status.data === undefined ? status.error : null} hasData={status.data !== undefined}>
       {status.data === undefined ? null : (
         <>
-          {t3Configured(status.data) ? <StatusCard status={status.data} /> : null}
-          <NewTaskDefaults harness={T3_KIND} />
+          <StatusCard status={status.data} check={check} />
           <PairCard status={status.data} />
+          <NewTaskDefaults harness={T3_KIND} />
         </>
       )}
     </QueryState>
   );
 }
 
-function StatusCard({ status }: { status: T3Status }) {
+function StatusCard({ status, check }: { status: T3Status; check: () => Promise<unknown> }) {
+  const presentation = status.presentation;
+  const fix = status.autoPair.reason === "fake" && presentation?.fix?.command === "t3 pair" ? undefined : presentation?.fix;
+  const facts: HarnessFact[] = [...(presentation?.facts ?? [])];
+  if (status.lastFullSyncAt !== null) facts.push({ id: "lastFullSync", label: "Last full sync", value: when(status.lastFullSyncAt) });
   return (
-    <Panel
-      title="T3 connection"
-      actions={
-        <Chip tone={T3_STATE_TONE[status.state]} dot>
-          {status.state}
-        </Chip>
-      }
-    >
-      <div className="flex flex-col gap-3">
-        <Details>
-          <Detail label="T3">{t3Identity(status) ?? (status.reachable ? "-" : <InlineError>{status.probeError ?? "not reachable"}</InlineError>)}</Detail>
-          <Detail label="T3 URL">{status.t3Url}</Detail>
-          <Detail label="Browser URL">{status.publicUrl}</Detail>
-          <Detail label="Environment">{status.environmentId ?? "-"}</Detail>
-          <Detail label="Client id">{status.clientId ?? "-"}</Detail>
-          <Detail label="Token expires">{when(status.tokenExpiresAt)}</Detail>
-          <Detail label="Admin token">
-            {status.adminTokenConfigured ? "saved (auto-renew)" : "not set"}
-          </Detail>
-          <Detail label="Last full sync">{when(status.lastFullSyncAt)}</Detail>
-          <Detail label="Last error">
-            {status.lastError === null ? "-" : <InlineError>{status.lastError}</InlineError>}
-          </Detail>
-        </Details>
-        <AutoCompleteToggle harness={T3_KIND} className="border-t border-line pt-2" />
-        <DisconnectT3 status={status} />
+    <Panel title="T3 connection" actions={presentation === undefined ? undefined : <HarnessStatusChip status={presentation} />}>
+      <div className="flex min-w-0 flex-col gap-3">
+        <HarnessFix fix={fix} reason={status.probeError ?? status.lastError ?? presentation?.reason} />
+        <HarnessFacts facts={facts} />
+        <div className="flex flex-wrap items-start gap-2">
+          <CheckConnection run={check} />
+          <DisconnectT3 status={status} />
+        </div>
+        {t3Configured(status) ? <AutoCompleteToggle harness={T3_KIND} className="border-t border-line pt-2" /> : null}
       </div>
     </Panel>
   );
@@ -419,7 +395,7 @@ function PairCard({ status }: { status: T3Status }) {
   return (
     <Panel title="Pair" meta={paired ? "paired · pair again to replace the token" : status.state === "unpaired" ? "not paired" : status.state}>
       <div className="flex flex-col gap-4">
-        <PairActions status={status} primary={!paired} />
+        <PairActions status={status} primary={!paired} showFix={false} />
         <section className="flex flex-col gap-3 border-t border-line pt-3">
           <T3SettingsForm status={status} />
         </section>

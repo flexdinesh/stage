@@ -31,6 +31,7 @@ export function copyStatusText(status: CopyStatus, idle: string): string {
 export function CopyButton({
   text,
   label,
+  accessibleLabel,
   small = true,
   variant = "secondary",
   title,
@@ -38,6 +39,7 @@ export function CopyButton({
 }: {
   text: string;
   label: string;
+  accessibleLabel?: string;
   small?: boolean;
   variant?: Variant;
   title?: string;
@@ -46,11 +48,11 @@ export function CopyButton({
   const [status, copy] = useCopy();
   return (
     <>
-      <Button small={small} variant={variant} title={title} className={className} onClick={() => copy(text)}>
+      <Button small={small} variant={variant} title={title} aria-label={accessibleLabel} className={className} onClick={() => copy(text)}>
         {copyStatusText(status, label)}
       </Button>
       <span className="sr-only" aria-live="polite">
-        {status === "copied" ? `${label}: copied` : status === "failed" ? `${label}: copy failed` : ""}
+        {status === "copied" ? `${accessibleLabel ?? label}: copied` : status === "failed" ? `${accessibleLabel ?? label}: copy failed` : ""}
       </span>
     </>
   );

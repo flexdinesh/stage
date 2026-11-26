@@ -94,6 +94,9 @@ export function rovingKeyDown(selector: string) {
   };
 }
 
+const modalStack: HTMLElement[] = [];
+let beforeModalOverflow = "";
+
 /**
  * Modal behavior for a dialog element: initial focus (`[data-autofocus]`, else the first focusable), Tab trapped
  * inside, Esc closes, body scroll locked, focus restored to where it was on close.
@@ -107,12 +110,15 @@ export function useModal(panel: RefObject<HTMLElement | null>, onClose: () => vo
   useEffect(() => {
     const previous = document.activeElement;
     const el = panel.current;
-    const first = el?.querySelector<HTMLElement>("[data-autofocus]") ?? el?.querySelector<HTMLElement>(FOCUSABLE);
+    if (el === null) return;
+    if (modalStack.length === 0) beforeModalOverflow = document.body.style.overflow;
+    modalStack.push(el);
+    const first = el.querySelector<HTMLElement>("[data-autofocus]") ?? el.querySelector<HTMLElement>(FOCUSABLE);
     first?.focus();
-    const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
     function onKey(e: KeyboardEvent) {
+      if (e.defaultPrevented || modalStack.at(-1) !== el) return;
       if (e.key === "Escape") {
         e.stopPropagation();
         onCloseRef.current();
@@ -134,8 +140,19 @@ export function useModal(panel: RefObject<HTMLElement | null>, onClose: () => vo
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = overflow;
-      if (previous instanceof HTMLElement) previous.focus();
+      const index = modalStack.indexOf(el);
+      if (index >= 0) modalStack.splice(index, 1);
+      if (modalStack.length === 0) document.body.style.overflow = beforeModalOverflow;
+      if (previous instanceof HTMLElement) {
+        if (previous.isConnected && previous.getClientRects().length > 0) previous.focus();
+        else if (previous.dataset.focusReturn !== undefined) {
+          // A connection action can replace its invoking row while the drawer is open.
+          const replacement = [...document.querySelectorAll<HTMLElement>("[data-focus-return]")].find((candidate) =>
+            candidate.dataset.focusReturn === previous.dataset.focusReturn && candidate.getClientRects().length > 0,
+          );
+          replacement?.focus();
+        }
+      }
     };
   }, [panel]);
 }

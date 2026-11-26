@@ -8,7 +8,8 @@ import { useApi } from "../platform/context.tsx";
 import { IconBack, IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
 import { AddExistingTaskDrawer } from "../components/trees/AddExistingTaskDrawer.tsx";
-import { AdoptSessionDrawer } from "../components/trees/AdoptSessionDrawer.tsx";
+import { AdoptSessionDrawer, useTrackSessionBlock } from "../components/trees/AdoptSessionDrawer.tsx";
+import { BlockedReason, useStartReadyTasks } from "../components/LaunchGate.tsx";
 import { TreeActivity } from "../components/trees/TreeActivity.tsx";
 import { JournalPanel } from "../components/Journal.tsx";
 import { TreeNodePanel } from "../components/trees/TreeNodePanel.tsx";
@@ -93,13 +94,14 @@ function TreeMenu({ tree, onPick }: { tree: TreeDetail; onPick: (item: TreeActio
   const menu = useMenu();
   const closed = treeClosed(tree);
   const blocker = closeBlocker(tree.tasks);
+  const trackBlock = useTrackSessionBlock();
   return (
     <>
       <PickerButton {...menu.triggerProps}>More</PickerButton>
       <Menu menu={menu} label="Tree actions" align="right" className="w-52">
         <MenuItem onSelect={() => onPick("rename")}>Rename</MenuItem>
         {closed ? null : <MenuItem onSelect={() => onPick("existing")}>Add existing task</MenuItem>}
-        {closed ? null : <MenuItem onSelect={() => onPick("session")}>Add session</MenuItem>}
+        {closed ? null : <MenuItem reason={trackBlock} onSelect={() => onPick("session")}>Add session</MenuItem>}
         <MenuSeparator />
         {tree.status === "done" ? null : (
           <MenuItem reason={blocker} onSelect={() => onPick("done")}>
@@ -189,13 +191,12 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [confirming, setConfirming] = useState<"dissolve" | "delete" | null>(null);
   const selected = tree.tasks.find((t) => t.id === picked) ?? null;
-  const readyCount = tree.tasks.filter((t) => t.readiness === "ready" && !t.adopted).length;
   const completed = treeCompleted(tree.tasks);
   const closed = treeClosed(tree);
   const closedChip = closedLabel(tree, countMembers(tree.tasks));
   const linkSubject: LinkSubject = { kind: "tree", id: tree.id, title: tree.title };
 
-  const start = useMutation({ mutationFn: () => api.startTree(tree.id), onSettled: invalidate });
+  const { start, count: launchableCount, readyCount, reason: startBlock } = useStartReadyTasks(tree.tasks);
   const mode = useMutation({ mutationFn: (startMode: StartMode) => api.updateTree(tree.id, { startMode }), onSettled: invalidate });
   const status = useMutation({ mutationFn: (next: TreeStatus) => api.updateTree(tree.id, { status: next }), onSettled: invalidate });
   const leave = async () => {
@@ -276,15 +277,17 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
                 <IconPlus size={14} />
                 {selected === null ? "Add task" : `New task after #${selected.id}`}
               </Button>
-              <Button
-                variant="primary"
-                busy={start.isPending}
-                disabled={readyCount === 0}
-                title={readyCount === 0 ? "No task is ready" : `Starts ${readyCount} ready task${readyCount === 1 ? "" : "s"}`}
-                onClick={() => start.mutate()}
-              >
-                Start ready <span className="font-mono tabular">{readyCount}</span>
-              </Button>
+              <BlockedReason reason={startBlock ?? undefined} showOnPhone={readyCount > 0}>
+                <Button
+                  variant="primary"
+                  busy={start.isPending}
+                  disabled={startBlock !== null}
+                  title={`Starts ${launchableCount} ready task${launchableCount === 1 ? "" : "s"}`}
+                  onClick={() => start.mutate()}
+                >
+                  Start ready <span className="font-mono tabular">{launchableCount}</span>
+                </Button>
+              </BlockedReason>
             </>
           )
         }

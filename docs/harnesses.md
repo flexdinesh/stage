@@ -60,7 +60,7 @@ actions or facts.
 | Typed operation | Stage behavior gated by capability, such as launch, stop, adopt, reply, opening, attention, images, respond or send. | Shipped `execution.Capabilities`. Layer 06 applies the declaration to UI controls. |
 | Launch option | A typed choice, boolean or text input the harness takes during launch, such as its worktree option. | Shipped `execution.Config` and capability options. The adapter validates and translates the value. |
 | Action | A harness-specific operation on a connection, session or project, such as labelling a session. | Declare the input schema, confirmation, availability and allowed callers. Use the connector for connection setup, or implement `execution.Actor` and declare session and project actions in capabilities. The owner validates opaque input. |
-| Fact | A display detail, such as a harness status detail. | Relay a fact on status, observations or action results. Layer 06 renders facts in the shared UI. |
+| Fact | A display detail, such as a harness status detail. | Relay a fact on status, observations or action results. Stage renders them in the shared UI. |
 | Optional interface | A specialized adapter protocol for a declared policy or typed operation, such as event streaming or interaction. | Shipped `execution.As[T]` reaches the interface through local and proxy placements. Layer 03 negotiates the trait. |
 
 An agent may invoke a declared action only when its declaration allows
@@ -106,25 +106,25 @@ support and define availability before exposing one.
 ## UI slots
 
 The [slot registry](../packages/app/src/harnesses/index.ts) selects a
-harness's setup panel, connection row, status reader and query key, live
-chip and web-address policy via [`HarnessSlots`](../packages/app/src/harnesses/types.ts).
+harness's setup panel, connection row, status reader and query key, and live
+chip via [`HarnessSlots`](../packages/app/src/harnesses/types.ts).
 UI code outside `packages/app/src/harnesses/` consumes the slot,
-descriptor and declared capabilities.
+descriptor and declared capabilities. The descriptor carries the web-address policy.
 
-- **Generic panel.** A kind without a registered custom entry uses the
-  [generic slots](../packages/app/src/harnesses/generic.tsx). They render
-  settings and setup actions from the descriptor and status. Layer 06 adds
-  shared action and fact presentation with confirmation where declared.
-- **Custom panel.** Register one slot entry to keep the harness's
-  connection workflow, vocabulary, settings and details. OpenCode's
-  setup panel owns its local service and pairing flows. Layer 06 shares
-  primitives across the custom and generic panels.
-- **Unavailable operation.** A harness without Stop declares that
-  operation unavailable with a reason. Layer 06 gates the control
-  on availability. The target uses the same declaration for API, MCP
-  and CLI dispatch. Today the Stop handler calls the adapter directly.
-  The harness keeps its native controls. Start and Track follow the
-  same UI pattern for launch and adoption.
+- **Generic panel.** A kind without a custom entry uses the
+  [generic slots](../packages/app/src/harnesses/generic.tsx). Define settings
+  and setup actions in the descriptor. Stage renders the fields, confirmation,
+  availability reasons, status facts and fix.
+- **Custom panel.** Register one slot entry to keep the harness's connection
+  workflow, vocabulary and settings. Share the presentation primitives and
+  declare which setup actions the panel renders. Manage renders additional
+  declared actions and the connection row offers them by label.
+- **Unavailable operation.** A harness without Stop declares its availability
+  and reason. Stage gates Start, Stop and Track on launch, stop and adopt
+  in the UI and checks the operations before dispatch on the server.
+- **Session and project actions.** Use the shared action renderer with the
+  appropriate target route. Session actions appear with the task's controls,
+  and session facts appear in its session panel.
 
 ## Author checklist
 

@@ -1,11 +1,11 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApi } from "../platform/context.tsx";
-import { useHarnesses, useMachines, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
+import { useConnectionCapabilities, useHarnesses, useMachines, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
 import { connectionOptions, machineTag, withMachine } from "../lib/machines.ts";
 import {
   type ExecutionConfig,
-  type OperationId,
+  type Project,
   type Schedule,
   type StartMode as TreeStartMode,
   type Task,
@@ -249,17 +249,20 @@ function TaskFormDrawer({
     caps,
     acceptsImages,
     prefilled,
-    draftConfig,
-    setDraftConfig,
+    setConfig,
     effectiveConfig,
     issues,
-    unverifiedConfig,
     chooseHarness,
+    chooseProject,
     fellBack,
   } = useHarnessConfig(existing, s.projectId, defaultConnection);
   const full = task === undefined || isFullyEditable(task);
-  const images = useImageSet(task?.attachments ?? schedule?.attachments);
-  const isNew = task === undefined && schedule === undefined;
+  const images = useImageSet(existing?.attachments);
+  const isNew = existing === undefined;
+  // The API verifies images when the connection changes or when a draft adds an image.
+  const checksImages = existing?.connectionId !== connection || images.ids.some((id) =>
+    !existing.attachments?.some((attachment) => attachment.id === id),
+  );
   // Start options: all for a new task, timing only for a backlog task without needs, none otherwise (or for a schedule).
   const needs = task?.needs ?? [];
   const modes: readonly StartMode[] = isNew ? newModes(defaultTree) : task !== undefined && full && needs.length === 0 ? ["backlog", "at"] : [];
@@ -333,8 +336,7 @@ function TaskFormDrawer({
     full && s.prompt.trim() === "" && "prompt",
     full && connection === 0 && "harness",
     full && issues.length > 0 && `resolve ${issues.join(", ")}`,
-    full && unverifiedConfig && "verify or clear saved settings",
-    full && !acceptsImages && images.items.length > 0 && "remove images",
+    full && checksImages && !acceptsImages && images.items.length > 0 && "remove images",
     images.uploading && "images still uploading",
     images.failed && "remove failed images",
     (mode === "at" || mode === "repeat") && !tzValid && "time zone",
@@ -413,8 +415,10 @@ function TaskFormDrawer({
                 projects={pickable}
                 disabled={!full}
                 value={s.projectId}
-                // The list holds only projects the chosen harness can use, so the choice stands.
-                onChange={(projectId) => set({projectId})}
+                onChange={(projectId) => {
+                  chooseProject(projectId);
+                  set({ projectId });
+                }}
                 placeholder="Select project…"
                 autoFocus={isNew}
                 emptyText={chosen === 0 || pickable.length > 0 ? undefined : <NoHarnessProjects connectionId={chosen} />}
@@ -446,15 +450,24 @@ function TaskFormDrawer({
         <Field label="Prompt" hint={full ? "Type / to insert a snippet." : undefined}>
           {(id) =>
             full ? (
-              <ImageDropzone set={images} label="Prompt images" disabled={!acceptsImages}>
-                <SnippetTextarea
-                  id={id}
-                  rows={8}
-                  value={s.prompt}
-                  onValueChange={(prompt) => set({ prompt })}
-                  projectId={snippetProject}
-                />
-              </ImageDropzone>
+              <div className="flex min-w-0 flex-col gap-2">
+                <ImageDropzone set={images} label="Prompt images" disabled={!acceptsImages}>
+                  <SnippetTextarea
+                    id={id}
+                    rows={8}
+                    value={s.prompt}
+                    onValueChange={(prompt) => set({ prompt })}
+                    projectId={snippetProject}
+                  />
+                </ImageDropzone>
+                {!acceptsImages && images.items.length > 0 ? (
+                  <Alert>
+                    <span className="break-words">
+                      {caps.data?.operations.images?.reason || "This harness cannot receive these images."}
+                    </span>
+                  </Alert>
+                ) : null}
+              </div>
             ) : (
               <div className="flex flex-col gap-2">
                 <Textarea id={id} rows={8} disabled value={s.prompt} />
@@ -463,13 +476,20 @@ function TaskFormDrawer({
             )
           }
         </Field>
-        {connection ? <>
-          <HarnessFields title={`Harness · ${connectionName(connection)}`} config={effectiveConfig} caps={caps.data} onChange={setDraftConfig} disabled={!full}/>
-          <ErrorText error={caps.error}/>
-          {unverifiedConfig ? <p className="text-small">Connect and bind this harness to verify saved choices, or clear each unavailable choice above.</p> : null}
-          {!acceptsImages && images.items.length ? <Alert>{caps.data?.operations.images?.reason || "This harness cannot receive these images."} {images.items.map(i=><Button small key={i.key} onClick={()=>images.remove(i.key)}>Remove {i.name}</Button>)}</Alert> : null}
-        </> : null}
-        {prefilled === undefined || draftConfig ? null : (
+        {connection > 0 ? (
+          <HarnessFields
+            title={`Harness · ${connectionName(connection)}`}
+            config={effectiveConfig}
+            caps={caps.data}
+            onChange={setConfig}
+            disabled={!full}
+            allowReset={full}
+            loading={caps.live && caps.data === undefined && (caps.isPending || caps.isFetching)}
+            error={caps.isFetching ? null : caps.error}
+            onRetry={() => void caps.refetch()}
+          />
+        ) : null}
+        {prefilled === undefined ? null : (
           <Hint className="-mt-1.5">model prefilled from the {connectionName(connection)} pin (Settings › Connections)</Hint>
         )}
         {modes.length > 0 ? (
@@ -543,52 +563,49 @@ function useHarnessConfig(
   projectId: string,
   defaultConnection: number | null,
 ) {
-  const api = useApi();
   const projects = useProjects();
   const harnesses = useHarnesses();
-  const selectedProject = projects.data?.projects.find((project) => String(project.id) === projectId);
+  const projectFor = (id: string) => projects.data?.projects.find((project) => String(project.id) === id);
+  const selectedProject = projectFor(projectId);
   const [chosen, setChosen] = useState(existing?.connectionId ?? 0);
+  const [draftConfig, setDraftConfig] = useState<{ connectionId: number; config: ExecutionConfig } | null>(null);
   // Bindings on replaced or disconnected connections never pick the destination.
-  const bindings = (selectedProject?.bindings ?? []).filter((b) => b.connectionActive && !harnesses.unconfigured(b.connectionId));
-  // A default that is no longer an active, connected connection is none.
+  const bindingsFor = (project: Project | undefined) =>
+    (project?.bindings ?? []).filter((b) => b.connectionActive && !harnesses.unconfigured(b.connectionId));
+  const bindings = bindingsFor(selectedProject);
   const fallbackDefault = defaultConnection !== null && harnesses.active(defaultConnection) && !harnesses.unconfigured(defaultConnection) ? defaultConnection : null;
-  // Not chosen: the default connection, or (for a project not available there) the one the server would pick. The
-  // default never narrows the project list; only an explicit choice does.
-  const implicit = existing
-    ? 0
-    : selectedProject === undefined
-      ? (fallbackDefault ?? 0)
-      : newTaskConnection(bindings, fallbackDefault, (id) => harnesses.connection(id)?.machineId ?? Number.MAX_SAFE_INTEGER);
-  const connection = chosen || implicit || (bindings.length === 1 ? bindings[0]?.connectionId ?? 0 : 0);
-  // The project is not on the default connection: the form says where the task goes instead.
+  // When no connection was chosen, follow the project's bindings or the new-task default.
+  const implicit = (project: Project | undefined, projectBindings: Project["bindings"]) => {
+    if (existing !== undefined) return projectBindings.length === 1 ? projectBindings[0]?.connectionId ?? 0 : 0;
+    if (project === undefined) return fallbackDefault ?? 0;
+    return newTaskConnection(projectBindings, fallbackDefault, (id) => harnesses.connection(id)?.machineId ?? Number.MAX_SAFE_INTEGER);
+  };
+  const connection = chosen || implicit(selectedProject, bindings);
   const fellBack = chosen === 0 && fallbackDefault !== null && selectedProject !== undefined && connection !== fallbackDefault ? fallbackDefault : null;
-  // An explicitly chosen harness narrows the picker to projects it can run.
+  // An explicitly chosen harness narrows the picker; the current Stage project stays selected.
   const pickable = useMemo(() => projectsForConnection(projects.data?.projects ?? [], chosen, projectId), [projects.data, chosen, projectId]);
-  const bound = bindings.some(b => b.connectionId === connection && b.status === "available");
-  const caps = useQuery({
-    queryKey: ["capabilities", connection, projectId, bound],
-    enabled: connection > 0 && bound,
-    queryFn: () => api.capabilities(connection, Number(projectId)),
-    // What the harness can do changes rarely; the form reads it once, not on a poll.
-    staleTime: 60_000,
-    retry: false,
-  });
-  // Until the harness answers, nothing is ruled out: the server checks the launch.
-  const operation = (id: OperationId) => caps.data?.operations[id]?.available ?? true;
-  const [draftConfig, setDraftConfig] = useState<ExecutionConfig | null>(null);
-  // A new task starts with the connection's pinned model; it follows the harness until the user edits the config.
-  const prefilled = existing ? undefined : prefillConfig(harnesses.connection(connection));
-  const originalConfig = existing?.executionConfig ?? prefilled;
-  const baseConfig = originalConfig ? { ...originalConfig, options: originalConfig.options ?? [] } : harnessDefaults;
-  // New-task prefill carries model and options only; mode and permission start at the harness default.
-  const initialConfig = existing ? baseConfig : { ...baseConfig, mode: "", permission: "" };
-  const effectiveConfig = draftConfig ?? initialConfig;
-  const changedHarness = existing !== undefined && connection !== existing.connectionId;
-  const unverifiedConfig = changedHarness && caps.data === undefined &&
-    (effectiveConfig.model || effectiveConfig.mode || effectiveConfig.permission || effectiveConfig.options.length > 0);
+  const binding = bindings.find((b) => b.connectionId === connection && b.status === "available");
+  const caps = useConnectionCapabilities(connection, true, binding);
+  const acceptsImages = caps.data === undefined || caps.data.operations.images?.available === true;
+  // The first connection uses its pin. Switching connections starts with the harness defaults.
+  const prefilled = existing === undefined && draftConfig === null ? prefillConfig(harnesses.connection(connection)) : undefined;
+  const original = existing?.connectionId === connection ? existing.executionConfig : prefilled;
+  const initialConfig = original ? { ...original, options: original.options ?? [] } : harnessDefaults;
+  const effectiveConfig = draftConfig === null ? initialConfig : draftConfig.connectionId === connection ? draftConfig.config : harnessDefaults;
+
+  function resetForConnection(connectionId: number) {
+    if (connectionId !== connection && (connection > 0 || draftConfig !== null)) {
+      setDraftConfig({ connectionId, config: harnessDefaults });
+    }
+  }
   function chooseHarness(id: number) {
-    if (existing || draftConfig) setDraftConfig(effectiveConfig);
+    resetForConnection(id || implicit(selectedProject, bindings));
     setChosen(id);
+  }
+  function chooseProject(id: string) {
+    if (chosen !== 0) return;
+    const nextProject = projectFor(id);
+    resetForConnection(implicit(nextProject, bindingsFor(nextProject)));
   }
   return {
     harnesses,
@@ -597,16 +614,15 @@ function useHarnessConfig(
     chosen,
     connection,
     pickable,
-    bound,
+    bound: binding !== undefined,
     caps,
-    acceptsImages: operation("images"),
+    acceptsImages,
     prefilled,
-    draftConfig,
-    setDraftConfig,
+    setConfig: (config: ExecutionConfig) => setDraftConfig({ connectionId: connection, config }),
     effectiveConfig,
     issues: incompatibleSettings(effectiveConfig, caps.data),
-    unverifiedConfig,
     chooseHarness,
+    chooseProject,
     fellBack,
   };
 }

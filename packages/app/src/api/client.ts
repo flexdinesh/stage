@@ -1,6 +1,7 @@
 import type {
+  HarnessAction,
   Machine, MachinePairing, PairingStatus,
-  Harness, HarnessConnection, HarnessesReply, HarnessStatus, Capabilities, ExecutionConfig, ExecutionLinks, TaskState,
+  ActionResult, Harness, HarnessFact, HarnessConnection, HarnessesReply, HarnessStatus, Capabilities, ExecutionConfig, ExecutionLinks, TaskState,
   CompletionPreview,
   AcceptanceRequest,
   AcceptanceResult,
@@ -103,9 +104,10 @@ function errorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-type RequestOptions = { method?: string; body?: unknown };
+type RequestOptions = { method?: string; body?: unknown; actionConfirmed?: boolean };
 
 const post = (body?: unknown): RequestOptions => (body === undefined ? { method: "POST" } : { method: "POST", body });
+const actionPost = (body: Record<string, unknown>, confirmed: boolean): RequestOptions => ({ ...post(body), actionConfirmed: confirmed });
 const patch = (body: unknown): RequestOptions => ({ method: "PATCH", body });
 const put = (body: unknown): RequestOptions => ({ method: "PUT", body });
 const del: RequestOptions = { method: "DELETE" };
@@ -125,8 +127,8 @@ function harnessCalls(apiFetch: Fetch, base: string) {
       apiFetch<HarnessStatus<D>>(path(kind, refresh ? "/status?refresh=1" : "/status")),
     /** Saves settings keyed by setup field id (null resets). */
     configureHarness: <D = unknown>(kind: Harness, settings: Record<string, unknown>) => apiFetch<HarnessStatus<D>>(path(kind, "/settings"), put(settings)),
-    runHarnessAction: <D = unknown>(kind: Harness, action: string, input?: Record<string, unknown>) =>
-      apiFetch<HarnessStatus<D>>(path(kind, `/actions/${encodeURIComponent(action)}`), post(input)),
+    runHarnessAction: <D = unknown>(kind: Harness, action: string, input?: Record<string, unknown>, confirmed = false) =>
+      apiFetch<HarnessStatus<D>>(path(kind, `/actions/${encodeURIComponent(action)}`), confirmed ? actionPost(input ?? {}, true) : post(input)),
     /** Forgets the connection's credentials; tasks and history stay. */
     disconnectHarness: <D = unknown>(kind: Harness) => apiFetch<HarnessStatus<D>>(path(kind, "/connection"), del),
     };
@@ -141,6 +143,7 @@ export type Api = ReturnType<typeof createApi>;
 export function createApi(transport: Transport) {
   async function request(path: string, init: RequestOptions): Promise<Response> {
     const headers: Record<string, string> = { Accept: "application/json" };
+    if (init.actionConfirmed) headers["Stage-Action-Confirmed"] = "1";
     const req: RequestInit = { method: init.method ?? "GET", headers };
     if (init.body instanceof FormData) {
       req.body = init.body; // the transport sets the multipart boundary
@@ -189,6 +192,9 @@ export function createApi(transport: Transport) {
     setNewTaskConfig: (connectionId: number, config: ExecutionConfig | null) => apiFetch<{connection: HarnessConnection}>(`/connections/${connectionId}/new-task-config`, put({config})),
     /** Forgets a retired connection, or a disconnected active one (409 while connected or its machine is offline, 404 when unknown or already forgotten). */
     forgetConnection: (id: number) => apiSend(`/connections/${id}`, del),
+    connectionFacts: (id: number) => apiFetch<{ facts: HarnessFact[] }>(`/connections/${id}/facts`),
+    runConnectionAction: (id: number, action: string, input: Record<string, unknown>, confirmed: boolean) =>
+      apiFetch<ActionResult>(`/connections/${id}/actions/${encodeURIComponent(action)}`, actionPost(input, confirmed)),
     capabilities: (id: number, projectId?: number) => apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({projectId})}`),
     sync: () => apiFetch<SyncResult>("/sync", post()),
 
@@ -226,6 +232,9 @@ export function createApi(transport: Transport) {
     unarchiveTask: (id: number) => apiFetch<Task>(`/tasks/${id}/unarchive`, post()),
     startTask: (id: number) => apiFetch<Task>(`/tasks/${id}/start`, post()),
     stopTask: (id: number) => apiFetch<Task>(`/tasks/${id}/stop`, post()),
+    taskActions: (id: number) => apiFetch<HarnessAction[]>(`/tasks/${id}/actions`),
+    runTaskAction: (id: number, actionId: string, input: Record<string, unknown>, confirmed: boolean) =>
+      apiFetch<ActionResult>(`/tasks/${id}/actions/${encodeURIComponent(actionId)}`, actionPost(input, confirmed)),
     /** What the task's session waits on (409 `operation_unavailable` when its harness can't answer from Stage). */
     taskRequests: (id: number) => apiFetch<{requests: SessionRequest[]}>(`/tasks/${id}/requests`),
     /** Answers one request (400 the answer doesn't fit, 404 no longer pending, 403 `agent_forbidden` for agents). */

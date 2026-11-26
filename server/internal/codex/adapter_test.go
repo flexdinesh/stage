@@ -392,6 +392,9 @@ func TestFeaturesFromModelCatalog(t *testing.T) {
 	if len(c.Models) != 1 || c.Models[0].ID != "gpt-test" || len(c.Models[0].Options) != 1 || c.Models[0].Options[0].Default == nil || c.Models[0].Options[0].Default.Str != "low" {
 		t.Fatalf("models %+v", c.Models)
 	}
+	if labels := c.Models[0].Options[0].ValueLabels; labels["low"] != "Low" || labels["high"] != "High" {
+		t.Fatalf("reasoning effort labels %+v", labels)
+	}
 	if !c.Operations[execution.OpImages].Available || c.Operations[execution.OpRespond].Available || len(c.Options) != 0 || len(c.Permissions) != 3 {
 		t.Fatalf("%+v", c)
 	}

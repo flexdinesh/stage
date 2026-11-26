@@ -19,7 +19,7 @@ const (
 // identity (the connector proves continuity); an archived session may
 // complete its task.
 var Descriptor = harness.Descriptor{
-	Kind: Kind, Name: "OpenCode", Sessions: harness.SessionsMachine, ContinuityProof: true,
+	Kind: Kind, Name: "OpenCode", Sessions: harness.SessionsMachine, WebAddress: true, ContinuityProof: true,
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedArchived, Provenance: "harness_archived",
 		Setting:   "Complete tasks when archived in OpenCode",
@@ -38,7 +38,7 @@ var Descriptor = harness.Descriptor{
 		},
 		Actions: []execution.Action{
 			{
-				ID: ActionConnectLocal, Label: "Connect local service",
+				ID: ActionConnectLocal, Label: "Connect local service", Primary: true,
 				Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
 				Input:        []execution.Field{newInstance},
 				Availability: execution.Availability{Available: true},
@@ -53,7 +53,7 @@ var Descriptor = harness.Descriptor{
 				Availability: execution.Availability{Available: true},
 			},
 			{
-				ID: ActionCheck, Label: "Check connection",
+				ID: ActionCheck, Label: "Check again",
 				Target: execution.TargetConnection, Callers: []execution.Caller{execution.CallerUser},
 				Availability: execution.Availability{Available: true},
 			},

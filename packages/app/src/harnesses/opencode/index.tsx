@@ -1,4 +1,5 @@
 // OpenCode's registry entry: its setup panel, Settings row and status reader.
+import { connectionStatusChip } from "../../lib/connections.ts";
 import { ConnectionRow } from "../../components/ConnectionRow.tsx";
 import { statusRead } from "../../lib/connections.ts";
 import { statusSlots } from "../status.ts";
@@ -11,12 +12,11 @@ export const OPENCODE_SLOTS: HarnessSlots = {
   Setup: OpenCodeSetup,
   Row: OpenCodeRow,
   ...statusSlots(OPENCODE_STATUS),
+  handledSetupActions: (id) => id === "connect-local" || id === "pair" || id === "check",
   statusKey: () => OPENCODE_STATUS_KEY,
-  // Its address for other devices and web client URL (Advanced) make session links work from other devices.
-  webAddress: true,
 };
 
-function OpenCodeRow({ descriptor, machine, onManage, isDefault }: ConnectionRowProps) {
+function OpenCodeRow({ descriptor, machine, onManage, isDefault, overflow }: ConnectionRowProps) {
   const query = useOpenCodeStatus();
   const read = statusRead(query);
   const summary = openCodeSummary(read);
@@ -26,10 +26,11 @@ function OpenCodeRow({ descriptor, machine, onManage, isDefault }: ConnectionRow
     <ConnectionRow
       name={descriptor.name}
       machine={machine}
-      detail={s === undefined ? (read.error ?? "") : openCodeRowDetail(s)}
-      chip={{ tone: summary.tone, label: summary.state }}
+      detail={s === undefined ? (read.error ?? "") : (s.presentation?.reason || openCodeRowDetail(s))}
+      chip={s?.presentation === undefined ? { tone: summary.tone, label: summary.state } : connectionStatusChip(s.presentation)}
       onManage={onManage}
       isDefault={isDefault}
+      overflow={overflow}
       disconnect={
         s === undefined || s.state === "unconfigured"
           ? null

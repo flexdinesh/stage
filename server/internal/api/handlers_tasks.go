@@ -485,6 +485,17 @@ func (s *server) stopTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	caps, err := adapter.Features(r.Context())
+	if err != nil {
+		return &db.HarnessError{Err: err}
+	}
+	if op := caps.Operations[execution.OpStop]; !op.Available {
+		reason := strings.TrimSpace(op.Reason)
+		if reason == "" {
+			reason = "This connection does not support stopping tasks."
+		}
+		return db.Conflict("%s", reason)
+	}
 	if err := adapter.Stop(r.Context(), *task.Session); err != nil {
 		return &db.HarnessError{Err: err}
 	}

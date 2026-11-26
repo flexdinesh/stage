@@ -72,6 +72,8 @@ type Connections interface {
 	// List: active first, then retired (forgotten included), by id.
 	List(ctx context.Context) ([]HarnessConnection, error)
 	Get(ctx context.Context, id int64) (HarnessConnection, error)
+	ConnectionFacts(ctx context.Context, id int64) (string, error)
+	SaveConnectionFacts(ctx context.Context, id int64, facts string) error
 	SetAutoComplete(ctx context.Context, id int64, on bool) error
 	// SetNewTaskConfig: false when the connection is unknown.
 	SetNewTaskConfig(ctx context.Context, id int64, c *execution.Config) (bool, error)

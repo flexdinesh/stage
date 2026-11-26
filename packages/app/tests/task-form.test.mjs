@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { blockedStartModes, scheduleBody, taskCreateBody, taskUpdateBody } from "../src/lib/taskForm.ts";
+import { setOption } from "../src/lib/options.ts";
 
 const config = { model: "m", options: [], permission: "", mode: "" };
 const template = { projectId: 1, title: "T", prompt: "P", connectionId: 3, executionConfig: config };
@@ -53,6 +54,24 @@ test("taskUpdateBody sends only edited fields; a task past backlog sends its tit
   assert.deepEqual(taskUpdateBody(update({ template: { ...template, title: "New" } })), { title: "New" });
   assert.deepEqual(taskUpdateBody(update({})), {});
   assert.deepEqual(taskUpdateBody(update({ full: false, template: { ...template, title: "X" } })), { title: "X" });
+});
+
+test("a connection change sends reset options without altering unrelated task fields", () => {
+  const executionConfig = { model: "", options: [], permission: "", mode: "" };
+  const next = { ...template, connectionId: 4, executionConfig };
+  assert.deepEqual(taskUpdateBody(update({ template: next })), { connectionId: 4, executionConfig });
+});
+
+test("task creation sends explicit Off and omits the option after choosing Harness default", () => {
+  const boolean = { id: "fast", kind: "boolean", values: [true, false], default: false };
+  const state = { notes: "", attachmentIds: [], timed: null, startNow: false, tree: undefined, treeStart: "inherit" };
+  const off = setOption([], [boolean], "fast", false);
+  const defaults = setOption(off, [boolean], "fast", undefined);
+  const payload = (options) => JSON.parse(JSON.stringify(taskCreateBody({
+    ...template, executionConfig: { ...config, options },
+  }, state))).executionConfig.options;
+  assert.deepEqual(payload(off), [{ id: "fast", value: false }]);
+  assert.deepEqual(payload(defaults), []);
 });
 
 test("taskUpdateBody: handoff and tree start only when edited and changed", () => {

@@ -5,12 +5,12 @@ import { useApi, usePlatform } from "../platform/context.tsx";
 import {
   keys,
   latestNotificationsKey,
-  useInvalidateWork,
   useNotificationHistory,
   useNotificationInbox,
   useNotifications,
   useHarnesses,
   useSessionRequests,
+  useTask,
 } from "../api/queries.ts";
 import type { Notification, NotificationEvent, NotificationGroup, NotificationPage, SessionRef, WaitingSession } from "../api/types.ts";
 import { folderName, type SessionAction } from "../lib/harnesses.ts";
@@ -44,6 +44,8 @@ import {
 import { useSessionAction } from "../lib/hostState.ts";
 import { SessionActionButton } from "./SessionAction.tsx";
 import { RowRequestControls, RowRequestLine, useRowRequest } from "./Requests.tsx";
+import { BlockedReason, useOperationGate, useStartTask } from "./LaunchGate.tsx";
+import { canStart } from "../lib/tasks.ts";
 
 const TOAST_MS = 8000;
 const MAX_TOASTS = 3;
@@ -57,15 +59,9 @@ const startable = (n: Notification): n is Notification & { taskId: number } =>
 
 /** Start for a ready notification (POST start); the error shows in the title and as a red line. */
 function StartButton({ taskId, onStarted }: { taskId: number; onStarted?: () => void }) {
-  const api = useApi();
-  const qc = useQueryClient();
-  const invalidate = useInvalidateWork();
-  const start = useMutation({
-    mutationFn: () => api.startTask(taskId),
-    onSuccess: () => onStarted?.(),
-    // The task's state names it startable here: the notification views refresh with the work.
-    onSettled: () => Promise.all([invalidate(), qc.invalidateQueries({ queryKey: keys.notifications })]),
-  });
+  const task = useTask(taskId);
+  const { start, block } = useStartTask(task.data, onStarted);
+  const reason = task.error?.message ?? block?.reason ?? (task.data !== undefined && !canStart(task.data) ? "This task cannot start yet." : undefined);
   const error = errorText(start.error);
   return (
     <>
@@ -74,9 +70,11 @@ function StartButton({ taskId, onStarted }: { taskId: number; onStarted?: () => 
           {error}
         </InlineError>
       )}
-      <Button small variant="primary" busy={start.isPending} onClick={() => start.mutate()} title={`Start task #${taskId}`}>
-        Start
-      </Button>
+      <BlockedReason reason={reason} showOnPhone>
+        <Button small variant="primary" disabled={reason !== undefined} busy={start.isPending} onClick={() => start.mutate()} title={`Start task #${taskId}`}>
+          Start
+        </Button>
+      </BlockedReason>
     </>
   );
 }
@@ -649,6 +647,7 @@ function NotificationHistory({ groupKey }: { groupKey: string }) {
 function SilentWaitingRow({ session, onTrack }: { session: WaitingSession; onTrack: ((session: SessionRef) => void) | undefined }) {
   const action = useNotificationAction()(session);
   const { name, retired } = useHarnesses();
+  const trackBlock = useOperationGate()(session.connectionId, "adopt");
   const harness = name(session.connectionId);
   const place = session.projectTitle ?? folderName(session.directory) ?? harness;
   return <div className={cx(needEdgeClass(true), "px-3 py-row")}>
@@ -660,13 +659,16 @@ function SilentWaitingRow({ session, onTrack }: { session: WaitingSession; onTra
       <Meta className="min-w-0 truncate" title={session.directory ?? place}>{place}</Meta>
       <div className="flex shrink-0 items-center gap-1.5">
         {onTrack === undefined || retired(session.connectionId) ? null : (
-          <Button small title="Track this session as a Stage task" onClick={() => onTrack({ connectionId: session.connectionId, externalSessionId: session.externalSessionId })}>
-            Track
-          </Button>
+          <BlockedReason reason={trackBlock?.reason}>
+            <Button small disabled={trackBlock !== null} title="Track this session as a Stage task" onClick={() => onTrack({ connectionId: session.connectionId, externalSessionId: session.externalSessionId })}>
+              Track
+            </Button>
+          </BlockedReason>
         )}
         <RowSessionButton action={action} harness={harness} waiting connectionId={session.connectionId} />
       </div>
     </div>
+    {onTrack === undefined || trackBlock === null || retired(session.connectionId) ? null : <Hint className="mt-1 wrap-anywhere md:hidden">{trackBlock.reason}</Hint>}
     {action?.kind === "resume" ? <code title={action.command} className="mt-1 block truncate font-mono text-meta text-muted">{action.command}</code> : null}
   </div>;
 }

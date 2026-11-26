@@ -46,6 +46,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{name: "settings, secrets and status copied", seed: seedV0036HarnessSetup, check: checkV0036HarnessSetup},
 		{name: "unconfigured defaults retained", check: checkV0036HarnessSetupDefaults},
 	},
+	37: {{name: "existing connection and task evidence retained", seed: seedV0037ConnectionFacts, check: checkV0037ConnectionFacts}},
 }
 
 func seedV0029Search(t *testing.T, pool *sql.DB) {
@@ -468,4 +469,18 @@ func checkV0035EmptyPreferences(t *testing.T, pool *sql.DB) {
 	if err := pool.QueryRowContext(ctx, `SELECT notify_events='["needs_input","failed","done"]' FROM preferences WHERE id=1`).Scan(&defaultMatches); err != nil || !defaultMatches {
 		t.Fatalf("Postgres notification default: %v, %v", defaultMatches, err)
 	}
+}
+
+func seedV0037ConnectionFacts(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	seedV0032(
+		`INSERT INTO harness_connections(id,machine_id,harness,identity,label) VALUES(42,1,'opencode','instance','Desk')`,
+		`INSERT INTO projects(id,title) VALUES(1,'P')`,
+		`INSERT INTO tasks(id,project_id,title,prompt,connection_id,execution_config) VALUES(1,1,'T','p',42,'{"options":[{"id":"worktree","value":false}]}')`,
+	)(t, pool)
+}
+
+func checkV0037ConnectionFacts(t *testing.T, pool *sql.DB) {
+	wantPGRows(t, pool, `SELECT id || '|' || identity || '|' || label || '|' || COALESCE(last_known_facts,'NULL') FROM harness_connections WHERE id=42`, "42|instance|Desk|NULL")
+	wantPGRows(t, pool, `SELECT connection_id || '|' || (execution_config->'options'->0->>'value') FROM tasks WHERE id=1`, "42|false")
 }

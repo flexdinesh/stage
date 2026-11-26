@@ -1,5 +1,9 @@
-import type { Capabilities, ExecutionConfig, HarnessOption, HarnessOptionKind, ModelOption } from "../api/types.ts";
-import { optionsFor } from "./capabilities.ts";
+import type { Capabilities, ExecutionConfig, HarnessModel, HarnessOption, HarnessOptionKind, ModelOption } from "../api/types.ts";
+
+/** What a config may set: the harness-wide options, then the model's own. */
+export function optionsFor(caps: Pick<Capabilities, "options"> | undefined, model: Pick<HarnessModel, "options"> | undefined): HarnessOption[] {
+  return [...(caps?.options ?? []), ...(model?.options ?? [])];
+}
 
 /** The option's kind; one declared without (an older harness) is boolean when every value is boolean, else choice. */
 export function optionKind(o: Pick<HarnessOption, "kind" | "values">): HarnessOptionKind {
@@ -10,6 +14,13 @@ export function optionKind(o: Pick<HarnessOption, "kind" | "values">): HarnessOp
 /** The option's name in the harness's words, else its id. */
 export function optionLabel(o: Pick<HarnessOption, "id" | "label">): string {
   return o.label || o.id;
+}
+
+/** A choice's display label, with the wire value as the fallback. Boolean labels describe explicit overrides. */
+export function optionValueLabel(option: Pick<HarnessOption, "valueLabels"> | undefined, value: string | boolean): string {
+  if (typeof value === "boolean") return value ? "On" : "Off";
+  const label = option?.valueLabels?.[value];
+  return typeof label === "string" && label !== "" ? label : value;
 }
 
 /** The value a config gives the option: its selection, else the option's default (undefined: neither). */
@@ -67,6 +78,11 @@ export function setOption(
 /** The options a form shows under a selection, in declared order: those whose dependency holds. */
 export function shownOptions(all: readonly HarnessOption[], selection: readonly ModelOption[]): HarnessOption[] {
   return all.filter((o) => optionApplies(o, selection, all));
+}
+
+/** Whether this config explicitly overrides the harness's defaults. */
+export function hasOverrides(config: ExecutionConfig): boolean {
+  return config.model !== "" || config.mode !== "" || config.permission !== "" || config.options.length > 0;
 }
 
 /**

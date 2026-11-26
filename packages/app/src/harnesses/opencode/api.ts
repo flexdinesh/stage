@@ -23,20 +23,18 @@ export function normalizeOpenCodeStatus(w: OpenCodeStatusWire): OpenCodeStatus {
 /** OpenCode's panel state from its harness status. */
 export function openCodeDetails(s: HarnessStatus<OpenCodeStatusWire>): OpenCodeStatus {
   if (s.details === undefined) throw new ApiError(502, "OpenCode status without details");
-  return normalizeOpenCodeStatus(s.details);
+  return { ...normalizeOpenCodeStatus(s.details), presentation: s };
 }
-
-const done = (): void => undefined;
 
 /** OpenCode's setup calls on a machine (`api`: that machine's harness calls); setting and action replies are read from the status. */
 export const openCodeApi = (api: HarnessApi) => ({
   status: () => api.harnessStatus<OpenCodeStatusWire>(OPENCODE_KIND).then(openCodeDetails),
   /** 409 `opencode_auth_required` when the service demands a password; 409 code instance_changed when the address is another OpenCode service (instance_returned: a replaced one); resend with newInstance to connect it. */
-  save: (body: OpenCodeSettings) => api.configureHarness(OPENCODE_KIND, { ...body }).then(done),
+  save: (body: OpenCodeSettings) => api.configureHarness(OPENCODE_KIND, { ...body }),
   /** Connects the OpenCode service on the machine with its own password (409 `opencode_local_unavailable`, or instance_changed / instance_returned as for save). */
-  connectLocal: (newInstance = false) => api.runHarnessAction(OPENCODE_KIND, "connect-local", newInstance ? { newInstance: true } : undefined).then(done),
+  connectLocal: (newInstance = false) => api.runHarnessAction(OPENCODE_KIND, "connect-local", newInstance ? { newInstance: true } : undefined),
   /** Redeems a link from `opencode pair` (400 when invalid, 409 `opencode_pairing_expired`, or instance_changed / instance_returned: resend the same link with newInstance). */
-  pair: (link: string, newInstance = false) => api.runHarnessAction(OPENCODE_KIND, "pair", newInstance ? { link, newInstance: true } : { link }).then(done),
+  pair: (link: string, newInstance = false) => api.runHarnessAction(OPENCODE_KIND, "pair", newInstance ? { link, newInstance: true } : { link }),
   /** Forgets the OpenCode connection; tasks and history stay. */
-  disconnect: () => api.disconnectHarness(OPENCODE_KIND).then(done),
+  disconnect: () => api.disconnectHarness(OPENCODE_KIND),
 });

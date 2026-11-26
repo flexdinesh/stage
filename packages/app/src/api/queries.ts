@@ -259,6 +259,31 @@ export const useTask = (id: number) => {
   return useQuery({ queryKey: [...keys.task, id], queryFn: () => api.task(id), refetchInterval: POLL.live });
 };
 
+/** Declarations for the current session. A new attempt gets fresh controls and action state. */
+export function useTaskActions(task: { id: number; launchAttempt: number; externalSessionId: string | null }, enabled: boolean) {
+  const api = useApi();
+  const qc = useQueryClient();
+  const queryKey = [...keys.task, task.id, "actions", task.launchAttempt, task.externalSessionId];
+  const q = useQuery({
+    queryKey,
+    queryFn: () => api.taskActions(task.id),
+    enabled,
+    refetchInterval: POLL.slow,
+    retry: false,
+  });
+  const actions = enabled && !q.isError ? q.data ?? [] : [];
+  const run = async (id: string, input: Record<string, unknown>, confirmed: boolean) => {
+    const action = actions.find((a) => a.id === id && a.callers.includes("user"));
+    if (action?.availability.available !== true) throw new Error(action?.availability.reason || "This action is unavailable.");
+    try {
+      return await api.runTaskAction(task.id, id, input, confirmed);
+    } finally {
+      void Promise.all([invalidateWork(qc), qc.invalidateQueries({ queryKey: keys.notifications })]);
+    }
+  };
+  return { actions, run };
+}
+
 /** `live: false` (a picker's one-off list): read once, re-read after 30s, no polling. */
 export const useTrees = (q: TreeListQuery = {}, { live = true }: { live?: boolean } = {}) => {
   const api = useApi();
@@ -423,7 +448,9 @@ export function invalidateConnectionChange(
     qc.invalidateQueries({ queryKey: keys.connections }),
     qc.invalidateQueries({ queryKey: keys.machines }),
     qc.invalidateQueries({ queryKey: keys.projects }),
+    qc.invalidateQueries({ queryKey: ["capabilities"] }),
     qc.invalidateQueries({ queryKey: scopedKey(keys.harnesses) }),
+    qc.invalidateQueries({ queryKey: ["capabilities"] }),
     invalidateWork(qc),
   ]);
   return Promise.all(awaited.map((key) => qc.invalidateQueries({ queryKey: scopedKey(key) }))).then(() => undefined);
@@ -439,21 +466,24 @@ const NO_REQUESTS: SessionRequest[] = [];
 /** How often pending requests are re-read while a task needs input: a request can appear or be answered elsewhere at any time. */
 const REQUESTS_POLL = 3000;
 
-/**
- * Connection `connectionId`'s capabilities for any project (its harness-wide models, options and operations), cached
- * as NewTaskDefaults reads them. Read only while `enabled` and the connection is not retired.
- */
-export function useConnectionCapabilities(connectionId: number, enabled: boolean) {
-  const api = useApi();
-  const harnesses = useHarnesses();
-  const live = enabled && connectionId > 0 && !harnesses.retired(connectionId);
-  const caps = useQuery({
-    queryKey: ["capabilities", connectionId, "", false],
-    queryFn: () => api.capabilities(connectionId),
-    enabled: live,
+type CapabilityScope = { projectId: number; id: number; revision: number };
+
+/** One cached capability read per connection and binding revision. Omit the binding for harness-wide declarations. */
+export function connectionCapabilityOptions(api: Pick<ReturnType<typeof useApi>, "capabilities">, connectionId: number, scope?: CapabilityScope) {
+  return queryOptions({
+    queryKey: scope === undefined ? ["capabilities", connectionId, "", false] : ["capabilities", connectionId, scope.projectId, scope.id, scope.revision],
+    queryFn: () => api.capabilities(connectionId, scope?.projectId),
     staleTime: 60_000,
     retry: false,
   });
+}
+
+/** Read capabilities while enabled and the connection is not retired. */
+export function useConnectionCapabilities(connectionId: number, enabled: boolean, scope?: CapabilityScope) {
+  const api = useApi();
+  const harnesses = useHarnesses();
+  const live = enabled && connectionId > 0 && !harnesses.retired(connectionId);
+  const caps = useQuery({ ...connectionCapabilityOptions(api, connectionId, scope), enabled: live });
   return { ...caps, live };
 }
 

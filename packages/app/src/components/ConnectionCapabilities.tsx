@@ -6,7 +6,7 @@ import { useConnectionCapabilities, useConnections } from "../api/queries.ts";
 import type { Capabilities, HarnessDescriptor } from "../api/types.ts";
 import { capabilityLines } from "../lib/capabilities.ts";
 import { activeOn } from "../lib/harnesses.ts";
-import { EmptyState, Meta, Panel, QueryState, Row, RowList, cx } from "./ui.tsx";
+import { Meta, Panel, QueryState, Row, RowList, cx } from "./ui.tsx";
 
 /** The Capabilities panel for the scope machine's active connection of the harness; nothing until it is set up. */
 export function ConnectionCapabilities({ descriptor }: { descriptor: HarnessDescriptor }) {
@@ -18,6 +18,7 @@ export function ConnectionCapabilities({ descriptor }: { descriptor: HarnessDesc
 
 function CapabilitiesPanel({ connectionId, name }: { connectionId: number; name: string }) {
   const caps = useConnectionCapabilities(connectionId, true);
+  if (caps.data !== undefined && capabilityLines(caps.data.operations).length === 0) return null;
   return (
     <Panel title="Capabilities" meta={`declared by ${name}`} flush>
       <QueryState isPending={caps.isPending} error={caps.error} hasData={caps.data !== undefined}>
@@ -30,7 +31,7 @@ function CapabilitiesPanel({ connectionId, name }: { connectionId: number; name:
 /** The ruled lines: label, then a mono available / unavailable and the harness's reason under an unavailable one. */
 export function CapabilityList({ operations, name }: { operations: Capabilities["operations"]; name: string }) {
   const lines = capabilityLines(operations);
-  if (lines.length === 0) return <EmptyState inset>{name} declares no operations.</EmptyState>;
+  if (lines.length === 0) return null;
   return (
     <RowList label={`${name} capabilities`}>
       {lines.map((l) => (

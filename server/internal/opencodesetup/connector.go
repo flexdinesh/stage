@@ -128,7 +128,14 @@ func (c *Connector) Configure(ctx context.Context, settings json.RawMessage) (ha
 	if err := db.DecodeStrict(settings, &in); err != nil {
 		return harness.Result{}, err
 	}
-	return harness.Result{}, c.svc.Save(ctx, in)
+	old := c.svc.ID()
+	if err := c.svc.Save(ctx, in); err != nil {
+		return harness.Result{}, err
+	}
+	if c.svc.ID() != old {
+		return harness.Result{Replaced: old}, nil
+	}
+	return harness.Result{}, nil
 }
 
 // Run runs connect-local, pair or check.

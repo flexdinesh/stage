@@ -63,6 +63,11 @@ func decodeModelKey(key string) (string, string, error) {
 	}
 	return pair[0], pair[1], nil
 }
+
+var effortLabels = map[string]string{
+	"none": "None", "minimal": "Minimal", "low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Maximum",
+}
+
 func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) {
 	c, err := a.Client.Capabilities(ctx)
 	if err != nil {
@@ -112,6 +117,15 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 					continue
 				}
 				taken[o.ID] = true
+				if o.ID == "effort" {
+					opt.Label = "Effort"
+					opt.ValueLabels = make(map[string]string)
+					for _, value := range o.Values {
+						if label := effortLabels[value.Str]; label != "" {
+							opt.ValueLabels[value.Str] = label
+						}
+					}
+				}
 				model.Options = append(model.Options, opt)
 			}
 			// Unreported runtime modes leave Permissions nil: the model inherits the harness list.

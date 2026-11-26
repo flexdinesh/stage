@@ -181,6 +181,7 @@ export interface HarnessAction {
   input?: SetupField[];
   confirm?: string;
   destructive: boolean;
+  primary?: boolean;
   callers: ActionCaller[];
   availability: { available: boolean; reason?: string };
 }
@@ -212,6 +213,8 @@ export interface HarnessDescriptor {
   stateReasons: string[];
   closures: HarnessClosure[];
   linkSchemes: string[];
+  /** Session web links can require a browser address in connection settings. */
+  webAddress?: boolean;
   setup: HarnessSetup;
   /** How the harness names an agent's session: MCP _meta keys it sends per call, and the variable its agents read their session id from. */
   attribution: {
@@ -349,6 +352,8 @@ export interface HarnessOption {
   label?: string;
   /** A choice's values; a boolean's true and false; none for text. */
   values: (string | boolean)[];
+  /** Display labels keyed by a choice's string values. */
+  valueLabels?: Record<string, string>;
   default?: string | boolean | null;
   /** It applies only while another option of the same config has this value (baseRef only with worktree on). */
   dependsOn?: { option: string; value: string | boolean };
