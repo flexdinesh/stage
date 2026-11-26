@@ -143,8 +143,8 @@ func TraitOf[T any]() string {
 
 // As reads an optional interface. A partial adapter must declare a registered
 // trait even when its Go type implements the interface.
-func As[T any](a Adapter) (T, bool) {
-	t, ok := any(a).(T)
+func As[T any](a any) (T, bool) {
+	t, ok := a.(T)
 	if p, partial := a.(Partial); ok && partial {
 		name := TraitOf[T]()
 		if name == "" || !p.Implements(name) {
