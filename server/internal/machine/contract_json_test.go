@@ -88,6 +88,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		"ProjectBinding":     binding,
 		"OpenCodeSetup":      config.OpenCodeSetup{Endpoint: "http://oc", BrowserEndpoint: "http://ocb", WebClient: "http://ocw", Auth: config.OpenCodeAuthPaired},
 		"OpenCodeCredential": config.OpenCodeCredential{Username: "opencode", Password: "tok", TokenIssuedAt: &at},
+		"CodexSettings":      config.CodexSettings{Binary: "/opt/codex/bin/codex", Connected: true},
 		"Registration":       opencode.Registration{ID: "svc", Version: "2.3.0", URL: "http://127.0.0.1:4096", Password: "pw", PID: 42},
 		// Machine ops.
 		"SharedRoot":       machine.SharedRoot{HarnessRoot: "/srv", StageRoot: "/home/u/src"},

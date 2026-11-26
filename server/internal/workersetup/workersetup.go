@@ -1,11 +1,11 @@
 // Package workersetup composes a worker's connection setup (ADR 0002,
 // docs/execution.md "Remote machines"): the real T3, OpenCode and (where
-// the machine allows local harnesses) Claude Code setups, connectors and
-// adapters of the worker's machine, built by the same constructors the
-// main server's own machine uses, over ports that reach the main server
-// through the worker channel (Ports). Harness credentials stay in the
-// worker's credentials file. Harness settings set in the worker's
-// environment lock those settings for this machine.
+// the machine allows local harnesses) Claude Code and Codex setups,
+// connectors and adapters of the worker's machine, built by the same
+// constructors the main server's own machine uses, over ports that reach
+// the main server through the worker channel (Ports). Harness credentials
+// stay in the worker's credentials file. Harness settings set in the
+// worker's environment lock those settings for this machine.
 package workersetup
 
 import (
@@ -17,8 +17,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
+	"github.com/flexdinesh/stage/server/internal/codex"
+	"github.com/flexdinesh/stage/server/internal/codexsetup"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/machine"
@@ -43,6 +46,9 @@ type Options struct {
 	// Claude overrides Claude Code's machine-local environment (tests);
 	// nil: this process's, with a systemd scope where one works.
 	Claude *claudecodesetup.Options
+	// Codex overrides Codex's machine-local options (tests: the daemon);
+	// nil: the codex CLI on this machine. Its ports are always the worker's.
+	Codex *codexsetup.Options
 	// StateDir is the worker's own folder: harness setups keep machine-local
 	// files under it (Claude Code's hook settings in <StateDir>/claude,
 	// unless Claude sets its own StateDir).
@@ -163,10 +169,21 @@ func (s *Setup) build(ctx context.Context) error {
 			return err
 		}
 	}
+	// Codex's daemon runs on this machine too: the same rule. Stage starts
+	// it on demand and never stops it.
+	var cdx *codexsetup.Service
+	if local.Allows(codex.Descriptor).Available {
+		if cdx, err = s.codex(ctx, ports, local.Install); err != nil {
+			return err
+		}
+	}
 	local.SetConnector(t3.Kind, t3setup.NewConnector(t3Setup, nil))
 	local.SetConnector(opencode.Kind, opencodesetup.NewConnector(openCode))
 	if claude != nil {
 		local.SetConnector(claudecode.Kind, claudecodesetup.NewConnector(claude))
+	}
+	if cdx != nil {
+		local.SetConnector(codex.Kind, codexsetup.NewConnector(cdx))
 	}
 	ok = true
 	return nil
@@ -191,4 +208,32 @@ func (s *Setup) claude(ctx context.Context, ports Ports, install machine.Install
 		return nil, nil
 	}
 	return c, err
+}
+
+// codex builds Codex's setup over the main server's record (no secrets:
+// `codex login` on this machine). An older main server that does not serve
+// Codex's settings leaves it out (nil), so the other harnesses still
+// compose; the main server then reports the machine as needing an update
+// for Codex. The daemon connection closes with the worker; the daemon
+// keeps running.
+func (s *Setup) codex(ctx context.Context, ports Ports, install machine.Install) (*codexsetup.Service, error) {
+	var o codexsetup.Options
+	if s.o.Codex != nil {
+		o = *s.o.Codex
+	}
+	o.Ports = codexsetup.Ports{Settings: ports, Identity: ports, Install: install}
+	if o.Version == "" {
+		o.Version = buildinfo.Version
+	}
+	o.Logger = s.log
+	c, err := codexsetup.New(ctx, o)
+	if errors.Is(err, errNotServed) {
+		s.log.Warn("the Stage server does not set up Codex yet; update it to use Codex on this machine", "err", err)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	context.AfterFunc(ctx, c.Close)
+	return c, nil
 }

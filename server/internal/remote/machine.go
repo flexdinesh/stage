@@ -76,8 +76,8 @@ func (m *Machine) Profile() harness.Profile {
 
 // Allows: connected harnesses always; a hosted one as the worker's
 // profile allows it (harness.Profile.Allows), with the fix in the worker's
-// terms, and once its setup is ready only if the worker set it up (it
-// hosts no Codex setup, or an older worker no Claude one). Until the worker
+// terms, and once its setup is ready only if the worker set it up (an
+// older worker sets up no Claude Code or Codex). Until the worker
 // described the machine its profile is unknown: allowed, so the calls
 // themselves answer offline or still starting.
 func (m *Machine) Allows(d harness.Descriptor) execution.Availability {
@@ -89,7 +89,7 @@ func (m *Machine) Allows(d harness.Descriptor) execution.Availability {
 	}
 	if desc.Profile.Allows(d).Available {
 		if d.Hosting == harness.Hosted && desc.SetupReady && !slices.ContainsFunc(desc.Connectors, func(c ConnectorState) bool { return c.Kind == d.Kind }) {
-			return execution.Availability{Reason: d.Name + " can't run on this machine: its Stage worker doesn't set it up (not supported on workers yet, or the worker needs an update)."}
+			return execution.Availability{Reason: d.Name + " can't run on this machine: its Stage worker doesn't set it up. Update Stage on that machine."}
 		}
 		return execution.Availability{Available: true}
 	}

@@ -5,7 +5,10 @@
 - **Amended** 2026-11-26 by #420 ([ADR 0007](0007-harness-boundary.md)):
   decisions 8 (T3's threads are refused through T3's declared `wraps`, not
   by the adapter naming T3) and 11 (attribution yields to T3 through
-  `wraps`, not by name).
+  `wraps`, not by name);
+  decision 10 (Codex is offered on workers whose machine profile allows
+  local harnesses, like Claude Code; ADR 0007 decision 14). Decision 2
+  stands, on workers too.
 - **Sources:** live gates against `codex` 0.171.0 (app-server 0.171.0) on
   Linux x86_64 with a ChatGPT login, 2026-11-25, in scratch directories.
   Probe threads were deleted afterwards. Sanitized protocol fixtures:
@@ -81,8 +84,9 @@ daemon, so a thread Stage starts is the user's thread too.
     Codex declares no launch options, so a `worktree` option is rejected), no Plan mode, images
     included. Permission presets: read-only (on-request, read-only), auto
     (on-request, workspace-write; default), full-access (never,
-    danger-full-access). Remote machines are out of scope (#374): like every
-    hosted kind, Codex is unavailable on a worker.
+    danger-full-access). On a worker, Codex runs on that machine where its
+    profile allows local harnesses, like Claude Code (ADR 0007 decision 14);
+    the main server keeps the machine's `codex_settings` row.
 11. **Attribution.** Codex sets `CODEX_THREAD_ID` in commands (gate). Its
     precedence ([ADR 0005](0005-claude-code-harness.md)'s generic
     owns/yields) yields to T3 (`T3CODE_THREAD_ID`): a Codex process T3 runs

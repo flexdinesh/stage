@@ -60,9 +60,10 @@ not allow.
   policy, with the fix in the worker's terms: `stage worker run
   --local-harnesses` or the worker service, or the worker outside Docker).
   Once the worker's setup is ready, a hosted kind it did not set up is not
-  allowed either: workers set up Claude Code but not Codex (an older worker
-  not Claude Code), so Codex on a worker reads unavailable, never as a
-  connect that fails. Until its worker described it since this server started, a remote
+  allowed either: workers set up Claude Code and Codex where their profile
+  allows local harnesses, so on an older worker without one of them it
+  reads unavailable ("Update Stage on that machine"), never as a connect
+  that fails. Until its worker described it since this server started, a remote
   machine's profile is unknown and every kind is allowed, so the calls
   themselves answer offline or still starting. The API refuses a
   disallowed kind's setup routes with that reason (409
@@ -180,22 +181,26 @@ suite cannot tell a remote machine from the local one.
   launch is refused as `connection_unavailable`, and an attempt already
   dispatched stays unconfirmed and retries until the worker is back.
 - **Setup.** A remote machine's connection setup runs on its worker
-  (`server/internal/workersetup`): the same `t3setup`, `opencodesetup`
-  and `claudecodesetup` constructors as the local machine (Claude Code
-  only when the worker's profile allows local harnesses), composed once
+  (`server/internal/workersetup`): the same `t3setup`, `opencodesetup`,
+  `claudecodesetup` and `codexsetup` constructors as the local machine
+  (Claude Code and Codex only when the worker's profile allows local
+  harnesses), composed once
   the channel is first online, over ports that call the main server
   (`setup.*` worker-to-main kinds, `remote.ServeSetup`, always scoped to
   the token's machine; a connection of another machine is `not_found`).
   The main server keeps the connection rows, identity, status, non-secret
   settings (T3 URL and Browser URL, OpenCode addresses and auth mode,
   Claude Code's command, connected config directory and disconnect:
-  `setup.claude.get` and `setup.claude.save`) and sync bookkeeping;
-  Claude Code has no credentials (Claude's own login on that machine). A
-  worker whose main server is older (it answers `setup.claude.*` with
-  `unknown_kind`) composes T3 and OpenCode without Claude Code and logs
-  why; a worker older than its main server answers Claude Code's
-  connector calls `not_hosted`, which the main server reports as 503
-  `machine_needs_update`. Harness credentials (the
+  `setup.claude.get` and `setup.claude.save`; Codex's CLI path and
+  connected: `setup.codex.get` and `setup.codex.save`, the machine's
+  `codex_settings` row) and sync bookkeeping; Claude Code and Codex have
+  no credentials (Claude's own login, `codex login`, on that machine). A
+  worker whose main server is older (it answers `setup.claude.*` or
+  `setup.codex.*` with `unknown_kind`) composes the other harnesses
+  without that one and logs why; a worker older than its main server
+  answers that kind's connector calls `not_hosted`, which the main server
+  reports as 503 `machine_needs_update`. Stage never stops a worker's
+  Codex daemon either (ADR 0007 decision 14). Harness credentials (the
   T3 token and admin token, OpenCode Basic credentials or paired token) stay in the
   worker's `credentials.json` (`0600`, deleted on join and leave) and never
   cross the channel. The main server's `remote.Connector` per machine and
@@ -208,8 +213,8 @@ suite cannot tell a remote machine from the local one.
   `machine_setup_starting`). Every registered kind has a connector proxy
   on every remote machine (`remoteSetupHooks`); `remote.Machine.Allows`
   decides which ones the machine offers. A remote machine's connection row is created
-  on first connect (T3 pairing, OpenCode connect or pair, Claude Code
-  connect), and a switch on
+  on first connect (T3 pairing, OpenCode connect or pair, Claude Code or
+  Codex connect), and a switch on
   the worker follows the connections on the main server (runners, sync).
   No environment variable sets a connection.
 - **Verification.** Every `TestContract*` in `server/internal/sync` runs
@@ -220,10 +225,11 @@ suite cannot tell a remote machine from the local one.
   images, traits and ops. Setup runs end to end over a real channel and
   store in `workersetup` (T3 pair creating the machine's connection,
   OpenCode credentials kept on the worker, calls scoped
-  to the caller's machine, Claude Code against the fake `claude` CLI:
-  connect, a task through the coordinator whose stored observation carries
-  the resume command, disconnect; refused without local harnesses; left
-  out against an older main server).
+  to the caller's machine, Claude Code against the fake `claude` CLI and
+  Codex against the fake daemon (`codextest`): connect, a task through the
+  coordinator whose stored observation carries the resume command,
+  disconnect; refused without local harnesses; left out against an older
+  main server).
 - **Resume command.** `Destinations` makes no call, so a remote session's
   `links.command` comes from its stored observation (every observation
   carries its links). A launch whose session Stage saw but could not
@@ -244,8 +250,8 @@ every machine (`serve/runners.go` follows instance switches). The database
 stores kinds as text; the registry, not a schema CHECK, decides which exist.
 
 - **Hosting.** `connected`: Stage connects to a service (T3, OpenCode), on any
-  machine profile. `hosted` (Codex): the harness runs as processes on Stage's machine
-  and is available only where the machine profile allows local processes
+  machine profile. `hosted` (Claude Code, Codex): the harness runs as processes on its machine
+  (the server's or a worker's) and is available only where that machine's profile allows local processes
   ([runtime.md](runtime.md#machine-profile-and-hosted-harnesses)); elsewhere
   `GET /api/harnesses` reports it unavailable with the reason.
 - **Stable identity.** When the identity names one instance for good (a T3
@@ -826,7 +832,11 @@ back; the purge is what removes them.
 unix control socket; `internal/codexsetup` is its connection setup. Design
 and live gate evidence: [ADR 0006](adr/0006-codex-app-server-harness.md).
 Codex owns threads, models, login and project trust. Stage stores no Codex
-credentials and never writes Codex's config.
+credentials and never writes Codex's config. On a worker (`workersetup`) the
+setup runs on that machine, with that machine's `codex`, login and daemon,
+when the worker allows local harnesses; its settings live on the main
+server's `codex_settings` row for that machine
+([Remote machines](#remote-machines)), and the resume command runs there.
 
 - **Client.** One connection per adapter, opened lazily. When the daemon is
   down the client runs `daemon start` (at most once per 30 s), else reports

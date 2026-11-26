@@ -11,7 +11,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest"
 	"github.com/flexdinesh/stage/server/internal/claudecodesetup"
-	"github.com/flexdinesh/stage/server/internal/codex"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -148,7 +147,7 @@ func TestRemoteClaudeNeedsAWorkerThatAllowsLocalHarnesses(t *testing.T) {
 // Claude Code out (the main server reports the machine needs an update).
 func TestRemoteClaudeSkippedAgainstAnOlderServer(t *testing.T) {
 	f := claudetest.New(t)
-	r := newRigWith(t, map[string]string{}, rigOptions{profile: localHarnesses, claude: claudeOptions(f), oldServer: true})
+	r := newRigWith(t, map[string]string{}, rigOptions{profile: localHarnesses, claude: claudeOptions(f), unserved: []string{"setup.claude.", "setup.codex."}})
 	ctx := t.Context()
 	if _, err := r.connector(t3.Kind).Status(ctx, false); err != nil {
 		t.Fatalf("T3 setup: %v", err)
@@ -156,25 +155,6 @@ func TestRemoteClaudeSkippedAgainstAnOlderServer(t *testing.T) {
 	if _, err := r.connector(claudecode.Kind).Status(ctx, false); !isUnavailable(err, remote.CodeMachineNeedsUpdate) {
 		t.Fatalf("Claude Code status: %v", err)
 	}
-	notSetUp := "Claude Code can't run on this machine: its Stage worker doesn't set it up (not supported on workers yet, or the worker needs an update)."
+	notSetUp := "Claude Code can't run on this machine: its Stage worker doesn't set it up. Update Stage on that machine."
 	r.wait("Claude Code unavailable", func() bool { return r.machine().Allows(claudecode.Descriptor).Reason == notSetUp })
-}
-
-// A worker sets up no Codex (hosted, driven through a local daemon): even
-// one that allows local harnesses reports it unavailable, never as a
-// connect that fails.
-func TestRemoteCodexIsUnavailableOnWorkers(t *testing.T) {
-	r := newRigWith(t, map[string]string{}, rigOptions{profile: localHarnesses, claude: claudeOptions(claudetest.New(t))})
-	want := "Codex can't run on this machine: its Stage worker doesn't set it up (not supported on workers yet, or the worker needs an update)."
-	r.wait("Codex unavailable", func() bool { return r.machine().Allows(codex.Descriptor).Reason == want })
-	if a := r.machine().Allows(claudecode.Descriptor); !a.Available {
-		t.Fatalf("Claude Code allows %+v", a)
-	}
-	conns, err := r.set.Connectors(registry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := conns.Get(r.id, codex.Kind); ok {
-		t.Fatal("the connectors index kept Codex")
-	}
 }
