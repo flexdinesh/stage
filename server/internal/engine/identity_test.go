@@ -105,7 +105,7 @@ func (r *identityRig) connection(kind string, machine int64) int64 {
 func (r *identityRig) sync(svc *engine.Engine, id int64) {
 	r.t.Helper()
 	ctx := r.t.Context()
-	ws, err := svc.Coordinator.Inventory(ctx, id)
+	ws, err := svc.Discovery.Inventory(ctx, id)
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -371,7 +371,7 @@ func TestIdentityInventoryWhereTheFilesLive(t *testing.T) {
 		plain := mkdir(t, filepath.Join(tempRoot(t), "notes"))
 		c := r.connection(claudecode.Kind, p.machine(t, r.pool))
 		svc := p.engine(t, r.store, nil, map[int64]execution.Adapter{c: claudeAdapter(t, c, repo, plain)}, nil)
-		ws, err := svc.Coordinator.Inventory(t.Context(), c)
+		ws, err := svc.Discovery.Inventory(t.Context(), c)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -49,16 +49,16 @@ func TestInventoryCallsOpsForHostedLocalWorkspaces(t *testing.T) {
 	host.Install(unplaced, unplaced, a)
 	svc := engine.NewForMachines(store, nil, machine.MustSet(host), nil)
 
-	got, err := svc.Coordinator.Inventory(t.Context(), dbtest.T3Connection)
+	got, err := svc.Discovery.Inventory(t.Context(), dbtest.T3Connection)
 	if err != nil || !reflect.DeepEqual(got, rows) || calls != 0 {
 		t.Fatalf("network inventory %+v, ops called %d times: %v", got, calls, err)
 	}
 	rows = append(rows, execution.WorkspaceInfo{ID: "local", WorkspaceRoot: "/local", Local: true})
-	got, err = svc.Coordinator.Inventory(t.Context(), unplaced)
+	got, err = svc.Discovery.Inventory(t.Context(), unplaced)
 	if err != nil || !reflect.DeepEqual(got, rows) || calls != 0 {
 		t.Fatalf("unplaced inventory %+v, ops called %d times: %v", got, calls, err)
 	}
-	got, err = svc.Coordinator.Inventory(t.Context(), dbtest.T3Connection)
+	got, err = svc.Discovery.Inventory(t.Context(), dbtest.T3Connection)
 	if err != nil || len(got) != 2 || got[0] != rows[0] || got[1].Evidence == nil || got[1].Evidence.CanonicalPath != "/canonical" || calls != 1 {
 		t.Fatalf("local inventory %+v, ops called %d times: %v", got, calls, err)
 	}
@@ -90,7 +90,7 @@ func TestFullSyncPollsLinkedTasksAfterInventoryFailure(t *testing.T) {
 	}
 	failed = true
 	fake.phase = "published"
-	result, err := svc.Coordinator.FullSync(ctx)
+	result, err := svc.Discovery.FullSync(ctx)
 	if !errors.Is(err, inventoryErr) || result.Projects != 0 || result.Sessions != 1 || !slices.Equal(result.Unavailable, []int64{task.ConnectionID}) {
 		t.Fatalf("sync result %+v: %v", result, err)
 	}

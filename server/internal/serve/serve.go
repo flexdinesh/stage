@@ -197,8 +197,8 @@ func Run(ctx context.Context, o Options) error {
 	eng.Coordinator.PublicURL = cfg.PublicURL
 	eng.Coordinator.CLI = cliName
 	// Retires connections whose instance moved to another machine (moved.go).
-	moved := newMovedRetirer(store, eng.Coordinator.FullSyncEvery, logger)
-	eng.Coordinator.OnFullSync = moved.Kick
+	moved := newMovedRetirer(store, eng.Discovery.FullSyncEvery, logger)
+	eng.Discovery.OnFullSync = moved.Kick
 	notifier := notify.New(store, cfg.PublicURL, logger)
 	// One release and one schedule runner per active connection, on every
 	// machine; the sets follow instance switches.

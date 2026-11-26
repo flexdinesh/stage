@@ -94,7 +94,7 @@ func TestReplacedT3IsNeverPolledAgainstItsReplacement(t *testing.T) {
 	if err := svc.Coordinator.WatchAttention(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Coordinator.FullSync(ctx); err != nil {
+	if _, err := svc.Discovery.FullSync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if b.read(thread) {

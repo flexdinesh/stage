@@ -148,20 +148,20 @@ func TestTwoMachinesT3FullSyncsRunTogether(t *testing.T) {
 	// records T3's last full sync per machine from it).
 	var mu gosync.Mutex
 	synced := map[int64]bool{}
-	svc.Coordinator.OnConnectionSynced = func(_ context.Context, connection int64, at time.Time) error {
+	svc.Discovery.OnConnectionSynced = func(_ context.Context, connection int64, at time.Time) error {
 		mu.Lock()
 		defer mu.Unlock()
 		synced[connection] = !at.IsZero()
 		return nil
 	}
-	r, err := svc.Coordinator.FullSync(ctx)
+	r, err := svc.Discovery.FullSync(ctx)
 	if err != nil || len(r.Unavailable) != 0 {
 		t.Fatalf("full sync %+v %v", r, err)
 	}
 	if !synced[local] || !synced[sw.New] {
 		t.Fatalf("synced connections %v", synced)
 	}
-	if svc.Coordinator.Progress(local).Running || svc.Coordinator.Progress(sw.New).Running {
+	if svc.Discovery.Progress(local).Running || svc.Discovery.Progress(sw.New).Running {
 		t.Fatal("progress after sync")
 	}
 }

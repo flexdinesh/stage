@@ -269,7 +269,7 @@ func TestT3StatusReportsSyncProgress(t *testing.T) {
 	gate, reached := make(chan struct{}), make(chan struct{}, 1)
 	e.t3.listGate.Store(&listGate{gate: gate, reached: reached})
 	done := make(chan error, 1)
-	go func() { _, err := e.engine.Coordinator.FullSync(context.Background()); done <- err }()
+	go func() { _, err := e.engine.Discovery.FullSync(context.Background()); done <- err }()
 	<-reached
 	var st t3Status
 	e.must("GET", "/api/harnesses/t3/status", nil, 200, &st)

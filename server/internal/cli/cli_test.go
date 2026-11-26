@@ -135,7 +135,7 @@ func (h *harness) project(root string) db.Project {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	if _, err := h.engine.Coordinator.FullSync(ctx); err != nil {
+	if _, err := h.engine.Discovery.FullSync(ctx); err != nil {
 		h.t.Fatal(err)
 	}
 	// The sync pass imports the T3 project.

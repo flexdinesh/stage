@@ -4,9 +4,11 @@ package engine
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/discovery"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/machine"
@@ -15,6 +17,7 @@ import (
 type Engine struct {
 	Connections *machine.Connections
 	Coordinator *coordinator.Service
+	Discovery   *discovery.Service
 }
 
 type Options struct {
@@ -26,7 +29,10 @@ type Options struct {
 
 func New(o Options) *Engine {
 	conns := machine.NewConnections(o.Store, o.Machines, o.Harnesses)
-	return &Engine{Connections: conns, Coordinator: coordinator.New(o.Store, conns, o.Log)}
+	reader := discovery.NewReader(o.Store, conns)
+	coord := coordinator.New(coordinator.Options{Store: o.Store, Connections: conns, Workspaces: reader, Log: o.Log})
+	disc := discovery.New(discovery.Options{Store: o.Store, Connections: conns, Poller: coord, Log: o.Log})
+	return &Engine{Connections: conns, Coordinator: coord, Discovery: disc}
 }
 
 func NewForMachines(store *db.Store, reg *harness.Registry, set *machine.Set, log *slog.Logger) *Engine {
@@ -58,10 +64,19 @@ func NewWithAdapters(store *db.Store, reg *harness.Registry, adapters map[int64]
 	return s
 }
 
-func (e *Engine) Run(ctx context.Context) { e.Coordinator.Run(ctx) }
+func (e *Engine) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+	wg.Go(func() { e.Coordinator.Run(ctx) })
+	e.Discovery.Run(ctx)
+	wg.Wait()
+}
 
-func (e *Engine) Kick() { e.Coordinator.Kick() }
+func (e *Engine) Kick() {
+	e.Discovery.Kick()
+	e.Coordinator.Kick()
+}
 
 func (e *Engine) ConnectionsChanged(old, next int64) {
 	e.Coordinator.ConnectionsChanged(old, next)
+	e.Discovery.Kick()
 }

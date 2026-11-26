@@ -84,7 +84,7 @@ func (e *env) project(root string) db.Project {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	if _, err := e.engine.Coordinator.FullSync(ctx); err != nil {
+	if _, err := e.engine.Discovery.FullSync(ctx); err != nil {
 		e.t.Fatal(err)
 	}
 	// The sync pass imports the T3 project.

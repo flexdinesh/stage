@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/flexdinesh/stage/server/internal/coordinator"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/discovery"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
 )
@@ -136,9 +136,9 @@ func (s *server) writeConnectionStatus(w http.ResponseWriter, ctx context.Contex
 	if err != nil {
 		return err
 	}
-	var progress coordinator.Progress
+	var progress discovery.Progress
 	if st.ConnectionID != 0 {
-		progress = s.Engine.Coordinator.Progress(st.ConnectionID)
+		progress = s.Engine.Discovery.Progress(st.ConnectionID)
 	}
 	st.Sync = &harness.SyncStatus{
 		LastError: saved.LastError, LastFullSyncAt: saved.LastFullSyncAt,

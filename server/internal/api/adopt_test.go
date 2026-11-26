@@ -237,7 +237,7 @@ func TestCancelledSessionHoldsUntilSettled(t *testing.T) {
 
 	// Settled with the last run still cancelled: passes.
 	_ = e.fake.Settle(s)
-	if _, err := e.engine.Coordinator.FullSync(context.Background()); err != nil {
+	if _, err := e.engine.Discovery.FullSync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	e.poll()

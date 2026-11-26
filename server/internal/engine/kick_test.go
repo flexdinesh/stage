@@ -60,7 +60,7 @@ func TestKickRunsFullSyncNow(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	client := &gateT3{Fake: t3.NewFake()}
 	svc := engine.NewWithAdapters(store, nil, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	svc.Coordinator.FullSyncEvery, svc.Coordinator.PollEvery = time.Hour, time.Hour
+	svc.Discovery.FullSyncEvery, svc.Coordinator.PollEvery = time.Hour, time.Hour
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { svc.Run(ctx); close(done) }()
@@ -86,11 +86,11 @@ func TestFullSyncDoesNotEnumerateHistory(t *testing.T) {
 		}
 	}
 	svc := engine.NewWithAdapters(store, nil, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	r, err := svc.Coordinator.FullSync(t.Context())
+	r, err := svc.Discovery.FullSync(t.Context())
 	if err != nil || r.Sessions != 0 || r.Projects != 1 || client.pages.Load() != 0 {
 		t.Fatalf("sync=%+v pages=%d err=%v", r, client.pages.Load(), err)
 	}
-	if pr := svc.Coordinator.Progress(store.ActiveID(db.LocalMachine, "t3")); pr.Running || pr.Sessions != 0 {
+	if pr := svc.Discovery.Progress(store.ActiveID(db.LocalMachine, "t3")); pr.Running || pr.Sessions != 0 {
 		t.Fatalf("after sync %+v", pr)
 	}
 	// The sync pass imports the discovered project once.
@@ -98,7 +98,7 @@ func TestFullSyncDoesNotEnumerateHistory(t *testing.T) {
 	if err != nil || len(ps) != 1 || ps[0].Title != "app" || len(ps[0].Bindings) != 1 || ps[0].Bindings[0].Rule != "new" {
 		t.Fatalf("projects %+v %v", ps, err)
 	}
-	if _, err = svc.Coordinator.FullSync(t.Context()); err != nil {
+	if _, err = svc.Discovery.FullSync(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if ps, err = store.ListProjects(t.Context(), "all"); err != nil || len(ps) != 1 {

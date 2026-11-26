@@ -797,7 +797,7 @@ func TestProjects(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/app")
 	ext := e.fake.AddProject("Discovered", "/w/elsewhere")
-	if _, err := e.engine.Coordinator.FullSync(context.Background()); err != nil {
+	if _, err := e.engine.Discovery.FullSync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	// Sync imports the unbound live T3 project; the bound one is untouched.
@@ -820,7 +820,7 @@ func TestProjects(t *testing.T) {
 	if err := e.fake.SetProject(p.T3ProjectID, func(x *t3.Project) { x.Title = "External rename"; x.ArchivedAt = &at; x.WorkspaceRoot = "/moved" }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.engine.Coordinator.FullSync(context.Background()); err != nil {
+	if _, err := e.engine.Discovery.FullSync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got, err := e.store.GetProject(context.Background(), p.ID)
@@ -835,7 +835,7 @@ func TestProjects(t *testing.T) {
 	if err := e.fake.SetProject(ext.ID, func(x *t3.Project) { x.DeletedAt = &at }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.engine.Coordinator.FullSync(context.Background()); err != nil {
+	if _, err := e.engine.Discovery.FullSync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = e.store.GetProject(context.Background(), p.ID)
@@ -907,7 +907,7 @@ func TestCancelledTaskReopens(t *testing.T) {
 	if got := e.getTask(a.ID); got.State != "cancelled" {
 		t.Fatalf("stale cancelled task polled before the mirror changed: %s", got.State)
 	}
-	if _, err := e.engine.Coordinator.FullSync(ctx); err != nil {
+	if _, err := e.engine.Discovery.FullSync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	e.poll()
@@ -926,7 +926,7 @@ func TestCancelledTaskReopens(t *testing.T) {
 		t.Fatalf("dependent of cancelled task %s", got.State)
 	}
 	_ = e.fake.SetStatus(*b.ExternalSessionID, t3.StatusRunning)
-	if _, err := e.engine.Coordinator.FullSync(ctx); err != nil {
+	if _, err := e.engine.Discovery.FullSync(ctx); err != nil {
 		t.Fatal(err)
 	}
 	e.poll()
