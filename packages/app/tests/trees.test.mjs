@@ -26,7 +26,6 @@ import {
   treeProjectLabel,
   treeProjects,
   treeRollup,
-  treeMembers,
   treePosition,
   treeCompleted,
   treeTaskPath,
@@ -271,13 +270,6 @@ test("a tree is completed only when every member is", () => {
   assert.equal(treeCompleted([acceptedMember(), acceptedMember()]), true);
   assert.equal(treeCompleted([acceptedMember(), member("done")]), false);
   assert.equal(treeCompleted([]), false);
-});
-
-test("new tree members: parallel roots, or a chain in the given order", () => {
-  const order = [{ id: 5 }, { id: 2 }, { id: 9 }];
-  assert.deepEqual(treeMembers(order, "parallel"), [{ taskId: 5 }, { taskId: 2 }, { taskId: 9 }]);
-  assert.deepEqual(treeMembers(order, "chain"), [{ taskId: 5 }, { taskId: 2, needs: [5] }, { taskId: 9, needs: [2] }]);
-  assert.deepEqual(treeMembers([], "chain"), []);
 });
 
 const nov = (d, h, m = 0) => new Date(2026, 10, d, h, m).toISOString();

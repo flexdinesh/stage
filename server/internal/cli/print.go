@@ -433,36 +433,6 @@ func compactCount(n int64) string {
 	}
 }
 
-// printCreated prints a session batch: each tree's tasks (by id), then
-// independent tasks.
-func printCreated(w io.Writer, c client.CreatedTasks) {
-	n := len(c.Independent)
-	for _, tr := range c.Trees {
-		n += len(tr.Tasks)
-	}
-	if n == 0 {
-		return
-	}
-	fmt.Fprintf(w, "\ncreated tasks (%d)\n", n)
-	for _, tr := range c.Trees {
-		fmt.Fprintf(w, "  tree %d %s (%s)\n", tr.Tree.ID, tr.Tree.Title, tr.Tree.StartMode)
-		for _, t := range tr.Tasks {
-			fmt.Fprintf(w, "    #%d [%s] %s%s\n", t.ID, t.State, t.Title, createdWait(t))
-		}
-	}
-	for _, t := range c.Independent {
-		fmt.Fprintf(w, "  task #%d [%s] %s%s\n", t.ID, t.State, t.Title, createdWait(t))
-	}
-}
-
-// createdWait is a batch row's wait ("  (waits on needs #3 #5)").
-func createdWait(t client.Task) string {
-	if s := waitsOn(t.Needs, t.StartAt); s != "-" {
-		return "  (waits on " + s + ")"
-	}
-	return ""
-}
-
 func projectWorkspace(p db.Project) string {
 	if len(p.Bindings) == 0 {
 		return "workspace not bound"

@@ -83,7 +83,7 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 - Results are the REST shapes as JSON; lists are compact rows. Errors are tool errors carrying the API `error`.
 - `list_tasks` rows carry `treeId`, `needs`, `readiness`, `adopted` and `lastWordPreview`. Open tasks by default; `closed: true|all` adds archived tasks and members of done or archived trees.
 - `list_trees` returns active trees by default (`status` done, archived or all for others).
-- `get_task` returns the task's events, `session`, available session links, `finalReply`, its tree, `handoff`, `currentHandoffs` and the grouped `batch`. `stage task show` prints the final reply and the session's web or native link when available.
+- `get_task` returns the task's events, `session`, available session links, `finalReply`, its tree, `handoff` and `currentHandoffs`. `stage task show` prints the final reply and the session's web or native link when available.
 - `imagePaths` reads local files (PNG, JPEG, GIF, WebP, up to 8) and uploads them. CLI and stdio only; HTTP MCP rejects them.
 - `stop_task` interrupts a task's running session.
 - `wait_task` polls the task every 3s until its state is in `until` (default `needs_input done failed interrupted cancelled`) or `timeoutSeconds` passes (default 600, max 3600). CLI `task wait` defaults to `--timeout 10m` and exits 3 on timeout.
@@ -161,9 +161,8 @@ A dependent's worktree starts where its own launch options say, never from a nee
 - For an opaque ID, pass `session` (CLI `--target-connection ID --target-session ID`).
 - Task references include Stage's saved results and available links. Open the native harness to continue the conversation.
 
-## Session batch
+## Task creator attribution
 
 Tasks and schedules record their creator in `originSession`; schedule-created tasks inherit it. The creator can use a different harness from the one selected for execution.
 
 - `list_tasks` with `originSession` (CLI `stage task ls --origin-connection ID --origin-session ID`) lists a creator session's tasks.
-- `get_task` returns the grouped `batch`. Task detail opens a Batch drawer with selection, editing, and Parallel or Chain tree creation.

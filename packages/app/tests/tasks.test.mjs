@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakeApi } from "./fake-transport.mjs";
-import { batchSize, canStart, isFullyEditable, isWaiting, moveItem, statusChips, waitTarget } from "../src/lib/tasks.ts";
+import { canStart, isFullyEditable, isWaiting, statusChips, waitTarget } from "../src/lib/tasks.ts";
 
 const task = (id, extra = {}) => ({
   acceptanceId: null, treeStatus: null, id, title: `t${id}`, state: "backlog", adopted: false, readiness: null, needs: [], startAt: null, ...extra,
 });
-
-const tree = (id) => ({ acceptanceId: null, treeStatus: null, id, title: `tree ${id}`, startMode: "auto" });
 
 test("an adopted backlog session keeps its launch controls in the harness", () => {
   const adopted = task(1, { adopted: true });
@@ -37,18 +35,6 @@ test("start is offered for startable states, blocked excluded, never for an adop
   assert.equal(canStart(task(1, { state: "running" })), false);
   assert.equal(canStart(task(1, { adopted: true })), false);
   assert.equal(canStart(task(1, { adopted: true, state: "failed" })), false);
-});
-
-test("moveItem moves one item and clamps at the ends", () => {
-  assert.deepEqual(moveItem([1, 2, 3], 2, -1), [1, 3, 2]);
-  assert.deepEqual(moveItem([1, 2, 3], 0, 1), [2, 1, 3]);
-  assert.deepEqual(moveItem([1, 2, 3], 0, -1), [1, 2, 3]);
-  assert.deepEqual(moveItem([1, 2, 3], 2, 1), [1, 2, 3]);
-});
-
-test("batch size counts tree members and independent tasks", () => {
-  assert.equal(batchSize({ trees: [{ tree: tree(1), tasks: [task(1), task(2)] }, { tree: tree(3), tasks: [task(3), task(4)] }], independent: [task(5)] }), 5);
-  assert.equal(batchSize({ trees: [], independent: [] }), 0);
 });
 
 test("HTTP contract: needs, trees and adopt calls", async () => {

@@ -126,9 +126,9 @@ interface RowChip {
 /**
  * The row's one chip: closed rows lead with "archived" / "tree done" / "tree archived"; then the one-shot start time
  * while timed, "needs #3 #5" while blocked on its needs, else the schedule that spawned it, else the agent session that
- * created it. Viewed from a session (`contextSessionId`), its own provenance chip is dropped.
+ * created it.
  */
-function rowChip(task: Task, contextSessionId?: string): RowChip | null {
+function rowChip(task: Task): RowChip | null {
   const closed = taskClosedLabel(task);
   if (closed !== null)
     return task.archivedAt !== null || task.treeId === null
@@ -159,9 +159,9 @@ function rowChip(task: Task, contextSessionId?: string): RowChip | null {
       title: `Started by schedule: ${task.scheduleTitle ?? `#${task.scheduleId}`}`,
       icon: <IconRepeat />,
     };
-  if (task.originSession && task.originSession.externalSessionId !== contextSessionId)
+  if (task.originSession)
     return {
-      to: `/tasks/${task.id}?batch=1`,
+      to: `/tasks/${task.id}`,
       label: "by agent",
       title: `Created by session ${task.originSessionTitle ?? task.originSession.externalSessionId}`,
       icon: <IconChainLink />,
@@ -170,8 +170,7 @@ function rowChip(task: Task, contextSessionId?: string): RowChip | null {
 }
 
 /**
- * Waiting tasks get no Start here (Start now, which unlinks, lives on task detail). `contextSessionId`: the session
- * page showing the row (relative run-order chip copy).
+ * Waiting tasks get no Start here (Start now, which unlinks, lives on task detail).
  */
 /** Task row grid (laptop columns: chip, project, title, actions, copy), shared with its skeleton. */
 function taskRowGrid(showProject: boolean): string {
@@ -216,17 +215,13 @@ export function TaskRowsSkeleton({ count = 3, showProject = false }: { count?: n
 
 export function TaskRow({
   task,
-  extra,
   showProject = false,
   showTree = false,
-  contextSessionId,
   hideStart = false,
 }: {
   task: Task;
-  extra?: ReactNode;
   showProject?: boolean;
   showTree?: boolean;
-  contextSessionId?: string;
   /** The Start lives elsewhere (a chain head's Start chain). */
   hideStart?: boolean;
 }) {
@@ -236,7 +231,7 @@ export function TaskRow({
   const since = task.launchedAt ?? task.createdAt;
   const showStart = !hideStart && canStart(task) && !isWaiting(task);
   const block = useLaunchGate()(task);
-  const chip = rowChip(task, contextSessionId);
+  const chip = rowChip(task);
   // A closed tree's row chip already links it.
   const treeLink = showTree && task.treeId !== null && taskClosedLabel(task) === null ? task.treeId : null;
   const needsInput = task.state === "needs_input";
@@ -254,7 +249,7 @@ export function TaskRow({
   const { requests } = useSessionRequests({ taskId: task.id, connectionId: task.connectionId, needsInput });
   const answer = useRowRequest(task.id, requests);
   const session = rowSessionAction(appLink, task, { needsInput: needsInput && answer.action === null, hidden: justCompleted || confirming !== null });
-  const hasActions = justCompleted || review || showStart || session !== null || answer.action !== null || extra !== undefined;
+  const hasActions = justCompleted || review || showStart || session !== null || answer.action !== null;
   // Full-width lines under the title start at the title column.
   const underTitle = showProject ? "md:col-span-3 md:col-start-3" : "md:col-span-3 md:col-start-2";
 
@@ -360,7 +355,6 @@ export function TaskRow({
         {session === null ? null : (
           <SessionActionButton action={session} name={kindName(task.harness)} small variant={session.primary ? "primary" : "secondary"} connectionId={task.connectionId} />
         )}
-        {extra}
         <RowCopyLink subject={{ kind: "task", id: task.id, title: task.title }} />
       </div>
 

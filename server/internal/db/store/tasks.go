@@ -122,7 +122,6 @@ type Task struct {
 	// Deletable: no notes or execution history; otherwise archive only.
 	Deletable        bool       `json:"deletable"`
 	SessionUpdatedAt *time.Time `json:"-"` // mirrored session's updatedAt (tree activity)
-	TreeStartMode    *StartMode `json:"-"` // the tree's start mode (batch grouping)
 }
 
 type TaskEvent struct {
@@ -319,8 +318,6 @@ type Tasks interface {
 	BySession(ctx context.Context, ref SessionRef) (Task, error)
 	// ByIDs reads the tasks with these ids (unknown ids are skipped).
 	ByIDs(ctx context.Context, ids []int64) ([]Task, error)
-	// CreatedBySession: tasks ref created, by id.
-	CreatedBySession(ctx context.Context, ref SessionRef) ([]Task, error)
 	// BySessionID is the task owning a session identity (ErrNotFound).
 	BySessionID(ctx context.Context, sessionID int64) (int64, error)
 	// SessionOccupied: another task than taskID owns the session.

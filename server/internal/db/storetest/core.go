@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 )
 
 func init() {
+	register("TaskOriginSessionFilter", caseTaskOriginSessionFilter)
 	register("TransitionTask", caseTransitionTask)
 	register("UpdateTaskRestrictions", caseUpdateTaskRestrictions)
 	register("TransitionLaunchGuards", caseTransitionLaunchGuards)
@@ -42,6 +44,46 @@ func mustTask(t *testing.T, s *db.Store, ctx context.Context, projectID int64, t
 		t.Fatal(err)
 	}
 	return task
+}
+
+func caseTaskOriginSessionFilter(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
+	p := mustProject(t, s, ctx, "proj-1")
+	add := func(title, origin string, needs ...int64) db.Task {
+		t.Helper()
+		task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection,
+			ProjectID: p.ID, Title: title, Prompt: "p", OriginSession: ptr(session(origin)), Needs: needs,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return task
+	}
+	a := add("a", "plan")
+	b := add("b", "plan", a.ID)
+	c := add("c", "plan")
+	dependent := mustTask(t, s, ctx, p.ID, "owner", []int64{b.ID})
+	add("other", "elsewhere")
+
+	got, err := s.ListTasks(ctx, db.TaskFilter{OriginSession: ptr(session("plan"))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]int64, 0, len(got))
+	for _, task := range got {
+		ids = append(ids, task.ID)
+		if task.ID == b.ID && !slices.Equal(task.Dependents, []int64{dependent.ID}) {
+			t.Fatalf("task %d dependents: %v", task.ID, task.Dependents)
+		}
+	}
+	slices.Sort(ids)
+	if !slices.Equal(ids, []int64{a.ID, b.ID, c.ID}) {
+		t.Fatalf("tasks created by plan: %v", ids)
+	}
+	none, err := s.ListTasks(ctx, db.TaskFilter{OriginSession: ptr(session("nobody"))})
+	if err != nil || len(none) != 0 {
+		t.Fatalf("tasks created by nobody: %+v, %v", none, err)
+	}
 }
 
 func caseTransitionTask(t *testing.T, open Factory) {

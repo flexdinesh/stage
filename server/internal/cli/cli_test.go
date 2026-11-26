@@ -239,7 +239,7 @@ func TestTaskCommands(t *testing.T) {
 	}
 }
 
-func TestTreeCommandsAndSessionBatch(t *testing.T) {
+func TestTreeCommandsAndOriginSessionFilter(t *testing.T) {
 	h := newHarness(t)
 	p := h.project("/w/cli-o")
 	out, err := h.fake.LaunchThread(context.Background(), t3.LaunchInput{ProjectID: p.Bindings[0].ExternalProjectID, Title: "Planner"})
@@ -269,15 +269,23 @@ func TestTreeCommandsAndSessionBatch(t *testing.T) {
 	}
 	code, stdout, _ := h.run("", "task", "ls", "--origin-connection", "1", "--origin-session", out.ThreadID, "--json")
 	if rows := decode[agenttools.TasksOut](t, stdout); code != 0 || rows.Total != 3 {
-		t.Fatalf("batch: %s", stdout)
+		t.Fatalf("origin session filter: %s", stdout)
 	}
 	if code, _, _ := h.run("", "task", "ls", "--origin-thread", out.ThreadID); code != 2 {
 		t.Fatalf("removed --origin-thread exit %d", code)
 	}
 
+	code, stdout, stderr := h.run("", "task", "show", fmt.Sprint(second.ID), "--json")
+	if code != 0 {
+		t.Fatalf("task show: %s", stderr)
+	}
+	if _, ok := decode[map[string]json.RawMessage](t, stdout)["batch"]; ok {
+		t.Fatal("task show has batch field")
+	}
+
 	// tree new with ID:NEED members, then show/ls/edit/add/rm/start.
 	third, fourth := add("--title", "third"), add("--title", "fourth")
-	code, stdout, stderr := h.run("", "tree", "new", "--title", "Stack", "--start-mode", "manual", fmt.Sprint(third.ID), fmt.Sprintf("%d:%d", fourth.ID, third.ID), "--json")
+	code, stdout, stderr = h.run("", "tree", "new", "--title", "Stack", "--start-mode", "manual", fmt.Sprint(third.ID), fmt.Sprintf("%d:%d", fourth.ID, third.ID), "--json")
 	if code != 0 {
 		t.Fatalf("tree new: %d %s", code, stderr)
 	}

@@ -23,8 +23,6 @@ type taskDetailJSON struct {
 	Events []db.TaskEvent `json:"events"`
 	// Tree: the task's tree (null outside one).
 	Tree *treeDetailJSON `json:"tree"`
-	// Batch: the tasks the task's origin session created (null without one).
-	Batch *createdTasksJSON `json:"batch"`
 	// CurrentHandoffs: what the current launch attempt appended, one per
 	// need (empty when none).
 	CurrentHandoffs []db.Handoff `json:"currentHandoffs"`
@@ -49,25 +47,6 @@ type treeDetailJSON struct {
 func (s *server) treeDetail(t db.TreeDetail) treeDetailJSON {
 	return treeDetailJSON{Tree: t.Tree, TreeTimes: t.TreeTimes, Tasks: s.tasks(t.Tasks), Edges: t.Edges,
 		Levels: t.Levels, Events: t.Events}
-}
-
-// createdTasksJSON is db.CreatedTasks with API task shapes.
-type createdTasksJSON struct {
-	Trees       []batchTreeJSON `json:"trees"`
-	Independent []taskJSON      `json:"independent"`
-}
-
-type batchTreeJSON struct {
-	Tree  db.TreeRef `json:"tree"`
-	Tasks []taskJSON `json:"tasks"`
-}
-
-func (s *server) createdTasks(c db.CreatedTasks) createdTasksJSON {
-	out := createdTasksJSON{Trees: make([]batchTreeJSON, len(c.Trees)), Independent: s.tasks(c.Independent)}
-	for i, t := range c.Trees {
-		out.Trees[i] = batchTreeJSON{Tree: t.Tree, Tasks: s.tasks(t.Tasks)}
-	}
-	return out
 }
 
 func (s *server) task(t db.Task) taskJSON {

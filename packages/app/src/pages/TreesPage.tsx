@@ -122,7 +122,7 @@ function OpenTrees({ selected, onSelect }: { selected: TreeGroupKey | null; onSe
         {selected === null ? (
           <>
             <Panel flush title="Active" meta={<span className="tabular">{active.length}</span>}>
-              <TreeList trees={active} emptyText="No active trees. Let an agent plan one, or pick New tree from a session's batch." />
+              <TreeList trees={active} emptyText="No active trees. Use Add to tree from a task to create one." />
             </Panel>
             {completed.length === 0 ? null : (
               <GroupPanel

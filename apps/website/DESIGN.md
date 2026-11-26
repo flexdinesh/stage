@@ -542,7 +542,7 @@ Closing work: the Dashboard never lists closed work (archived tasks, done or arc
 ### Last word
 A session's latest assistant reply, a read-only glance (T3 stays the place to talk).
 - **Row preview:** needs-input and done rows only (task rows and external session rows). One line of Geist 13px Slate prose with an ellipsis, full preview in `title`, no marker or label. Laptop: under the meta line in the title column. Phone: its own full-width line between the title block and the actions, so it is not squeezed beside the state chip.
-- **Panel:** "Last word" Panel right under Prompt in the main column on task detail (above Created tasks). Header meta is the reply's relative time (mono, exact time on hover); Copy in the header. The body renders sanitized markdown (`.prose-reply`): Geist 14.5px at 1.55 leading, 75ch measure, headings at body or title size (never competing with the page H1), square Slate list markers, inline code and code blocks in mono on the Bench Gray panel with hairline borders (code blocks scroll sideways, prose wraps anywhere), hairline tables and rules, and a 1px Strong Hairline quote rule. Raw HTML shows as literal text. A truncated excerpt ends with a hairline-ruled mono footer, "Excerpt. Full reply in T3", linking to the session. Hidden until a reply has been read.
+- **Panel:** "Last word" Panel right under Prompt in the main column on task detail. Header meta is the reply's relative time (mono, exact time on hover); Copy in the header. The body renders sanitized markdown (`.prose-reply`): Geist 14.5px at 1.55 leading, 75ch measure, headings at body or title size (never competing with the page H1), square Slate list markers, inline code and code blocks in mono on the Bench Gray panel with hairline borders (code blocks scroll sideways, prose wraps anywhere), hairline tables and rules, and a 1px Strong Hairline quote rule. Raw HTML shows as literal text. A truncated excerpt ends with a hairline-ruled mono footer, "Excerpt. Full reply in T3", linking to the session. Hidden until a reply has been read.
 
 ### Transcript
 
@@ -570,10 +570,6 @@ Task run span remains in metadata. Detailed harness runs are opened in T3.
 ### Session adoption
 
 Track session accepts a pasted T3 URL or ID, previews metadata and requires confirmation. No global session browser. See the root DESIGN.md for current product controls.
-
-### Session batch (Created tasks)
-
-Task detail has a compact Batch panel and View batch drawer (`?batch=1`). The drawer groups tasks by tree, then independent tasks. Retain Start and Edit, selection order, and New tree from selection with Parallel or Chain. By-agent row links open that task's batch. Closed or moved tasks retain their identity and current grouping.
 
 ### Image dropzone
 

@@ -38,7 +38,7 @@ const closedSQL = `(t.archived_at IS NOT NULL OR COALESCE(tr.status, 'open') <> 
 
 const taskSelect = `
 SELECT t.id, t.project_id, p.title, t.title, t.prompt,
-  t.state, t.tree_id, tr.title, tr.start_mode, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
+  t.state, t.tree_id, tr.title, t.start_mode, ` + effectiveModeSQL + `, ` + readinessSQL + `,
   COALESCE((SELECT jsonb_agg(n.need_id ORDER BY n.need_id) FROM task_needs n WHERE n.task_id = t.id), '[]'::jsonb),
   COALESCE((SELECT jsonb_agg(n.task_id ORDER BY n.task_id) FROM task_needs n WHERE n.need_id = t.id), '[]'::jsonb),
   t.adopted, t.ready_at, t.launch_attempt, t.last_error,
@@ -63,7 +63,7 @@ LEFT JOIN schedules sc ON sc.id = t.schedule_id`
 func scanTask(row rowScanner) (store.Task, error) {
 	var t store.Task
 	err := row.Scan(&t.ID, &t.ProjectID, &t.ProjectTitle, &t.Title, &t.Prompt,
-		&t.State, &t.TreeID, &t.TreeTitle, &t.TreeStartMode,
+		&t.State, &t.TreeID, &t.TreeTitle,
 		&t.StartMode, &t.EffectiveStartMode, &t.Readiness, &t.Needs, &t.Dependents, &t.Adopted, &t.ReadyAt,
 		&t.LaunchAttempt, &t.LastError, &t.LaunchedAt, &t.FinishedAt, &t.RunStartedAt, &t.RunEndedAt,
 		&t.LastWordPreview, &t.LastWordAt, &t.CreatedAt,
@@ -166,11 +166,6 @@ ORDER BY t.id`, includeStale)
 
 func (r tasks) BySession(ctx context.Context, ref store.SessionRef) (store.Task, error) {
 	return scanTask(r.QueryRow(ctx, taskSelect+` WHERE t.session_id=(SELECT id FROM session_identities WHERE connection_id=$1 AND external_id=$2)`, ref.ConnectionID, ref.ExternalSessionID))
-}
-
-func (r tasks) CreatedBySession(ctx context.Context, ref store.SessionRef) ([]store.Task, error) {
-	rows, err := r.Query(ctx, taskSelect+` WHERE t.origin_session_id = (SELECT id FROM session_identities WHERE connection_id=$1 AND external_id=$2) ORDER BY t.id`, ref.ConnectionID, ref.ExternalSessionID)
-	return collectTasks(rows, err)
 }
 
 func (r tasks) BySessionID(ctx context.Context, sessionID int64) (int64, error) {
