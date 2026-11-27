@@ -32,6 +32,11 @@ capabilities, never a harness name. The code drifted:
 
 ## Decisions
 
+[ADR 0010](0010-harness-workspaces-and-logical-projects.md) supersedes
+the project ownership, identity, binding and launch-routing portions of
+these decisions. Stage projects become logical groups. Each harness
+connection owns its catalog and supplies exact workspace destinations.
+
 1. **What Stage is.** Stage is an MCP server, a CLI and an HTTP API with
    a UI and a database. It owns projects, tasks, trees, schedules,
    journals, acceptance and handoff. It launches a task into a harness

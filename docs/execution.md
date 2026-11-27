@@ -6,11 +6,12 @@ translate their native protocols, options and session state.
 
 ## Ownership: Stage and the harness
 
-- **Keep Stage lean.** Stage owns projects, tasks, trees, schedules, journals,
-  acceptance and durable handoff. The harness owns sessions, its project and
-  model catalogs, workspaces, worktrees, branches, archive, UI and processes.
-  Stage resolves project identity across harnesses from read-only evidence.
-  [Harness boundary](adr/0007-harness-boundary.md) · [Discovery](discovery.md)
+- **Keep Stage lean.** Stage owns logical project groups, tasks, trees,
+  schedules, journals, acceptance and durable handoff. Each harness
+  connection owns its workspace catalog and sessions. The harness also owns
+  worktrees, branches, archive, models, UI and processes. Stage uses read-only
+  evidence to group workspaces for navigation. [Harness boundary](adr/0007-harness-boundary.md)
+  · [Workspace ownership and transition](adr/0010-harness-workspaces-and-logical-projects.md)
 - **Use generic code and declared policy.** Stage reads descriptors and
   capabilities to make its decisions. Each adapter validates and translates its
   own options. Harness-specific operations and display data use declared actions
@@ -19,9 +20,11 @@ translate their native protocols, options and session state.
 - **Scope every session.** A session is `{connectionId, externalSessionId}`.
   Parents, adoption, task events and journal provenance use the connection of
   the session they describe. A bare external ID carries no connection identity.
-  Project bindings retain the verified connection, external project, path,
-  binding ID and revision. A task or schedule may choose a binding on its
-  connection. Otherwise launch uses the primary binding.
+- **Pin exact destinations.** The [target contract](adr/0010-harness-workspaces-and-logical-projects.md#ownership-and-exact-destinations)
+  pins a workspace on the selected connection and validates it before
+  launch. Grouping cannot supply a launch destination. During the
+  transition, [shipped bindings](discovery.md#bindings-and-review-07-backend-08-ui)
+  can still supply the primary workspace under the legacy selection rules.
 - **Attribute the caller independently of the destination.** Agent tools
   accept `callerSession`. A harness can declare a native per-call metadata
   key (OpenCode supplies its session ID in MCP metadata) or a session

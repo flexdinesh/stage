@@ -1,6 +1,10 @@
 # Workspace discovery and project identity
 
-Stage owns the project and its stable ID. A harness reports its workspaces and owns its sessions and their checkouts. The evidence and identity rules implement [ADR 0008 D9](adr/0008-harness-foundation.md#d9) and [D10](adr/0008-harness-foundation.md#d10).
+This page describes shipped bindings and discovery review under
+[ADR 0008 D9](adr/0008-harness-foundation.md#d9) and [D10](adr/0008-harness-foundation.md#d10).
+[ADR 0010](adr/0010-harness-workspaces-and-logical-projects.md) defines the
+transition to Stage-owned logical groups and harness-owned destinations.
+The read-only evidence below remains useful for grouping.
 
 | Layer | Delivers |
 | --- | --- |
