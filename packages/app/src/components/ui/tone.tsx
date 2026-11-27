@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { capCount } from "../../lib/format.ts";
 import { cx } from "./cx.ts";
 
 /** Semantic tone → CSS class from index.css (sets --c / --cf). */
@@ -33,6 +34,18 @@ export function Chip({
   return (
     <span title={title} className={cx("chip", dot && "chip-dot", TONE_CLASS[tone], className)}>
       {children}
+    </span>
+  );
+}
+
+/**
+ * A count on a square icon button's top-right corner (the button needs `relative`), capped at 99+, so the button
+ * never widens. Plain is ink; need and bad fill their state color. Decorative: the button's name carries the count.
+ */
+export function CornerBadge({ count, tone = "plain" }: { count: number; tone?: "plain" | "need" | "bad" }) {
+  return (
+    <span aria-hidden="true" className={cx("corner-badge", tone === "plain" ? undefined : TONE_CLASS[tone])}>
+      {capCount(count)}
     </span>
   );
 }

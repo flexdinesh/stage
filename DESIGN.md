@@ -19,6 +19,8 @@ colors:
   ok: "#15803d"
   bad: "#b3261e"
   idle: "#6b7280"
+  on-need: "#0b0d14"
+  on-bad: "#ffffff"
   accent-dark: "#eef0f5"
   on-accent-dark: "#0b0d14"
   fg-dark: "#e6e8ee"
@@ -36,6 +38,8 @@ colors:
   ok-dark: "#5fd38a"
   bad-dark: "#ec8378"
   idle-dark: "#9aa1b0"
+  on-need-dark: "#0b0d14"
+  on-bad-dark: "#0b0d14"
 typography:
   headline:
     fontFamily: "Geist Variable, ui-sans-serif, system-ui, sans-serif"
@@ -97,6 +101,11 @@ typography:
     fontFamily: "JetBrains Mono Variable, ui-monospace, monospace"
     fontSize: "12.5px"
     fontWeight: 400
+  badge:
+    fontFamily: "JetBrains Mono Variable, ui-monospace, monospace"
+    fontSize: "10px"
+    fontWeight: 700
+    lineHeight: "16px"
 rounded:
   none: "0px"
 spacing:
@@ -168,6 +177,19 @@ components:
     textColor: "{colors.bad}"
   chip-idle:
     textColor: "{colors.idle}"
+  corner-badge:
+    typography: "{typography.badge}"
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.on-accent}"
+    rounded: "{rounded.none}"
+    padding: "0 3px"
+    height: "16px"
+  corner-badge-need:
+    backgroundColor: "{colors.need}"
+    textColor: "{colors.on-need}"
+  corner-badge-bad:
+    backgroundColor: "{colors.bad}"
+    textColor: "{colors.on-bad}"
   panel-header:
     backgroundColor: "{colors.panel}"
     textColor: "{colors.fg}"
@@ -238,6 +260,7 @@ An ink-and-paper neutral system with a strictly semantic state palette; nothing 
 - **Settled Green** (`ok`): completed tasks and trees, T3 connected. A completed task shows one "completed" chip; its execution chip joins only once execution moves on (running again, needs input, failed, interrupted, cancelled).
 - **Fault Red** (`bad`): failed, interrupted, T3 unreachable or rejected, errors, danger buttons.
 - **Idle Gray** (`idle`): backlog, cancelled, idle, rolled back.
+- **On-state text** (`on-need`, `on-bad`): text on a solid need or bad fill (the corner badge). Ink on yellow in both themes; white on red in light, ink in dark.
 
 ### Named Rules
 **The State Earns Color Rule.** Hue appears only on a state: a chip, a square marker, a stat count, an alert, the needs-input row edge, or the mark's top step while anything needs input. Chrome, navigation, links and primary buttons stay ink.
@@ -264,7 +287,7 @@ Sizes are role tokens (`--fs-*` on `:root`, exposed as `text-label`, `text-meta-
 - **Body Small** (400, 13px): alerts, details, empty states, button labels (500).
 - **Stat** (700, 16px, tabular): stat strip counts.
 - **Label** (JetBrains Mono 400, 11px, 0.12em, uppercase): panel headers (in Ink Text), field labels and section labels (in Slate).
-- **Meta** (JetBrains Mono 400, 12px, 1.5 line): row metadata, chips, hints, timestamps. Small counts and panel meta sit at 11.5px (`text-meta-sm`), detail values at 12.5px mono (`text-detail`), read-only prompts at 13px mono with relaxed leading.
+- **Meta** (JetBrains Mono 400, 12px, 1.5 line): row metadata, chips, hints, timestamps. Small counts and panel meta sit at 11.5px (`text-meta-sm`), detail values at 12.5px mono (`text-detail`), read-only prompts at 13px mono with relaxed leading. **Badge** (JetBrains Mono 700, 10px, 16px line, tabular) is only the corner badge's count.
 
 ### Named Rules
 **The Mono Is Metadata Rule.** JetBrains Mono for project names, models, times, ids, counts, chips, labels, keycaps; Geist for titles, actions and prose. Counts, times and step numbers use tabular numerals.
@@ -353,6 +376,7 @@ Compact, flat, and ink-led.
 ### Chips
 - **Style:** inline mono label (`text-meta`, 1.5 line, 1px 7px padding) with a tone-tinted 1px border, a faint tone fill and tone text. The `dot` variant prefixes a 6px square marker.
 - **State:** task and session states map onto the six tones; plain chips (Slate border, Ink Text) carry `tracked session`, `manual`, needs and the tree link. Detail page headers never repeat a panel: task detail's header chips are flags only (`archived`, `tracked session`, `replaced`), drawn only when one applies; its state lives in the State panel and its model, permission, mode and workspace in Config. Schedule detail's header keeps only its active/paused chip; its config lives in its Config panel. Both Config panels' Harness row follows the name with its connection's live state chip, in the Settings Connections row's tones and read on its machine (`connected`, `expired`, `unreachable`, `checking`; an offline or outdated worker an idle `offline` / `needs update`; an unset connection an idle `disconnected`), its title the Settings detail line and error; a replaced connection keeps its muted "(replaced)" and no chip. A yellow or red state, or `disconnected`, adds a Geist "Fix in Settings" link under it to Settings Connections.
+- **Corner badge** (`CornerBadge`, `.corner-badge`): a count on a square icon button's top-right corner, so the button never widens. 16px tall (min 16px wide, 0 3px padding), straddling the corner by 4px, mono 10px bold tabular, capped at `99+`, a solid fill knocked out from the ground by a 2px `bg` ring (a separation, not a cast shadow). Plain fills Ink (`accent` / `on-accent`); need fills Waiting Yellow with `on-need` text; bad fills Fault Red with `on-bad` text. Decorative: the button's accessible name carries the count. Used by the notifications bell and the status button.
 - **Not a chip:** a role or identity tag beside a row title (`main` or `worker` on Settings Connections machines) is Slate mono `Meta` with no box; boxed beside row buttons it reads as a control.
 
 ### Cards / Containers (Panel)
@@ -503,7 +527,7 @@ Explicit Track session drawer from Stage and Project; Add session from a tree. P
 Backlog task prompts accept image drops and Add image. Preserve thumbnails, upload/error states, the 8-image limit and read-only image links on launched tasks. No conversation composer.
 
 ### Notifications bell
-A secondary 32px button (40px on phone) in the sidebar bottom row (after the theme toggle) on laptop, and in the phone top bar (before search) with the bell icon. Unread count sits inside as a mono chip: plain, or need-toned when an unread needs-input item is still waiting. Zero unread shows the bell alone, square.
+A secondary 32px button (40px on phone) in the sidebar bottom row (after the theme toggle) on laptop, and in the phone top bar (before search) with the bell icon. Always square: the unread count rides a corner badge (see Chips), plain, or need-toned when an unread needs-input item is still waiting. Zero unread shows the bell alone.
 
 ### Needs input panel
 
@@ -535,7 +559,7 @@ Three tabs, each its own route: General (`/settings`, the default), Connections 
 One panel, two sections split by a hairline. `EVENTS · all devices`: the global event filter (Needs input, Failed, Ready, Done; Ready in the idle tone, hint "needs are completed, start it"), each toggle saving at once (optimistic; a failed save reverts and shows a red Alert); a muted line explains that unchecked events are dropped, or reads "All events off. Nothing is recorded or pushed." `THIS DEVICE`: per-device enable, test and disable; the header chip shows this device's state. In the browser it is Web Push ("Web Push to this browser for the checked events.", success "Test notification sent."). On desktop the same section, chip and buttons drive native notifications: intro "System notifications from the Stage app for the checked events, when Stage is not in front."; unsupported reads "This system has no notification service Stage can use."; blocked is a plain Alert, "Notifications from Stage are turned off in system settings. Allow them there, then try again.", with small Open System Settings (when the host can open them) and Try again; on adds a ghost "System settings" after Send test and Disable; when the host cannot open its settings, a muted "Allow notifications for Stage in your desktop's settings." follows; success reads "Test notification shown." No new components, tokens or colors.
 
 ### Status button
-The first button of the sidebar bottom row: a secondary 32px square, like the bell, with one 16px icon over everything Stage depends on: every set-up harness connection on every machine (the main machine and each worker), each read on its own machine. All healthy: a check in Settled Green. A problem: a triangle alert in its tone (`need-fg` or red); from two problems up a count chip in the worst tone (red over yellow) sits beside it, as the bell's does. While anything is checking, a Slate refresh; with nothing configured, a Slate plug. Its accessible name and title carry the sentence: "All connected", the one problem ("OpenCode rejected", "T3 pairing expired"), "n need attention", "Checking", "Connect a harness". A connection counts when set up (its Settings row: T3 with a token, a set URL or a live connection; OpenCode connected to a service); tones follow the Settings chips (yellow: T3 unpaired or expired, OpenCode refused the sign-in or its pairing expired; red: unreachable, rejected the pairing, unavailable, or its status call fails). A worker that is offline or needs an update makes each of its connections a red problem ("controlbox offline", "controlbox needs an update"; detail: when it was last seen, or the build it runs). With two or more machines the sentence names the machine ("T3 pairing expired on controlbox"). Click toggles the details panel (Bench Gray fill while open; no hover preview); Esc, an outside click or tabbing away closes it. The panel opens 4px above the bottom row, its left edge level with the button, 300px, flat Paper, Strong Hairline, no shadow: one section per group (Harnesses on a single machine; one per machine, by its label, from two machines up) with a Bench Gray `label-caps` header and its count, problems first, then one ruled line per item linking to Settings: 6px square, Geist name (in its tone when a problem), mono state right, then mono Slate detail lines (T3: `controlbox · v0.1.9 · URL`, `synced 2m ago · token expires in 17d`; OpenCode: `host:port · sign-in`, `checked 5m ago`) and a red error, 2 lines max. An "Open settings" footer row (settings icon) closes it. With nothing configured the panel reads "No harness connected yet". Phone shows the same sections inline on More, and the More tab carries a square in the status tone only while a problem stands.
+The first button of the sidebar bottom row: a secondary 32px square, like the bell, with one 16px icon over everything Stage depends on: every set-up harness connection on every machine (the main machine and each worker), each read on its own machine. All healthy: a check in Settled Green. A problem: a triangle alert in its tone (`need-fg` or red); from two problems up a corner badge in the worst tone (red over yellow), as the bell's does, so the button stays square. While anything is checking, a Slate refresh; with nothing configured, a Slate plug. Its accessible name and title carry the sentence: "All connected", the one problem ("OpenCode rejected", "T3 pairing expired"), "n need attention", "Checking", "Connect a harness". A connection counts when set up (its Settings row: T3 with a token, a set URL or a live connection; OpenCode connected to a service); tones follow the Settings chips (yellow: T3 unpaired or expired, OpenCode refused the sign-in or its pairing expired; red: unreachable, rejected the pairing, unavailable, or its status call fails). A worker that is offline or needs an update makes each of its connections a red problem ("controlbox offline", "controlbox needs an update"; detail: when it was last seen, or the build it runs). With two or more machines the sentence names the machine ("T3 pairing expired on controlbox"). Click toggles the details panel (Bench Gray fill while open; no hover preview); Esc, an outside click or tabbing away closes it. The panel opens 4px above the bottom row, its left edge level with the button, 300px, flat Paper, Strong Hairline, no shadow: one section per group (Harnesses on a single machine; one per machine, by its label, from two machines up) with a Bench Gray `label-caps` header and its count, problems first, then one ruled line per item linking to Settings: 6px square, Geist name (in its tone when a problem), mono state right, then mono Slate detail lines (T3: `controlbox · v0.1.9 · URL`, `synced 2m ago · token expires in 17d`; OpenCode: `host:port · sign-in`, `checked 5m ago`) and a red error, 2 lines max. An "Open settings" footer row (settings icon) closes it. With nothing configured the panel reads "No harness connected yet". Phone shows the same sections inline on More, and the More tab carries a square in the status tone only while a problem stands.
 
 ### Page location
 No content bar: the page title is the first thing in the content column on every breakpoint. A page's trail (`PageHeader` `trail`: project / tree / task n; project / schedule n; project label / tree n; Projects / project n) starts its `//` meta line, earlier steps ink links (underline on hover), joined to the rest of the meta by ` · `.
@@ -575,6 +599,13 @@ Task and schedule forms identify the workspace on the chosen connection.
 Primary follows the connection's default. A different selection pins the
 workspace and keeps its full path in the field's details. A missing pin shows
 its repair in the field. Task detail identifies the assignment recorded at launch.
+Picking a connection or workspace never moves the form: square secondary
+icon buttons sit right of the Workspace combobox (Refresh workspaces, always
+shown, disabled without an active connection, the busy spinner while it
+runs; Clear workspace in backlog only, disabled with none picked), and one
+line under it is always kept, reading the status, else the path, else blank.
+Only a long status may wrap. "Connect a harness in Settings." sits under
+Connection when there is none.
 
 ### Replaced connections
 A connection is one harness instance. When another T3 or OpenCode replaces it,

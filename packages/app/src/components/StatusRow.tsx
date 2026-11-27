@@ -5,7 +5,7 @@ import { machineSetupState } from "../lib/machines.ts";
 import { connectionStatusItem, statusTargets, unreachableDetail, type StatusDetail, type StatusView } from "../lib/connections.ts";
 import { statusGroups, statusRow, type StatusItem, type StatusKind, type StatusRow as Row, type StatusTone } from "../lib/status.ts";
 import { IconCheck, IconPlug, IconRefresh, IconSettings, IconTriangleAlert } from "./icons.tsx";
-import { Button, InlineError, Marker, Meta, PanelHeader, PopoverPanel, Row as ListRow, RowList, cx, rowButtonClass, toneClass, usePopover, type IconComponent } from "./ui.tsx";
+import { Button, CornerBadge, InlineError, Marker, Meta, PanelHeader, PopoverPanel, Row as ListRow, RowList, cx, rowButtonClass, usePopover, type IconComponent } from "./ui.tsx";
 
 /** Detail per item key, for the panel. */
 type Details = Record<string, StatusDetail>;
@@ -92,7 +92,7 @@ const ICON: Record<StatusKind, { icon: IconComponent; className: string }> = {
 
 /**
  * Sidebar bottom-row status button: one icon for everything Stage depends on (a check when all is well, an alert in
- * the worst tone, refresh while checking, a plug with nothing set up), and a toned count from two problems up. Its
+ * the worst tone, refresh while checking, a plug with nothing set up), and a toned corner badge from two problems up. Its
  * name and title carry the sentence ("T3 pairing expired"). Click toggles the details panel above the row; the
  * wrapper stays static so the panel anchors to the row (the nearest positioned ancestor).
  */
@@ -109,12 +109,12 @@ export function StatusButton() {
         {...popover.triggerProps}
         title={row.text}
         aria-label={label}
-        className={cx(count === null ? "w-control px-0" : "gap-1.5 px-2", popover.open && "bg-panel")}
+        className={cx("relative w-control px-0", popover.open && "bg-panel")}
       >
         <span className={cx("flex", className)}>
           <Icon size={16} />
         </span>
-        {count === null ? null : <span className={cx("chip px-1.5 text-meta-sm leading-4 tabular", toneClass(row.tone))}>{count}</span>}
+        {count === null ? null : <CornerBadge count={count} tone={row.tone === "bad" ? "bad" : row.tone === "need" ? "need" : "plain"} />}
       </Button>
       <PopoverPanel popover={popover} label="Status" className="absolute bottom-full left-3 mb-1 w-[300px]">
         <StatusSections row={row} details={details} onPick={popover.close} />

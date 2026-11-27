@@ -21,6 +21,7 @@ import { NotificationEventBadge, TaskStateBadge, notificationEventLabel, notific
 import {
   Button,
   Chip,
+  CornerBadge,
   DisclosureChevron,
   Drawer,
   EmptyState,
@@ -157,14 +158,10 @@ export function NotificationsBell({ onOpen }: { onOpen: () => void }) {
       onClick={onOpen}
       title={label}
       aria-label={label}
-      className={cx(unread === 0 ? "w-control px-0" : "gap-1.5 px-2.5 md:px-2")}
+      className="relative w-control px-0"
     >
       <IconBell size={16} />
-      {unread === 0 ? null : (
-        <span className={cx("chip px-1.5 text-meta-sm leading-4 tabular", urgent ? "tone-need" : "tone-plain")}>
-          {unread > 99 ? "99+" : unread}
-        </span>
-      )}
+      {unread === 0 ? null : <CornerBadge count={unread} tone={urgent ? "need" : "plain"} />}
     </Button>
   );
 }

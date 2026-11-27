@@ -1,7 +1,7 @@
 // Primitives gallery (/dev/ui): every shared component in its states, for visual checks in both themes and at
 // phone width. Unlinked and lazy-loaded; not a product page.
 import { useState, type ReactNode } from "react";
-import { IconClose, IconPlus, IconSearch } from "../components/icons.tsx";
+import { IconBell, IconClose, IconPlus, IconRefresh, IconSearch } from "../components/icons.tsx";
 import { RequestCard, RowRequestControls, RowRequestLine } from "../components/Requests.tsx";
 import { FollowUpPanel } from "../components/FollowUp.tsx";
 import { ApiError } from "../api/client.ts";
@@ -20,6 +20,7 @@ import {
   Chip,
   Combobox,
   ConfirmInline,
+  CornerBadge,
   CopyButton,
   CommandBox,
   Detail,
@@ -71,6 +72,7 @@ import {
 } from "../components/ui.tsx";
 
 const TONES: readonly ChipTone[] = ["need", "run", "done", "ok", "bad", "idle", "plain"];
+const BADGES: readonly (readonly [number, "plain" | "need" | "bad"])[] = [[3, "plain"], [55, "plain"], [120, "plain"], [7, "need"], [2, "bad"]];
 const COLORS = ["bg", "surface", "panel", "line", "line-strong", "fg", "muted", "accent", "need", "need-fg", "run", "done", "ok", "bad", "idle"] as const;
 const TYPE_ROLES = ["label", "meta-sm", "meta", "detail", "small", "ui", "body", "title", "headline"] as const;
 
@@ -273,7 +275,16 @@ export function DevUiPage() {
               <IconButton label="Search" icon={IconSearch} variant="secondary" />
               <IconButton label="Close" icon={IconClose} />
               <IconButton label="Close" icon={IconClose} small />
+              <IconButton label="Refresh" icon={IconRefresh} variant="secondary" busy />
               <TextButton className="text-ui">Text button</TextButton>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              {BADGES.map(([count, tone]) => (
+                <span key={`${count}-${tone}`} className="relative inline-flex">
+                  <IconButton label={`Notifications, ${count} unread`} icon={IconBell} variant="secondary" />
+                  <CornerBadge count={count} tone={tone} />
+                </span>
+              ))}
             </div>
           </div>
         </Panel>

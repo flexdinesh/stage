@@ -26,6 +26,9 @@
   --ok: #15803d;
   --bad: #b3261e;
   --idle: #6b7280;
+  /* Text on a solid state fill (corner badge). */
+  --on-need: #0b0d14;
+  --on-bad: #ffffff;
 
   /* Type roles: laptop values; phone overrides below. */
   --fs-label: 11px;
@@ -110,6 +113,8 @@
     --ok: #5fd38a;
     --bad: #ec8378;
     --idle: #9aa1b0;
+    --on-need: #0b0d14;
+    --on-bad: #0b0d14;
   }
 }
 
@@ -133,6 +138,8 @@
   --ok: #5fd38a;
   --bad: #ec8378;
   --idle: #9aa1b0;
+  --on-need: #0b0d14;
+  --on-bad: #0b0d14;
 }
 
 @theme inline {
@@ -270,6 +277,35 @@
   }
   .chip.tone-need {
     background: color-mix(in srgb, var(--need) 14%, transparent);
+  }
+  /* Count on a square icon button's top-right corner: solid fill, knocked out from the page by a 2px ring so the
+     button never widens. Plain is ink; need and bad fill their state color. */
+  .corner-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 3px;
+    background: var(--accent);
+    color: var(--on-accent);
+    box-shadow: 0 0 0 2px var(--bg);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .corner-badge.tone-need {
+    background: var(--need);
+    color: var(--on-need);
+  }
+  .corner-badge.tone-bad {
+    background: var(--bad);
+    color: var(--on-bad);
   }
   .chip-dot::before {
     content: "";
