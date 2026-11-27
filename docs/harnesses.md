@@ -107,7 +107,7 @@ the role on the connection's machine.
 | `Launcher` | `Launch` applies the frozen intent and saves durable checkpoints. `Stop` interrupts a scoped session when available. The coordinator owns dispatch and reconciliation. |
 
 Use [`execution.As[T]`](../server/internal/execution/optional.go) for
-`LinkResolver`, `WorkspaceFeatures`, `Correlator`, `EventSource`,
+`LinkResolver`, `SessionSearcher`, `WorkspaceFeatures`, `Correlator`, `EventSource`,
 `Interactive` and `Actor`. The adapter implements the Go interface.
 A partial adapter such as a worker proxy must also advertise the trait in
 its ready snapshot. The trait says whether the interface is callable.
@@ -125,13 +125,15 @@ roots under one ID. Attest locality only when the files live on the
 connection's machine. Report trust, archive, disappearance and
 unavailability through the adapter contract. Stage handles grouping.
 
-Implement roster search as an optional declared role on the owning
-connection. Return bounded pages of harness-listed metadata and preserve
-eligibility checks for direct lookup and adoption. Browse includes eligible
-completed sessions still listed by the harness. Declare an unavailable
-reason when the harness or worker cannot safely enumerate. Attention, the
-watch set and transcript files are outside the roster search source.
-Route collection browsing through the human policy.
+Implement roster search with `execution.SessionSearcher` and declare
+`OpSessionSearch` on the owning connection. Return bounded pages of
+harness-listed metadata, including eligible completed sessions still
+listed by the harness. Supply known origin for the Stage wrapper policy.
+The Claude adapter checks only a bounded transcript prefix for origin
+on matches from the roster. Declare an unavailable reason when the
+harness or worker cannot safely enumerate. Keep collection browsing
+behind the human route, independent of Attention, the watch set and
+named lookup and adoption. [Session search API](api.md#session-search)
 
 ## Choose an extension
 
@@ -143,7 +145,7 @@ degrades through declared availability.
 | --- | --- | --- |
 | Display fact | Show a harness detail such as an endpoint or extra usage information. | `execution.Fact` carries a label, value and tone in status, an observation or an action result. |
 | Scoped action | Relay a harness-specific operation such as labelling a session. | Declare the target, inputs, confirmation, caller authorization and availability. Connection setup uses the connector. Session and project actions use `execution.Actor` and capability declarations. The owner validates opaque input. |
-| Typed operation | Let Stage decide whether it can launch, stop, adopt, read a reply or opening, list attention, launch with images, respond or send. | Declare each [`execution.Op`](../server/internal/execution/ops.go) with availability and a reason when unavailable. Use `WorkspaceFeatures` for a workspace-specific declaration. |
+| Typed operation | Let Stage decide whether it can launch, stop, adopt, read a reply or opening, list attention, search for sessions, launch with images, respond or send. | Declare each [`execution.Op`](../server/internal/execution/ops.go) with availability and a reason when unavailable. Use `WorkspaceFeatures` for a workspace-specific declaration. |
 | Launch option | Pass a choice, boolean or text value at launch, such as a harness worktree option. | Declare the field in capabilities and validate and translate it from `execution.Config`. |
 | Descriptor policy | Apply a Stage invariant such as launch recovery, attribution, identity or completion from a closure signal. | Declare it in the descriptor. Stage interprets the policy for every kind that uses it. |
 

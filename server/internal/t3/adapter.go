@@ -75,6 +75,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	}
 	yes := execution.Availability{Available: true}
 	out := execution.Capabilities{Operations: map[execution.Op]execution.Availability{}, Models: []execution.Model{}}
+	out.Operations[execution.OpSessionSearch] = execution.Availability{Reason: "Search is unavailable on T3. Enter a session link or ID."}
 	for _, op := range []execution.Op{execution.OpLaunch, execution.OpStop, execution.OpAdopt, execution.OpOpening, execution.OpReply, execution.OpAttention, execution.OpImages} {
 		out.Operations[op] = yes
 	}

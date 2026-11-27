@@ -329,8 +329,12 @@ func ReadHead(path string) (Transcript, error) {
 		return Transcript{}, err
 	}
 	defer f.Close()
+	return readHead(f)
+}
+
+func readHead(r io.Reader) (Transcript, error) {
 	var t Transcript
-	err = eachRecord(f, func(rec record) bool {
+	err := eachRecord(r, func(rec record) bool {
 		if rec.Type != "user" || rec.IsSidechain || rec.IsMeta || rec.Message == nil {
 			return true
 		}

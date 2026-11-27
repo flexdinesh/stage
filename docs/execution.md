@@ -397,11 +397,26 @@ declared capabilities.
 ### Typed operations
 
 Use a typed operation when Stage branches on availability.
-`execution.Op` (UI `OperationId`) covers `launch`, `stop`, `adopt`,
-`reply`, `opening`, `attention`, `images`, `respond` and `send`.
+`execution.Op` covers `launch`, `stop`, `adopt`, `reply`, `opening`,
+`attention`, `sessionSearch`, `images`, `respond` and `send`.
 Every adapter declares each operation and a reason when unavailable.
 For example, `images` gates image fields and image delivery in the API
 and MCP. The remote proxy passes the declarations through.
+
+### Session search
+
+`execution.SessionSearcher` is a separate optional role gated by the
+`sessionSearch` operation. It returns a bounded page of metadata for
+one connection's harness-listed sessions. The adapter owns the matching
+and pagination rules. Stage admits each HTTP request, scopes the cursor,
+applies the wrapper policy and looks up existing task ownership by the
+full session reference. Explicit preview and adoption revalidate the
+session through their own path.
+
+On workers the operation requires both the `sessionSearcher` trait on
+the connection and the `adapter.sessionSearch` request kind. These use
+the existing worker channel negotiation. An older worker can still
+serve its other operations. [Session search API](api.md#session-search)
 
 ### Interaction
 

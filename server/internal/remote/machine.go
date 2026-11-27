@@ -187,11 +187,15 @@ func (m *Machine) Connectors() map[string]harness.Connector {
 
 func (m *Machine) Ops() machine.Ops { return ops{m} }
 
-// implements uses the current ready snapshot. Running actions requires both
-// the adapter trait and the worker's action handler.
+// implements uses the current ready snapshot. Actions and session search
+// also need their worker handler.
 func (m *Machine) implements(connection int64, trait string) bool {
 	snapshot, _ := m.hub.Advertisement(m.id)
-	if snapshot == nil || trait == execution.TraitOf[execution.Actor]() && !slices.Contains(snapshot.ChannelKinds, KindAct) {
+	if snapshot == nil {
+		return false
+	}
+	if trait == execution.TraitOf[execution.Actor]() && !slices.Contains(snapshot.ChannelKinds, KindAct) ||
+		trait == execution.TraitOf[execution.SessionSearcher]() && !slices.Contains(snapshot.ChannelKinds, KindSessionSearch) {
 		return false
 	}
 	for _, c := range snapshot.Connections {

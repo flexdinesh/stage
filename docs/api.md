@@ -824,7 +824,7 @@ attaches to the unresolved attempt; 409 if it changed. No launch or acceptance.
 ### `GET /api/connections/:connectionId/capabilities`
 Stage-owned operation availability/reasons, models/options, permissions,
 interaction modes and launch options. `operations` maps every operation
-(`launch`, `stop`, `adopt`, `reply`, `opening`, `attention`, `images`,
+(`launch`, `stop`, `adopt`, `reply`, `opening`, `attention`, `sessionSearch`, `images`,
 `respond`, `send`) to `{available, reason?}`; an unavailable one says why.
 An option (harness-wide in `options`, or a model's) is `{id, kind?, label?,
 values, default, dependsOn?}`: `kind` `choice` (one of `values`),
@@ -1113,6 +1113,40 @@ Multipart form, field `file` (one image). 201 `Attachment` (staged). 400 not an 
 
 ### `DELETE /api/attachments/:id`
 Deletes a staged upload, or an image of a `backlog` task. 204. 404. 409 when the task has left backlog (images are read-only after launch).
+
+## Session search
+
+### `GET /api/connections/:connectionId/sessions`
+
+The personal operator and active shared members and admins can browse a
+connection that offers `sessionSearch`. The human route admits each page
+before calling the owning adapter, including through its worker. Agent
+credentials, private agent sockets and worker agent gateways receive 403
+in claimed mode. Setup pending receives 403 and missing or expired shared
+credentials receive 401. This route has no MCP equivalent.
+
+Optional query parameters are `q` (up to 256 bytes), `limit` (1–50, default
+20) and `cursor`. The response is `{sessions, nextCursor?}`. Each entry
+has `session: {connectionId, externalSessionId}`, optional `title`,
+`workspace` and `startedAt`, `eligibility: {available, reason?}`, and
+`trackedTaskId` when a task already owns that exact session. Eligibility
+is preliminary. Use the named session routes to preview and adopt.
+
+Send the same connection, query and limit on each page. Each cursor is
+opaque, scoped to the admitted account and search, and valid for five
+minutes or until the server restarts. A 400 `invalid_session_search_cursor`
+means to start a fresh search. A 409 `operation_unavailable` gives the
+reason search is unsupported or requires a worker update. A 503
+`session_search_unavailable` indicates an unavailable harness or worker.
+A 502 `session_search_failed` indicates a failed search. Direct link or
+ID entry is still available under its existing policy.
+
+Claude Code matches case-insensitive substrings of the listed title,
+workspace path, UUID or short ID. It orders by start time descending
+(unknown times last), then UUID ascending. Pages reflect the live roster.
+Listed completed sessions appear, and sessions whose only record is a
+historical transcript are outside search. Browse creates no task,
+observation, subscription or notification.
 
 ## Explicit session lookup and adoption
 

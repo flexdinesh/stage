@@ -30,6 +30,7 @@ const (
 	KindLaunch               = "adapter.launch"
 	KindStop                 = "adapter.stop"
 	KindAttention            = "adapter.attention"
+	KindSessionSearch        = "adapter.sessionSearch"
 	KindOpening              = "adapter.opening"
 	KindResolveLink          = "adapter.resolveLink"
 	KindCorrelate            = "adapter.correlate"
@@ -57,9 +58,10 @@ const (
 
 // Result error codes beyond workerchan's.
 const (
-	CodeUnavailable = "unavailable" // execution.ErrUnavailable
-	CodeNotFound    = "not_found"   // execution.ErrNotFound
-	CodeNoReply     = "no_reply"    // execution.ErrNoReply
+	CodeUnavailable         = "unavailable" // execution.ErrUnavailable
+	CodeNotFound            = "not_found"   // execution.ErrNotFound
+	CodeNoReply             = "no_reply"    // execution.ErrNoReply
+	CodeSessionSearchCursor = "session_search_cursor"
 	// CodeRejected: the worker's adapter certified that no execution
 	// started (execution.Rejected). Nothing else maps to it.
 	CodeRejected = "rejected"
@@ -170,6 +172,8 @@ func encodeError(err error) error {
 		return &workerchan.RemoteError{Code: CodeNotFound, Message: err.Error()}
 	case errors.Is(err, execution.ErrNoReply):
 		return &workerchan.RemoteError{Code: CodeNoReply, Message: err.Error()}
+	case errors.Is(err, execution.ErrSessionSearchCursor):
+		return &workerchan.RemoteError{Code: CodeSessionSearchCursor, Message: err.Error()}
 	}
 	return err
 }
@@ -209,6 +213,8 @@ func decodeError(err error) error {
 		return fmt.Errorf("%w: %s", execution.ErrNotFound, re.Message)
 	case CodeNoReply:
 		return fmt.Errorf("%w: %s", execution.ErrNoReply, re.Message)
+	case CodeSessionSearchCursor:
+		return execution.ErrSessionSearchCursor
 	case CodeNotHosted:
 		return fmt.Errorf("%w: %s", execution.ErrUnavailable, re.Message)
 	case CodeUnsupported, workerchan.CodeOperationUnavailable, workerchan.CodeUnknownKind:

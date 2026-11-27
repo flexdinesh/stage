@@ -218,9 +218,10 @@ func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 	return execution.Capabilities{
 		Operations: map[execution.Op]execution.Availability{
 			execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpImages: a.images(),
-			execution.OpAttention: available,
-			execution.OpRespond:   a.hooksRunning(),
-			execution.OpSend:      available,
+			execution.OpAttention:     available,
+			execution.OpSessionSearch: available,
+			execution.OpRespond:       a.hooksRunning(),
+			execution.OpSend:          available,
 		},
 		Models:      slices.Clone(models),
 		Options:     []execution.Option{effort, worktree},

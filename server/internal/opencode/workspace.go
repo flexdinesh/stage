@@ -145,9 +145,10 @@ func operations() map[execution.Op]execution.Availability {
 	answer := execution.Availability{Reason: "Answer in OpenCode: open the session there."}
 	return map[execution.Op]execution.Availability{
 		execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
-		execution.OpImages:  {Reason: "Image attachment delivery has not been verified for this adapter."},
-		execution.OpRespond: answer,
-		execution.OpSend:    answer,
+		execution.OpSessionSearch: {Reason: "Search is unavailable on OpenCode. Enter a session link or ID."},
+		execution.OpImages:        {Reason: "Image attachment delivery has not been verified for this adapter."},
+		execution.OpRespond:       answer,
+		execution.OpSend:          answer,
 	}
 }
 

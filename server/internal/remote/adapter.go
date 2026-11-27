@@ -54,6 +54,7 @@ var (
 	_ execution.EventSource       = (*Adapter)(nil)
 	_ execution.Interactive       = (*Adapter)(nil)
 	_ execution.Actor             = (*Adapter)(nil)
+	_ execution.SessionSearcher   = (*Adapter)(nil)
 )
 
 // Implements reads the current peer's declaration, never the Go proxy's methods.
@@ -146,6 +147,25 @@ func (a *Adapter) limitOperations(c *execution.Capabilities) {
 			}
 		}
 	}
+	// A worker predating session search cannot declare its availability.
+	if !slices.Contains(snapshot.ChannelKinds, KindSessionSearch) {
+		if c.Operations == nil {
+			c.Operations = make(map[execution.Op]execution.Availability)
+		}
+		c.Operations[execution.OpSessionSearch] = execution.Availability{
+			Reason: "Update Stage on the worker machine to search sessions, or enter a session link or ID.",
+		}
+	} else if c.Operations[execution.OpSessionSearch].Available && !a.Implements(execution.TraitOf[execution.SessionSearcher]()) {
+		c.Operations[execution.OpSessionSearch] = execution.Availability{
+			Reason: "This worker connection does not offer session search. Enter a session link or ID.",
+		}
+	}
+}
+
+func (a *Adapter) SearchSessions(ctx context.Context, q execution.SessionSearchQuery) (execution.SessionSearchPage, error) {
+	var page execution.SessionSearchPage
+	err := callTrait[execution.SessionSearcher](ctx, a, KindSessionSearch, q, &page)
+	return page, err
 }
 
 func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, error) {
