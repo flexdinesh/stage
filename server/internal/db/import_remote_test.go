@@ -32,10 +32,11 @@ func remote(repo, path string) func(*execution.WorkspaceInfo) {
 	return func(w *execution.WorkspaceInfo) { w.Repo, w.RepoPath = repo, path }
 }
 
+// projectCount measures legacy imports, independent of catalog groups.
 func projectCount(t *testing.T, pool *sqlite.DB) int {
 	t.Helper()
 	var n int
-	if err := pool.QueryRow(`SELECT count(*) FROM projects`).Scan(&n); err != nil {
+	if err := pool.QueryRow(`SELECT count(*) FROM projects WHERE NOT catalog_group`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n

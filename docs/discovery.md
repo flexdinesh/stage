@@ -6,6 +6,35 @@ This page describes shipped bindings and discovery review under
 transition to Stage-owned logical groups and harness-owned destinations.
 The read-only evidence below remains useful for grouping.
 
+## Logical project groups
+
+Every usable catalog row can join a project group, including ordinary
+folders and workspaces ineligible for legacy import. Stage assigns an
+unplaced row to a single group when the normalized origin and known
+subpath match. Without that evidence, a known subpath on the same attested
+Git common directory or a canonical non-Git directory on the same
+attested host can match. An unknown Git subpath, a bare path or a label
+cannot establish membership. Multiple owners or competing move candidates
+give the row its own group. Evidence refresh can add members and suggest
+related projects. Existing memberships remain fixed until a person edits
+them, so fresh evidence cannot undo a separation.
+
+Members can move an exact row into an existing project or separate it
+into a new one. Moving the row back restores its previous membership.
+The edit leaves all project IDs, history, snippets and execution
+selectors in place. Retired and forgotten connections retain grouped
+rows as history. Groups with only retired rows and groups emptied by
+edits stay addressable. Group archive and harness eligibility remain
+independent.
+
+The [group API](api.md#logical-project-groups) is additive. Binding clients
+keep their existing list and operations during the transition. A project
+created only for catalog membership can appear in the group list without
+an equivalent entry in the legacy list. A legacy project created later
+for routing can have no current group members and still own its recorded
+work. Routine sync establishes legacy import anchors before assigning new
+memberships. The catalog remains usable for grouping if legacy import fails.
+
 | Layer | Delivers |
 | --- | --- |
 | 07 | Evidence, identity keys, a single resolver, bindings, review data, moves, merge and split. Updates API, CLI and MCP consumers and keeps existing screens working. |

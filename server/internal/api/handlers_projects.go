@@ -66,7 +66,11 @@ func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
 		for _, p := range ps {
 			summaries = append(summaries, projectSummary(p, available))
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"projects": summaries, "destinations": destinations})
+		groups, err := s.Store.ListProjectGroupSummaries(r.Context(), archived)
+		if err != nil {
+			return err
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"projects": summaries, "groups": groups, "destinations": destinations})
 		return nil
 	}
 	imports, err := s.Store.ImportSummaries(r.Context())

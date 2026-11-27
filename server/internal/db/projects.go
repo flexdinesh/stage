@@ -12,14 +12,20 @@ import (
 )
 
 func (s *Store) ListProjects(ctx context.Context, archived string) ([]Project, error) {
-	archive := store.ProjectsActive
+	return read(ctx, s, func(tx store.Tx) ([]Project, error) {
+		return tx.Projects().List(ctx, projectArchive(archived), false)
+	})
+}
+
+func projectArchive(archived string) store.ProjectArchive {
 	switch archived {
 	case "true":
-		archive = store.ProjectsArchived
+		return store.ProjectsArchived
 	case "all":
-		archive = store.ProjectsAll
+		return store.ProjectsAll
+	default:
+		return store.ProjectsActive
 	}
-	return read(ctx, s, func(tx store.Tx) ([]Project, error) { return tx.Projects().List(ctx, archive) })
 }
 
 // BoundProject resolves the verified workspace in a single connection.
@@ -95,10 +101,13 @@ func (s *Store) UpdateProject(ctx context.Context, id int64, title string, archi
 	})
 }
 
-// RefreshWorkspaces refreshes a connection's discovery, never imports or
-// edits Stage metadata. The caller supplies a complete successful list;
-// failures never mark missing.
+// RefreshWorkspaces records a complete inventory and organizes new rows.
+// It never imports legacy bindings. Failures never mark rows missing.
 func (s *Store) RefreshWorkspaces(ctx context.Context, connectionID int64, ps []execution.WorkspaceInfo) (int, error) {
+	return s.refreshWorkspaces(ctx, connectionID, ps, true)
+}
+
+func (s *Store) refreshWorkspaces(ctx context.Context, connectionID int64, ps []execution.WorkspaceInfo, organize bool) (int, error) {
 	return write(ctx, s, func(tx store.Tx) (int, error) {
 		if err := tx.Projects().LockIdentity(ctx); err != nil {
 			return 0, err
@@ -106,6 +115,9 @@ func (s *Store) RefreshWorkspaces(ctx context.Context, connectionID int64, ps []
 		n, err := refreshWorkspaceRows(ctx, tx, connectionID, ps)
 		if err != nil {
 			return 0, err
+		}
+		if organize {
+			return n, resolveCatalog(ctx, tx, connectionID)
 		}
 		return n, resolveAll(ctx, tx)
 	})

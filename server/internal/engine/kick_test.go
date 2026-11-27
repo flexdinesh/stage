@@ -120,6 +120,10 @@ func TestFullSyncDoesNotEnumerateHistory(t *testing.T) {
 	if err != nil || len(ps) != 1 || ps[0].Title != "app" || len(ps[0].Bindings) != 1 || ps[0].Bindings[0].Rule != "new" {
 		t.Fatalf("projects %+v %v", ps, err)
 	}
+	groups, err := store.ListProjectGroups(t.Context(), "all")
+	if err != nil || len(groups) != 1 || groups[0].ID != ps[0].ID || len(groups[0].Members) != 1 {
+		t.Fatalf("sync created separate identities for the same workspace: projects %+v, groups %+v: %v", ps, groups, err)
+	}
 	if _, err = svc.Discovery.FullSync(t.Context()); err != nil {
 		t.Fatal(err)
 	}

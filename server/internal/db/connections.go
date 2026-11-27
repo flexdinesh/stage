@@ -292,7 +292,7 @@ func (s *Store) RetiredConnections(ctx context.Context, machine int64, harness s
 
 // ForgetConnection lets go of a retired connection. Its history stays: tasks
 // keep it and its label. It can no longer be restored, its project bindings
-// no longer ask for repair, and its discovery and declines are dropped.
+// no longer ask for repair, and its grouped workspace rows remain historical.
 // A connection nothing references is deleted outright.
 func (s *Store) ForgetConnection(ctx context.Context, id int64) error {
 	err := s.writeConnectionIdentity(ctx, func(tx store.Tx) error {

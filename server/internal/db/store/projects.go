@@ -49,6 +49,7 @@ type Workspace struct {
 	HarnessArchived bool                `json:"harnessArchived"`
 	ActiveAt        *time.Time          `json:"activeAt"`
 	ProjectID       *int64              `json:"projectId"`
+	GroupProjectID  *int64              `json:"groupProjectId"`
 	BindingID       *int64              `json:"bindingId"`
 	Primary         bool                `json:"primary"`
 	FileHost        *int64              `json:"fileHost"`
@@ -71,10 +72,12 @@ type WorkspaceResolution struct {
 
 type StoredWorkspace struct {
 	Workspace
-	MachineID        int64
-	ConnectionActive bool
-	CheckoutKey      string
-	InodeHint        string
+	MachineID           int64
+	ConnectionActive    bool
+	CheckoutKey         string
+	InodeHint           string
+	GroupRevision       int64
+	HistoricalProjectID *int64
 }
 
 type IdentityBinding struct {
@@ -129,12 +132,14 @@ type Projects interface {
 	LockIdentity(ctx context.Context) error
 	Exists(ctx context.Context, id int64) (bool, error)
 	// List orders by title (case-insensitive), then id.
-	List(ctx context.Context, archive ProjectArchive) ([]Project, error)
+	List(ctx context.Context, archive ProjectArchive, includeCatalogGroups bool) ([]Project, error)
 	Get(ctx context.Context, id int64) (Project, error)
 	// Bound is the project with the active, available binding of
 	// (connection, external project, workspace).
 	Bound(ctx context.Context, b ProjectBinding) (Project, error)
 	Insert(ctx context.Context, title string, createdBy int64, sourceMachine *int64) (int64, error)
+	InsertCatalogGroup(ctx context.Context, title string, createdBy int64, sourceMachine *int64) (int64, error)
+	SetWorkspaceGroup(ctx context.Context, workspace StoredWorkspace, group int64, attribution Attribution) error
 	// SoleBinding is the project of the only active binding of external
 	// project on the connection (nil: none or several).
 	SoleBinding(ctx context.Context, connectionID int64, external string) (*int64, error)
@@ -157,9 +162,9 @@ type Projects interface {
 	// BoundOn: the project has an active binding on the connection.
 	BoundOn(ctx context.Context, projectID, connectionID int64) (bool, error)
 	WorkspaceRows(ctx context.Context) ([]StoredWorkspace, error)
-	// HistoricalWorkspaceProject records a group for tracking an exact row
+	// WorkspaceProjectReferences reads recorded history and current membership
 	// independently of any active binding.
-	HistoricalWorkspaceProject(ctx context.Context, b ProjectBinding) (int64, error)
+	WorkspaceProjectReferences(ctx context.Context, b ProjectBinding) (historical, group *int64, err error)
 	SetHistoricalWorkspaceProject(ctx context.Context, b ProjectBinding, projectID int64) error
 	IdentityBindings(ctx context.Context) ([]IdentityBinding, error)
 	WorkspaceDeclines(ctx context.Context) ([]WorkspaceDecline, error)

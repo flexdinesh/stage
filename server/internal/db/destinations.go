@@ -32,6 +32,7 @@ type Destination struct {
 	MachineLabel    string `json:"machineLabel"`
 	Discriminator   string `json:"discriminator,omitempty"`
 	ProjectID       *int64 `json:"projectId,omitempty"`
+	GroupProjectID  *int64 `json:"groupProjectId,omitempty"`
 	Available       bool   `json:"available"`
 }
 

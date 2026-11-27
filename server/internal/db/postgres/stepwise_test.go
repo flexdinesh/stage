@@ -10,6 +10,8 @@ import (
 	"maps"
 	"slices"
 	"testing"
+
+	"github.com/flexdinesh/stage/server/internal/db/dbtest/migrationfixture"
 )
 
 // migrationStep is one upgrade scenario for a Postgres migration: seed runs
@@ -59,6 +61,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	45: {{name: "existing connection has unknown workspace freshness", seed: seedV0037ConnectionFacts, check: checkV0045WorkspaceRefresh}},
 	46: {{name: "existing workspace has no historical project", seed: seedV0046HistoricalWorkspaceProject, check: checkV0046HistoricalWorkspaceProject}},
 	47: {{name: "backfill proven workspace pins and preserve attempts", seed: seedV0047WorkspacePins, check: checkV0047WorkspacePins}},
+	48: {{name: "proven group memberships and historical work retained", seed: seedProjectGroups, check: checkProjectGroups}},
 }
 
 func seedV0046HistoricalWorkspaceProject(t *testing.T, pool *sql.DB) {
@@ -137,6 +140,21 @@ func checkV0047WorkspacePins(t *testing.T, pool *sql.DB) {
 	wantPGRows(t, pool, `SELECT task_id || '|' || attempt || '|' || connection_id || '|' || external_project_id
 	 || '|' || workspace || '|' || COALESCE(binding_id::text,'NULL') || '|' || binding_revision
 	FROM task_launch_destinations ORDER BY attempt`, "13|1|2|historic|/historic|1|7", "13|2|2|unbound|/unbound|NULL|0")
+}
+
+func seedProjectGroups(t *testing.T, pool *sql.DB) {
+	migrationfixture.SeedProjectGroups(t, func(query string) error {
+		_, err := pool.ExecContext(t.Context(), query)
+		return err
+	})
+}
+
+func checkProjectGroups(t *testing.T, pool *sql.DB) {
+	migrationfixture.CheckProjectGroups(t, func(query string) (int, error) {
+		var count int
+		err := pool.QueryRowContext(t.Context(), query).Scan(&count)
+		return count, err
+	})
 }
 
 func checkV0045WorkspaceRefresh(t *testing.T, pool *sql.DB) {

@@ -137,6 +137,9 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/sync", s.runSync)
 
 	agent("GET /api/projects", s.listProjects)
+	agent("GET /api/project-groups", s.listProjectGroups)
+	agent("GET /api/project-groups/{id}", s.getProjectGroup)
+	h("POST /api/project-groups/membership", s.editProjectGroup)
 	h("GET /api/shared-paths", removedRoute("GET /api/connections/{connectionId}/workspaces"))
 	h("PUT /api/shared-paths", removedRoute("PUT /api/projects/{id}/binding"))
 	h("POST /api/projects/{id}/bindings/{connectionId}/match", removedRoute("POST /api/connections/{connectionId}/resolve"))

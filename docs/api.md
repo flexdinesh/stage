@@ -511,6 +511,40 @@ Refresh external workspace discovery and task-owned sessions, then import delibe
 ```
 409 sync already running. 503 not connected. 502 T3 error.
 
+## Logical project groups
+
+- `GET /api/project-groups?archived=false|true|all` returns
+  `{groups: [...]}`. The default includes all unarchived groups, even
+  empty or retired-only groups.
+- `GET /api/project-groups/:id` accepts a project ID or legacy alias.
+  Human responses include `id`, `title`, `archivedAt`, `aliases`,
+  `lastActivityAt`, `state`, `members`, and `relatedProjectIds`. State is `empty`,
+  `retired` when every member's connection is retired, or `current`
+  when at least one member has an active connection. Related IDs share
+  strong workspace evidence and can be reviewed manually.
+- Each member has `connectionId`, `workspaceId`, `machineId`,
+  `title`, `path` and `catalogState` (`listed`, `missing`,
+  `archived`, or `retired`). These are stored catalog observations.
+  Current destination eligibility comes from the destination projection.
+- Scoped agent group reads return the shared `id`, `title`,
+  `archivedAt` and `aliases`. The destination response on
+  `GET /api/projects?view=destinations` and MCP `list_projects` includes
+  these summaries in `groups`. Destination summaries and human catalog
+  rows include `groupProjectId`. The existing `projectId` identifies
+  the legacy binding's project.
+- `POST /api/project-groups/membership` lets an active human member
+  preview an edit with `{connectionId, workspaceId, targetProjectId}`.
+  Supply an existing project ID to group the row there. Use null to
+  separate the row into a new project. The preview names the source and
+  target (or suggested new title) and returns a `previewToken`. Repeat the
+  same request with that token to apply atomically. A 409
+  `preview_changed` includes the updated preview. A successful edit
+  returns `applied: true` and both project IDs.
+
+Task and schedule filters and snippet scopes continue to use the project
+IDs recorded on their records. The legacy project routes below stay
+available during client migration.
+
 ## Projects
 
 Stage owns project IDs, titles and archive state. Creating a project needs no
@@ -1178,7 +1212,8 @@ Browsing creates no task, observation, subscription or notification.
 `POST /api/connections/:connectionId/sessions/:id/adopt` accepts `{title?, initialNote?, treeId?, projectId?, newProjectTitle?}`. Returns Task: 201 new, 200 existing owner. Revalidates current eligibility; never creates a second task for a session. Archived and child sessions cannot be newly adopted. Stage refuses a session another registered harness wraps (its origin among that harness's `wraps`): 409 `session_refused` with where to track it (a Claude Code session T3 started: "This Claude Code session was started by T3. Track it through T3."). Session context lookups and resolving such a session from a pasted link or ID (`GET /api/refs/resolve`) answer the same 409. The UI previews before confirming. See Adopt session below.
 
 For a human tracking a verified workspace with no project selection, Stage
-reuses its existing project or records a stable historical project. This
+reuses its existing project or records a stable historical project. Current
+group membership can supply the initial historical project. This
 creates no launch binding. A preview leaves tasks, notifications and read
 receipts unchanged. Existing named-session adoption and explicit binding
 arguments remain available to scoped callers. Concurrent confirmations

@@ -73,8 +73,8 @@ var seedSQL = []string{
 	`INSERT INTO projects (id, title, archived_at) VALUES (2, 'Separate', '2026-11-06T01:03:00.123456Z')`,
 	`INSERT INTO project_bindings (id, project_id, connection_id, external_project_id, workspace, is_primary, rule)
 	  VALUES (1, 1, 1, 'ext-1', '/w', 1, 'manual'), (2, 1, 1, 'ext-1-secondary', '/old/w2', 0, 'moved')`,
-	`INSERT INTO external_projects (connection_id, external_id, title, workspace, available, repo, repo_path, file_host, canonical_path, checkout_key, inode_hint, evidence_at, evidence_source, resolution, resolution_reason, resolution_rule, candidates, historical_project_id)
-	  VALUES (2, 'ext-2', 'Ext', '/w2', 1, 'example.org/Proj', 'packages/app', 1, '/work/w2', '/work/.git', '7:19', '2026-11-06T02:00:00.123456Z', 'machine', 'review', 'ambiguous', 'remote', '[1, 2]', 2)`,
+	`INSERT INTO external_projects (connection_id, external_id, title, workspace, available, repo, repo_path, file_host, canonical_path, checkout_key, inode_hint, evidence_at, evidence_source, resolution, resolution_reason, resolution_rule, candidates, historical_project_id, group_project_id, group_revision, group_attribution)
+	  VALUES (2, 'ext-2', 'Ext', '/w2', 1, 'example.org/Proj', 'packages/app', 1, '/work/w2', '/work/.git', '7:19', '2026-11-06T02:00:00.123456Z', 'machine', 'review', 'ambiguous', 'remote', '[1, 2]', 2, 1, 3, '{ "actor": { "kind": "human", "userId": 2 } }')`,
 	`INSERT INTO workspace_declines (connection_id, identity_key, declined_at) VALUES (2, 'external:2:declined', '2026-11-06T01:30:00.000000Z')`,
 	`INSERT INTO project_aliases (alias_id, project_id, title, merged_at, merged_by_user_id) VALUES (9, 1, 'Merged', '2026-11-06T01:00:00.000000Z', 2)`,
 	`INSERT INTO project_events (id, project_id, type, text, created_at, created_by_user_id) VALUES

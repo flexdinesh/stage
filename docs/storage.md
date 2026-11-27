@@ -564,6 +564,14 @@ and paging. (Thread search was removed with API v3.)
   its success time commit together. An unsuccessful read updates only the
   failure field. Existing inventory remains available as last-known data
   until the next successful refresh supplies a timestamp.
+  Paired migration 0048 `project_groups` adds catalog membership, a
+  membership revision and an attribution stamp to each external workspace.
+  It seeds exact manual and original import bindings and automatic joins
+  corroborated by a strong key on an anchor of the same project. Existing
+  exact historical associations can seed other rows. The
+  revision and stamp belong to membership. Catalog-created project IDs
+  support the same history, aliases and snippet scopes as other projects.
+  Copies carry the membership columns and project IDs without a transform.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -892,10 +900,12 @@ resolutions in one write transaction. Confirmation recomputes the plan
 under that lock. Task and schedule creation, edits, duplication and spawning
 use the same lock to serialize the selected workspace with identity changes.
 Session tracking uses the exact workspace's current project when bound.
-Otherwise it reuses its historical project or a unique strong match, and
-creates a project when neither exists. The association survives workspace
-refreshes and project merges. Task and schedule creation uses the same
-association when the caller selects a workspace without naming a project.
+Otherwise it reuses its recorded historical project. When recording that
+association for the first time, it uses current group membership, a unique
+strong match, or a new project. The recorded association survives workspace
+refreshes and group membership edits. Task and schedule creation uses the
+same association when the caller selects a workspace without naming a
+project. The caller's exact workspace selection supplies the launch pin.
 
 Migration 0047 adds nullable `workspace_pin` to tasks and schedules on both
 engines. With the owner's `connection_id`, its native ID and root identify one

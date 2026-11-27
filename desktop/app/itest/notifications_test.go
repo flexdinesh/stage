@@ -296,15 +296,13 @@ func bindDemoProject(t *testing.T, request func(string, string, any, int, any)) 
 			} `json:"workspaces"`
 		}
 		request("GET", discovery, nil, 200, &discovered)
-		if len(discovered.Workspaces) == 0 {
-			t.Fatal("fake has no workspace")
-		}
-		if id := discovered.Workspaces[0].ProjectID; id != nil {
+		if len(discovered.Workspaces) > 0 && discovered.Workspaces[0].ProjectID != nil {
+			id := *discovered.Workspaces[0].ProjectID
 			var project struct {
 				ID    int64  `json:"id"`
 				Title string `json:"title"`
 			}
-			request("GET", fmt.Sprintf("/api/projects/%d", *id), nil, 200, &project)
+			request("GET", fmt.Sprintf("/api/projects/%d", id), nil, 200, &project)
 			return project.ID, project.Title
 		}
 		if time.Now().After(deadline) {
