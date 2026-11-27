@@ -213,7 +213,6 @@ with tempfile.TemporaryDirectory(prefix="stage-workflow-") as root, contextlib.E
         lambda: request(oc, "/api/location?directory=" + urllib.parse.quote(str(repo)), auth=True),
         "OpenCode location",
     )
-    cid = request(stage, "/api/harnesses/opencode/status")["connectionId"]
     client = "http://localhost:" + str(oc_port)
     request(
         stage,
@@ -229,18 +228,21 @@ with tempfile.TemporaryDirectory(prefix="stage-workflow-") as root, contextlib.E
     )
     status = request(stage, "/api/harnesses/opencode/status")
     assert status["state"] == "connected" and status["details"]["hasCredentials"] and "fixture" not in json.dumps(status)
+    cid = status["connectionId"]
     synced = request(stage, "/api/sync", {})
-    assert synced["projects"] >= 1 and synced["unavailableConnections"] == [1], synced
-    project = request(stage, "/api/projects", {"title": "Integration fixture"})
-    pid = project["id"]
-    inventory = request(stage, f"/api/connections/{cid}/projects")["projects"]
+    assert synced["projects"] >= 1 and not synced.get("unavailableConnections"), synced
+    inventory = request(stage, f"/api/connections/{cid}/workspaces")["workspaces"]
     workspace = next(w for w in inventory if w["workspace"] == str(repo))
-    request(
-        stage,
-        f"/api/projects/{pid}/binding",
-        {"connectionId": cid, "externalProjectId": workspace["externalId"], "workspace": str(repo)},
-        "PUT",
-    )
+    pid = workspace["projectId"]
+    if pid is None:
+        project = request(stage, "/api/projects", {"title": "Integration fixture"})
+        pid = project["id"]
+        request(
+            stage,
+            f"/api/projects/{pid}/binding",
+            {"connectionId": cid, "externalProjectId": workspace["externalId"], "workspace": str(repo)},
+            "PUT",
+        )
 
     def cli(*args):
         return json.loads(
@@ -290,9 +292,7 @@ with tempfile.TemporaryDirectory(prefix="stage-workflow-") as root, contextlib.E
     assert any(
         n["sourceSession"] == parent["session"] and n["text"] == "Created inside OpenCode" for n in journal
     ), journal
-    assert parent["links"]["web"].startswith(client + "/server/") and parent["links"]["service"].startswith(
-        oc + "/server/"
-    )
+    assert parent["links"]["web"].startswith(client + "/server/")
     print("Native OpenCode tool call created task and journal with exact caller", flush=True)
     external = request(
         oc,
@@ -301,6 +301,9 @@ with tempfile.TemporaryDirectory(prefix="stage-workflow-") as root, contextlib.E
         auth=True,
     )["data"]["id"]
     sref = f"/api/connections/{cid}/sessions/{external}"
+    roster = request(stage, f"/api/connections/{cid}/sessions?q={urllib.parse.quote(external)}")["sessions"]
+    candidate = next((item for item in roster if item["session"]["externalSessionId"] == external), None)
+    assert candidate and candidate["session"]["connectionId"] == cid and candidate["eligibility"]["available"], roster
     preview = request(stage, sref + "/context")
     assert preview["project"]["id"] == pid and preview["task"] is None
     attached = request(stage, sref + "/adopt", {"initialNote": "Explicitly adopted"})

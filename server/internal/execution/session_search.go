@@ -16,6 +16,12 @@ const (
 // ErrSessionSearchCursor means the caller must start a fresh search.
 var ErrSessionSearchCursor = errors.New("Start a fresh search. This cursor is invalid or expired.")
 
+// SessionSearchUnsupported carries the adapter's fallback when the harness
+// rejects listing, even though the connection ordinarily supports it.
+type SessionSearchUnsupported struct{ Reason string }
+
+func (e *SessionSearchUnsupported) Error() string { return e.Reason }
+
 // SessionSearcher browses one connection's current roster. The adapter owns
 // match and ordering semantics and its continuation token. Browsing does not
 // observe or subscribe to sessions.

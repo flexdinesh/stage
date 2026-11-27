@@ -89,6 +89,9 @@ func (c *MCPClient) ListThreads(ctx context.Context, in ListThreadsInput) (Threa
 	if err := c.call(ctx, "t3_thread_list", args, &out); err != nil {
 		return ThreadPage{}, err
 	}
+	if out.Threads == nil {
+		return ThreadPage{}, errors.New("t3 t3_thread_list: missing threads array")
+	}
 	page := out.toPage()
 	for _, t := range page.Threads {
 		if env := environmentFromLink(t.Link); env != "" {

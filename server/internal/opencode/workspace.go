@@ -124,10 +124,15 @@ func choice(id, label string) execution.Choice {
 	return execution.Choice{ID: id, Label: label, Availability: available}
 }
 func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) {
-	if _, err := a.check(ctx); err != nil {
+	contract, err := a.checkContract(ctx)
+	if err != nil {
 		return execution.Capabilities{}, err
 	}
-	return execution.Capabilities{Operations: operations(), ModeLabel: "Agent", Options: launchOptions()}, nil
+	ops := operations()
+	if contract.search.available {
+		ops[execution.OpSessionSearch] = available
+	}
+	return execution.Capabilities{Operations: ops, ModeLabel: "Agent", Options: launchOptions()}, nil
 }
 
 // optionWorktree is the worktree launch option: OpenCode creates the
@@ -140,12 +145,12 @@ func launchOptions() []execution.Option {
 	return []execution.Option{{ID: optionWorktree, Kind: execution.OptionBoolean, Label: "OpenCode worktree", Values: []execution.OptionValue{execution.BoolValue(true), off}, Default: &off}}
 }
 
-// operations are OpenCode's, whatever the server.
+// operations declares OpenCode's baseline capabilities.
 func operations() map[execution.Op]execution.Availability {
 	answer := execution.Availability{Reason: "Answer in OpenCode: open the session there."}
 	return map[execution.Op]execution.Availability{
 		execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
-		execution.OpSessionSearch: {Reason: "Search is unavailable on OpenCode. Enter a session link or ID."},
+		execution.OpSessionSearch: {Reason: sessionSearchUnavailable},
 		execution.OpImages:        {Reason: "Image attachment delivery has not been verified for this adapter."},
 		execution.OpRespond:       answer,
 		execution.OpSend:          answer,

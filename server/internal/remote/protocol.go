@@ -76,7 +76,7 @@ const (
 	CodeBusy = "busy"
 	// CodeNotHosted: the worker hosts no adapter for the connection.
 	CodeNotHosted = "not_hosted"
-	// CodeUnsupported: the worker's adapter lacks the optional interface.
+	// CodeUnsupported: the worker's adapter cannot offer the operation.
 	CodeUnsupported = "unsupported"
 )
 
@@ -155,6 +155,7 @@ func encodeError(err error) error {
 	var invalid *execution.Invalid
 	var busy *execution.Busy
 	var re *workerchan.RemoteError
+	var searchUnsupported *execution.SessionSearchUnsupported
 	switch {
 	case errors.As(err, &re):
 		return err
@@ -174,6 +175,8 @@ func encodeError(err error) error {
 		return &workerchan.RemoteError{Code: CodeNoReply, Message: err.Error()}
 	case errors.Is(err, execution.ErrSessionSearchCursor):
 		return &workerchan.RemoteError{Code: CodeSessionSearchCursor, Message: err.Error()}
+	case errors.As(err, &searchUnsupported):
+		return &workerchan.RemoteError{Code: CodeUnsupported, Message: searchUnsupported.Reason}
 	}
 	return err
 }

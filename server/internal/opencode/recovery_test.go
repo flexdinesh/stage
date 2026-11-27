@@ -175,7 +175,7 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 	router := api.NewRouter(api.Deps{Store: store, Engine: svc})
 	path := "/api/connections/2/sessions/" + id
 	preview := httptest.NewRecorder()
-	router.ServeHTTP(preview, httptest.NewRequest("GET", path, nil))
+	router.ServeHTTP(preview, httptest.NewRequest("GET", path+"/context", nil))
 	if preview.Code != 200 || !strings.Contains(preview.Body.String(), observation.Links.Web) {
 		t.Fatalf("adoption preview: %d %s", preview.Code, preview.Body.String())
 	}

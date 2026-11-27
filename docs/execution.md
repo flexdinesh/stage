@@ -413,6 +413,17 @@ applies the wrapper policy and looks up existing task ownership by the
 full session reference. Explicit preview and adoption revalidate the
 session through their own path.
 
+| Harness | Metadata and scope |
+| --- | --- |
+| T3 | `t3_thread_list` over all projects in the selected environment, with T3's newest-first offset cursor and settled threads included. Search matches the thread title or ID and the project name, ID or root. The workspace label is the T3 project name when available. Listed subagents are ineligible and forks retain their existing eligibility. |
+| Codex | App-server `thread/list` in the connected Codex home, newest creation first. Includes saved unarchived CLI, IDE, exec, app-server and unknown-source threads exposed by the daemon. Search matches name, working directory or thread ID. The roster supplies the originator for wrapper eligibility. Prompt previews, turns and attachments stay out of search results. |
+| OpenCode | The V2 service's connection-wide `GET /api/session` listing in native newest-first order. Search matches title, directory or session ID. The service must advertise a bounded, cursor-paginated `session.list` in OpenAPI. Services without that contract retain explicit session lookup. |
+| Claude Code | Roster entries for the selected configuration, including listed completed sessions. Search matches title, directory, UUID or short ID, newest start first. Only a bounded transcript header of a listed match supplies wrapper origin. Transcript-only historical sessions stay outside the roster. |
+
+T3, Codex and OpenCode filter one native page at a time. A filtered page
+can be short or empty while a continuation remains. Each page reflects
+the live roster, so changes during browsing can affect later pages.
+
 On workers the operation requires both the `sessionSearcher` trait on
 the connection and the `adapter.sessionSearch` request kind. These use
 the existing worker channel negotiation. An older worker can still
