@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blockedStartModes, scheduleBody, taskCreateBody, taskUpdateBody, taskWorkspaceLocation, taskWorkspaceSelection } from "../src/lib/taskForm.ts";
+import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceLocation, taskWorkspaceSelection } from "../src/lib/taskForm.ts";
 import { setOption } from "../src/lib/options.ts";
 
 const config = { model: "m", options: [], permission: "", mode: "" };
@@ -81,6 +81,29 @@ test("task edits preserve the saved workspace until it is changed or cleared", (
   assert.deepEqual(taskUpdateBody(update({ before, template: { ...template, projectId: 2 } })), {
     projectId: 2,
     bindingId: null,
+    executionConfig: config,
+  });
+});
+
+test("an exact task edit sends the pin and scoped config only when choosing a replacement", () => {
+  const before = { ...task, bindingId: 42, workspaceId: "ws_saved" };
+  const next = { projectId: before.projectId, title: "Renamed", prompt: before.prompt, connectionId: before.connectionId, workspaceId: before.workspaceId, executionConfig: config };
+  assert.deepEqual(taskUpdateBody(update({ before, template: next })), { title: "Renamed" });
+  assert.deepEqual(taskUpdateBody(update({ before, template: { ...next, title: before.title, workspaceId: "ws_unbound" } })), {
+    workspaceId: "ws_unbound",
+    executionConfig: config,
+  });
+});
+
+test("a schedule edit preserves the saved workspace and repeat until changed", () => {
+  const timing = { notes: "n", attachmentIds: [], cron: "0 9 * * 0", tz: "UTC" };
+  const next = { projectId: 1, title: "New", prompt: "P", connectionId: 3, workspaceId: "ws_saved", executionConfig: config };
+  const before = { ...scheduleBody(next, timing), title: "T", cron: "00 09 * * 7", bindingId: 42, attachments: [] };
+  assert.deepEqual(scheduleUpdateBody(before, scheduleBody(next, timing)), { title: "New" });
+  const replacement = { ...next, title: before.title, connectionId: 4, workspaceId: "ws_unbound" };
+  assert.deepEqual(scheduleUpdateBody(before, scheduleBody(replacement, timing)), {
+    connectionId: 4,
+    workspaceId: "ws_unbound",
     executionConfig: config,
   });
 });

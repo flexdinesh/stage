@@ -454,7 +454,8 @@ function SessionPanel({ task }: { task: TaskDetail }) {
   const projects = useProjects();
   const bindings = projects.data?.projects.find((project) => project.id === task.projectId)?.bindings;
   const binding = workspaceBinding(bindings ?? [], task.connectionId, task.workspace?.bindingId ?? task.bindingId);
-  const caps = useConnectionCapabilities(task.connectionId, true, binding?.status === "available" ? binding : undefined);
+  const scope = task.workspaceId ? { workspaceId: task.workspaceId } : binding?.status === "available" ? binding : undefined;
+  const caps = useConnectionCapabilities(task.connectionId, true, scope);
   const meta = <LaunchMeta parts={launchParts(task.executionConfig, caps.data)} reported={task.reported} harness={name} />;
   const session = task.session;
   if (session === null) {

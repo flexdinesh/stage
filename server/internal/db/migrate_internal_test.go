@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // openUnmigrated opens a fresh temp database with no migrations applied.
@@ -326,6 +327,16 @@ func TestLegacyScheduleTemplatesPreserveTextAcrossJournalParts(t *testing.T) {
 			}
 			s := NewStore(pool)
 			ctx := context.Background()
+			schedule, err := s.GetSchedule(ctx, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.RefreshWorkspaces(ctx, schedule.ConnectionID, []execution.WorkspaceInfo{{ID: "p", WorkspaceRoot: "/w"}}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.UpdateSchedule(ctx, 1, SchedulePatch{WorkspaceID: Optional[string]{Set: true, V: WorkspaceID(schedule.ConnectionID, "p", "/w")}}); err != nil {
+				t.Fatal(err)
+			}
 			manual, err := s.RunScheduleNow(ctx, 1)
 			if err != nil {
 				t.Fatal(err)

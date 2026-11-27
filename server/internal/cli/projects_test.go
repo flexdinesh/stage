@@ -26,6 +26,13 @@ func TestProjectWorkspaceCommands(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/projects":
+			if r.URL.Query().Get("view") == "destinations" {
+				io.WriteString(w, `{"projects":[{"id":1,"title":"Current"}],"destinations":[
+					{"connectionId":7,"workspaceId":"ws_bound","title":"Build","connectionLabel":"Codex","machineLabel":"Laptop","discriminator":"4ab2","projectId":1,"available":true},
+					{"connectionId":8,"workspaceId":"ws_unbound","title":"Build","connectionLabel":"Codex","machineLabel":"Laptop","discriminator":"5nd9","available":true}
+				]}`)
+				return
+			}
 			io.WriteString(w, `{"projects":[`+project+`],"imports":[]}`)
 		case "GET /api/projects/2":
 			io.WriteString(w, project)
@@ -87,8 +94,10 @@ func TestProjectWorkspaceCommands(t *testing.T) {
 	}
 
 	list := run("ls")
-	if !strings.Contains(list, "/primary") || strings.Contains(list, "/secondary") {
-		t.Errorf("project list should show primary paths: %s", list)
+	for _, want := range []string{"Current", "ws_bound", "ws_unbound", "Build (4ab2)", "Build (5nd9)", "unbound", "available"} {
+		if !strings.Contains(list, want) {
+			t.Errorf("project list lacks %q: %s", want, list)
+		}
 	}
 	for _, ref := range [][]string{nil, {"2"}} {
 		out := run(append([]string{"workspaces"}, ref...)...)
@@ -168,6 +177,72 @@ func TestTaskAndScheduleBindingFlag(t *testing.T) {
 			create,
 			{kind, "edit", "5", "--title", "chosen", "--binding", "41"},
 			{kind, "edit", "5", "--title", "cleared", "--binding", ""},
+			{kind, "edit", "5", "--title", "unchanged"},
+		} {
+			if code, out, stderr := h.run("", args...); code != 0 || stderr != "" {
+				t.Errorf("%v = %d, %s, %s", args, code, out, stderr)
+			}
+		}
+	}
+}
+
+func TestExactWorkspaceFlags(t *testing.T) {
+	const workspace = "ws_second_root"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/harnesses":
+			io.WriteString(w, `{"harnesses":[]}`)
+		case "GET /api/connections":
+			io.WriteString(w, `{"connections":[{"id":7,"active":true},{"id":8,"active":true}]}`)
+		case "GET /api/connections/8/capabilities":
+			q := r.URL.Query()
+			if q.Get("workspaceId") != workspace || len(q) != 1 {
+				t.Errorf("capabilities scope = %s", r.URL.RawQuery)
+			}
+			io.WriteString(w, `{"models":[{"id":"selected-model","label":"Selected model","available":true}]}`)
+		case "POST /api/tasks", "POST /api/schedules", "PATCH /api/tasks/5", "PATCH /api/schedules/5":
+			var in struct {
+				Title        string          `json:"title"`
+				WorkspaceID  json.RawMessage `json:"workspaceId"`
+				ConnectionID int64           `json:"connectionId"`
+				ProjectID    json.RawMessage `json:"projectId"`
+				TreeID       *int64          `json:"treeId"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				t.Errorf("decode request: %v", err)
+			}
+			want := map[string]string{"create": `"` + workspace + `"`, "reselect": `"` + workspace + `"`, "clear": "null", "unchanged": ""}[in.Title]
+			if string(in.WorkspaceID) != want || len(in.ProjectID) != 0 {
+				t.Errorf("%s %s workspaceId = %s, want %s, projectId = %s", r.Method, r.URL.Path, in.WorkspaceID, want, in.ProjectID)
+			}
+			if (in.Title == "create" || in.Title == "reselect") && in.ConnectionID != 8 {
+				t.Errorf("%s %s connectionId = %d, want 8", r.Method, r.URL.Path, in.ConnectionID)
+			}
+			if r.Method == "POST" && r.URL.Path == "/api/tasks" && (in.TreeID == nil || *in.TreeID != 12) {
+				t.Errorf("member create lost its tree: %+v", in)
+			}
+			io.WriteString(w, `{"id":5}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	h := &harness{t: t, url: srv.URL}
+	if code, out, stderr := h.run("", "models", "ls", "--connection", "8", "--workspace-id", workspace); code != 0 || !strings.Contains(out, "selected-model") {
+		t.Fatalf("models ls = %d, %s, %s", code, out, stderr)
+	}
+	for _, kind := range []string{"task", "schedule"} {
+		create := []string{kind, "add", "--title", "create", "--prompt", "Build it", "--connection", "8", "--workspace-id", workspace, "--execution-config", `{"model":"selected-model"}`}
+		if kind == "task" {
+			create = append(create, "--tree", "12")
+		} else {
+			create = append(create, "--cron", "@daily", "--tz", "UTC")
+		}
+		for _, args := range [][]string{
+			create,
+			{kind, "edit", "5", "--title", "reselect", "--connection", "8", "--workspace-id", workspace},
+			{kind, "edit", "5", "--title", "clear", "--workspace-id", ""},
 			{kind, "edit", "5", "--title", "unchanged"},
 		} {
 			if code, out, stderr := h.run("", args...); code != 0 || stderr != "" {

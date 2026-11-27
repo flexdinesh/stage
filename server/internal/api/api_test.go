@@ -739,8 +739,8 @@ func TestBindingChangeDoesNotRedirectUncertainLaunch(t *testing.T) {
 	}
 	e.poll()
 	e.must("POST", endpoint, nil, 200, &started)
-	if e.fake.Launched[3].ProjectID != replacement.ID || started.LaunchAttempt != 2 {
-		t.Fatal("future attempt did not use new binding")
+	if e.fake.Launched[3].ProjectID != p.T3ProjectID || started.LaunchAttempt != 2 {
+		t.Fatal("a new attempt must use the original workspace pin")
 	}
 }
 
@@ -755,9 +755,9 @@ func TestSaveAndStartWithoutBindingRetainsActionableBacklog(t *testing.T) {
 	e := newEnv(t)
 	var p project
 	e.must("POST", "/api/projects", map[string]any{"title": "Offline"}, 201, &p)
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "Plan", "prompt": "p"}, 400, nil)
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "Plan", "prompt": "p"}, 409, nil)
 	task := e.task(p.ID, "Plan", map[string]any{"start": true, "connectionId": dbtest.T3Connection})
-	if task.State != "backlog" || task.LaunchAttempt != 0 || task.LastError == nil || !strings.Contains(*task.LastError, "Bind or confirm") {
+	if task.State != "backlog" || task.LaunchAttempt != 0 || task.LastError == nil || !strings.Contains(*task.LastError, "Choose a connection and workspace") {
 		t.Fatalf("silent launch refusal %+v", task)
 	}
 	if len(e.t3.launchRequestIDs()) != 0 {

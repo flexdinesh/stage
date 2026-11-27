@@ -23,6 +23,10 @@ type scheduleDetailJSON struct {
 }
 
 func (s *server) scheduleJSON(sc db.Schedule) db.Schedule {
+	sc.ExecutionConfig = configForClient(sc.ExecutionConfig)
+	if sc.WorkspacePin != nil {
+		sc.WorkspaceID = db.WorkspaceID(sc.ConnectionID, sc.WorkspacePin.ExternalID, sc.WorkspacePin.Root)
+	}
 	return sc
 }
 
@@ -92,7 +96,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	}
 	sc, err := s.Store.CreateSchedule(r.Context(), db.NewSchedule{
 		ExecutionConfig: in.ExecutionConfig, ConnectionID: in.ConnectionID,
-		ProjectID: in.ProjectID, BindingID: in.BindingID, Title: in.Title, Prompt: in.Prompt,
+		ProjectID: in.ProjectID, BindingID: in.BindingID, WorkspaceID: in.WorkspaceID, Title: in.Title, Prompt: in.Prompt,
 		Notes: req.Notes, AttachmentIDs: in.AttachmentIDs,
 		Cron: req.Cron, Tz: req.Tz, Paused: req.Paused, OriginSession: in.OriginSession,
 	})
@@ -143,14 +147,15 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	p.ValidatedConnection, p.ValidatedProject, p.ValidatedBinding = current.ConnectionID, current.ProjectID, current.BindingID
+	p.ValidatedWorkspace = current.WorkspacePin
 	if err := validateConfigPatch(configPatch{
 		ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt,
 		AttachmentIDs: &p.AttachmentIDs,
 	}); err != nil {
 		return err
 	}
-	original := taskDestination{current.ConnectionID, current.ProjectID, current.BindingID}
-	if err := s.validateDestinationPatch(r.Context(), original, p.ConnectionID, &p.ProjectID, p.BindingID,
+	original := taskDestination{current.ConnectionID, current.ProjectID, current.BindingID, current.WorkspaceID}
+	if err := s.validateDestinationPatch(r.Context(), original, p.ConnectionID, &p.ProjectID, p.BindingID, p.WorkspaceID,
 		current.ExecutionConfig, p.ExecutionConfig, current.Attachments, p.AttachmentIDs); err != nil {
 		return err
 	}

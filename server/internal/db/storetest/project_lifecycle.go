@@ -192,8 +192,14 @@ func caseProjectSplit(t *testing.T, open Factory) {
 		t.Fatalf("remaining workspaces %+v", kept)
 	}
 	assertProjectContents(t, s, ctx, task, schedule, snippet, src.ID, binding)
-	_, err = s.TransitionTask(ctx, db.Transition{TaskID: task, To: db.StateLaunching, BeginAttempt: true})
-	assertProjectConflict(t, err, "binding_unavailable")
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task, To: db.StateLaunching, BeginAttempt: true}); err != nil {
+		t.Fatal(err)
+	}
+	destination, err := s.LaunchDestination(ctx, task, 1)
+	if err != nil || destination.ConnectionID != connection || destination.BindingID != 0 ||
+		destination.ExternalProjectID != "source" || destination.Workspace != "/w/source" {
+		t.Fatalf("launch after split: %+v, %v", destination, err)
+	}
 	_, err = s.SplitProject(ctx, dst.ID, binding, "Another project")
 	assertProjectConflict(t, err, "split_last_workspace")
 	assertMergeDismissals(t, engine, ctx, [][2]int64{{src.ID, dst.ID}})

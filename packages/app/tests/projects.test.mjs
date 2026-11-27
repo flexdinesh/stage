@@ -39,6 +39,21 @@ test("capabilities and project actions can address a non-primary binding", async
   ]);
 });
 
+test("destination reads and capabilities carry their query scope and cancellation signal", async () => {
+  const requests = [];
+  const { api } = fakeApi(async (path, init) => {
+    requests.push({ path, signal: init.signal });
+    return Response.json({ projects: [], connections: [], destinations: [] });
+  });
+  const { signal } = new AbortController();
+  await api.destinations(signal);
+  await api.capabilities(8, { workspaceId: "ws_abc" }, signal);
+  assert.deepEqual(requests, [
+    { path: "/projects?view=destinations&archived=all", signal },
+    { path: "/connections/8/capabilities?workspaceId=ws_abc", signal },
+  ]);
+});
+
 test("a stale workspace confirmation carries the fresh preview", async () => {
   const preview = { applied: false, previewToken: "fresh", placements: [], created: 0, joined: 0, moved: 0, review: 0 };
   const { api } = fakeApi(async () => Response.json(

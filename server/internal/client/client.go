@@ -268,9 +268,10 @@ type ScheduleDetail struct {
 type CreateTask struct {
 	NeedsSession    *db.SessionRef    `json:"needsSession,omitempty"`
 	ConnectionID    int64             `json:"connectionId,omitempty"`
+	WorkspaceID     string            `json:"workspaceId,omitempty"`
 	OriginSession   *db.SessionRef    `json:"originSession,omitempty"`
 	ExecutionConfig *execution.Config `json:"executionConfig,omitempty"`
-	ProjectID       int64             `json:"projectId"`
+	ProjectID       int64             `json:"projectId,omitempty"`
 	BindingID       *int64            `json:"bindingId,omitempty"`
 	Title           string            `json:"title"`
 	Prompt          string            `json:"prompt"`
@@ -288,9 +289,10 @@ type CreateTask struct {
 // CreateSchedule is the POST /api/schedules body.
 type CreateSchedule struct {
 	ConnectionID    int64             `json:"connectionId,omitempty"`
+	WorkspaceID     string            `json:"workspaceId,omitempty"`
 	OriginSession   *db.SessionRef    `json:"originSession,omitempty"`
 	ExecutionConfig *execution.Config `json:"executionConfig,omitempty"`
-	ProjectID       int64             `json:"projectId"`
+	ProjectID       int64             `json:"projectId,omitempty"`
 	BindingID       *int64            `json:"bindingId,omitempty"`
 	Title           string            `json:"title"`
 	Prompt          string            `json:"prompt"`
@@ -842,12 +844,21 @@ func (c *Client) ProjectCapabilities(ctx context.Context, id, projectID int64) (
 // WorkspaceCapabilities reads features for the selected binding, defaulting to
 // the project's primary workspace on the connection.
 func (c *Client) WorkspaceCapabilities(ctx context.Context, id, projectID int64, bindingID *int64) (execution.Capabilities, error) {
-	var out execution.Capabilities
 	q := url.Values{}
 	if projectID != 0 {
 		setID(q, "projectId", &projectID)
 	}
 	setID(q, "bindingId", bindingID)
+	return c.capabilities(ctx, id, q)
+}
+
+// DestinationCapabilities reads features for an exact connection workspace.
+func (c *Client) DestinationCapabilities(ctx context.Context, id int64, workspaceID string) (execution.Capabilities, error) {
+	return c.capabilities(ctx, id, url.Values{"workspaceId": {workspaceID}})
+}
+
+func (c *Client) capabilities(ctx context.Context, id int64, q url.Values) (execution.Capabilities, error) {
+	var out execution.Capabilities
 	path := withQuery(fmt.Sprintf("/api/connections/%d/capabilities", id), q)
 	err := c.do(ctx, http.MethodGet, path, nil, &out)
 	return out, err

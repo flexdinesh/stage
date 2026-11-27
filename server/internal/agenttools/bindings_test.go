@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/agenttools"
@@ -22,8 +23,6 @@ func TestMCPWorkspaceChoice(t *testing.T) {
 			io.WriteString(w, `{"projects":[`+project+`]}`)
 		case "GET /api/connections":
 			io.WriteString(w, `{"connections":[{"id":7,"active":true},{"id":8,"active":true}]}`)
-		case "GET /api/preferences":
-			io.WriteString(w, `{"defaultConnectionId":7}`)
 		case "GET /api/connections/8/capabilities":
 			if r.URL.Query().Get("projectId") != "1" {
 				t.Errorf("capabilities query: %s", r.URL.RawQuery)
@@ -60,7 +59,7 @@ func TestMCPWorkspaceChoice(t *testing.T) {
 			}
 			if r.Method == "POST" {
 				connectionID := int64(8)
-				if in.Title == "default" {
+				if in.Title == "explicit connection" {
 					connectionID = 7
 				}
 				if in.ProjectID != 1 || in.ConnectionID != connectionID {
@@ -100,10 +99,14 @@ func TestMCPWorkspaceChoice(t *testing.T) {
 		if msg := call(t, cs, tool, args, nil); msg != "" {
 			t.Errorf("%s: %s", tool, msg)
 		}
-		args["title"], args["bindingId"] = "default", nil
+		args["title"], args["bindingId"] = "explicit connection", nil
 		delete(args, "executionConfig")
+		if msg := call(t, cs, tool, args, nil); !strings.Contains(msg, "select connectionId and workspaceId from list_projects") {
+			t.Errorf("%s with ambiguous project: %s", tool, msg)
+		}
+		args["connectionId"] = 7
 		if msg := call(t, cs, tool, args, nil); msg != "" {
-			t.Errorf("%s using the primary: %s", tool, msg)
+			t.Errorf("%s using an explicit connection: %s", tool, msg)
 		}
 	}
 	for _, tool := range []string{"update_task", "update_schedule"} {

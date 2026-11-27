@@ -42,13 +42,14 @@ export function statusChips(t: Pick<Task, "state" | "readiness" | "acceptanceId"
 // ---- Editing ----
 
 /** A task's editable fields as an edit form opened, in update-body shape: what `taskEditChanges` compares against. */
-export function taskEditBaseline(task: Task): UpdateTaskRequest {
+export function taskEditBaseline(task: Pick<Task, "projectId" | "title" | "prompt" | "connectionId" | "workspaceId" | "executionConfig" | "attachments">): UpdateTaskRequest {
   const config = task.executionConfig;
   return {
     projectId: task.projectId,
     title: task.title,
     prompt: task.prompt,
     connectionId: task.connectionId,
+    ...(task.workspaceId === undefined ? {} : { workspaceId: task.workspaceId }),
     ...(config === null || config === undefined ? {} : { executionConfig: { ...config, options: config.options ?? [] } }),
     attachmentIds: task.attachments.map((a) => a.id),
   };
@@ -61,7 +62,7 @@ export function taskEditBaseline(task: Task): UpdateTaskRequest {
  */
 export function taskEditChanges(baseline: UpdateTaskRequest, next: UpdateTaskRequest): UpdateTaskRequest {
   const body = changedFields(baseline, next);
-  if (body.projectId === undefined && body.connectionId === undefined) return body;
+  if (body.projectId === undefined && body.connectionId === undefined && body.workspaceId === undefined) return body;
   return {
     ...body,
     ...(next.executionConfig === undefined ? {} : { executionConfig: next.executionConfig }),

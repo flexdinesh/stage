@@ -205,7 +205,7 @@ func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput,
 		return id, nil
 	}
 	if in.Workspace != nil && in.TrackUnbound && in.ProjectID == nil && strings.TrimSpace(in.NewProjectTitle) == "" {
-		return historicalAdoptionProject(ctx, tx.Projects(), in.Workspace.Binding)
+		return historicalWorkspaceProject(ctx, tx.Projects(), in.Workspace.Binding, "")
 	}
 	if in.Workspace == nil || in.ProjectID == nil && strings.TrimSpace(in.NewProjectTitle) == "" {
 		return 0, Conflict("choose a bound Stage project or explicitly bind this session workspace before adoption")
@@ -226,7 +226,7 @@ func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput,
 	return id, nil
 }
 
-func historicalAdoptionProject(ctx context.Context, pr store.Projects, b ProjectBinding) (int64, error) {
+func historicalWorkspaceProject(ctx context.Context, pr store.Projects, b ProjectBinding, title string) (int64, error) {
 	id, err := pr.HistoricalWorkspaceProject(ctx, b)
 	if !errors.Is(err, ErrNotFound) {
 		return id, err
@@ -242,7 +242,7 @@ func historicalAdoptionProject(ctx context.Context, pr store.Projects, b Project
 	row := state.rows[i]
 	id = projectmatch.NewResolver(state.input).StrongProject(state.input.Workspaces[i])
 	if id == 0 {
-		title := splitProjectTitle("", store.ProjectSplitWorkspace{
+		title := splitProjectTitle(title, store.ProjectSplitWorkspace{
 			Title: row.Title, Workspace: row.Workspace.Workspace, ExternalID: row.ExternalID,
 		}, row.ExternalID)
 		id, err = pr.Insert(ctx, title, ActingUser(ctx), ActingMachine(ctx))

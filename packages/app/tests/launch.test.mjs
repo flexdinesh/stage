@@ -53,6 +53,16 @@ test("launchBlock lets a live, bound connection launch", () => {
   assert.equal(launchBlock(subject, ctx()), null);
 });
 
+test("a saved task checks its exact workspace independently of legacy bindings", () => {
+  const task = { ...subject, id: 10, workspaceId: "ws_exact" };
+  const row = { connectionId: task.connectionId, workspaceId: task.workspaceId, available: true };
+  assert.equal(launchBlock(task, ctx({ bindings: [], destinations: [row] })), null);
+  assert.match(launchBlock(task, ctx({ destinations: [{ ...row, connectionId: 9 }] }))?.reason, /unavailable/);
+  assert.match(launchBlock(task, ctx({ destinations: [{ ...row, workspaceId: "ws_other" }] }))?.reason, /unavailable/);
+  assert.match(launchBlock(task, ctx())?.reason, /Checking the saved workspace/);
+  assert.match(launchBlock({ ...subject, id: 10 }, ctx())?.reason, /Choose a workspace/);
+});
+
 test("launchBlock refuses a disconnected connection and links to Settings", () => {
   const b = launchBlock(subject, ctx({ connection: { active: true, configured: false } }));
   assert.equal(b?.kind, "disconnected");

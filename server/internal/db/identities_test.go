@@ -104,14 +104,20 @@ func TestBindingOwnershipAndPinnedDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt) VALUES(1,?,'task','p')`, p.ID)
-	if _, err = s.TransitionTask(ctx, Transition{TaskID: 1, To: StateLaunching, BeginAttempt: true}); err != nil {
+	if _, err := s.RefreshWorkspaces(ctx, 1, []execution.WorkspaceInfo{{ID: "p", WorkspaceRoot: "/old"}}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.CreateTask(ctx, NewTask{ProjectID: p.ID, ConnectionID: 1, Title: "task", Prompt: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.TransitionTask(ctx, Transition{TaskID: task.ID, To: StateLaunching, BeginAttempt: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.BindProject(ctx, ProjectBinding{ProjectID: p.ID, ConnectionID: 1, ExternalProjectID: "new", Workspace: "/new", Replaces: p.Bindings[0].ID}); err != nil {
 		t.Fatal(err)
 	}
-	dest, err := s.LaunchDestination(ctx, 1, 1)
+	dest, err := s.LaunchDestination(ctx, task.ID, 1)
 	if err != nil || dest.Workspace != "/old" {
 		t.Fatal("claim redirected", dest, err)
 	}

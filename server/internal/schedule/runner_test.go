@@ -3,6 +3,7 @@ package schedule_test
 import (
 	"context"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -44,6 +45,9 @@ func TestReconcileLaunchesDueStarts(t *testing.T) {
 	ctx := context.Background()
 	p, err := store.InsertProject(ctx, db.Project{Title: "p", Bindings: []db.ProjectBinding{{ConnectionID: 1, ExternalProjectID: "p", Workspace: "/w/p"}}})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RefreshWorkspaces(ctx, dbtest.T3Connection, []execution.WorkspaceInfo{{ID: "p", WorkspaceRoot: "/w/p"}}); err != nil {
 		t.Fatal(err)
 	}
 	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: dbtest.T3Connection,
@@ -109,7 +113,7 @@ func TestReconcileLaunchesDueStarts(t *testing.T) {
 	}
 }
 
-func TestUnboundScheduleHoldsOneOccurrenceUntilManualStart(t *testing.T) {
+func TestUnresolvedScheduleSkipsUntilReselected(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	ctx := context.Background()
 	p, err := store.InsertProject(ctx, db.Project{Title: "Offline plan"})
@@ -128,14 +132,18 @@ func TestUnboundScheduleHoldsOneOccurrenceUntilManualStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := store.GetSchedule(ctx, sc.ID)
-	if err != nil || got.LastTaskID == nil {
-		t.Fatal(got, err)
+	if err != nil || got.LastTaskID != nil || got.NextRunAt == nil {
+		t.Fatalf("unresolved fire = %+v, %v", got, err)
 	}
-	task, err := store.GetTask(ctx, *got.LastTaskID)
-	if err != nil || task.State != db.StateBacklog || task.StartAt != nil || task.LastError == nil || task.LaunchAttempt != 0 {
-		t.Fatalf("not held %+v %v", task, err)
+	runs, err := store.ScheduleRuns(ctx, sc.ID, 1)
+	if err != nil || len(runs) != 1 || runs[0].Outcome != db.RunSkipped || !strings.Contains(runs[0].Detail, "Choose a connection and workspace") {
+		t.Fatalf("unresolved run = %+v, %v", runs, err)
 	}
-	if _, err = store.BindProject(ctx, db.ProjectBinding{ProjectID: p.ID, ConnectionID: 1, ExternalProjectID: "repaired", Workspace: "/repaired"}); err != nil {
+	if _, err = store.RefreshWorkspaces(ctx, dbtest.T3Connection, []execution.WorkspaceInfo{{ID: "repaired", WorkspaceRoot: "/repaired"}}); err != nil {
+		t.Fatal(err)
+	}
+	selector := db.WorkspaceID(dbtest.T3Connection, "repaired", "/repaired")
+	if _, err = store.UpdateSchedule(ctx, sc.ID, db.SchedulePatch{WorkspaceID: db.Optional[string]{Set: true, V: selector}}); err != nil {
 		t.Fatal(err)
 	}
 	now = got.NextRunAt.Add(time.Second)
@@ -143,15 +151,12 @@ func TestUnboundScheduleHoldsOneOccurrenceUntilManualStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, err := store.GetSchedule(ctx, sc.ID)
-	if err != nil || after.LastTaskID == nil || *after.LastTaskID != task.ID {
-		t.Fatal("spawned duplicate occurrence", after, err)
+	if err != nil || after.LastTaskID == nil {
+		t.Fatalf("reselected fire = %+v, %v", after, err)
 	}
-	task, err = store.GetTask(ctx, task.ID)
-	if err != nil || task.State != db.StateBacklog || task.LaunchAttempt != 0 {
-		t.Fatal("repair auto-started task", task, err)
-	}
-	if _, err = launcher.LaunchScheduled(ctx, task.ID, "manual start"); err != nil {
-		t.Fatal(err)
+	task, err := store.GetTask(ctx, *after.LastTaskID)
+	if err != nil || task.WorkspaceID != selector || task.LaunchAttempt != 1 {
+		t.Fatalf("reselected task = %+v, %v", task, err)
 	}
 }
 
@@ -180,6 +185,9 @@ func TestRunnersPerConnectionFireOnlyTheirMachinesSchedules(t *testing.T) {
 	}
 	schedules := map[int64]db.Schedule{}
 	for _, id := range []int64{local, laptop} {
+		if _, err := store.RefreshWorkspaces(ctx, id, []execution.WorkspaceInfo{{ID: "p", WorkspaceRoot: "/w/p"}}); err != nil {
+			t.Fatal(err)
+		}
 		sc, err := store.CreateSchedule(ctx, db.NewSchedule{
 			ProjectID: p.ID, ConnectionID: id, Title: "nightly", Prompt: "p",
 			Cron: "*/5 * * * *", Tz: "UTC",
@@ -228,7 +236,7 @@ func TestRunnersPerConnectionFireOnlyTheirMachinesSchedules(t *testing.T) {
 	}
 }
 
-func TestScheduleWithMissingChosenWorkspaceHoldsOccurrence(t *testing.T) {
+func TestScheduleWithMissingChosenWorkspaceSkipsOccurrence(t *testing.T) {
 	store := db.NewStore(testDB.Reset(t))
 	ctx := t.Context()
 	project, err := store.InsertProject(ctx, db.Project{Title: "Project", Bindings: []db.ProjectBinding{
@@ -260,12 +268,11 @@ func TestScheduleWithMissingChosenWorkspaceHoldsOccurrence(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := store.GetSchedule(ctx, sc.ID)
-	if err != nil || got.LastTaskID == nil {
+	if err != nil || got.LastTaskID != nil {
 		t.Fatalf("schedule after reconciliation %+v, %v", got, err)
 	}
-	task, err := store.GetTask(ctx, *got.LastTaskID)
-	if err != nil || task.State != db.StateBacklog || task.StartAt != nil || task.LaunchAttempt != 0 ||
-		task.LastError == nil || task.BindingID == nil || *task.BindingID != id {
-		t.Fatalf("occurrence was not held: %+v, %v", task, err)
+	runs, err := store.ScheduleRuns(ctx, sc.ID, 1)
+	if err != nil || len(runs) != 1 || runs[0].Outcome != db.RunSkipped || !strings.Contains(runs[0].Detail, "selected workspace is unavailable") {
+		t.Fatalf("unavailable run = %+v, %v", runs, err)
 	}
 }

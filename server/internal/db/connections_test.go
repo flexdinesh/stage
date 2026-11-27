@@ -112,7 +112,7 @@ func projectWithBinding(t *testing.T, s *Store, connection int64, workspace stri
 	return p.ID
 }
 
-func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
+func TestSwitchInstanceRetiresAndRevivesWithoutRetargetingWork(t *testing.T) {
 	s, ctx, pool := connectionStore(t)
 	first := s.ActiveID(LocalMachine, "t3")
 	// First pairing stamps the connection in place.
@@ -120,6 +120,10 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 		t.Fatalf("stamp %+v %v", sw, err)
 	}
 	project := projectWithBinding(t, s, first, "/w/a")
+	workspace := execution.WorkspaceInfo{ID: "p/w/a", WorkspaceRoot: "/w/a"}
+	if _, err := s.RefreshWorkspaces(ctx, first, []execution.WorkspaceInfo{workspace}); err != nil {
+		t.Fatal(err)
+	}
 	backlog, err := s.CreateTask(ctx, NewTask{ProjectID: project, Title: "queued", Prompt: "p", ConnectionID: first})
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +146,7 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 		t.Fatalf("replace %+v %v", sw, err)
 	}
 	second := sw.New
-	// The replacement takes over the pin and the default.
+	// The replacement takes over new-task options and the default.
 	if c, _ := s.GetHarnessConnection(ctx, second); c.NewTaskConfig == nil || c.NewTaskConfig.Model != pin.Model || len(c.NewTaskConfig.Options) != 1 {
 		t.Fatalf("pin not carried: %+v", c.NewTaskConfig)
 	}
@@ -159,11 +163,11 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 	if err != nil || ran.ConnectionID != first || ran.ConnectionActive || ran.ConnectionLabel != "box a" || ran.State != StateRunning {
 		t.Fatalf("launched task %+v %v", ran, err)
 	}
-	if got, _ := s.GetTask(ctx, backlog.ID); got.ConnectionID != second || !got.ConnectionActive {
-		t.Fatalf("unlaunched task stayed on %d", got.ConnectionID)
+	if got, err := s.GetTask(ctx, backlog.ID); err != nil || got.ConnectionID != first || got.ConnectionActive || got.WorkspaceID != backlog.WorkspaceID {
+		t.Fatalf("task after replacement: %+v, %v", got, err)
 	}
-	if got, _ := s.GetSchedule(ctx, schedule.ID); got.ConnectionID != second {
-		t.Fatalf("schedule stayed on %d", got.ConnectionID)
+	if got, err := s.GetSchedule(ctx, schedule.ID); err != nil || got.ConnectionID != first || got.WorkspaceID != schedule.WorkspaceID {
+		t.Fatalf("schedule after replacement: %+v, %v", got, err)
 	}
 	// The binding stays on the replaced connection: nothing is bound to env-b.
 	p, _ := s.GetProject(ctx, project)
@@ -179,14 +183,13 @@ func TestSwitchInstanceRetiresRevivesAndMovesUnlaunchedWork(t *testing.T) {
 		t.Fatalf("task on replaced: %v", err)
 	}
 
-	// env-a again: its connection comes back; env-b held only moved work,
-	// so it is deleted rather than kept.
+	// env-a comes back with its original work. The unused env-b is removed.
 	sw, err = s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-a", "box a", 0)
 	if err != nil || !sw.Revived || sw.New != first || sw.Old != second {
 		t.Fatalf("revive %+v %v", sw, err)
 	}
-	if got, _ := s.GetTask(ctx, backlog.ID); got.ConnectionID != first {
-		t.Fatalf("unlaunched task not back on %d: %d", first, got.ConnectionID)
+	if got, err := s.GetTask(ctx, backlog.ID); err != nil || got.ConnectionID != first || !got.ConnectionActive || got.WorkspaceID != backlog.WorkspaceID {
+		t.Fatalf("task after revival: %+v, %v", got, err)
 	}
 	if _, err := s.GetHarnessConnection(ctx, second); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("empty connection kept: %v", err)
@@ -270,8 +273,8 @@ func TestForgetConnection(t *testing.T) {
 	if err != nil || sw.Revived || sw.New == first {
 		t.Fatalf("forgotten revived %+v %v", sw, err)
 	}
-	// A replaced connection nothing references is deleted outright.
-	empty := sw.Old
+	// Forgetting removes a retired connection once only its binding remains.
+	empty := sw.New
 	projectWithBinding(t, s, empty, "/w/b")
 	if _, err := s.SwitchInstance(ctx, LocalMachine, t3.Descriptor, "env-c", "box c", 0); err != nil {
 		t.Fatal(err)
@@ -309,7 +312,16 @@ func TestMovedConnectionsRetireOntoTheirReplacement(t *testing.T) {
 	}
 	project := projectWithBinding(t, s, old, "/w/a")
 	ranTask(t, pool, project, old, "done", "thread-a")
-	mustExec(t, pool, `INSERT INTO tasks(id,project_id,title,prompt,state,connection_id) VALUES(50,$1,'planned','p','backlog',$2)`, project, old)
+	workspace := execution.WorkspaceInfo{ID: "p/w/a", WorkspaceRoot: "/w/a"}
+	for _, conn := range []int64{old, moved} {
+		if _, err := s.RefreshWorkspaces(ctx, conn, []execution.WorkspaceInfo{workspace}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backlog, err := s.CreateTask(ctx, NewTask{ProjectID: project, ConnectionID: old, Title: "planned", Prompt: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.SetDefaultConnection(ctx, &old); err != nil {
 		t.Fatal(err)
 	}
@@ -321,12 +333,20 @@ func TestMovedConnectionsRetireOntoTheirReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, err := s.GetHarnessConnection(ctx, old)
-	if err != nil || c.Active || c.RetiredAt == nil || c.ForgottenAt != nil || c.Tasks != 1 || c.Bindings != 1 {
+	if err != nil || c.Active || c.RetiredAt == nil || c.ForgottenAt != nil || c.Tasks != 2 || c.Bindings != 1 {
 		t.Fatalf("retired %+v %v", c, err)
 	}
-	var backlog int64
-	if err := pool.QueryRow(`SELECT connection_id FROM tasks WHERE id=50`).Scan(&backlog); err != nil || backlog != moved {
-		t.Fatalf("backlog on %d %v", backlog, err)
+	if got, err := s.GetTask(ctx, backlog.ID); err != nil || got.ConnectionID != old || got.ConnectionActive || got.WorkspaceID != backlog.WorkspaceID {
+		t.Fatalf("task after move: %+v, %v", got, err)
+	}
+	selector := WorkspaceID(moved, workspace.ID, workspace.WorkspaceRoot)
+	got, err := s.UpdateTask(ctx, backlog.ID, TaskPatch{
+		ConnectionID:    Optional[int64]{Set: true, V: moved},
+		WorkspaceID:     Optional[string]{Set: true, V: selector},
+		ExecutionConfig: Optional[execution.Config]{Set: true},
+	})
+	if err != nil || got.ConnectionID != moved || !got.ConnectionActive || got.WorkspaceID != selector {
+		t.Fatalf("task after reselecting: %+v, %v", got, err)
 	}
 	if p, err := s.GetPreferences(ctx); err != nil || p.DefaultConnectionID == nil || *p.DefaultConnectionID != moved {
 		t.Fatalf("default %+v %v", p, err)

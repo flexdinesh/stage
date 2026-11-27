@@ -2,7 +2,7 @@
 // once for the whole app and reuse the status row's live queries.
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, type ReactNode } from "react";
-import { connectionCapabilityOptions, keys, useConnections, useHarnesses, useInvalidateWork, useMachines, useProjects } from "../api/queries.ts";
+import { connectionCapabilityOptions, keys, useConnections, useDestinations, useHarnesses, useInvalidateWork, useMachines, useProjects } from "../api/queries.ts";
 import { useApi } from "../platform/context.tsx";
 import { useConnectionStatuses } from "../harnesses/index.ts";
 import type { StartTreeResponse, Task } from "../api/types.ts";
@@ -34,6 +34,7 @@ export function LaunchGateProvider({ children }: { children: ReactNode }) {
   const harnesses = useHarnesses();
   const { machines, data } = useMachines();
   const projects = useProjects();
+  const destinations = useDestinations();
   const loaded = harnesses.loaded && data !== undefined;
   const targets = loaded ? statusTargets(machines, harnesses.connection) : [];
   const reads = useConnectionStatuses(
@@ -83,6 +84,8 @@ export function LaunchGateProvider({ children }: { children: ReactNode }) {
     launchBlock(t, {
       ...context(t.connectionId),
       bindings: projects.data?.projects.find((p) => p.id === t.projectId)?.bindings,
+      ...(destinations.data?.destinations === undefined ? {} : { destinations: destinations.data.destinations }),
+      destinationError: destinations.data?.destinations === undefined && !destinations.isPending,
     }) ?? operation(t.connectionId, "launch");
   return <LaunchGateContext.Provider value={{ launch, operation }}>{children}</LaunchGateContext.Provider>;
 }

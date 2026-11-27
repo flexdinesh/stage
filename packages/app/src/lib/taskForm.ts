@@ -1,16 +1,19 @@
 // Request bodies the task form (components/TaskForm.tsx) saves: a new task, a task edit, or a schedule.
-import type { CreateScheduleRequest, CreateTaskRequest, ExecutionConfig, ProjectBinding, StartMode, Task, TaskWorkspace, UpdateTaskRequest } from "../api/types.ts";
+import type { CreateScheduleRequest, CreateTaskRequest, ExecutionConfig, ProjectBinding, Schedule, StartMode, Task, TaskWorkspace, UpdateScheduleRequest, UpdateTaskRequest } from "../api/types.ts";
+import { changedFields } from "./changes.ts";
 import { orderedWorkspaces, workspaceBinding } from "./projects.ts";
+import { buildCron, parseCron } from "./schedules.ts";
 import { taskEditBaseline, taskEditChanges } from "./tasks.ts";
 
-/** The fields every form body carries. */
+/** The task-shaped config shared by task and schedule forms. */
 export interface TaskTemplate {
   projectId: number;
   title: string;
   prompt: string;
   connectionId: number;
-  bindingId: number | null;
-  executionConfig: ExecutionConfig;
+  bindingId?: number | null;
+  workspaceId?: string;
+  executionConfig?: ExecutionConfig;
 }
 
 /** Live choices and the selected binding, including a saved choice that needs repair. */
@@ -42,6 +45,21 @@ export type TimedStart = { startLocal: string; startTz: string } | null;
 
 export function scheduleBody(template: TaskTemplate, s: { notes: string; attachmentIds: number[]; cron: string; tz: string }): CreateScheduleRequest {
   return { ...template, notes: s.notes, attachmentIds: s.attachmentIds, cron: s.cron, tz: s.tz };
+}
+
+/** A schedule edit sends only changed fields, so other edits keep the saved destination and repeat. */
+export function scheduleUpdateBody(before: Schedule, next: CreateScheduleRequest): UpdateScheduleRequest {
+  const body = changedFields<UpdateScheduleRequest>({
+    ...taskEditBaseline(before),
+    bindingId: before.bindingId,
+    notes: before.notes,
+    cron: buildCron(parseCron(before.cron)),
+    tz: before.tz,
+  }, next);
+  if ((body.connectionId !== undefined || body.workspaceId !== undefined) && next.executionConfig !== undefined) {
+    body.executionConfig = next.executionConfig;
+  }
+  return body;
 }
 
 export function taskCreateBody(

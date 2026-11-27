@@ -108,9 +108,8 @@ func TestTwoMachinesEachHaveTheirOwnActiveConnections(t *testing.T) {
 	if _, err := s.SwitchInstance(ctx, LocalMachine, proof, "", "", remote); !errors.As(err, &conflict) {
 		t.Fatalf("revived another machine's connection: %v", err)
 	}
-	// The same environment id on two machines is two connections (the
-	// laptop's unused replacement is restamped in place).
-	if sw, err := s.SwitchInstance(ctx, laptop, t3.Descriptor, "env-a", "laptop a", 0); err != nil || sw.New != replacement || sw.New == local {
+	// The same environment ID on two machines is represented by two connections.
+	if sw, err := s.SwitchInstance(ctx, laptop, t3.Descriptor, "env-a", "laptop a", 0); err != nil || !sw.Changed || sw.Old != replacement || sw.New == replacement || sw.New == local {
 		t.Fatalf("same identity on two machines %+v %v", sw, err)
 	}
 

@@ -26,6 +26,7 @@ import type {
   CreateTaskRequest,
   CreateSnippetRequest,
   CreateScheduleRequest,
+  DestinationCatalog,
   Schedule,
   ScheduleDetail,
   ScheduleList,
@@ -231,10 +232,12 @@ export function createApi(transport: Transport) {
     connectionFacts: (id: number) => apiFetch<{ facts: HarnessFact[] }>(`/connections/${id}/facts`),
     runConnectionAction: (id: number, action: string, input: Record<string, unknown>, confirmed: boolean) =>
       apiFetch<ActionResult>(`/connections/${id}/actions/${encodeURIComponent(action)}`, actionPost(input, confirmed)),
-    capabilities: (id: number, scope?: { projectId: number; bindingId?: number }) => apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({ ...scope })}`),
+    capabilities: (id: number, scope?: { projectId: number; bindingId?: number } | { workspaceId: string }, signal?: AbortSignal) =>
+      apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({ ...scope })}`, signal === undefined ? undefined : { signal }),
     sync: () => apiFetch<SyncResult>("/sync", post()),
 
     projects: (archived: ArchivedFilter = "false") => apiFetch<ProjectList>(`/projects${toQuery({ archived })}`),
+    destinations: (signal: AbortSignal) => apiFetch<DestinationCatalog>("/projects?view=destinations&archived=all", { signal }),
     project: (id: number) => apiFetch<Project>(`/projects/${id}`),
     createProject: (body: CreateProjectRequest) => apiFetch<Project>("/projects", post(body)),
     updateProject: (id: number, body: {title: string; archived: boolean}) => apiFetch<Project>(`/projects/${id}`, patch(body)),

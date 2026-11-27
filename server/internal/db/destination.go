@@ -1,10 +1,8 @@
 package db
 
 import (
-	"cmp"
 	"context"
 	"errors"
-	"slices"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
 )
@@ -41,52 +39,4 @@ func validateBinding(ctx context.Context, tx store.Tx, project, connection int64
 		return ErrInvalidBinding
 	}
 	return nil
-}
-
-// bindingPatch clears an explicit choice when either part of its destination
-// changes, or validates the replacement when the caller chooses a new one.
-func bindingPatch(ctx context.Context, tx store.Tx, project, connection int64, p, c, b Optional[int64]) (Optional[int64], error) {
-	nextProject, nextConnection := project, connection
-	if p.Set {
-		nextProject = p.V
-	}
-	if c.Set {
-		nextConnection = c.V
-	}
-	if !b.Set && (nextProject != project || nextConnection != connection) {
-		b = Optional[int64]{Set: true, Null: true}
-	}
-	return b, validateBinding(ctx, tx, nextProject, nextConnection, b.Ptr())
-}
-
-// NewTaskDestination picks the connection for a task with no explicit choice.
-// It prefers the default when its primary workspace is available, then the
-// only active connection. With a default set, it can fall back to another
-// available primary, ordered by machine and connection id.
-func NewTaskDestination(bindings []ProjectBinding, def *int64, machine func(int64) int64) int64 {
-	active := make(map[int64]struct{})
-	var available []int64
-	for _, b := range bindings {
-		if !b.ConnectionActive {
-			continue
-		}
-		active[b.ConnectionID] = struct{}{}
-		if b.Primary && b.Status == "available" {
-			available = append(available, b.ConnectionID)
-		}
-	}
-	if def != nil && slices.Contains(available, *def) {
-		return *def
-	}
-	if len(active) == 1 {
-		for id := range active {
-			return id
-		}
-	}
-	if def == nil || len(available) == 0 {
-		return 0
-	}
-	return slices.MinFunc(available, func(a, b int64) int {
-		return cmp.Or(cmp.Compare(machine(a), machine(b)), cmp.Compare(a, b))
-	})
 }

@@ -408,7 +408,7 @@ func TestPairingAnotherEnvironmentReplacesTheConnection(t *testing.T) {
 	}
 }
 
-func TestPairingAnotherEnvironmentRestampsAnEmptyConnection(t *testing.T) {
+func TestPairingAnotherEnvironmentReplacesAnEmptyConnection(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t, "", false)
 	if _, err := e.svc.Pair(ctx, "CODE-1"); err != nil {
@@ -420,8 +420,10 @@ func TestPairingAnotherEnvironmentRestampsAnEmptyConnection(t *testing.T) {
 	}
 	e.client.SetProbe(reachable("env-b"))
 	paired, err := e.svc.Pair(ctx, "CODE-2")
-	if err != nil || paired.Replaced != 0 || e.bound() != "env-b" || e.store.ActiveID(db.LocalMachine, "t3") != first || len(e.switches) != 0 {
-		t.Fatalf("restamp: %v %+v %q %d %v", err, paired, e.bound(), e.store.ActiveID(db.LocalMachine, "t3"), e.switches)
+	second := e.store.ActiveID(db.LocalMachine, "t3")
+	if err != nil || paired.Replaced != 0 || e.bound() != "env-b" || second == 0 || second == first ||
+		len(e.switches) != 1 || e.switches[0].Old != first || e.switches[0].New != second {
+		t.Fatalf("replacement: %v %+v %q %d %v", err, paired, e.bound(), second, e.switches)
 	}
 	if err := e.svc.Unpair(ctx); err != nil {
 		t.Fatal(err)

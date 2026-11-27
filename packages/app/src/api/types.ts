@@ -156,6 +156,30 @@ export interface ProjectList {
   imports: ImportSummary[];
 }
 
+/** An exact workspace offered for selection on one connection. */
+export interface Destination {
+  connectionId: number;
+  workspaceId: string;
+  projectId?: number;
+  title: string;
+  connectionLabel: string;
+  machineLabel: string;
+  discriminator?: string;
+  available: boolean;
+  reason?: string;
+}
+
+export interface DestinationCatalog {
+  projects: (Pick<Project, "id" | "title" | "archivedAt" | "aliases"> & {
+    bindings: (Pick<ProjectBinding, "id" | "connectionId" | "connectionActive" | "title" | "primary"> & {
+      workspaceId: string;
+      status: string;
+    })[];
+  })[];
+  connections?: Pick<HarnessConnection, "id" | "machineId" | "harness" | "label" | "active" | "configured">[];
+  destinations: Destination[];
+}
+
 export interface ProjectAlias {
   id: number;
   title: string;
@@ -571,6 +595,7 @@ export interface Task {
   originSession: SessionRef | null;
   connectionId: number;
   bindingId: number | null;
+  workspaceId?: string;
   workspace: TaskWorkspace | null;
   harness: Harness;
   /** False once the task's connection was replaced: read-only history, Stage no longer follows it. */
@@ -938,6 +963,7 @@ export interface TaskList {
 export interface CreateTaskRequest {
   connectionId?: number;
   bindingId?: number | null;
+  workspaceId?: string;
   executionConfig?: ExecutionConfig;
   projectId: number;
   title: string;
@@ -964,6 +990,7 @@ export interface CreateTaskRequest {
 export interface UpdateTaskRequest {
   connectionId?: number;
   bindingId?: number | null;
+  workspaceId?: string | null;
   executionConfig?: ExecutionConfig;
   projectId?: number;
   title?: string;
@@ -1039,6 +1066,7 @@ export interface Schedule {
   executionConfig?: ExecutionConfig | null;
   connectionId: number;
   bindingId: number | null;
+  workspaceId?: string;
   originSession: SessionRef | null;
   id: number;
   projectId: number;
@@ -1094,6 +1122,7 @@ export interface ScheduleListQuery {
 export interface CreateScheduleRequest {
   connectionId?: number;
   bindingId?: number | null;
+  workspaceId?: string;
   executionConfig?: ExecutionConfig;
   projectId: number;
   title: string;
@@ -1105,7 +1134,7 @@ export interface CreateScheduleRequest {
   paused?: boolean;
 }
 
-export type UpdateScheduleRequest = Partial<CreateScheduleRequest>;
+export type UpdateScheduleRequest = Partial<Omit<CreateScheduleRequest, "workspaceId">> & { workspaceId?: string | null };
 
 export interface SchedulePreviewRequest {
   cron: string;

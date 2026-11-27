@@ -33,7 +33,9 @@ const (
 )
 
 func (s *Store) GetSchedule(ctx context.Context, id int64) (Schedule, error) {
-	return read(ctx, s, func(tx store.Tx) (Schedule, error) { return tx.Schedules().Get(ctx, id) })
+	schedule, err := read(ctx, s, func(tx store.Tx) (Schedule, error) { return tx.Schedules().Get(ctx, id) })
+	schedule.WorkspaceID = selectorOf(schedule.ConnectionID, schedule.WorkspacePin)
+	return schedule, err
 }
 
 // ListSchedules orders by next fire (paused last), then id.
@@ -49,6 +51,7 @@ type NewSchedule struct {
 	OriginSession   *SessionRef
 	ProjectID       int64
 	BindingID       *int64
+	WorkspaceID     string
 	Title           string
 	Prompt          string
 	Notes           string
@@ -86,18 +89,15 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 		if err := tx.Projects().LockIdentity(ctx); err != nil {
 			return 0, err
 		}
-		project, err := projectID(ctx, tx, in.ProjectID)
-		if err != nil {
-			return 0, err
-		}
-		if err := validateBinding(ctx, tx, project, in.ConnectionID, in.BindingID); err != nil {
-			return 0, err
-		}
 		connection := in.ConnectionID
 		if connection == 0 {
 			return 0, errConnectionRequired
 		}
-		if err := requireConnection(ctx, tx, connection); err != nil {
+		if err := connectionUsable(ctx, tx, connection); err != nil {
+			return 0, err
+		}
+		project, pin, err := creationDestination(ctx, tx, connection, in.ProjectID, in.BindingID, in.WorkspaceID)
+		if err != nil {
 			return 0, err
 		}
 		config := in.ExecutionConfig
@@ -113,7 +113,7 @@ func (s *Store) CreateSchedule(ctx context.Context, in NewSchedule) (Schedule, e
 			originID = &value
 		}
 		id, err := tx.Schedules().Insert(ctx, store.ScheduleInsert{
-			ProjectID: project, BindingID: in.BindingID, Title: in.Title, Prompt: in.Prompt,
+			ProjectID: project, BindingID: in.BindingID, WorkspacePin: pin, Title: in.Title, Prompt: in.Prompt,
 			Notes: in.Notes, Cron: strings.TrimSpace(in.Cron), Tz: in.Tz, Paused: in.Paused, NextRunAt: next,
 			OriginSessionID: originID, ExecutionConfig: config,
 			ConnectionID: connection, CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx),
@@ -138,10 +138,12 @@ type SchedulePatch struct {
 	ValidatedConnection int64                      `json:"-"`
 	ValidatedProject    int64                      `json:"-"`
 	ValidatedBinding    *int64                     `json:"-"`
+	ValidatedWorkspace  *WorkspacePin              `json:"-"`
 	ConnectionID        Optional[int64]            `json:"connectionId"`
 	ExecutionConfig     Optional[execution.Config] `json:"executionConfig"`
 	ProjectID           Optional[int64]            `json:"projectId"`
 	BindingID           Optional[int64]            `json:"bindingId"`
+	WorkspaceID         Optional[string]           `json:"workspaceId"`
 	Title               Optional[string]           `json:"title"`
 	Prompt              Optional[string]           `json:"prompt"`
 	Notes               Optional[string]           `json:"notes"`
@@ -171,7 +173,8 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 			return err
 		}
 		cron, tz, paused := e.Cron, e.Tz, e.Paused
-		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject || !equalPtr(e.BindingID, p.ValidatedBinding)) {
+		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject ||
+			!equalPtr(e.BindingID, p.ValidatedBinding) || !equalPtr(e.WorkspacePin, p.ValidatedWorkspace)) {
 			return Conflict("The destination changed during editing. Refresh and choose the task settings again.")
 		}
 		if p.AttachmentIDs.Set {
@@ -192,7 +195,7 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 				return err
 			}
 		}
-		u.BindingID, err = bindingPatch(ctx, tx, e.ProjectID, e.ConnectionID, u.ProjectID, p.ConnectionID, p.BindingID)
+		u.BindingID, u.WorkspacePin, err = destinationPatch(ctx, tx, e.ProjectID, e.ConnectionID, u.ProjectID, p.ConnectionID, p.BindingID, p.WorkspaceID)
 		if err != nil {
 			return err
 		}
@@ -218,7 +221,7 @@ func (s *Store) UpdateSchedule(ctx context.Context, id int64, p SchedulePatch) (
 				u.NextRunAt.V = *next
 			}
 		}
-		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !u.BindingID.Set && !p.Title.Set && !p.Prompt.Set &&
+		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !u.BindingID.Set && !u.WorkspacePin.Set && !p.Title.Set && !p.Prompt.Set &&
 			!p.Notes.Set && !u.NextRunAt.Set && !p.AttachmentIDs.Set {
 			return nil
 		}
@@ -317,8 +320,11 @@ func (s *Store) spawnTask(ctx context.Context, tx store.Tx, id int64, startAt *t
 	if err != nil {
 		return 0, err
 	}
+	if _, err := verifiedPin(ctx, tx, tpl.ConnectionID, tpl.WorkspacePin); err != nil {
+		return 0, err
+	}
 	in := NewTask{ProjectID: tpl.ProjectID, BindingID: tpl.BindingID, Title: tpl.Title, Prompt: tpl.Prompt,
-		ConnectionID: tpl.ConnectionID, OriginSession: tpl.OriginSession, ExecutionConfig: tpl.ExecutionConfig}
+		ConnectionID: tpl.ConnectionID, workspacePin: tpl.WorkspacePin, OriginSession: tpl.OriginSession, ExecutionConfig: tpl.ExecutionConfig}
 	tz, notes := tpl.Tz, tpl.Notes
 	// The schedule spawns the task, not the request that ran it: no source
 	// machine.
@@ -449,8 +455,15 @@ func (s *Store) FireScheduleSince(ctx context.Context, id int64, now time.Time, 
 				err = sc.InsertRun(ctx, id, fireAt, RunSkipped, nil, fmt.Sprintf("#%d still %s", prev, stateWords(prevState)), WorkAttribution(ctx))
 			case errors.Is(err, ErrNotFound):
 				var task int64
-				if task, err = s.spawnTask(ctx, tx, id, &fireAt); err != nil {
-					return err
+				task, err = s.spawnTask(ctx, tx, id, &fireAt)
+				if err != nil {
+					var conflict *ConflictError
+					if !errors.As(err, &conflict) || (conflict.Code != "destination_required" && conflict.Code != "destination_unavailable") {
+						return err
+					}
+					res.Outcome = RunSkipped
+					err = sc.InsertRun(ctx, id, fireAt, RunSkipped, nil, conflict.Msg, WorkAttribution(ctx))
+					break
 				}
 				res.Outcome, res.TaskID = RunStarted, &task
 				err = sc.InsertRun(ctx, id, fireAt, RunStarted, &task, "", WorkAttribution(ctx))

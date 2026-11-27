@@ -39,19 +39,18 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	if t.Adopted {
 		return t, db.Conflict("An adopted session cannot be launched. Open it in its harness.")
 	}
+	if t.WorkspacePin == nil {
+		return t, db.DestinationRequired()
+	}
+	if !t.ConnectionActive {
+		return t, db.DestinationUnavailable()
+	}
 	a, e := s.conns.Adapter(t.ConnectionID)
 	if e != nil {
 		return t, e
 	}
 	if h := a.Health(ctx); !h.Available {
 		return t, &db.ConflictError{Code: "connection_unavailable", Msg: h.Reason}
-	}
-	features, e := a.Features(ctx)
-	if e != nil {
-		return t, harnessErr(e)
-	}
-	if op := features.Operations[execution.OpLaunch]; !op.Available {
-		return t, &db.ConflictError{Code: "operation_unavailable", Msg: "Launch unavailable: " + op.Reason}
 	}
 	d, _ := s.conns.Descriptor(t.Harness)
 	correlated := d.Launch == harness.LaunchCorrelated
@@ -69,7 +68,29 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	if config == nil {
 		return t, db.Invalid("executionConfig is required for this harness")
 	}
-	claim, e := s.transition(ctx, db.Transition{TaskID: id, From: []db.TaskState{db.StateBacklog, db.StateFailed, db.StateInterrupted, db.StateCancelled}, To: db.StateLaunching, Detail: detail, BeginAttempt: true, RequireAuto: automatic})
+	pin := *t.WorkspacePin
+	if _, e := s.store.ResolveDestination(ctx, t.ConnectionID, t.WorkspaceID); e != nil {
+		return t, e
+	}
+	var features execution.Capabilities
+	if scoped, ok := execution.As[execution.WorkspaceFeatures](a); ok {
+		features, e = scoped.FeaturesForWorkspace(ctx, pin.ExternalID, pin.Root)
+		if e == nil && (config.Model != "" || config.Mode != "" || config.Permission != "" || len(config.Options) > 0) {
+			if invalid := features.ValidateConfig(*config); invalid != nil {
+				return t, db.Invalid("%s", invalid)
+			}
+		}
+	} else {
+		features, e = a.Features(ctx)
+	}
+	if e != nil {
+		return t, harnessErr(e)
+	}
+	if op := features.Operations[execution.OpLaunch]; !op.Available {
+		return t, &db.ConflictError{Code: "operation_unavailable", Msg: "Launch unavailable: " + op.Reason}
+	}
+	claim, e := s.transition(ctx, db.Transition{TaskID: id, From: []db.TaskState{db.StateBacklog, db.StateFailed, db.StateInterrupted, db.StateCancelled}, To: db.StateLaunching, Detail: detail, BeginAttempt: true, RequireAuto: automatic,
+		LaunchCheck: &db.LaunchCheck{ConnectionID: t.ConnectionID, WorkspacePin: pin, Config: config}})
 	if e != nil {
 		return t, e
 	}
@@ -153,6 +174,9 @@ func (s *Service) resume(ctx context.Context, t db.Task, attempt db.Attempt) (db
 	if attempt.Intent == nil {
 		return t, db.Conflict("Launch identity is incomplete. Link the existing session.")
 	}
+	if !s.store.ConnectionActive(attempt.Intent.ConnectionID) {
+		return t, db.ConnectionRetired()
+	}
 	a, e := s.conns.Adapter(attempt.Intent.ConnectionID)
 	if e != nil {
 		return t, e
@@ -165,7 +189,7 @@ func (s *Service) resume(ctx context.Context, t db.Task, attempt db.Attempt) (db
 	}
 	verified := false
 	for _, w := range workspaces {
-		if w.ID == attempt.Intent.Project && w.WorkspaceRoot == attempt.Intent.Directory && w.DeletedAt == nil {
+		if w.ID == attempt.Intent.Project && w.WorkspaceRoot == attempt.Intent.Directory && w.DeletedAt == nil && w.ArchivedAt == nil {
 			verified = true
 		}
 	}

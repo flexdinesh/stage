@@ -216,6 +216,7 @@ type ContextOut struct {
 	// CallerTaskID: the stage task that owns the caller's session.
 	CallerTaskID *int64  `json:"callerTaskId"`
 	BindingID    *int64  `json:"bindingId"`
+	WorkspaceID  string  `json:"workspaceId,omitempty"`
 	TreeID       *int64  `json:"treeId"`
 	TreeTitle    *string `json:"treeTitle"`
 	APIURL       string  `json:"apiUrl"`
@@ -259,7 +260,8 @@ func (o *Ops) Context(ctx context.Context, a CallerArgs) (ContextOut, error) {
 	if d.Task != nil {
 		out.CallerTaskID = &d.Task.ID
 		out.BindingID = d.Task.BindingID
-		if w := d.Task.Workspace; w != nil && w.Source == "pinned" {
+		out.WorkspaceID = d.Task.WorkspaceID
+		if w := d.Task.Workspace; w != nil && w.Source == "pinned" && w.BindingID > 0 {
 			out.BindingID = &w.BindingID
 		}
 		out.TreeID = d.Task.TreeID
@@ -291,9 +293,10 @@ func (o *Ops) ListProjects(ctx context.Context, _ struct{}) (ProjectsOut, error)
 }
 
 type ModelsArgs struct {
-	ProjectID    int64  `json:"projectId,omitempty" jsonschema:"Stage project for workspace-specific models and modes"`
-	ConnectionID int64  `json:"connectionId" jsonschema:"harness connection from list_projects"`
-	BindingID    *int64 `json:"bindingId,omitempty" jsonschema:"workspace binding on the selected connection; defaults to the primary"`
+	ProjectID    int64   `json:"projectId,omitempty" jsonschema:"legacy Stage project for workspace-specific models and modes"`
+	ConnectionID int64   `json:"connectionId" jsonschema:"harness connection from list_projects"`
+	WorkspaceID  *string `json:"workspaceId,omitempty" jsonschema:"exact workspace on the selected connection from list_projects"`
+	BindingID    *int64  `json:"bindingId,omitempty" jsonschema:"legacy binding on the selected connection and project"`
 }
 type ModelsOut struct {
 	Capabilities *execution.Capabilities `json:"capabilities,omitempty"`
@@ -303,19 +306,43 @@ func (o *Ops) ListModels(ctx context.Context, a ModelsArgs) (ModelsOut, error) {
 	if a.ConnectionID <= 0 {
 		return ModelsOut{}, errors.New("connectionId is required: choose a harness connection from list_projects")
 	}
-	c, err := o.Client.WorkspaceCapabilities(ctx, a.ConnectionID, a.ProjectID, a.BindingID)
+	if err := validateWorkspaceSelector(a.WorkspaceID, a.BindingID); err != nil {
+		return ModelsOut{}, err
+	}
+	c, err := o.destinationCapabilities(ctx, a.ConnectionID, a.ProjectID, a.WorkspaceID, a.BindingID)
 	c.Actions = slices.DeleteFunc(c.Actions, func(a execution.Action) bool { return !a.Allows(execution.CallerAgent) })
 	return ModelsOut{Capabilities: &c}, err
+}
+
+func validateWorkspaceSelector(workspaceID *string, bindingID *int64) error {
+	if workspaceID == nil {
+		return nil
+	}
+	if *workspaceID == "" {
+		return fmt.Errorf("workspaceId is empty, %s", destinationHelp)
+	}
+	if bindingID != nil {
+		return errors.New("choose workspaceId or the legacy bindingId")
+	}
+	return nil
+}
+
+func (o *Ops) destinationCapabilities(ctx context.Context, connectionID, projectID int64, workspaceID *string, bindingID *int64) (execution.Capabilities, error) {
+	if workspaceID != nil {
+		return o.Client.DestinationCapabilities(ctx, connectionID, *workspaceID)
+	}
+	return o.Client.WorkspaceCapabilities(ctx, connectionID, projectID, bindingID)
 }
 
 // ---- task config shared by tasks and schedules ----
 
 // ConfigArgs is the task configuration (create_task, create_schedule).
 type ConfigArgs struct {
-	ConnectionID    int64        `json:"connectionId,omitempty" jsonschema:"execution destination from list_projects"`
-	BindingID       *int64       `json:"bindingId,omitempty" jsonschema:"workspace of the project from list_projects; omitted or null uses the primary workspace on the connection"`
+	ConnectionID    int64        `json:"connectionId,omitempty" jsonschema:"destination connection from list_projects; required with workspaceId"`
+	WorkspaceID     *string      `json:"workspaceId,omitempty" jsonschema:"exact destination workspace on the selected connection from list_projects, including unbound workspaces"`
+	BindingID       *int64       `json:"bindingId,omitempty" jsonschema:"legacy project binding from list_projects"`
 	ExecutionConfig *ConfigInput `json:"executionConfig,omitempty" jsonschema:"the selected connection's model, options, permission and mode from list_models; options include the harness's launch options (a worktree, its base ref or branch where the harness declares them); omitted = the connection's pinned model, else the harness defaults"`
-	Project         string       `json:"project,omitempty" jsonschema:"project id or unambiguous exact title; default: your session's explicitly bound project"`
+	Project         string       `json:"project,omitempty" jsonschema:"Stage project id or unambiguous exact title; optional with workspaceId. Legacy project lookup can use the caller's bound project"`
 	Title           string       `json:"title" jsonschema:"short task title"`
 	Prompt          string       `json:"prompt" jsonschema:"the full prompt the agent session starts with; self-contained"`
 	ImagePaths      []string     `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp, max 8) sent with the prompt; stdio/CLI only"`
@@ -324,8 +351,9 @@ type ConfigArgs struct {
 // resolvedConfig is ConfigArgs resolved against the API.
 type resolvedConfig struct {
 	connectionID  int64
+	workspaceID   string
 	config        *execution.Config
-	project       db.Project
+	projectID     int64
 	attachmentIDs []int64
 }
 
@@ -383,22 +411,42 @@ func (o *Ops) uploadImages(ctx context.Context, paths []string) ([]int64, error)
 }
 
 func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller) (resolvedConfig, error) {
-	var rc resolvedConfig
-	p, _, err := agentctx.ResolveProject(ctx, o.Client, c, a.Project)
-	if err != nil {
+	rc := resolvedConfig{connectionID: a.ConnectionID}
+	if err := validateWorkspaceSelector(a.WorkspaceID, a.BindingID); err != nil {
 		return rc, err
 	}
-	rc.project = p
-	rc.connectionID, err = o.destination(ctx, a, p, c)
-	if err != nil {
-		return rc, err
+	if a.WorkspaceID != nil {
+		if a.ConnectionID <= 0 {
+			return rc, fmt.Errorf("workspaceId requires a positive connectionId, %s", destinationHelp)
+		}
+		rc.workspaceID = *a.WorkspaceID
+	}
+	if a.WorkspaceID == nil || strings.TrimSpace(a.Project) != "" {
+		p, _, err := agentctx.ResolveProject(ctx, o.Client, c, a.Project)
+		if err != nil {
+			return rc, fmt.Errorf("%w, or %s", err, destinationHelp)
+		}
+		rc.projectID = p.ID
+		if a.WorkspaceID == nil {
+			rc.connectionID, err = legacyConnection(a, p)
+			if err != nil {
+				return rc, err
+			}
+		}
 	}
 	h, err := o.harnesses(ctx)
 	if err != nil {
 		return rc, err
 	}
+	conn := h.get(rc.connectionID)
+	if conn == nil {
+		return rc, fmt.Errorf("connection %d is unavailable, %s", rc.connectionID, destinationHelp)
+	}
+	if !conn.Active {
+		return rc, fmt.Errorf("connection %d was replaced, %s", rc.connectionID, destinationHelp)
+	}
 	// Without a model choice, a new task starts with its connection's pinned model and options.
-	pin := h.newTaskConfig(rc.connectionID)
+	pin := conn.NewTaskConfig
 	config := execution.Config{}
 	if a.ExecutionConfig != nil {
 		config, err = a.ExecutionConfig.config()
@@ -416,7 +464,7 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 	}
 	rc.config = &config
 	if config.Model != "" || config.Mode != "" || config.Permission != "" || len(config.Options) > 0 || len(a.ImagePaths) > 0 {
-		f, err := o.Client.WorkspaceCapabilities(ctx, rc.connectionID, p.ID, a.BindingID)
+		f, err := o.destinationCapabilities(ctx, rc.connectionID, rc.projectID, a.WorkspaceID, a.BindingID)
 		if err != nil {
 			return rc, err
 		}
@@ -438,6 +486,7 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 // TaskRow is a compact task for lists.
 type TaskRow struct {
 	ConnectionID      int64        `json:"connectionId"`
+	WorkspaceID       string       `json:"workspaceId,omitempty"`
 	ID                int64        `json:"id"`
 	Title             string       `json:"title"`
 	State             db.TaskState `json:"state"`
@@ -462,6 +511,7 @@ type TaskRow struct {
 func taskRow(t client.Task) TaskRow {
 	return TaskRow{
 		ConnectionID: t.ConnectionID,
+		WorkspaceID:  t.WorkspaceID,
 		ID:           t.ID, Title: t.Title, State: t.State, ProjectID: t.ProjectID, Project: t.ProjectTitle,
 		ExternalSessionID: t.ExternalSessionID, TreeID: t.TreeID, Needs: t.Needs, Readiness: t.Readiness, TreeStatus: t.TreeStatus,
 		Archived: t.ArchivedAt != nil, Adopted: t.Adopted,
@@ -578,7 +628,7 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 		return client.Task{}, err
 	}
 	return o.Client.CreateTask(ctx, client.CreateTask{
-		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, BindingID: a.BindingID, Title: a.Title, Prompt: a.Prompt,
+		ConnectionID: rc.connectionID, WorkspaceID: rc.workspaceID, ExecutionConfig: rc.config, ProjectID: rc.projectID, BindingID: a.BindingID, Title: a.Title, Prompt: a.Prompt,
 		InitialNote: strPtr(a.InitialNote), AttachmentIDs: rc.attachmentIDs,
 		TreeID: a.TreeID, Needs: a.Needs, NeedsSession: session, StartMode: mode.mode, OriginSession: c.Session,
 		StartLocal: strPtr(a.StartLocal), StartTz: strPtr(a.StartTz), Start: a.Start, Handoff: a.Handoff,
@@ -588,16 +638,17 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 // UpdateArgs are editable config fields (nil = unchanged). Outside backlog
 // only the title changes.
 type UpdateArgs struct {
-	ConnectionID    int64              `json:"connectionId,omitempty"`
-	BindingID       db.Optional[int64] `json:"bindingId,omitzero" jsonschema:"workspace of the project from list_projects; null restores the primary workspace on the connection"`
-	ExecutionConfig *ConfigInput       `json:"executionConfig,omitempty"`
-	ID              int64              `json:"id"`
-	Project         *string            `json:"project,omitempty" jsonschema:"move to project (id or title)"`
-	Title           *string            `json:"title,omitempty"`
-	Prompt          *string            `json:"prompt,omitempty"`
+	ConnectionID    int64               `json:"connectionId,omitempty" jsonschema:"destination connection from list_projects"`
+	WorkspaceID     db.Optional[string] `json:"workspaceId,omitzero" jsonschema:"exact destination workspace from list_projects; null clears the pin"`
+	BindingID       db.Optional[int64]  `json:"bindingId,omitzero" jsonschema:"legacy project binding; null restores the primary workspace on the connection"`
+	ExecutionConfig *ConfigInput        `json:"executionConfig,omitempty"`
+	ID              int64               `json:"id"`
+	Project         *string             `json:"project,omitempty" jsonschema:"move to project (id or title)"`
+	Title           *string             `json:"title,omitempty"`
+	Prompt          *string             `json:"prompt,omitempty"`
 }
 
-func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (client.Patch, error) {
+func (o *Ops) configPatch(ctx context.Context, a UpdateArgs) (client.Patch, error) {
 	p := client.Patch{}
 	if a.ConnectionID != 0 {
 		p["connectionId"] = a.ConnectionID
@@ -605,53 +656,22 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, schedule bool) (cli
 	if a.BindingID.Set {
 		p["bindingId"] = a.BindingID.Ptr()
 	}
-	var targetProjectID int64
+	if a.WorkspaceID.Set {
+		p["workspaceId"] = a.WorkspaceID.Ptr()
+	}
 	if a.Project != nil {
 		pr, _, err := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, *a.Project)
 		if err != nil {
 			return nil, err
 		}
-		targetProjectID = pr.ID
-		p["projectId"] = targetProjectID
+		p["projectId"] = pr.ID
 	}
 	if a.ExecutionConfig != nil {
-		var id, projectID int64
-		var bindingID *int64
-		if schedule {
-			v, err := o.Client.Schedule(ctx, a.ID)
-			if err != nil {
-				return nil, err
-			}
-			id, projectID, bindingID = v.ConnectionID, v.ProjectID, v.BindingID
-		} else {
-			v, err := o.Client.Task(ctx, a.ID)
-			if err != nil {
-				return nil, err
-			}
-			id, projectID, bindingID = v.ConnectionID, v.ProjectID, v.BindingID
-		}
-		if a.ConnectionID != 0 && a.ConnectionID != id {
-			id, bindingID = a.ConnectionID, nil
-		}
-		if targetProjectID != 0 && targetProjectID != projectID {
-			projectID, bindingID = targetProjectID, nil
-		}
-		if a.BindingID.Set {
-			bindingID = a.BindingID.Ptr()
-		}
 		cfg, err := a.ExecutionConfig.config()
 		if err != nil {
 			return nil, err
 		}
-		if cfg.Model != "" || cfg.Permission != "" || cfg.Mode != "" || len(cfg.Options) > 0 {
-			f, err := o.Client.WorkspaceCapabilities(ctx, id, projectID, bindingID)
-			if err != nil {
-				return nil, err
-			}
-			if err = f.ValidateConfig(cfg); err != nil {
-				return nil, err
-			}
-		}
+		// The API validates against the destination resolved for this edit.
 		p["executionConfig"] = cfg
 	}
 	if a.Title != nil {
@@ -673,7 +693,7 @@ type UpdateTaskArgs struct {
 }
 
 func (o *Ops) UpdateTask(ctx context.Context, a UpdateTaskArgs) (client.Task, error) {
-	p, err := o.configPatch(ctx, a.UpdateArgs, false)
+	p, err := o.configPatch(ctx, a.UpdateArgs)
 	if err != nil {
 		return client.Task{}, err
 	}
@@ -845,7 +865,7 @@ func (o *Ops) CreateSchedule(ctx context.Context, a CreateScheduleArgs) (db.Sche
 		return db.Schedule{}, err
 	}
 	return o.Client.CreateSchedule(ctx, client.CreateSchedule{
-		ConnectionID: rc.connectionID, ExecutionConfig: rc.config, ProjectID: rc.project.ID, BindingID: a.BindingID, Title: a.Title, Prompt: a.Prompt,
+		ConnectionID: rc.connectionID, WorkspaceID: rc.workspaceID, ExecutionConfig: rc.config, ProjectID: rc.projectID, BindingID: a.BindingID, Title: a.Title, Prompt: a.Prompt,
 		Notes: strPtr(a.Notes), AttachmentIDs: rc.attachmentIDs, OriginSession: c.Session,
 		Cron: a.Cron, Tz: a.Tz, Paused: a.Paused,
 	})
@@ -861,7 +881,7 @@ type UpdateScheduleArgs struct {
 }
 
 func (o *Ops) UpdateSchedule(ctx context.Context, a UpdateScheduleArgs) (db.Schedule, error) {
-	p, err := o.configPatch(ctx, a.UpdateArgs, true)
+	p, err := o.configPatch(ctx, a.UpdateArgs)
 	if err != nil {
 		return db.Schedule{}, err
 	}

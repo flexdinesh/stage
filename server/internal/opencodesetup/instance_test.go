@@ -219,6 +219,67 @@ func TestReplacingTheOpenCodeServiceRetiresItsConnection(t *testing.T) {
 	}
 }
 
+func TestOpenCodeAddressChangeWithAnUnboundWorkspace(t *testing.T) {
+	ctx := t.Context()
+	var temp dbtest.DB
+	store := db.NewStore(temp.Reset(t))
+	original := &service{projects: []map[string]any{project("proj", "/repo")}}
+	other := &service{projects: []map[string]any{project("proj", "/repo")}}
+	firstAddress, nextAddress := original.start(t), other.start(t)
+	var in installs
+	s, err := newService(ctx, storePorts(store, in.install), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(ctx, Edit{Endpoint: &firstAddress}); err != nil {
+		t.Fatal(err)
+	}
+	first := s.ID()
+	catalog := []execution.WorkspaceInfo{{ID: "proj", Title: "repo", WorkspaceRoot: "/repo"}}
+	if _, err := store.RefreshWorkspaces(ctx, first, catalog); err != nil {
+		t.Fatal(err)
+	}
+	assertNeedsConfirmation := func() {
+		t.Helper()
+		var conflict *db.ConflictError
+		if err := s.Save(ctx, Edit{Endpoint: &nextAddress}); !errors.As(err, &conflict) || conflict.Code != "instance_changed" || s.ID() != first {
+			t.Fatalf("address change with no continuity proof: %v, id %d", err, s.ID())
+		}
+	}
+	assertNeedsConfirmation()
+	p, err := store.InsertProject(ctx, db.Project{Title: "Planning"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldSelector := db.WorkspaceID(first, "proj", "/repo")
+	task, err := store.CreateTask(ctx, db.NewTask{ConnectionID: first, WorkspaceID: oldSelector, ProjectID: p.ID, Title: "Draft", Prompt: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RefreshWorkspaces(ctx, first, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The saved unbound pin still counts after the workspace leaves inventory.
+	assertNeedsConfirmation()
+	if err := s.Save(ctx, Edit{Endpoint: &nextAddress, NewInstance: true}); err != nil {
+		t.Fatal(err)
+	}
+	second := s.ID()
+	if second == first {
+		t.Fatal("the new service inherited the old connection")
+	}
+	if _, err := store.RefreshWorkspaces(ctx, second, catalog); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ResolveDestination(ctx, second, oldSelector); err == nil {
+		t.Fatal("the new service admitted the old workspace selector")
+	}
+	draft, err := store.GetTask(ctx, task.ID)
+	if err != nil || draft.ConnectionID != first || draft.WorkspaceID != oldSelector || draft.ConnectionActive {
+		t.Fatalf("the draft followed the new service: %+v, %v", draft, err)
+	}
+}
+
 // A pairing link works once: when its service needs confirming as new, the
 // confirming retry reuses the token Stage already redeemed.
 func TestPairingAnotherServiceKeepsTheRedeemedTokenForTheConfirm(t *testing.T) {

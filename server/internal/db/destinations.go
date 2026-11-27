@@ -2,9 +2,26 @@ package db
 
 import (
 	"cmp"
+	"path"
 	"strings"
 	"time"
 )
+
+// WorkspaceTitle is the display title safe for a scoped destination summary.
+func WorkspaceTitle(title, root string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = root
+	}
+	title = strings.ReplaceAll(title, "\\", "/")
+	if title == root || path.IsAbs(title) || (len(title) >= 3 && title[1:3] == ":/") || strings.Contains(title, "://") {
+		title = path.Base(title)
+	}
+	if title == "." || title == "/" || title == "" {
+		return "Workspace"
+	}
+	return title
+}
 
 // Destination is the safe display and selection projection of a workspace.
 type Destination struct {

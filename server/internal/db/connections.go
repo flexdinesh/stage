@@ -120,14 +120,10 @@ func (s *Store) ConnectionActive(id int64) bool {
 type Switch = harness.Switch
 
 // SwitchInstance makes the instance with identity the active connection of
-// harness on machine. The same identity keeps the connection. A connection with no
-// identity yet, or holding no relations, is restamped in place. Otherwise
-// the active connection retires and keeps its relations, and the instance
-// gets a retired connection with that identity back when the harness's
-// identity is stable (or revive, a retired connection the caller matched),
-// else a new connection. Unlaunched backlog tasks and schedules follow the
-// active connection. An explicit workspace choice must still resolve on that
-// connection before launch. A connection of another machine is never revived.
+// harness on machine. The same identity keeps the connection. A first
+// identity can fill an unconfigured connection. Otherwise the existing
+// connection retires with its work and the instance gets its proven retired
+// connection back on the same machine or gets a new connection.
 func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Descriptor, identity, label string, revive int64) (Switch, error) {
 	kind := d.Kind
 	if identity == "" && revive == 0 {
@@ -183,16 +179,11 @@ func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Des
 			out.New, err = c.Insert(ctx, machine, kind, identity, label, d.StableIdentity)
 			return err
 		}
-		related, err := c.HasRelations(ctx, cur.ID)
+		related, err := connectionReferenced(ctx, tx, cur.ID)
 		if err != nil {
 			return err
 		}
-		if target == 0 && (cur.Identity == "" || !related) {
-			if cur.Identity != "" {
-				if err := c.ClearDiscovery(ctx, cur.ID); err != nil {
-					return err
-				}
-			}
+		if target == 0 && cur.Identity == "" {
 			return c.SetIdentity(ctx, cur.ID, identity, label)
 		}
 		if err := c.Retire(ctx, cur.ID); err != nil {
@@ -231,12 +222,9 @@ func (s *Store) MovedConnections(ctx context.Context) ([]Move, error) {
 	return read(ctx, s, func(tx store.Tx) ([]Move, error) { return tx.Connections().Moved(ctx) })
 }
 
-// RetireConnection retires an active connection. With a replacement (an
-// active connection of the same harness), the default, unlaunched backlog
-// tasks and schedules follow it, and a retired connection that holds nothing
-// is deleted. Without one, the default is cleared and the rest stays; the
-// tasks keep their history, read-only. 404 unknown, 409 already retired or an
-// unusable replacement.
+// RetireConnection retires an active connection. A replacement can inherit
+// the display default. Tasks and schedules keep their original connection.
+// A replaced connection without references may be deleted.
 func (s *Store) RetireConnection(ctx context.Context, id, replacement int64) error {
 	err := s.writeConnectionIdentity(ctx, func(tx store.Tx) error {
 		if err := lockMachineOf(ctx, tx, id); err != nil {
@@ -266,7 +254,7 @@ func retireTx(ctx context.Context, tx store.Tx, id, replacement int64) error {
 			return Conflict("The replacement must be another active %s connection.", harness)
 		}
 	}
-	related, err := c.HasRelations(ctx, id)
+	related, err := connectionReferenced(ctx, tx, id)
 	if err != nil {
 		return err
 	}

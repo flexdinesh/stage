@@ -111,10 +111,10 @@ module may also declare a moved-retire predicate. Stage evaluates it using
 both connector summaries when the old machine is reachable.
 
 Replacing an instance retires its connection. Tasks, sessions and bindings
-remain on it as history. Unlaunched backlog tasks and schedules follow the
-new active connection. Bindings change through workspace discovery or a
-user action. Serve follows connection changes and runs release and schedule
-runners per active connection.
+remain on it as history. Edit a backlog task or schedule and select an
+exact workspace on the new connection to run future work there. Serve
+follows connection changes and runs release and schedule runners per
+active connection.
 [Connection storage and lifecycle](architecture.md#project-and-session-identity)
 
 ## Adapter roles

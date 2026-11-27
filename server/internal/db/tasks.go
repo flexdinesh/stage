@@ -13,7 +13,9 @@ import (
 )
 
 func (s *Store) GetTask(ctx context.Context, id int64) (Task, error) {
-	return read(ctx, s, func(tx store.Tx) (Task, error) { return tx.Tasks().Get(ctx, id) })
+	task, err := read(ctx, s, func(tx store.Tx) (Task, error) { return tx.Tasks().Get(ctx, id) })
+	task.WorkspaceID = selectorOf(task.ConnectionID, task.WorkspacePin)
+	return task, err
 }
 
 type TaskFilter = store.TaskFilter
@@ -44,6 +46,8 @@ type NewTask struct {
 	OriginSession   *SessionRef
 	ProjectID       int64
 	BindingID       *int64
+	WorkspaceID     string
+	workspacePin    *WorkspacePin
 	Title           string
 	Prompt          string
 	InitialNote     string
@@ -77,15 +81,15 @@ func (s *Store) CreateTask(ctx context.Context, in NewTask) (Task, error) {
 		if err := tx.Projects().LockIdentity(ctx); err != nil {
 			return 0, err
 		}
-		project, err := projectID(ctx, tx, in.ProjectID)
+		if err := connectionUsable(ctx, tx, in.ConnectionID); err != nil {
+			return 0, err
+		}
+		project, pin, err := creationDestination(ctx, tx, in.ConnectionID, in.ProjectID, in.BindingID, in.WorkspaceID)
 		if err != nil {
 			return 0, err
 		}
-		if err := validateBinding(ctx, tx, project, in.ConnectionID, in.BindingID); err != nil {
-			return 0, err
-		}
 		in := in
-		in.ProjectID = project
+		in.ProjectID, in.workspacePin = project, pin
 		return s.insertTask(ctx, tx, in, nil)
 	})
 	if err != nil {
@@ -107,7 +111,7 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 	if in.ConnectionID == 0 {
 		return 0, errConnectionRequired
 	}
-	if err := connectionUsable(ctx, tx, in.ConnectionID); err != nil {
+	if err := requireConnection(ctx, tx, in.ConnectionID); err != nil {
 		return 0, err
 	}
 	config := in.ExecutionConfig
@@ -122,7 +126,7 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 		originID = &value
 	}
 	id, err := tx.Tasks().Insert(ctx, store.TaskInsert{
-		ProjectID: in.ProjectID, BindingID: in.BindingID, Title: in.Title, Prompt: in.Prompt,
+		ProjectID: in.ProjectID, BindingID: in.BindingID, WorkspacePin: in.workspacePin, Title: in.Title, Prompt: in.Prompt,
 		StartAt: in.StartAt, StartTz: in.StartTz, ScheduleID: in.ScheduleID, Handoff: in.Handoff,
 		StartMode: in.StartMode, ConnectionID: in.ConnectionID, OriginSessionID: originID, ExecutionConfig: config,
 		CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx),
@@ -178,10 +182,12 @@ type TaskPatch struct {
 	ValidatedConnection int64                      `json:"-"`
 	ValidatedProject    int64                      `json:"-"`
 	ValidatedBinding    *int64                     `json:"-"`
+	ValidatedWorkspace  *WorkspacePin              `json:"-"`
 	ConnectionID        Optional[int64]            `json:"connectionId"`
 	ExecutionConfig     Optional[execution.Config] `json:"executionConfig"`
 	ProjectID           Optional[int64]            `json:"projectId"`
 	BindingID           Optional[int64]            `json:"bindingId"`
+	WorkspaceID         Optional[string]           `json:"workspaceId"`
 	Title               Optional[string]           `json:"title"`
 	Prompt              Optional[string]           `json:"prompt"`
 	AttachmentIDs       Optional[[]int64]          `json:"attachmentIds"` // the exact image set; null = none
@@ -196,7 +202,7 @@ type TaskPatch struct {
 
 // restrictedSet reports whether a field editable only in backlog is present.
 func (p TaskPatch) restrictedSet() bool {
-	return p.ConnectionID.Set || p.ExecutionConfig.Set || p.ProjectID.Set || p.BindingID.Set || p.Prompt.Set || p.AttachmentIDs.Set ||
+	return p.ConnectionID.Set || p.ExecutionConfig.Set || p.ProjectID.Set || p.BindingID.Set || p.WorkspaceID.Set || p.Prompt.Set || p.AttachmentIDs.Set ||
 		p.StartAt.Set || p.Handoff.Set || p.StartMode.Set
 }
 
@@ -214,7 +220,8 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 		if err != nil {
 			return err
 		}
-		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject || !equalPtr(e.BindingID, p.ValidatedBinding)) {
+		if p.ValidatedConnection != 0 && (e.ConnectionID != p.ValidatedConnection || e.ProjectID != p.ValidatedProject ||
+			!equalPtr(e.BindingID, p.ValidatedBinding) || !equalPtr(e.WorkspacePin, p.ValidatedWorkspace)) {
 			return Conflict("The destination changed during editing. Refresh and choose the task settings again.")
 		}
 		if e.State != StateBacklog && p.restrictedSet() {
@@ -249,11 +256,11 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 				return err
 			}
 		}
-		u.BindingID, err = bindingPatch(ctx, tx, e.ProjectID, e.ConnectionID, u.ProjectID, p.ConnectionID, p.BindingID)
+		u.BindingID, u.WorkspacePin, err = destinationPatch(ctx, tx, e.ProjectID, e.ConnectionID, u.ProjectID, p.ConnectionID, p.BindingID, p.WorkspaceID)
 		if err != nil {
 			return err
 		}
-		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !u.BindingID.Set && !p.Title.Set && !p.Prompt.Set &&
+		if !u.ConnectionID.Set && !u.ExecutionConfig.Set && !p.ProjectID.Set && !u.BindingID.Set && !u.WorkspacePin.Set && !p.Title.Set && !p.Prompt.Set &&
 			!p.Handoff.Set && !p.StartMode.Set && !p.AttachmentIDs.Set && !p.StartAt.Set {
 			return nil
 		}
@@ -339,7 +346,16 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 		}
 		in := NewTask{
 			ProjectID: src.ProjectID, ConnectionID: src.ConnectionID, BindingID: src.BindingID,
-			ExecutionConfig: src.ExecutionConfig, Title: src.Title, Prompt: src.Prompt,
+			ExecutionConfig: src.ExecutionConfig, Title: src.Title, Prompt: src.Prompt, workspacePin: src.WorkspacePin,
+		}
+		if in.workspacePin == nil && src.LaunchAttempt > 0 {
+			frozen, err := tx.Attempts().Destination(ctx, id, src.LaunchAttempt)
+			if err != nil && !errors.Is(err, ErrNotFound) {
+				return 0, err
+			}
+			if err == nil && frozen.ConnectionID == src.ConnectionID {
+				in.workspacePin = &WorkspacePin{ExternalID: frozen.ExternalProjectID, Root: frozen.Workspace}
+			}
 		}
 		return s.insertTask(ctx, tx, in, func(tx store.Tx, dst int64) error {
 			if err := tx.Attachments().CopyToTask(ctx, store.OwnerTask, src.ID, dst); err != nil {
@@ -440,7 +456,7 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 			if err := a.Begin(ctx, t.TaskID, res.Attempt, WorkAttribution(eventCtx)); err != nil {
 				return err
 			}
-			if err := pinDestination(ctx, tx, t.TaskID, res.Attempt); err != nil {
+			if err := pinDestination(ctx, tx, t.TaskID, res.Attempt, t.LaunchCheck); err != nil {
 				return err
 			}
 			claimed, err := a.Claim(ctx, t.TaskID, res.Attempt)
