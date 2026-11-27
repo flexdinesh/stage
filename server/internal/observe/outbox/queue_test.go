@@ -156,9 +156,15 @@ func TestSealedBatchSurvivesPartialAckAndRestart(t *testing.T) {
 	if q.state.Acked != 1 || !reflect.DeepEqual(encode(t, seal(t, q)), firstBytes) {
 		t.Fatal("restart lost the durable prefix ack or changed the sealed batch")
 	}
+	if released, err := q.ReleasedCursor(); err != nil || released != 0 {
+		t.Fatalf("retained prefix reported as released: cursor %d, err %v", released, err)
+	}
 	ack(t, q, 2)
 	ack(t, q, 1)
 	q = openQueue(t, dir, joined, limits)
+	if released, err := q.ReleasedCursor(); err != nil || released != 2 {
+		t.Fatalf("released prefix after restart: cursor %d, err %v", released, err)
+	}
 	checkSamples(t, seal(t, q), 3, c, newer)
 	ack(t, q, 4)
 	q = openQueue(t, dir, joined, limits)

@@ -36,11 +36,17 @@ func (s *Service) RequestResample(machine int64) {
 	s.Kick()
 }
 
-func (s *Service) BindWorkerProducer(ctx context.Context, machine int64, producer string) error {
-	if !validProducer(producer) {
+func (s *Service) BindWorkerProducer(ctx context.Context, machine int64, ack WatchAck) error {
+	if !validProducer(ack.Producer) {
 		return db.ErrObservationProducer
 	}
-	return s.store.BindObservationProducer(ctx, machine, producer)
+	lost, err := s.store.ReconcileObservationProducer(ctx, machine, ack.Producer, ack.ReleasedCursor)
+	if err == nil && lost > 0 {
+		s.log.Warn("worker observation receipt restored behind outbox", "machine", machine,
+			"cursor", ack.ReleasedCursor, "lostRecords", lost)
+		s.RequestResample(machine)
+	}
+	return err
 }
 
 // Run maintains desired watches and reconciles unfinished launch commands.

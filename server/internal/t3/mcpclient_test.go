@@ -574,6 +574,26 @@ func TestListProjectsPagesToCompletion(t *testing.T) {
 	}
 }
 
+func TestListProjectsRejectsIncompleteInventory(t *testing.T) {
+	for _, response := range []string{`{}`, `{"projects":null}`, `{"projects":[],"nextCursor":null}`} {
+		t.Run(response, func(t *testing.T) {
+			f := newFakeT3(t)
+			f.tool("t3_project_list", func(map[string]any) (*mcp.CallToolResult, error) {
+				return structured(response), nil
+			})
+			c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
+			projects, err := c.ListProjects(ctxT(t))
+			if response == `{"projects":[],"nextCursor":null}` {
+				if err != nil || len(projects) != 0 {
+					t.Fatalf("explicitly empty inventory: %+v, %v", projects, err)
+				}
+			} else if err == nil {
+				t.Fatal("missing result array was accepted as an empty inventory")
+			}
+		})
+	}
+}
+
 func (c *MCPClient) currentSession() *mcp.ClientSession {
 	c.sessMu.Lock()
 	defer c.sessMu.Unlock()

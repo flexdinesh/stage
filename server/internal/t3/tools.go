@@ -28,6 +28,9 @@ func (c *MCPClient) ListProjects(ctx context.Context) ([]Project, error) {
 		if err := c.call(ctx, "t3_project_list", args, &page); err != nil {
 			return nil, err
 		}
+		if page.Projects == nil {
+			return nil, errors.New("t3 t3_project_list: missing projects array")
+		}
 		for _, p := range page.Projects {
 			out = append(out, p.toProject())
 		}

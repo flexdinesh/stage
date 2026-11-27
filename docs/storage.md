@@ -226,6 +226,10 @@ notifications run after commit.
 The worker's outbox and cached compose inputs live under its own config
 directory. The database copy carries the server's observation receipts
 and task effects, so the server can recognize replay after a cutover.
+If a restored receipt is behind the worker's released cursor, the main
+advances it and writes a `receipt_rollback` disposition in the same
+transaction. The disposition records the exact count of unavailable
+records through the released cursor. The main requests a resample.
 [Worker observation files](runtime.md#worker-observation-files)
 
 ## Transactions and locking
@@ -280,6 +284,10 @@ and task effects, so the server can recognize replay after a cutover.
 | Pairing redeem | `RedeemPairing` | a code redeems once, before expiry | expiry read, then one `UPDATE ... WHERE redeemed_at IS NULL`: the loser updates no row | `RedeemPairingConcurrentSingleWinner` |
 | Launch checkpoint | `SaveCheckpoint` | checkpoints of one attempt apply in order | one `UPDATE ... WHERE revision = $expected`: a stale writer updates no row (409) | none yet |
 | Project identity | inventory refresh, resolve/apply, bind/unbind, primary, decline, adoption, merge, split and dismissals | placement sees all connections and serializes with evidence and binding changes | `Projects().LockIdentity` first. SQLite single writer, Postgres transaction advisory lock | `ConcurrentImportAcrossConnections` |
+
+Adoption refreshes the verified live workspace inventory under the identity
+lock before choosing or creating a binding. The refresh, binding, adopted
+task and tree changes commit together.
 
 Each row's lock was checked to matter: with it removed, its `storetest`
 case fails on Postgres. On SQLite the single writer keeps every invariant,
@@ -796,8 +804,16 @@ use the same lock to serialize the selected workspace with identity changes.
 Launch claims take it before the task lock and pin the active, available
 chosen binding or primary. Each attempt keeps its pinned path, external
 workspace ID and binding revision. Task readers take the pinned workspace
-address from the launch destination on both engines. Review reads the
-undismissed project pairs from the per-pair dismissal records.
+address from the launch destination on both engines.
+
+When a connection is replaced, unlaunched backlog tasks and schedules follow
+the replacement with their saved workspace choice. An explicit choice stays
+unavailable until its binding resolves on the replacement or the choice is
+edited. A null choice uses the replacement's primary workspace when available.
+Forgetting a retired connection deactivates its bindings and retains their
+rows if workspace choices still reference them.
+
+Review reads the undismissed project pairs from the per-pair dismissal records.
 See [workspace discovery](discovery.md) for rule priority
 and [the API](api.md#workspace-discovery-and-project-identity) for previews.
 
@@ -944,6 +960,11 @@ new observation has none.
 
 The same JSON carries optional display `facts`. Old observations decode
 without facts. These values require no schema migration on either engine.
+
+Stage stores its sample capture time as `stageCapturedAt` in the stored
+observation JSON to order snapshots with equal harness timestamps. Older
+rows use the storage receipt time in `observed_at`. The adapter and API
+observation payloads keep their existing format.
 
 ### Doc claims this audit corrects
 

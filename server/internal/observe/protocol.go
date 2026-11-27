@@ -32,7 +32,8 @@ type WatchSession struct {
 }
 
 type WatchAck struct {
-	Producer string `json:"producer"`
+	Producer       string `json:"producer"`
+	ReleasedCursor int64  `json:"releasedCursor,omitempty"`
 }
 
 // Record is one adapter sample, read/stream status, or report of lost samples.
@@ -47,6 +48,17 @@ type Record struct {
 	Quiet             bool                   `json:"quiet,omitempty"`
 	Unavailable       bool                   `json:"unavailable,omitempty"`
 	StreamError       *string                `json:"streamError,omitempty"`
+
+	// A bridge preserves its harness event time in ObservedAt. Stage knows
+	// when it received the push and uses that time for ordering snapshots.
+	capturedAt time.Time
+}
+
+func (r Record) captureTime() time.Time {
+	if r.capturedAt.IsZero() {
+		return r.ObservedAt
+	}
+	return r.capturedAt
 }
 
 type Gap struct {

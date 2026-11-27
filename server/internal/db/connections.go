@@ -125,10 +125,9 @@ type Switch = harness.Switch
 // the active connection retires and keeps its relations, and the instance
 // gets a retired connection with that identity back when the harness's
 // identity is stable (or revive, a retired connection the caller matched),
-// else a new connection. Unlaunched backlog
-// tasks and schedules follow the active connection; they launch only after
-// the user binds the project there. A connection of another machine is never
-// revived.
+// else a new connection. Unlaunched backlog tasks and schedules follow the
+// active connection. An explicit workspace choice must still resolve on that
+// connection before launch. A connection of another machine is never revived.
 func (s *Store) SwitchInstance(ctx context.Context, machine int64, d harness.Descriptor, identity, label string, revive int64) (Switch, error) {
 	kind := d.Kind
 	if identity == "" && revive == 0 {

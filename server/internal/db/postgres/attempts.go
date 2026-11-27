@@ -158,13 +158,17 @@ func (r observations) Get(ctx context.Context, sessionID int64) (execution.Obser
 	return o, notFound(err)
 }
 
-func (r observations) ByRef(ctx context.Context, ref store.SessionRef) (execution.Observation, error) {
-	var o execution.Observation
-	err := r.QueryRow(ctx, `SELECT observation FROM execution_observations WHERE session_id=(SELECT id FROM session_identities WHERE connection_id=$1 AND external_id=$2)`, ref.ConnectionID, ref.ExternalSessionID).Scan(&o)
+func (r observations) ByRef(ctx context.Context, ref store.SessionRef) (store.ObservationSnapshot, error) {
+	var o store.ObservationSnapshot
+	var receivedAt time.Time
+	err := r.QueryRow(ctx, `SELECT observation, observed_at FROM execution_observations WHERE session_id=(SELECT id FROM session_identities WHERE connection_id=$1 AND external_id=$2)`, ref.ConnectionID, ref.ExternalSessionID).Scan(&o, &receivedAt)
+	if o.CapturedAt.IsZero() {
+		o.CapturedAt = receivedAt
+	}
 	return o, notFound(err)
 }
 
-func (r observations) Put(ctx context.Context, sessionID int64, o execution.Observation) error {
+func (r observations) Put(ctx context.Context, sessionID int64, o store.ObservationSnapshot) error {
 	raw, err := json.Marshal(o)
 	if err != nil {
 		return err

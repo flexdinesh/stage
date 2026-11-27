@@ -323,9 +323,10 @@ server's observation ingest rules. Ingest looks up the task by scoped session
 and delegates to the coordinator's apply path, also used by `PollTask`.
 Unowned sessions follow attention policy, and launches reconcile their own
 sessions. Apply verifies the session and descriptor policy, stores the
-observation and applies the transition. Older `updatedAt` values cannot
-replace newer snapshots. An idle observation leaves a known task state in
-place.
+observation and applies the transition. The harness's `updatedAt` orders
+snapshots first. When it ties, Stage uses the sample capture time or the
+time the main received a bridge push. Bridge task events still use the
+harness timestamp. An idle observation leaves a known task state in place.
 
 The worker seals records with contiguous cursors and sends one batch at a
 time. The server commits each record with its durable effects or permanent

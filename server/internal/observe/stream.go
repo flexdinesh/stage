@@ -78,12 +78,13 @@ const (
 // /api/connections/{id}/observations) to the task that owns its session.
 // An unowned session is left to discovery.
 func (s *Service) Ingest(ctx context.Context, o execution.Observation) (Ingested, error) {
+	capturedAt := time.Now().UTC()
 	at := o.UpdatedAt
 	if at.IsZero() {
-		at = time.Now().UTC()
+		at = capturedAt
 	}
 	return s.ingestLocal(ctx, Record{
 		ConnectionID: o.Session.ConnectionID, ExternalSessionID: o.Session.ExternalSessionID,
-		ObservedAt: at, Observation: &o,
+		ObservedAt: at, Observation: &o, capturedAt: capturedAt,
 	})
 }

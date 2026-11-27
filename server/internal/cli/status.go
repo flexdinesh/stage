@@ -23,7 +23,7 @@ type statusOut struct {
 }
 
 // runStatus is `stage status [--wait DUR]`: which server this CLI reaches
-// and whether it is ready. Exit 0 when ready (T3 offline included), 1 when
+// and whether it is ready. Exit 0 when ready (even with offline connections), 1 when
 // unreachable, unhealthy or on another API version, 3 when --wait expires.
 func runStatus(ctx context.Context, env Env, args []string) error {
 	c := newCmd(env, "status")

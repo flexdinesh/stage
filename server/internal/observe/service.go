@@ -18,7 +18,7 @@ type Coordinator interface {
 	PollTask(context.Context, db.Task) error
 	ReconcileLaunch(context.Context, db.Task) error
 	CheckObservation(string, execution.Observation) error
-	ApplyObservation(context.Context, *db.Store, db.Task, execution.Observation, time.Time) (*workevent.TaskChange, bool, error)
+	ApplyObservation(context.Context, *db.Store, db.Task, execution.Observation, time.Time, time.Time) (*workevent.TaskChange, bool, error)
 	PublishObservation(context.Context, *workevent.TaskChange, bool, bool)
 }
 

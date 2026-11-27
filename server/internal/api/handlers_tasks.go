@@ -250,7 +250,7 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if in.NeedsSession != nil {
-		in.NeedsBinding, err = s.prepareAdoption(r, *in.NeedsSession)
+		in.NeedsWorkspace, err = s.prepareAdoption(r.Context(), *in.NeedsSession)
 		if err != nil {
 			return err
 		}
@@ -483,16 +483,15 @@ func (s *server) stopTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	caps, err := adapter.Features(r.Context())
-	if err != nil {
-		return &db.HarnessError{Err: err}
-	}
-	if op := caps.Operations[execution.OpStop]; !op.Available {
+	// A catalog outage does not prevent the owning adapter from stopping a
+	// running session. A negative declaration still prevents dispatch.
+	caps, catalogErr := adapter.Features(r.Context())
+	if op, declared := caps.Operations[execution.OpStop]; !op.Available && (catalogErr == nil || declared) {
 		reason := strings.TrimSpace(op.Reason)
 		if reason == "" {
 			reason = "This connection does not support stopping tasks."
 		}
-		return db.Conflict("%s", reason)
+		return &db.ConflictError{Code: "operation_unavailable", Msg: reason}
 	}
 	if err := adapter.Stop(r.Context(), *task.Session); err != nil {
 		return &db.HarnessError{Err: err}

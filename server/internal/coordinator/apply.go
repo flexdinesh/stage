@@ -39,6 +39,7 @@ func (s *Service) Apply(ctx context.Context, task db.Task, o execution.Observati
 	}
 	var change *workevent.TaskChange
 	var inferred bool
+	at := time.Now().UTC()
 	err := s.store.WriteObservation(ctx, func(tx *db.Store) error {
 		if err := tx.LockObservationConnection(ctx, o.Session.ConnectionID); err != nil {
 			return err
@@ -47,7 +48,7 @@ func (s *Service) Apply(ctx context.Context, task db.Task, o execution.Observati
 		if err != nil {
 			return err
 		}
-		change, inferred, err = s.ApplyObservation(ctx, tx, current, o, time.Now().UTC())
+		change, inferred, err = s.ApplyObservation(ctx, tx, current, o, at, at)
 		return err
 	})
 	if err == nil {
@@ -58,20 +59,21 @@ func (s *Service) Apply(ctx context.Context, task db.Task, o execution.Observati
 
 // ApplyObservation reconciles a validated observation within the caller's
 // unit of work. The caller publishes its effects after commit.
-func (s *Service) ApplyObservation(ctx context.Context, tx *db.Store, task db.Task, o execution.Observation, at time.Time) (*workevent.TaskChange, bool, error) {
+func (s *Service) ApplyObservation(ctx context.Context, tx *db.Store, task db.Task, o execution.Observation, eventAt, capturedAt time.Time) (*workevent.TaskChange, bool, error) {
 	if task.Session == nil || o.Session != *task.Session {
 		return nil, false, errors.New("observation returned a different session")
 	}
-	previous, err := tx.Observation(ctx, o.Session)
+	previous, err := tx.ObservationSnapshot(ctx, o.Session)
 	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		return nil, false, err
 	}
-	if previous.UpdatedAt.After(o.UpdatedAt) {
+	if previous.UpdatedAt.After(o.UpdatedAt) ||
+		(previous.UpdatedAt.Equal(o.UpdatedAt) && previous.CapturedAt.After(capturedAt)) {
 		return nil, false, nil
 	}
 	d, _ := s.conns.Descriptor(task.Harness)
 	o.Facts = d.DisplayFacts(o.Facts)
-	if err := tx.PutObservation(ctx, o); err != nil {
+	if err := tx.PutObservationAt(ctx, o, capturedAt); err != nil {
 		return nil, false, err
 	}
 	o, err = tx.Observation(ctx, o.Session)
@@ -90,7 +92,7 @@ func (s *Service) ApplyObservation(ctx context.Context, tx *db.Store, task db.Ta
 		if o.StateReason != "" {
 			detail += " (" + o.StateReason + ")"
 		}
-		change := db.Transition{TaskID: task.ID, From: []db.TaskState{task.State}, To: db.TaskState(o.State), Detail: detail, ObservedAt: &at}
+		change := db.Transition{TaskID: task.ID, From: []db.TaskState{task.State}, To: db.TaskState(o.State), Detail: detail, ObservedAt: &eventAt}
 		if task.Adopted && task.LaunchedAt == nil {
 			change.ObservedStart = o.StartedAt
 		}

@@ -20,9 +20,10 @@ You can also run one **main server** on a host every device can reach (a VM, a h
 |---|---|---|
 | Database, backlog, journals, scheduling | Yes | No |
 | The UI, `/api` and `/mcp` | Yes | No (agents reach the main server through it) |
-| Runs that machine's T3 and OpenCode connections | Its own, if any | Yes |
+| Hosts that machine's T3 and OpenCode connections | Its own, if any | Yes |
 | Runs Claude Code and Codex | Yes, on your computer (not in Docker) | Yes, with local harnesses (the worker service, or `stage worker run --local-harnesses`) |
 | Harness credentials | For its own connections | Kept on the worker |
+| Observes sessions | Its local connections and external bridge pushes | Its own connections, with bounded offline replay |
 | Read-only evidence from local workspace directories | For itself | Yes |
 
 The main server keeps each worker connection's status and non-secret settings. Credentials never leave the worker.

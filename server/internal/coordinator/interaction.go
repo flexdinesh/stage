@@ -24,16 +24,16 @@ func (s *Service) interactive(ctx context.Context, id int64, op execution.Op) (d
 	if err != nil {
 		return t, nil, err
 	}
-	in, ok := execution.As[execution.Interactive](a)
-	if !ok {
-		return t, nil, unavailable(op, "this harness does not support it")
-	}
 	features, err := a.Features(ctx)
 	if err != nil {
 		return t, nil, harnessErr(err)
 	}
 	if avail := features.Operations[op]; !avail.Available {
 		return t, nil, unavailable(op, avail.Reason)
+	}
+	in, ok := execution.As[execution.Interactive](a)
+	if !ok {
+		return t, nil, unavailable(op, "this connection does not provide session interaction")
 	}
 	return t, in, nil
 }
@@ -42,7 +42,7 @@ func unavailable(op execution.Op, reason string) error {
 	if strings.TrimSpace(reason) == "" {
 		reason = "the harness reports it unavailable"
 	}
-	return &db.ConflictError{Code: "operation_unavailable", Msg: "Operation " + string(op) + " unavailable: " + reason + "."}
+	return &db.ConflictError{Code: "operation_unavailable", Msg: "Operation " + string(op) + " unavailable: " + reason}
 }
 
 // Requests lists what the task's session waits on (operation respond).

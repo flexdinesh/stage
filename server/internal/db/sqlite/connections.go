@@ -163,7 +163,9 @@ func (r connections) Referenced(ctx context.Context, id int64) (bool, error) {
 	err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE connection_id=$1)
  OR EXISTS(SELECT 1 FROM schedules WHERE connection_id=$1)
  OR EXISTS(SELECT 1 FROM session_identities WHERE connection_id=$1)
- OR EXISTS(SELECT 1 FROM task_launch_destinations WHERE connection_id=$1)`, id).Scan(&referenced)
+ OR EXISTS(SELECT 1 FROM task_launch_destinations WHERE connection_id=$1)
+ OR EXISTS(SELECT 1 FROM tasks t JOIN project_bindings b ON b.id=t.binding_id WHERE b.connection_id=$1)
+ OR EXISTS(SELECT 1 FROM schedules s JOIN project_bindings b ON b.id=s.binding_id WHERE b.connection_id=$1)`, id).Scan(&referenced)
 	return referenced, err
 }
 
@@ -179,8 +181,8 @@ func (r connections) execAll(ctx context.Context, id any, qs ...string) error {
 func (r connections) FollowReplacement(ctx context.Context, from, to int64) error {
 	for _, q := range []string{
 		`UPDATE preferences SET default_connection_id=$2 WHERE default_connection_id=$1`,
-		`UPDATE tasks SET connection_id=$2,binding_id=NULL,updated_at=stage_now() WHERE connection_id=$1 AND state='backlog' AND session_id IS NULL`,
-		`UPDATE schedules SET connection_id=$2,binding_id=NULL,updated_at=stage_now() WHERE connection_id=$1`,
+		`UPDATE tasks SET connection_id=$2,updated_at=stage_now() WHERE connection_id=$1 AND state='backlog' AND session_id IS NULL`,
+		`UPDATE schedules SET connection_id=$2,updated_at=stage_now() WHERE connection_id=$1`,
 	} {
 		if _, err := r.Exec(ctx, q, from, to); err != nil {
 			return err

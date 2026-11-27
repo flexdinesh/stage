@@ -13,7 +13,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-// Launcher starts a task in T3 with a launching event detail
+// Launcher starts a task through its connection with a launching event detail
 // (sync.Service.LaunchScheduled).
 type Launcher interface {
 	LaunchScheduled(ctx context.Context, id int64, detail string) (db.Task, error)
@@ -114,7 +114,7 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 			continue // started or changed concurrently
 		}
 		if err != nil {
-			errs = append(errs, err) // T3 failure: the task is failed with lastError
+			errs = append(errs, err) // A rejected launch records lastError on the task.
 		}
 	}
 	return errors.Join(errs...)

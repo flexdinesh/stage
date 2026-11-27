@@ -59,9 +59,9 @@ type NewTask struct {
 	Needs []int64
 	// NeedsSession ("afterMe"): adopt this session (or take its owning
 	// task) and need it, before Needs.
-	NeedsSession *SessionRef
-	NeedsBinding *ProjectBinding
-	StartMode    *StartMode // nil = inherit the tree's
+	NeedsSession   *SessionRef
+	NeedsWorkspace *AdoptionWorkspace
+	StartMode      *StartMode // nil = inherit the tree's
 }
 
 // errConnectionRequired: no harness connection was chosen.
@@ -133,7 +133,7 @@ func (s *Store) insertTask(ctx context.Context, tx store.Tx, in NewTask, extra f
 
 	needs := slices.Clone(in.Needs)
 	if in.NeedsSession != nil {
-		owner, _, err := s.adoptSession(ctx, tx, AdoptInput{Binding: in.NeedsBinding, Session: *in.NeedsSession})
+		owner, _, err := s.adoptSession(ctx, tx, AdoptInput{Workspace: in.NeedsWorkspace, Session: *in.NeedsSession})
 		if err != nil {
 			return 0, err
 		}

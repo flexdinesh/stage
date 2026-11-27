@@ -46,6 +46,7 @@ type flakyT3 struct {
 	// (transport error).
 	lostLaunches  atomic.Int32
 	failInterrupt atomic.Bool
+	failCatalog   atomic.Bool
 	onInterrupt   func()
 	offline       atomic.Bool // Status reports not connected
 	// failQuestions fails t3_pending_request list (transport error).
@@ -134,6 +135,13 @@ func (f *flakyT3) Status(ctx context.Context) t3.ConnectionStatus {
 	return f.Fake.Status(ctx)
 }
 
+func (f *flakyT3) Capabilities(ctx context.Context) (t3.Catalog, error) {
+	if f.failCatalog.Load() {
+		return t3.Catalog{}, errors.New("model catalog unavailable")
+	}
+	return f.Fake.Capabilities(ctx)
+}
+
 func (f *flakyT3) Interrupt(ctx context.Context, threadID string) error {
 	if f.onInterrupt != nil {
 		f.onInterrupt()
@@ -142,6 +150,17 @@ func (f *flakyT3) Interrupt(ctx context.Context, threadID string) error {
 		return errors.New("interrupt transport failure")
 	}
 	return f.Fake.Interrupt(ctx, threadID)
+}
+
+func TestStopWhileModelCatalogIsUnavailable(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/stop")
+	a := e.task(p.ID, "running", map[string]any{"start": true})
+	e.t3.failCatalog.Store(true)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/stop", a.ID), nil, 200, &a)
+	if a.State != "interrupted" || len(e.fake.Interrupted) != 1 || a.ExternalSessionID == nil || e.fake.Interrupted[0] != *a.ExternalSessionID {
+		t.Fatalf("Stop did not interrupt the task's session: %+v, %v", a, e.fake.Interrupted)
+	}
 }
 
 func (f *flakyT3) ListPendingQuestions(ctx context.Context, threadID string) ([]string, error) {

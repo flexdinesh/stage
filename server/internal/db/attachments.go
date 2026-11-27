@@ -8,13 +8,13 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/store"
 )
 
-// MaxTaskAttachments is the per-task (and per-follow-up) image limit (T3's).
+// MaxTaskAttachments is the per-task (and per-follow-up) image limit.
 const MaxTaskAttachments = 8
 
-// MaxAttachmentBytes is the per-image size limit (T3's).
+// MaxAttachmentBytes is the per-image size limit.
 const MaxAttachmentBytes = 10 << 20
 
-// AttachmentMimeTypes are the accepted image types (T3's).
+// AttachmentMimeTypes are the accepted image types.
 var AttachmentMimeTypes = []string{"image/png", "image/jpeg", "image/gif", "image/webp"}
 
 type (

@@ -44,7 +44,7 @@ export interface Links {
   stageLink(path: string): string;
   /** Opens an external web page outside the app. */
   openExternal(url: string): void;
-  /** Hands an app link (t3code://) to the OS. */
+  /** Hands a native app link to the OS. */
   openApp(url: string): void;
 }
 

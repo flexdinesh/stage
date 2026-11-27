@@ -115,7 +115,7 @@ export function ExternalButton({
   );
 }
 
-/** Link to the T3 app's t3code:// scheme: same tab, so the OS hands it to the app instead of opening a blank tab. */
+/** Native app link. Use the same tab so the OS can open the app. */
 export function AppButton({
   href,
   variant,

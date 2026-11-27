@@ -88,7 +88,7 @@ type Notifications interface {
 	Waiting(ctx context.Context, upToID int64) ([]WaitingSession, error)
 }
 
-// Sessions is the session identity repository (the T3 mirror and session
+// Sessions is the session identity repository (observations and session
 // identities grow here).
 type Sessions interface {
 	// Ensure returns the identity of (connection, external id), creating it.

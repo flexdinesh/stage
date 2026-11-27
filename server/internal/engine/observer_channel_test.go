@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -21,6 +22,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -131,10 +134,61 @@ func TestWorkerObservationChannelAcknowledgesRetiredSamples(t *testing.T) {
 	}
 }
 
+func TestWorkerObservationChannelRearmsInactiveTask(t *testing.T) {
+	r := openObserverChannel(t, db.StateFailed)
+	waiting := r.adapter.sample(db.StateNeedsInput, 2*time.Second)
+	if first := sampleIn(r.initial.batch, waiting.UpdatedAt); first == nil || !first.Attention || !first.Quiet {
+		t.Fatalf("first sample did not come from the initial attention pass: %+v", r.initial.batch)
+	}
+	r.taskIn(db.StateNeedsInput)
+	r.assertObservation(waiting)
+	receiveObserver(t, r.adapter.streams, "worker subscription for the rearmed watch")
+
+	done := r.adapter.sample(db.StateDone, 3*time.Second)
+	r.adapter.snapshot.Store(&done)
+	batch := r.delivered(done.UpdatedAt)
+	if record := sampleIn(batch.batch, done.UpdatedAt); record == nil || record.Attention {
+		t.Fatalf("rearmed task was not polled: %+v", batch.batch)
+	}
+	r.taskIn(db.StateDone)
+	r.assertObservation(done)
+}
+
+func TestWorkerObservationChannelRecoversReleasedCursor(t *testing.T) {
+	r := newObserverChannel(t)
+	r.disconnect()
+	// Model a restored main receipt with the worker outbox still intact.
+	if err := r.storage.Write(t.Context(), func(tx store.Tx) error {
+		return tx.ObservationProducers().SetCursor(t.Context(), r.machine, r.initial.batch.Producer, 0)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	done := r.push(r.stream, db.StateDone, time.Second)
+	r.online.Store(true)
+	batch := r.delivered(done.UpdatedAt)
+	if batch.batch.Producer != r.initial.batch.Producer || batch.ack.Cursor <= r.initial.ack.Cursor {
+		t.Fatalf("delivery did not resume the original producer: %+v", batch)
+	}
+	var lost string
+	if err := r.storage.QueryRowContext(t.Context(), `SELECT lost FROM observation_dispositions
+		WHERE machine_id=? AND producer=? AND cursor=? AND code='receipt_rollback'`,
+		r.machine, batch.batch.Producer, r.initial.ack.Cursor).Scan(&lost); err != nil || lost != strconv.FormatInt(r.initial.ack.Cursor, 10) {
+		t.Fatalf("durable rollback disposition lost %q records: %v", lost, err)
+	}
+	waitObserver(t, "worker to receive a resample watch", func() bool {
+		var saved struct{ Watch observe.Watch }
+		readObserverJSON(t, filepath.Join(worker.Dir(r.config), "watch.json"), &saved)
+		return saved.Watch.Resample
+	})
+	r.waitDrained(batch.ack.Cursor)
+	r.taskIn(db.StateDone)
+	r.assertObservation(done)
+}
+
 func TestWorkerObservationChannelSharesOrderingWithBridge(t *testing.T) {
 	r := newObserverChannel(t)
 	r.disconnect()
-	stale := r.push(r.stream, db.StateFailed, time.Second)
+	stale := r.push(r.stream, db.StateFailed, 2*time.Second)
 	done := r.push(r.stream, db.StateDone, 3*time.Second)
 	bridge := r.adapter.sample(db.StateNeedsInput, 2*time.Second)
 
@@ -182,6 +236,14 @@ type channelObservationAdapter struct {
 	documentHarness
 	baseline execution.Observation
 	streams  chan observerSubscription
+	snapshot atomic.Pointer[execution.Observation]
+}
+
+func (a *channelObservationAdapter) Attention(context.Context) ([]execution.SessionRef, error) {
+	if current := a.snapshot.Load(); current != nil && current.State == string(db.StateNeedsInput) {
+		return []execution.SessionRef{current.Session}, nil
+	}
+	return nil, nil
 }
 
 func (a *channelObservationAdapter) Launch(context.Context, execution.Intent, execution.Checkpoint, execution.SaveCheckpoint) (execution.Observation, error) {
@@ -191,6 +253,9 @@ func (a *channelObservationAdapter) Launch(context.Context, execution.Intent, ex
 func (a *channelObservationAdapter) Observe(_ context.Context, ref execution.SessionRef) (execution.Observation, error) {
 	if ref != a.baseline.Session {
 		return execution.Observation{}, execution.ErrNotFound
+	}
+	if current := a.snapshot.Load(); current != nil {
+		return *current, nil
 	}
 	// The snapshot endpoint lags the stream throughout this fixture.
 	return a.baseline, nil
@@ -219,7 +284,7 @@ type observerHost struct {
 
 func (h observerHost) Handlers() map[string]workerchan.WorkerHandler {
 	handlers := h.Host.Handlers()
-	for _, kind := range []string{remote.KindObserve, remote.KindEvents} {
+	for _, kind := range []string{remote.KindObserve, remote.KindEvents, remote.KindAttention} {
 		handle := handlers[kind]
 		handlers[kind] = func(ctx context.Context, env workerchan.Envelope, up workerchan.Upcall) (any, error) {
 			h.observationRPCs.Add(1)
@@ -238,6 +303,7 @@ type observerBatch struct {
 type observerChannel struct {
 	t                   *testing.T
 	store               *db.Store
+	storage             *sqlite.DB
 	hub                 *workerchan.Hub
 	server              *httptest.Server
 	log                 *slog.Logger
@@ -259,6 +325,11 @@ type observerChannel struct {
 }
 
 func newObserverChannel(t *testing.T) *observerChannel {
+	t.Helper()
+	return openObserverChannel(t, db.StateRunning)
+}
+
+func openObserverChannel(t *testing.T, initialState db.TaskState) *observerChannel {
 	t.Helper()
 	ctx := t.Context()
 	var test dbtest.DB
@@ -311,13 +382,16 @@ func newObserverChannel(t *testing.T) *observerChannel {
 	routes := api.NewRouter(api.Deps{Store: store, Engine: eng, Channels: hub, Machines: hosts, Harnesses: documentHarnesses,
 		Logger: log, Inbox: inbox})
 	now := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	if initialState != db.StateRunning {
+		now = now.Add(-time.Hour)
+	}
 	adapter := &channelObservationAdapter{
 		baseline: execution.Observation{Session: execution.SessionRef{ConnectionID: conn.New, ExternalSessionID: "document:1"},
 			Project: "collection-z", Title: "Document", State: string(db.StateRunning), Active: true,
 			ExecutionID: "write:1", CreatedAt: now, UpdatedAt: now},
 		streams: make(chan observerSubscription, 8),
 	}
-	r := &observerChannel{t: t, store: store, hub: hub, machine: grant.MachineID, log: log, task: task, adapter: adapter,
+	r := &observerChannel{t: t, store: store, storage: test.Pool, hub: hub, machine: grant.MachineID, log: log, task: task, adapter: adapter,
 		refused: make(chan struct{}, 1), allowRetry: make(chan struct{}),
 		lost: make(chan observerBatch, 1), accepted: make(chan observerBatch, 32)}
 	r.online.Store(true)
@@ -344,6 +418,12 @@ func newObserverChannel(t *testing.T) *observerChannel {
 	if err != nil || started.State != db.StateRunning || started.Session == nil || *started.Session != adapter.baseline.Session {
 		t.Fatalf("launch task: %+v %v", started, err)
 	}
+	initial := adapter.baseline
+	if initialState != db.StateRunning {
+		ageObservationTask(t, test.Pool, store, task.ID, adapter.sample(initialState, time.Second))
+		initial = adapter.sample(db.StateNeedsInput, 2*time.Second)
+		adapter.snapshot.Store(&initial)
+	}
 	runDone := make(chan struct{})
 	go func() {
 		defer close(runDone)
@@ -352,11 +432,11 @@ func newObserverChannel(t *testing.T) *observerChannel {
 	t.Cleanup(func() {
 		receiveObserver(t, runDone, "main observation loop to stop")
 		if n := r.observationRPCs.Load(); n != 0 {
-			t.Errorf("main sent %d adapter.observe or adapter.events RPCs", n)
+			t.Errorf("main sent %d adapter.observe, adapter.events or adapter.attention RPCs", n)
 		}
 	})
 	r.stream = receiveObserver(t, r.adapter.streams, "initial worker subscription")
-	r.initial = r.delivered(adapter.baseline.UpdatedAt)
+	r.initial = r.delivered(initial.UpdatedAt)
 	r.waitDrained(r.initial.ack.Cursor)
 	return r
 }
