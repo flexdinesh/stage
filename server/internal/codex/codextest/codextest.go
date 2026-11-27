@@ -395,6 +395,12 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			_ = json.Unmarshal(m.Params, &p)
 			s.broadcastStatus(p.ThreadID)
 		}
+		if m.Method == "thread/archive" && rpcErr == nil {
+			var p struct{ ThreadID string }
+			_ = json.Unmarshal(m.Params, &p)
+			s.broadcastStatus(p.ThreadID)
+			s.broadcast("thread/archived", map[string]any{"threadId": p.ThreadID})
+		}
 	}
 }
 
@@ -511,6 +517,16 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 			th.Preview = tu.Prompt
 		}
 		return map[string]any{"turn": wireTurn(tu, "notLoaded")}, nil
+	case "thread/archive":
+		th, e := thread()
+		if e != nil {
+			return nil, e
+		}
+		if th.Archived {
+			return nil, invalid("thread already archived: %s", th.ID)
+		}
+		th.Archived, th.Status, th.Flags = true, "notLoaded", nil
+		return map[string]any{}, nil
 	case "thread/read":
 		th, e := thread()
 		if e != nil {

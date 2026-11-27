@@ -30,6 +30,8 @@ type Fake struct {
 	// Renamed: every accepted RenameThread; RenameErr fails it (tests).
 	Renamed   []FakeRename
 	RenameErr error
+	// Organized: every accepted OrganizeThread call, "threadID:action".
+	Organized []string
 	// Uploads: every UploadAttachment, in order. Discarded: discarded ids.
 	Uploads   []FakeUpload
 	Discarded []string
@@ -671,6 +673,41 @@ func (f *Fake) RenameThread(_ context.Context, threadID, title string) error {
 	}
 	t.Title = strings.TrimSpace(title)
 	f.Renamed = append(f.Renamed, FakeRename{ThreadID: threadID, Title: t.Title})
+	return nil
+}
+
+// OrganizeThread applies settle and archive with T3's own refusals
+// (orchestration_error, as t3_thread_organize returns them).
+func (f *Fake) OrganizeThread(_ context.Context, threadID, action string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.threads[threadID]
+	if !ok {
+		return &ToolError{Tool: "t3_thread_organize", Code: "thread_not_found", Message: "Thread not found."}
+	}
+	refuse := func(msg string) error {
+		return &ToolError{Tool: "t3_thread_organize", Code: "orchestration_error", Message: "Thread " + threadID + " " + msg}
+	}
+	now := f.now()
+	switch action {
+	case "settle":
+		switch {
+		case t.Archived:
+			return refuse("is archived.")
+		case t.ActiveRunID != "":
+			return refuse("is still running. Stop it before settling.")
+		}
+		t.Settled, t.SettledAt = true, &now
+	case "archive":
+		if t.Archived {
+			return refuse("is already archived.")
+		}
+		t.Archived = true
+	default:
+		return &ToolError{Tool: "t3_thread_organize", Code: "invalid_request", Message: "Unsupported action."}
+	}
+	t.UpdatedAt = now
+	f.Organized = append(f.Organized, threadID+":"+action)
 	return nil
 }
 

@@ -212,6 +212,9 @@ type serverContract struct {
 	search sessionListContract
 	// rename: PATCH /api/session/{sessionID} (session.update) takes a title.
 	rename bool
+	// archive: PATCH /api/session/{sessionID} (session.update) takes
+	// "archived". Optional: an older service keeps its other operations.
+	archive bool
 }
 
 func (a *Adapter) check(ctx context.Context) (serverInfo, error) {
@@ -267,15 +270,9 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 		"/api/session":                    {"id", "location", "metadata"},
 		"/api/session/{sessionID}/prompt": {"id", "text", "metadata"},
 	} {
-		shape := spec.Paths[path]["post"].RequestBody.Content["application/json"].Schema
-		if shape.Ref != "" {
-			ref := spec.Components.Schemas[strings.TrimPrefix(shape.Ref, "#/components/schemas/")]
-			shape = schemaShape{}
-			if len(ref) != 0 {
-				if err := json.Unmarshal(ref, &shape); err != nil {
-					return contract, fmt.Errorf("invalid OpenCode %s request schema: %w", path, err)
-				}
-			}
+		shape, err := requestShape(spec.Paths[path]["post"], spec.Components.Schemas)
+		if err != nil {
+			return contract, fmt.Errorf("invalid OpenCode %s request schema: %w", path, err)
 		}
 		for _, field := range fields {
 			if shape.Properties[field] == nil {
@@ -284,9 +281,26 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 		}
 	}
 	contract.search = inspectSessionList(spec.Paths["/api/session"]["get"], spec.Components.Schemas)
-	contract.rename = inspectSessionUpdate(spec.Paths["/api/session/{sessionID}"]["patch"], spec.Components.Schemas)
+	update := spec.Paths["/api/session/{sessionID}"]["patch"]
+	contract.rename = sessionUpdateTakes(update, spec.Components.Schemas, "title")
+	contract.archive = sessionUpdateTakes(update, spec.Components.Schemas, "archived")
 	a.verified = contract
 	return contract, nil
+}
+
+// requestShape is op's JSON request schema, with a component $ref resolved.
+func requestShape(op operation, schemas map[string]json.RawMessage) (schemaShape, error) {
+	shape := op.RequestBody.Content["application/json"].Schema
+	if shape.Ref == "" {
+		return shape, nil
+	}
+	ref := schemas[strings.TrimPrefix(shape.Ref, "#/components/schemas/")]
+	shape = schemaShape{}
+	if len(ref) == 0 {
+		return shape, nil
+	}
+	err := json.Unmarshal(ref, &shape)
+	return shape, err
 }
 func (a *Adapter) Health(ctx context.Context) execution.Health {
 	if a.onHealth != nil {

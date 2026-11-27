@@ -13,20 +13,14 @@ var _ execution.SessionNamer = (*Adapter)(nil)
 
 const sessionRenameUnavailable = "This OpenCode version cannot rename sessions (session.update with a title)."
 
-// inspectSessionUpdate reports whether session.update takes a title.
-func inspectSessionUpdate(op operation, components map[string]json.RawMessage) bool {
+// sessionUpdateTakes reports whether session.update takes field (title,
+// archived).
+func sessionUpdateTakes(op operation, components map[string]json.RawMessage, field string) bool {
 	if op.OperationID != "session.update" {
 		return false
 	}
-	shape := op.RequestBody.Content["application/json"].Schema
-	if shape.Ref != "" {
-		ref := components[strings.TrimPrefix(shape.Ref, "#/components/schemas/")]
-		shape = schemaShape{}
-		if len(ref) == 0 || json.Unmarshal(ref, &shape) != nil {
-			return false
-		}
-	}
-	return shape.Properties["title"] != nil
+	shape, err := requestShape(op, components)
+	return err == nil && shape.Properties[field] != nil
 }
 
 // RenameSession sets the session's title (PATCH /api/session/{id}).

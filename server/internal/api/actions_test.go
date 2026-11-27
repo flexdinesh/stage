@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -29,6 +30,7 @@ type actionHarness struct {
 	hostedAdapter
 	calls   chan execution.ActionRequest
 	gone    atomic.Bool
+	closed  atomic.Bool
 	onClear func(context.Context, execution.SessionRef) error
 }
 
@@ -54,6 +56,7 @@ func (*actionHarness) Features(ctx context.Context) (execution.Capabilities, err
 		{ID: "clear", Label: "Clear", Target: execution.TargetSession, Callers: users, Availability: available, Destructive: true, Confirm: "Clear the label?"},
 		{ID: "busy", Label: "Busy", Target: execution.TargetSession, Callers: both, Availability: available},
 		{ID: "later", Label: "Later", Target: execution.TargetSession, Callers: both, Availability: execution.Availability{Reason: "Connect first."}},
+		{ID: "close", Label: "Close in Kit", Target: execution.TargetSession, Callers: both, Availability: available, Confirm: "Kit closes this session."},
 		{ID: "open-workspace", Label: "Open workspace", Target: execution.TargetProject, Callers: both, Availability: available},
 	}
 	return c, err
@@ -81,8 +84,15 @@ func (a *actionHarness) Observe(ctx context.Context, ref execution.SessionRef) (
 	if a.gone.Load() {
 		return execution.Observation{}, execution.ErrNotFound
 	}
-	return a.hostedAdapter.Observe(ctx, ref)
+	o, err := a.hostedAdapter.Observe(ctx, ref)
+	if a.closed.Load() {
+		o.Actions = closedStates
+	}
+	return o, err
 }
+
+// closedStates: the session's own state rules out "close" (already closed).
+var closedStates = []execution.ActionState{{ID: "close", Availability: execution.Availability{Reason: "Already closed in Kit."}}}
 
 func (a *actionHarness) Act(ctx context.Context, req execution.ActionRequest) (execution.ActionResult, error) {
 	if req.ID == "busy" {
@@ -215,7 +225,7 @@ func TestDeclaredActionsLocalAndWorker(t *testing.T) {
 			agent := map[string]string{"Stage-Action-Agent": "1", "Stage-Caller-Session": fmt.Sprintf("%d:agent-session", conn)}
 			var actions []execution.Action
 			e.must("GET", path, nil, http.StatusOK, &actions)
-			if len(actions) != 4 || !slices.ContainsFunc(actions, func(a execution.Action) bool {
+			if len(actions) != 5 || !slices.ContainsFunc(actions, func(a execution.Action) bool {
 				return a.ID == "later" && !a.Availability.Available && a.Availability.Reason == "Connect first."
 			}) {
 				t.Fatalf("user actions %+v", actions)
@@ -223,7 +233,7 @@ func TestDeclaredActionsLocalAndWorker(t *testing.T) {
 			if !slices.ContainsFunc(actions, func(a execution.Action) bool { return a.ID == "label" && a.Label == "Label in repo" }) {
 				t.Fatalf("session actions left the workspace pinned at launch: %+v", actions)
 			}
-			if rec := raw(t, e.h, "GET", path, agent, nil, &actions); rec.Code != 200 || len(actions) != 3 ||
+			if rec := raw(t, e.h, "GET", path, agent, nil, &actions); rec.Code != 200 || len(actions) != 4 ||
 				slices.ContainsFunc(actions, func(a execution.Action) bool { return a.ID == "clear" }) {
 				t.Fatalf("agent actions %s", rec.Body)
 			}
@@ -234,6 +244,45 @@ func TestDeclaredActionsLocalAndWorker(t *testing.T) {
 			e.must("POST", path+"/later", json.RawMessage(`{}`), http.StatusConflict, nil)
 			e.must("POST", path+"/open-workspace", json.RawMessage(`{}`), http.StatusNotFound, nil)
 			e.must("POST", path+"/busy", json.RawMessage(`{}`), http.StatusConflict, nil)
+			// Never on its own work: the task's own session cannot act on itself.
+			self := map[string]string{"Stage-Caller-Session": fmt.Sprintf("%d:%s", conn, task.Session.ExternalSessionID)}
+			if rec := raw(t, e.h, "POST", path+"/close", self, json.RawMessage(`{}`), nil); rec.Code != 403 || !strings.Contains(rec.Body.String(), "self_action_forbidden") {
+				t.Fatalf("self action %d %s", rec.Code, rec.Body)
+			}
+			// The fresh observation at dispatch rules the action out.
+			actor.closed.Store(true)
+			if msg := e.refused("POST", path+"/close", json.RawMessage(`{}`), http.StatusConflict); msg != "Already closed in Kit." {
+				t.Fatalf("closed session dispatch: %q", msg)
+			}
+			// The list reads the last stored observation.
+			sessionAction := func(id string) execution.Action {
+				t.Helper()
+				e.must("GET", path, nil, http.StatusOK, &actions)
+				i := slices.IndexFunc(actions, func(a execution.Action) bool { return a.ID == id })
+				if i < 0 {
+					t.Fatalf("%s missing from %+v", id, actions)
+				}
+				return actions[i]
+			}
+			if a := sessionAction("close"); !a.Availability.Available {
+				t.Fatalf("stored observation without states changed availability: %+v", a)
+			}
+			stored, err := e.store.Observation(ctx, *task.Session)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored.Actions = closedStates
+			stored.UpdatedAt = stored.UpdatedAt.Add(time.Second)
+			if err := e.store.PutObservation(ctx, stored); err != nil {
+				t.Fatal(err)
+			}
+			if a := sessionAction("close"); a.Availability.Available || a.Availability.Reason != "Already closed in Kit." {
+				t.Fatalf("stored closed state not applied: %+v", a)
+			}
+			if a := sessionAction("later"); a.Availability.Reason != "Connect first." {
+				t.Fatalf("declared reason replaced: %+v", a)
+			}
+			actor.closed.Store(false)
 			for _, bad := range []string{
 				`{"name":"fake-secret","scope":"missing","pinned":false}`,
 				`{"name":"fake-secret","scope":"brief"}`,

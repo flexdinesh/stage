@@ -181,7 +181,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	if contract.rename {
 		ops[execution.OpSessionRename] = available
 	}
-	return execution.Capabilities{Operations: ops, ModeLabel: "Agent", Options: launchOptions()}, nil
+	return execution.Capabilities{Operations: ops, ModeLabel: "Agent", Options: launchOptions(), Actions: sessionActions(contract)}, nil
 }
 
 // optionWorktree is the worktree launch option: OpenCode creates the

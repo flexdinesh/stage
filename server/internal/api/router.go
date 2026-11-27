@@ -429,6 +429,7 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	var outcome *execution.OutcomeUncertain
 	var notListed *workspaceNotListed
 	var forbidden actionForbidden
+	var self selfForbidden
 	switch {
 	case errors.As(err, &outcome):
 		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": outcome.Error(), "code": "outcome_uncertain"})
@@ -436,6 +437,8 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": notListed.Error(), "code": "workspace_not_listed"})
 	case errors.As(err, &forbidden):
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error(), "code": "action_forbidden"})
+	case errors.As(err, &self):
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": self.msg, "code": "self_action_forbidden"})
 	case errors.As(err, &uncertain):
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": uncertain.Error(), "code": "action_outcome_unknown"})
 	case errors.As(err, &unavailable):

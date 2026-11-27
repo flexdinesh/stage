@@ -33,6 +33,17 @@ func (s *server) taskRequests(w http.ResponseWriter, r *http.Request) error {
 // caller. Best effort: a request naming no caller session passes. It returns
 // the named caller session for attribution.
 func (s *server) selfAction(w http.ResponseWriter, r *http.Request, id int64, msg string) (*db.SessionRef, bool, error) {
+	ref, own, err := s.callerOwns(r, id)
+	if err != nil || !own {
+		return ref, false, err
+	}
+	writeJSON(w, http.StatusForbidden, map[string]string{"error": msg, "code": "self_action_forbidden"})
+	return ref, true, nil
+}
+
+// callerOwns reports whether the request's caller session belongs to task
+// id, returning the named caller session (nil when none is named).
+func (s *server) callerOwns(r *http.Request, id int64) (*db.SessionRef, bool, error) {
 	v := r.Header.Get(agentctx.CallerHeader)
 	if v == "" {
 		return nil, false, nil
@@ -48,11 +59,26 @@ func (s *server) selfAction(w http.ResponseWriter, r *http.Request, id int64, ms
 	if err != nil {
 		return nil, false, err
 	}
-	if owner.ID == id {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": msg, "code": "self_action_forbidden"})
-		return &ref, true, nil
+	return &ref, owner.ID == id, nil
+}
+
+// selfForbidden is 403 self_action_forbidden (selfAction) as an error.
+type selfForbidden struct{ msg string }
+
+func (e selfForbidden) Error() string { return e.msg }
+
+// forbidSelfSessionAction refuses a session action from task id's own
+// session: closing it can infer completion, which an agent never does for
+// its own work (ADR 0011).
+func (s *server) forbidSelfSessionAction(r *http.Request, id int64) error {
+	_, own, err := s.callerOwns(r, id)
+	if err != nil {
+		return err
 	}
-	return &ref, false, nil
+	if own {
+		return selfForbidden{"An agent cannot run actions on its own session. The user or another agent runs them."}
+	}
+	return nil
 }
 
 // respondRequest answers a pending request of task id's session; never

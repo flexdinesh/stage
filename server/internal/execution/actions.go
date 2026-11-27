@@ -70,6 +70,38 @@ type Action struct {
 
 func (a Action) Allows(c Caller) bool { return slices.Contains(a.Callers, c) }
 
+// ActionState is one session's availability of a declared session action,
+// reported on its observation.
+type ActionState struct {
+	ID string `json:"id"`
+	Availability
+}
+
+// ApplyActionStates makes declared session actions unavailable where a
+// session's states say so. A state never makes an unavailable declaration
+// available.
+func ApplyActionStates(actions []Action, states []ActionState) []Action {
+	if len(states) == 0 {
+		return actions
+	}
+	out := slices.Clone(actions)
+	for i, a := range out {
+		if a.Target != TargetSession || !a.Availability.Available {
+			continue
+		}
+		j := slices.IndexFunc(states, func(s ActionState) bool { return s.ID == a.ID })
+		if j < 0 || states[j].Available {
+			continue
+		}
+		reason := strings.TrimSpace(states[j].Reason)
+		if reason == "" {
+			reason = "The harness cannot run this action for this session."
+		}
+		out[i].Availability = Availability{Reason: reason}
+	}
+	return out
+}
+
 type Tone string
 
 const (

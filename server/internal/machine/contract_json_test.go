@@ -47,7 +47,8 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		Reply:  &execution.Reply{ItemID: "i", RunID: "r", Text: "done", Truncated: true, UpdatedAt: at},
 		Usage:  &execution.Usage{Turns: 2, InputTokens: 3, CacheReadTokens: 4, CacheWriteTokens: 5, OutputTokens: 6, WorkingMs: 7, CostUSD: &cost},
 		Closed: &execution.Closure{Signal: execution.ClosedSettled}, StateReason: execution.ReasonOwnerExited, Origin: "cli",
-		Facts: []execution.Fact{{ID: "review", Label: "Review", Value: "Ready", Link: "https://web/review", Copyable: true, Tone: execution.ToneOK}},
+		Facts:   []execution.Fact{{ID: "review", Label: "Review", Value: "Ready", Link: "https://web/review", Copyable: true, Tone: execution.ToneOK}},
+		Actions: []execution.ActionState{{ID: "archive", Availability: execution.Availability{Reason: "Already archived."}}},
 	}
 	machineID := int64(3)
 	binding := db.ProjectBinding{

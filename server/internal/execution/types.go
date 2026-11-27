@@ -343,6 +343,11 @@ type Observation struct {
 	Usage       *Usage      `json:"usage,omitempty"` // nil: the harness reports none (or has not yet)
 	Facts       []Fact      `json:"facts,omitempty"`
 	Closed      *Closure    `json:"closed,omitempty"`
+	// Actions: the session's own availability of declared session actions
+	// (Capabilities.Actions), in the harness's vocabulary. Stage applies
+	// them to that session's actions (ApplyActionStates); an action left
+	// out keeps its declared availability.
+	Actions []ActionState `json:"actions,omitempty"`
 	// StateReason qualifies State; "" when the state speaks for itself.
 	StateReason string `json:"stateReason,omitempty"`
 	// Origin is the client that started the session as the harness

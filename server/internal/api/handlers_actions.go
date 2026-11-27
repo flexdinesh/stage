@@ -218,6 +218,14 @@ func (s *server) actions(w http.ResponseWriter, r *http.Request, target executio
 			return err
 		}
 		actions = visibleActions(actions, target, actionCaller(r))
+		if site.request.Session != nil {
+			// The last stored observation carries the session's own availability.
+			o, err := s.Store.Observation(r.Context(), *site.request.Session)
+			if err != nil && !errors.Is(err, db.ErrNotFound) {
+				return err
+			}
+			actions = execution.ApplyActionStates(actions, o.Actions)
+		}
 		if target == execution.TargetConnection {
 			actions, _, err = site.liveSetupActions(r.Context(), actions)
 			if err != nil {
@@ -299,6 +307,11 @@ func (s *server) runAction(r *http.Request, site actionSite, setupRoute bool) (e
 	if !action.Availability.Available {
 		return result, &db.ConflictError{Code: code, Msg: action.Availability.Reason}
 	}
+	if site.request.Session != nil {
+		if err := s.forbidSelfSessionAction(r, site.taskID); err != nil {
+			return result, err
+		}
+	}
 	site.request.ID, site.request.Input = action.ID, body
 	if site.connectionID != 0 && !s.Store.ConnectionActive(site.connectionID) {
 		return result, db.ConnectionRetired()
@@ -324,6 +337,10 @@ func (s *server) runAction(r *http.Request, site actionSite, setupRoute bool) (e
 			}
 			if fresh.Session != *site.request.Session {
 				return result, fmt.Errorf("%w: the harness no longer reports the task's linked session", db.ErrNotFound)
+			}
+			// The session's current state can rule the action out (already archived).
+			if state := execution.ApplyActionStates([]execution.Action{action}, fresh.Actions)[0]; !state.Availability.Available {
+				return result, &db.ConflictError{Code: "operation_unavailable", Msg: state.Availability.Reason}
 			}
 		} else if site.request.Project != nil {
 			workspaces, err := site.adapter.Workspaces(ctx)

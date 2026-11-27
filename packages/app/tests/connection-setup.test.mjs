@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { actionBody, availableSetupActions, clearSecrets, initialValues, settingsBody } from "../src/lib/connectionSetup.ts";
+import { actionBody, availableSetupActions, clearSecrets, initialValues, settingsBody, splitToolbarActions } from "../src/lib/connectionSetup.ts";
 
 const fields = [
   { id: "endpoint", label: "Server URL", kind: "url" },
@@ -67,4 +67,18 @@ test("a generic setup uses both declaration and live availability, for users onl
     ["repair", { available: false, reason: "Start the relay first" }],
     ["export", { available: false, reason: "Disabled by policy" }],
   ]);
+});
+
+const sessionAction = (id, extra = {}) => ({ id, label: id, target: "session", destructive: false, callers: ["user", "agent"], availability: { available: true }, ...extra });
+
+test("task toolbar: user actions without input become buttons, actions with input keep their form", () => {
+  const action = sessionAction;
+  const settle = action("settle", { confirm: "T3 settles this session." });
+  const archive = action("archive", { availability: { available: false, reason: "Already archived in T3." } });
+  const label = action("label", { input: [{ id: "name", label: "Name", kind: "text" }] });
+  const noInput = action("refresh", { input: [] });
+  const agentOnly = action("agent", { callers: ["agent"] });
+  const { buttons, forms } = splitToolbarActions([settle, archive, label, noInput, agentOnly]);
+  assert.deepEqual(buttons.map((a) => a.id), ["settle", "archive", "refresh"], "unavailable stays visible with its reason");
+  assert.deepEqual(forms.map((a) => a.id), ["label"]);
 });

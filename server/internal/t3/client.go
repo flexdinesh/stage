@@ -77,6 +77,10 @@ type Client interface {
 	ReadPendingQuestion(ctx context.Context, threadID, requestID string) (PendingQuestion, error)
 	// RespondPendingQuestion calls t3_pending_request respond.
 	RespondPendingQuestion(ctx context.Context, threadID, requestID string, answers map[string]Answer) error
+	// OrganizeThread calls t3_thread_organize {threadId, action} (settle,
+	// archive). T3 validates it: an archived thread cannot settle, a running
+	// one cannot settle, an archived one cannot archive again.
+	OrganizeThread(ctx context.Context, threadID, action string) error
 	// Capabilities calls orchestrator_capabilities. Returns all providers
 	// unfiltered; callers drop providers with non-empty Constraints.
 	Capabilities(ctx context.Context) (Catalog, error)
