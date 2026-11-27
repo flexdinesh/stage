@@ -13,19 +13,20 @@ type Op string
 
 // Operations.
 const (
-	OpLaunch    Op = "launch"    // start a session for a task
-	OpStop      Op = "stop"      // stop a session
-	OpAdopt     Op = "adopt"     // track a session Stage did not launch
-	OpReply     Op = "reply"     // read the session's final reply
-	OpOpening   Op = "opening"   // read the session's opening prompt
-	OpAttention Op = "attention" // list sessions waiting for their user
-	OpImages    Op = "images"    // launch with image attachments
-	OpRespond   Op = "respond"   // list and answer pending requests (Interactive)
-	OpSend      Op = "send"      // send a message to the session (Interactive)
+	OpLaunch        Op = "launch"        // start a session for a task
+	OpStop          Op = "stop"          // stop a session
+	OpAdopt         Op = "adopt"         // track a session Stage did not launch
+	OpReply         Op = "reply"         // read the session's final reply
+	OpOpening       Op = "opening"       // read the session's opening prompt
+	OpAttention     Op = "attention"     // list sessions waiting for their user
+	OpSessionSearch Op = "sessionSearch" // browse a harness's listed session metadata
+	OpImages        Op = "images"        // launch with image attachments
+	OpRespond       Op = "respond"       // list and answer pending requests (Interactive)
+	OpSend          Op = "send"          // send a message to the session (Interactive)
 )
 
 // Ops are every operation, in a fixed order.
-var Ops = []Op{OpLaunch, OpStop, OpAdopt, OpReply, OpOpening, OpAttention, OpImages, OpRespond, OpSend}
+var Ops = []Op{OpLaunch, OpStop, OpAdopt, OpReply, OpOpening, OpAttention, OpSessionSearch, OpImages, OpRespond, OpSend}
 
 // DeclaresOperations reports an operation c leaves out, or one unavailable
 // without a reason. Every adapter declares them all (its contract tests).

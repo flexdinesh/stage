@@ -118,6 +118,7 @@ func registerTrait[T any](name string) optionalTrait {
 
 var optionalTraits = []optionalTrait{
 	registerTrait[LinkResolver]("linkResolver"),
+	registerTrait[SessionSearcher]("sessionSearcher"),
 	registerTrait[WorkspaceFeatures]("workspaceFeatures"),
 	registerTrait[Correlator]("correlator"),
 	registerTrait[EventSource]("eventSource"),

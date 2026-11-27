@@ -162,6 +162,20 @@ func (h *Host) Handlers() map[string]workerchan.WorkerHandler {
 			}
 			return refs, err
 		}),
+		KindSessionSearch: h.with(func(ctx context.Context, a execution.Adapter, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
+			searcher, ok := execution.As[execution.SessionSearcher](a)
+			if !ok {
+				return nil, unsupported("session search")
+			}
+			var q execution.SessionSearchQuery
+			if err := decode(env, &q); err != nil {
+				return nil, err
+			}
+			if err := q.Valid(); err != nil {
+				return nil, err
+			}
+			return searcher.SearchSessions(ctx, q)
+		}),
 		KindOpening: h.with(func(ctx context.Context, a execution.Adapter, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
 			var r OpeningRequest
 			if err := decode(env, &r); err != nil {

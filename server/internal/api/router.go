@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -92,13 +93,14 @@ type server struct {
 	Deps
 	log *slog.Logger
 	// mux is the /api route table (what the agent gateway route serves).
-	mux            *http.ServeMux
-	setupMutations sync.Map
+	mux                    *http.ServeMux
+	setupMutations         sync.Map
+	sessionSearchCursorKey []byte
 }
 
 // NewRouter returns the /api handler.
 func NewRouter(deps Deps) http.Handler {
-	s := &server{Deps: deps, log: deps.Logger}
+	s := &server{Deps: deps, log: deps.Logger, sessionSearchCursorKey: []byte(rand.Text())}
 	if s.log == nil {
 		s.log = slog.Default()
 	}
@@ -260,6 +262,7 @@ func NewRouter(deps Deps) http.Handler {
 	agent("GET /api/attachments/{id}", s.getAttachment)
 	h("DELETE /api/attachments/{id}", s.deleteAttachment)
 
+	h("GET /api/connections/{connectionId}/sessions", s.searchSessions)
 	agent("GET /api/connections/{connectionId}/sessions/{id}/context", s.sessionContext)
 	agent("POST /api/connections/{connectionId}/sessions/{id}/adopt", s.adoptSession)
 
