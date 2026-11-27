@@ -84,6 +84,24 @@ plus harness details. The API attaches full-sync time, error and progress as
 panel. The API exposes the same setup routes on each machine.
 [Connection API](api.md#harness-connections-api-v6)
 
+Display probes add facts to a connected status from the harness's own API,
+inside the setup package. Each call is bounded, and the result is cached
+for `harness.FactsTTL` (one minute): status reads reuse it, refreshes
+included, and the `check` action probes again. A failed or slow probe becomes a `bad` fact, never a status
+error. The `Stage MCP` fact reports the server `stage setup` registers
+(`harness.StageMCPName`): Codex `mcpServerStatus/list` for that server,
+OpenCode `GET /api/mcp` without a location, and Claude Code
+`claude mcp get stage` from the home folder, beside its version and login
+checks. `mcp list` is not used because it health-checks every server.
+`Connected` is `ok`. `Not configured` is `warn`, and when the status has no
+other fix, the fix names the matching setup command for the machine's CLI
+(`harness.Ports.CLI`). The phase does not change. T3 has no such fact,
+because it configures MCP for each provider. Codex also reports usage from
+`account/rateLimits/read` for a ChatGPT login: primary and secondary windows
+in Codex's words (`5h limit`, `Weekly limit`), the percent used and the
+reset time in the machine's local time. The fact is `warn` at 80% and `bad`
+at 100%. A failed usage read omits the usage facts.
+
 `Compose` takes machine-bound ports. `Settings.Get` reads a public JSON
 object by kind and `Settings.Save` applies a partial update. Omitted fields
 keep their values. Null resets a setting to its module default. `Secrets`

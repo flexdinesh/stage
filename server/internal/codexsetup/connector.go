@@ -48,12 +48,19 @@ func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, e
 		}
 		fix = &harness.Fix{Text: note, Command: d.Fix}
 	}
+	var extra harness.Probed
+	if state == StateConnected {
+		extra = c.svc.extras(ctx, d.Account)
+	}
+	if fix == nil {
+		fix = extra.Fix
+	}
 	return harness.Status{
 		Summary: sum,
 		State:   state,
 		Reason:  reason,
 		Phase:   phase,
-		Facts:   statusFacts(state, d),
+		Facts:   statusFacts(state, d, extra.Facts),
 		Fix:     fix,
 		Fields:  []harness.FieldState{{ID: "binary", Value: d.Binary, Set: d.Binary != "", Source: src}},
 		Actions: []harness.ActionState{{ID: codex.ActionConnect, Available: true}, {ID: codex.ActionCheck, Available: true}},
@@ -61,7 +68,7 @@ func (c *Connector) Status(ctx context.Context, refresh bool) (harness.Status, e
 	}, nil
 }
 
-func statusFacts(state string, d Details) []execution.Fact {
+func statusFacts(state string, d Details, extra []execution.Fact) []execution.Fact {
 	var facts []execution.Fact
 	for _, fact := range []execution.Fact{
 		{ID: "cliVersion", Label: "Codex CLI version", Value: d.CLIVersion},
@@ -100,6 +107,7 @@ func statusFacts(state string, d Details) []execution.Fact {
 	} else if state == StateSignedOut {
 		facts = append(facts, execution.Fact{ID: "account", Label: "Account", Value: "Not signed in", Tone: execution.ToneWarn})
 	}
+	facts = append(facts, extra...)
 	if d.CheckedAt != nil {
 		facts = append(facts, execution.Fact{ID: "checkedAt", Label: "Last checked", Value: d.CheckedAt.Format(time.RFC3339)})
 	}
@@ -133,6 +141,7 @@ func (c *Connector) Run(ctx context.Context, action string, input json.RawMessag
 		}
 	}
 	if action == codex.ActionCheck {
+		c.svc.probed.Forget() // an explicit check probes the facts again
 		status, err := c.Status(ctx, true)
 		return status.CheckResult(), err
 	}

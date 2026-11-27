@@ -30,6 +30,12 @@ type Options struct {
 	// Daemon runs the CLI's daemon commands for binary (default codex.CLI).
 	Daemon func(binary string) codex.Daemon
 	Logger *slog.Logger
+	// ProbeTimeout bounds each display probe call (default probeTimeout).
+	ProbeTimeout time.Duration
+	// Now and Location format usage reset times (default time.Now and
+	// the machine's local zone).
+	Now      func() time.Time
+	Location *time.Location
 }
 
 // Setup states (harness.Status.State).
@@ -78,6 +84,8 @@ type Service struct {
 	reason  string
 	details Details
 	checked time.Time
+	// probed is the display probes' last result (extras).
+	probed harness.Cached[harness.Probed]
 }
 
 // New loads the machine's setup and, when it was connected, installs the
@@ -161,6 +169,7 @@ func (s *Service) Connect(ctx context.Context) (harness.Result, error) {
 	}
 	s.saved, s.id, s.client, s.active = next, id, client, true
 	s.state, s.reason, s.details.Fix = StateConnected, "", ""
+	s.probed.Forget()
 	return res, nil
 }
 
@@ -191,6 +200,7 @@ func (s *Service) Disconnect(ctx context.Context) error {
 	}
 	s.saved, s.client, s.active = next, nil, false
 	s.state, s.reason, s.details.Fix = StateNotConnected, "", ""
+	s.probed.Forget()
 	return nil
 }
 
@@ -219,6 +229,7 @@ func (s *Service) SetBinary(ctx context.Context, binary string) error {
 		}
 	}
 	s.checked = time.Time{}
+	s.probed.Forget()
 	return nil
 }
 

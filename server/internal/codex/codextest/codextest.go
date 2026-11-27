@@ -67,6 +67,10 @@ type Server struct {
 	unsupported map[string]bool
 	drop        map[string]int
 	calls       map[string]int
+	// mcpServers answers mcpServerStatus/list; rateLimits
+	// account/rateLimits/read (nil: Codex's auth error).
+	mcpServers []map[string]any
+	rateLimits map[string]any
 }
 
 type wsClient struct {
@@ -95,6 +99,8 @@ func New(t testing.TB) *Server {
 		Path: filepath.Join(dir, "s.sock"), CodexHome: "/home/u/.codex",
 		clients: map[*wsClient]bool{}, threads: map[string]*Thread{}, now: 1_795_000_000,
 		projects: map[string]string{}, unsupported: map[string]bool{}, drop: map[string]int{}, calls: map[string]int{},
+		mcpServers: []map[string]any{MCPServer("stage", "")},
+		rateLimits: map[string]any{"primary": Window(12, 300, 1_795_003_600), "secondary": Window(30, 10080, 1_795_300_000)},
 		models: []map[string]any{
 			{"id": "gpt-test", "model": "gpt-test", "displayName": "GPT Test", "hidden": false, "isDefault": true, "defaultReasoningEffort": "low",
 				"supportedReasoningEfforts": []map[string]string{{"reasoningEffort": "low", "description": "fast"}, {"reasoningEffort": "high", "description": "deep"}}, "inputModalities": []string{"text", "image"}},
@@ -185,6 +191,28 @@ func (s *Server) Supported(method string) { s.mu.Lock(); delete(s.unsupported, m
 
 // DropReply performs method's next n calls without answering them.
 func (s *Server) DropReply(method string, n int) { s.mu.Lock(); s.drop[method] = n; s.mu.Unlock() }
+
+// SetMCPServers sets the configured MCP servers (MCPServer entries).
+func (s *Server) SetMCPServers(v ...map[string]any) { s.mu.Lock(); s.mcpServers = v; s.mu.Unlock() }
+
+// SetRateLimits sets the account's rateLimits snapshot (nil: the read
+// fails as for a non-ChatGPT login).
+func (s *Server) SetRateLimits(v map[string]any) { s.mu.Lock(); s.rateLimits = v; s.mu.Unlock() }
+
+// MCPServer is a mcpServerStatus/list entry; toolsError "" is none.
+func MCPServer(name, toolsError string) map[string]any {
+	m := map[string]any{"name": name, "runtimeStatus": nil, "serverInfo": nil, "tools": map[string]any{}, "toolsError": nil, "resources": []any{}, "resourceTemplates": []any{}, "authStatus": "unsupported"}
+	if toolsError != "" {
+		m["toolsError"] = toolsError
+	}
+	return m
+}
+
+// Window is a rate limit window: percent used, length in minutes and the
+// Unix reset time.
+func Window(used float64, mins, resetsAt int64) map[string]any {
+	return map[string]any{"usedPercent": used, "windowDurationMins": mins, "resetsAt": resetsAt}
+}
 
 // Calls is how often method ran.
 func (s *Server) Calls(method string) int { s.mu.Lock(); defer s.mu.Unlock(); return s.calls[method] }
@@ -410,6 +438,24 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		return map[string]any{"account": map[string]any{"type": "chatgpt", "email": "u@example.com", "planType": "pro"}, "userId": "u", "requiresOpenaiAuth": true}, nil
 	case "model/list":
 		return map[string]any{"data": s.models, "nextCursor": nil}, nil
+	case "mcpServerStatus/list":
+		name := str("serverName")
+		data := []map[string]any{}
+		for _, m := range s.mcpServers {
+			if name == "" || m["name"] == name {
+				data = append(data, m)
+			}
+		}
+		return map[string]any{"data": data, "nextCursor": nil}, nil
+	case "account/rateLimits/read":
+		if s.signedOut || s.rateLimits == nil {
+			return nil, invalid("codex account authentication required to read rate limits")
+		}
+		snap := map[string]any{"limitId": "codex", "limitName": nil, "primary": nil, "secondary": nil, "credits": nil, "planType": "pro", "rateLimitReachedType": nil}
+		for k, v := range s.rateLimits {
+			snap[k] = v
+		}
+		return map[string]any{"ordinaryUsageAllowed": true, "rateLimits": snap, "rateLimitsByLimitId": map[string]any{"codex": snap}, "rateLimitResetCredits": nil, "accountId": nil, "rateLimitUpsell": nil}, nil
 	case "config/read":
 		projects := map[string]any{}
 		for path, level := range s.projects {

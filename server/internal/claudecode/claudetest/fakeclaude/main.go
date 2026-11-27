@@ -34,8 +34,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, "fakeclaude:", err)
 		os.Exit(2)
 	}
+	if hang {
+		time.Sleep(time.Minute) // after the state lock is released
+	}
 	os.Exit(code)
 }
+
+// hang: the command answered but keeps running (HangMCP).
+var hang bool
 
 func run(s *fakestate.State, args []string) (int, error) {
 	s.Calls = append(s.Calls, fakestate.Call{Args: args, Env: claudeEnv(), Dir: cwd()})
@@ -52,6 +58,23 @@ func run(s *fakestate.State, args []string) (int, error) {
 		if !s.LoggedIn {
 			return 1, nil
 		}
+		return 0, nil
+	case len(args) == 3 && args[0] == "mcp" && args[1] == "get":
+		hang = s.HangMCP
+		m, ok := s.MCP[args[2]]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "No MCP server named %q.\n", args[2])
+			return 1, nil
+		}
+		if m.Raw != "" {
+			fmt.Print(m.Raw)
+			return 0, nil
+		}
+		fmt.Printf("%s:\n  Scope: User config (available in all your projects)\n  Status: %s\n", args[2], m.Status)
+		if m.Issue != "" {
+			fmt.Printf("  Issue: %s\n", m.Issue)
+		}
+		fmt.Printf("  Type: stdio\n  Command: stage\n  Args: mcp\n\nTo remove this server, run: claude mcp remove %s -s user\n", args[2])
 		return 0, nil
 	case len(args) >= 1 && args[0] == "agents":
 		if s.FailAgents {

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type Server struct {
@@ -25,11 +26,17 @@ type Server struct {
 	// Pairs counts POST /api/pair calls.
 	Pairs   int
 	version string
+	// mcp answers GET /api/mcp; mcpDelay holds its reply, mcpFail (a
+	// status code) fails it.
+	mcp      []map[string]any
+	mcpDelay time.Duration
+	mcpFail  int
 }
 
 // New starts a fake service; password "" requires no auth.
 func New(t testing.TB, password string) *Server {
-	s := &Server{password: password, codes: map[string]bool{}, tokens: map[string]bool{}, version: "2.3.0"}
+	s := &Server{password: password, codes: map[string]bool{}, tokens: map[string]bool{}, version: "2.3.0",
+		mcp: []map[string]any{MCP("stage", "connected", "")}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.Close)
 	return s
@@ -48,6 +55,27 @@ func (s *Server) SetVersion(v string) {
 	defer s.mu.Unlock()
 	s.version = v
 }
+
+// MCP is a GET /api/mcp entry; errText is set for failed and needs_auth.
+func MCP(name, status, errText string) map[string]any {
+	st := map[string]any{"status": status}
+	if errText != "" {
+		st["error"] = errText
+	}
+	return map[string]any{"name": name, "status": st}
+}
+
+// SetMCP sets the configured MCP servers (MCP entries).
+func (s *Server) SetMCP(servers ...map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mcp = servers
+}
+
+// DelayMCP holds GET /api/mcp replies for d; FailMCP answers them with
+// code (0: succeed).
+func (s *Server) DelayMCP(d time.Duration) { s.mu.Lock(); s.mcpDelay = d; s.mu.Unlock() }
+func (s *Server) FailMCP(code int)         { s.mu.Lock(); s.mcpFail = code; s.mu.Unlock() }
 
 // Revoke rejects every issued token.
 func (s *Server) Revoke() {
@@ -136,6 +164,23 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(spec())
 	case r.URL.Path == "/api/project":
 		fmt.Fprint(w, `[]`)
+	case r.Method == http.MethodGet && r.URL.Path == "/api/mcp":
+		s.mu.Lock()
+		servers, delay, fail := s.mcp, s.mcpDelay, s.mcpFail
+		s.mu.Unlock()
+		select {
+		case <-time.After(delay):
+		case <-r.Context().Done():
+			return
+		}
+		if fail != 0 {
+			http.Error(w, `{"_tag":"InternalError"}`, fail)
+			return
+		}
+		if servers == nil {
+			servers = []map[string]any{}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"location": map[string]any{"directory": "/home/u"}, "data": servers})
 	default:
 		http.NotFound(w, r)
 	}

@@ -158,7 +158,7 @@ func workerServiceInstalled(ctx context.Context, env Env) bool {
 // process work (machine.LocalOps), over the worker channel. harnessEnv is
 // the machine's harness environment; credentials stay in the worker dir
 // of configPath.
-func workerHost(profile harness.Profile, harnessEnv func(string) string, configPath string, logger *slog.Logger) func(int64, string, workerchan.Upcall) (worker.Host, func(context.Context) (bool, error)) {
+func workerHost(profile harness.Profile, harnessEnv func(string) string, configPath, cli string, logger *slog.Logger) func(int64, string, workerchan.Upcall) (worker.Host, func(context.Context) (bool, error)) {
 	return func(machineID int64, identity string, call workerchan.Upcall) (worker.Host, func(context.Context) (bool, error)) {
 		h := remote.NewHost(machine.NewLocal(machineID, profile, machine.LocalOps{}))
 		setup := workersetup.Attach(workersetup.Options{
@@ -169,6 +169,7 @@ func workerHost(profile harness.Profile, harnessEnv func(string) string, configP
 			StateDir:      worker.Dir(configPath),
 			Logger:        logger,
 			CacheIdentity: identity,
+			CLI:           cli,
 		})
 		return h, func(ctx context.Context) (bool, error) {
 			err := setup.Restore(ctx)
@@ -241,7 +242,7 @@ func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed, localHa
 			onOff = "on"
 		}
 		opts.Logger.Info("machine profile", "profile", profile.Kind, "localHarnesses", onOff)
-		opts.ScopedHost = workerHost(profile, harnessEnv, opts.ConfigPath, opts.Logger)
+		opts.ScopedHost = workerHost(profile, harnessEnv, opts.ConfigPath, env.cliName(), opts.Logger)
 		err = worker.Run(ctx, opts)
 	}
 	if err == nil {
