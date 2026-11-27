@@ -245,6 +245,19 @@ func DefaultSocket(getenv func(string) string, dataDir string) (string, error) {
 	return defaultSocket(getenv, runtime.GOOS, dataDir)
 }
 
+// AgentSocket is the separate, owner-private endpoint for shared local agents.
+func AgentSocket(getenv func(string) string, dataDir string) (string, error) {
+	product, err := DefaultSocket(getenv, dataDir)
+	if err != nil {
+		return "", err
+	}
+	path := strings.TrimSuffix(product, ".sock") + "-agent.sock"
+	if err := listen.CheckSocketPath(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 // DefaultSocketFor is DefaultSocket for goos.
 func DefaultSocketFor(getenv func(string) string, goos, dataDir string) (string, error) {
 	return defaultSocket(getenv, goos, dataDir)

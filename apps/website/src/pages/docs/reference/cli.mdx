@@ -110,7 +110,7 @@ Categories are optional: `finding`, `decision`, `blocker`, `outcome`. The CLI ge
 | `stage setup [--claude] [--codex] [--opencode] [--mcp]` | the Stage skill and an instruction pointer for every agent found (or those named), then a check; `--mcp` also registers stdio MCP with Claude Code and Codex |
 | `stage setup --check` | report only: CLI on `PATH`, server, caller detection, per-agent skill and MCP; exit 1 on problems |
 | `stage setup skill [--claude] [--codex] [--opencode]` | the skill only |
-| `stage setup mcp [--claude] [--codex] [--http]` | register MCP only (`--http` registers `/mcp` instead of stdio) |
+| `stage setup mcp [--claude] [--codex] [--http \| --credential-file FILE]` | register MCP only. Use a private credential file for shared stdio MCP over the network |
 | `stage setup instructions [--claude] [--codex] [--file PATH]` | the instruction pointer only |
 
 Agents are found by their command on `PATH` or their config directory. The skill is `SKILL.md` in `~/.claude/skills/stage/` (Claude Code) and `~/.agents/skills/stage/` (Codex and OpenCode). The instruction pointer is a two-line block in `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`.
@@ -193,11 +193,41 @@ Exit codes: [Install and update](/docs/reference/install).
 The CLI and `stage mcp` reach the server at:
 
 1. `--url URL`
-2. `STAGE_URL`: an `http(s)` URL, or `unix:///abs/path.sock` for a socket
-3. the private default socket, when a server owns it
+2. `STAGE_AGENT_URL` for agent commands, then `STAGE_URL`. Both accept an HTTP(S) address or `unix:///abs/path.sock`
+3. the private shared agent socket for agent commands, then the default Stage socket, when live
 4. `http://127.0.0.1:7380`
 
 `stage status` shows which server the CLI reaches. Agent commands never start a server; when nothing answers, their error suggests `stage service start`. On a worker's machine the CLI finds the worker's agent gateway socket the same way.
+
+## Sign in to shared Stage
+
+```sh
+stage auth login --url https://stage.example.com --email you@example.com
+stage auth whoami --url https://stage.example.com
+stage projects ls --human --url https://stage.example.com
+stage auth logout --url https://stage.example.com
+```
+
+The password prompt hides input. The CLI stores the session for this address
+and installation in an owner-only file under
+`${XDG_CONFIG_HOME:-$HOME/.config}/stage/cli` for the regular installation.
+Use the same address for later commands. A human CLI session has the signed-in
+account's current role. Logout revokes that session and removes the file.
+
+Use the private agent socket for local agents. For a network integration,
+create a separate 30-day agent credential. Use `--target URL` if the agent
+will connect to the same installation at a different address from your CLI.
+
+```sh
+stage auth agent rotate --url https://stage.example.com --out "$HOME/.config/stage-agent/stage.json"
+stage setup mcp --url https://stage.example.com --credential-file "$HOME/.config/stage-agent/stage.json"
+stage auth agent revoke --url https://stage.example.com
+```
+
+The credential file and its directory are owner-only. A network CLI or stdio
+MCP process reads the file from `STAGE_AGENT_CREDENTIAL_FILE`. Rotation
+invalidates the previous bearer for your account. After revocation, remove
+the retired file from the integration's secret storage.
 
 ## Caller context
 

@@ -35,8 +35,8 @@ func runStatus(ctx context.Context, env Env, args []string) error {
 	if len(c.pos) > 0 {
 		return usagef("status: unexpected argument %q", c.pos[0])
 	}
-	res := client.Resolve(c.url, env.Getenv)
-	cl := client.New(res.URL)
+	res := c.resolution()
+	cl := c.apiClient()
 	deadline := time.Now().Add(wait)
 	out := statusOut{URL: res.URL, Source: res.Source, ClientVersion: buildinfo.Version, ClientAPIVersion: buildinfo.APIVersion}
 	for {

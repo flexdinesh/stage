@@ -26,7 +26,7 @@ func runMachine(ctx context.Context, env Env, args []string) error {
 	if err := c.parse(rest); err != nil {
 		return err
 	}
-	cl := client.New(client.Resolve(c.url, env.Getenv).URL)
+	cl := c.apiClient()
 	switch v {
 	case "ls", "list":
 		if len(c.pos) > 0 {

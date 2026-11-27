@@ -40,8 +40,8 @@ func startSharedOwner(t *testing.T, opts serve.Options) (*inst, *syncBuffer) {
 	case err := <-i.done:
 		close(i.done)
 		t.Fatalf("shared startup: %v", err)
-	case <-time.After(10 * time.Second):
-		t.Fatal("shared server did not start")
+	case <-time.After(testStartupTimeout):
+		t.Fatalf("shared server did not start\n%s", logs.String())
 	}
 	return i, logs
 }

@@ -142,8 +142,10 @@ func setupAgents(ctx context.Context, env Env, args []string) error {
 	c := newCmd(env, "setup")
 	agents := agentFlags(c, env)
 	var mcp, check bool
+	var credentialFile string
 	c.fs.BoolVar(&mcp, "mcp", false, "also register the stdio MCP server (Claude Code, Codex)")
 	c.fs.BoolVar(&check, "check", false, "report only: write nothing")
+	c.fs.StringVar(&credentialFile, "credential-file", "", "private agent credential file for network stdio MCP")
 	if err := c.parse(args); err != nil {
 		return err
 	}
@@ -176,21 +178,38 @@ func setupAgents(ctx context.Context, env Env, args []string) error {
 				if a.mcp {
 					mcpArgs = append(mcpArgs, "--"+a.name)
 				} else {
-					warn(env.stdout(), "Skipped %s MCP: register %s as a local MCP server named %s in its config yourself", a.label, cmdText(env.Executable+" mcp"), mcpName)
+					target, file, err := mcpAgentTarget(ctx, env, c.url, credentialFile, false)
+					if err != nil {
+						return err
+					}
+					command := shellArg(env.Executable) + " mcp"
+					if target == "" {
+						target = c.url
+					}
+					if target != "" {
+						command += " --url " + shellArg(target)
+					}
+					warn(env.stdout(), "Register %s as a local MCP server named %s in %s", cmdText(command), mcpName, a.label)
+					if file != "" {
+						fmt.Fprintf(env.Stdout, "Set %s in the MCP server's environment to %s.\n", agentCredentialEnv, file)
+					}
 				}
 			}
 			if len(mcpArgs) > 0 {
 				if c.url != "" {
 					mcpArgs = append(mcpArgs, "--url", c.url)
 				}
-				if err := setupMCP(env, mcpArgs); err != nil {
+				if credentialFile != "" {
+					mcpArgs = append(mcpArgs, "--credential-file", credentialFile)
+				}
+				if err := setupMCP(ctx, env, mcpArgs); err != nil {
 					return err
 				}
 			}
 		}
 		fmt.Fprintln(env.Stdout)
 	}
-	report := setupCheck(ctx, env, c.url, chosen)
+	report := setupCheck(ctx, env, c.url, credentialFile, chosen)
 	if err := c.out(report, func(w io.Writer) { printSetupReport(w, report) }); err != nil {
 		return err
 	}
@@ -229,7 +248,7 @@ func problem(format string, a ...any) checkLine {
 	return checkLine{"problem", fmt.Sprintf(format, a...)}
 }
 
-func setupCheck(ctx context.Context, env Env, url string, agents []agentTarget) setupReport {
+func setupCheck(ctx context.Context, env Env, url, credentialFile string, agents []agentTarget) setupReport {
 	var r setupReport
 	cli := env.cliName()
 	switch path, err := which(env, cli); {
@@ -241,7 +260,7 @@ func setupCheck(ctx context.Context, env Env, url string, agents []agentTarget) 
 		r.CLI = ok("%s on PATH (%s)", cli, env.Executable)
 	}
 
-	res := client.Resolve(url, env.Getenv)
+	res := client.ResolveAgent(url, env.Getenv)
 	h, err := client.New(res.URL).Health(ctx)
 	switch {
 	case err != nil:
@@ -253,8 +272,7 @@ func setupCheck(ctx context.Context, env Env, url string, agents []agentTarget) 
 	}
 
 	if err == nil {
-		ops := (&cmd{env: env, url: url}).ops()
-		cx, cerr := ops.Context(ctx, agenttools.CallerArgs{})
+		cx, cerr := setupCaller(ctx, env, url, credentialFile, h.SharedAccess)
 		switch {
 		case cerr != nil:
 			r.Caller = problem("%v", cerr)
@@ -291,6 +309,32 @@ func setupCheck(ctx context.Context, env Env, url string, agents []agentTarget) 
 		}
 	}
 	return r
+}
+
+func setupCaller(ctx context.Context, env Env, url, file string, shared bool) (agenttools.ContextOut, error) {
+	if shared || file != "" {
+		target, credentialFile, err := mcpAgentTarget(ctx, env, url, file, false)
+		if err != nil {
+			return agenttools.ContextOut{}, err
+		}
+		if target != "" {
+			url = target
+		}
+		if credentialFile != "" {
+			getenv := env.Getenv
+			env.Getenv = func(key string) string {
+				if key == agentCredentialEnv {
+					return credentialFile
+				}
+				return getenv(key)
+			}
+		}
+	}
+	return (&cmd{env: env, url: url}).ops().Context(ctx, agenttools.CallerArgs{})
+}
+
+func shellArg(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 func (r setupReport) lines() []checkLine {

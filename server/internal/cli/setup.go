@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/client"
+	"github.com/flexdinesh/stage/server/internal/db/store"
 )
 
 // Instruction block markers (setup instructions replaces between them).
@@ -27,7 +29,7 @@ func runSetup(ctx context.Context, env Env, args []string) error {
 	case "":
 		return setupAgents(ctx, env, rest)
 	case "mcp":
-		return setupMCP(env, rest)
+		return setupMCP(ctx, env, rest)
 	case "instructions":
 		return setupInstructions(env, rest)
 	case "skill":
@@ -38,21 +40,30 @@ func runSetup(ctx context.Context, env Env, args []string) error {
 
 // setupMCP registers the stdio server (or the HTTP endpoint with --http) in
 // Claude Code (user scope) and Codex. Default: both.
-func setupMCP(env Env, args []string) error {
+func setupMCP(ctx context.Context, env Env, args []string) error {
 	c := newCmd(env, "setup mcp")
 	var claude, codex, http bool
+	var credentialFile string
 	c.fs.BoolVar(&claude, "claude", false, "Claude Code")
 	c.fs.BoolVar(&codex, "codex", false, "Codex")
 	c.fs.BoolVar(&http, "http", false, "register the server's HTTP /mcp endpoint instead of stdio")
+	c.fs.StringVar(&credentialFile, "credential-file", "", "private agent credential file for network stdio MCP")
 	if err := c.parse(args); err != nil {
 		return err
 	}
 	if !claude && !codex {
 		claude, codex = true, true
 	}
+	if len(c.pos) != 0 {
+		return usagef("setup mcp: unexpected argument")
+	}
 	base := c.url
 	if base == "" {
 		base = env.Getenv(URLEnv)
+	}
+	target, file, err := mcpAgentTarget(ctx, env, c.url, credentialFile, http)
+	if err != nil {
+		return err
 	}
 	// Pass an explicit non-default server URL to the stdio server; without
 	// one it resolves the server itself (default socket, else DefaultURL).
@@ -74,6 +85,13 @@ func setupMCP(env Env, args []string) error {
 	endpoint := strings.TrimRight(base, "/") + "/mcp"
 
 	stdio := []string{env.Executable, "mcp"}
+	if target != "" {
+		stdio = append(stdio, "--url", target)
+		urlEnv = nil
+	}
+	if file != "" {
+		urlEnv = append(urlEnv, agentCredentialEnv+"="+file)
+	}
 	var errs []error
 	if claude {
 		_ = env.Exec("claude", "mcp", "remove", "--scope", "user", mcpName) // re-register
@@ -104,6 +122,61 @@ func setupMCP(env Env, args []string) error {
 		errs = append(errs, register(env, "codex", args))
 	}
 	return errors.Join(errs...)
+}
+
+// mcpAgentTarget selects a verified shared endpoint. An unreachable or
+// older server can still be configured with the personal setup syntax.
+func mcpAgentTarget(ctx context.Context, env Env, raw, file string, directHTTP bool) (string, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	res := client.ResolveAgent(raw, env.Getenv)
+	if directHTTP {
+		res = client.Resolve(raw, env.Getenv)
+	}
+	status, _ := client.New(res.URL).AccessStatus(ctx)
+	if file == "" && !strings.HasPrefix(res.URL, "unix:") {
+		file = env.Getenv(agentCredentialEnv)
+	}
+	if file != "" {
+		if directHTTP {
+			return "", "", usagef("setup mcp --http: configure the agent bearer in your HTTP MCP client's secret settings, or use stdio with --credential-file")
+		}
+		target, err := client.CredentialTarget(res.URL)
+		if err != nil || strings.HasPrefix(target, "unix:") {
+			return "", "", usagef("setup mcp: select the credential file's HTTPS or loopback HTTP address with --url")
+		}
+		file, err = filepath.Abs(file)
+		if err != nil {
+			return "", "", err
+		}
+		cred, err := readCredential(file, store.SessionAgent)
+		if err != nil {
+			return "", "", err
+		}
+		if cred.Target != target || status.InstallationID != "" && status.InstallationID != cred.InstallationID {
+			return "", "", errors.New("Stage agent credential is for a different address or installation")
+		}
+		if !time.Now().Before(cred.ExpiresAt) {
+			return "", "", errors.New("Stage agent credential expired. Rotate it before setting up MCP")
+		}
+		return target, file, nil
+	}
+	switch {
+	case directHTTP && (status.AgentOnly || status.Mode == string(store.AccessClaimed) || status.Mode == string(store.AccessPending)):
+		return "", "", usagef("setup mcp --http: shared Stage requires an agent bearer. Configure it in your HTTP MCP client's secret settings, or use stdio")
+	case !directHTTP && status.AgentOnly:
+		return res.URL, "", nil
+	case status.Mode == string(store.AccessClaimed) || status.Mode == string(store.AccessPending):
+		if local, ok := client.LocalAgent(env.Getenv); ok {
+			agentStatus, err := client.New(local.URL).AccessStatus(ctx)
+			if err == nil && agentStatus.AgentOnly && agentStatus.InstallationID == status.InstallationID {
+				return local.URL, "", nil
+			}
+		}
+		return "", "", errors.New("shared Stage needs a private agent socket or an agent credential file. Select the socket with --url or pass --credential-file")
+	default:
+		return "", "", nil
+	}
 }
 
 func register(env Env, tool string, args []string) error {
@@ -211,6 +284,6 @@ const setupUsage = `  stage setup [--claude] [--codex] [--opencode] [--mcp] [--c
                                       Claude Code and Codex), then check CLI, server and caller;
                                       --check writes nothing (exit 1 on problems)
   stage setup skill [--claude] [--codex] [--opencode]   the Stage skill only
-  stage setup mcp [--claude] [--codex] [--http]
+  stage setup mcp [--claude] [--codex] [--http | --credential-file FILE]
   stage setup instructions [--claude] [--codex] [--file PATH]
 `

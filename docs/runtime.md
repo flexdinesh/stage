@@ -272,15 +272,21 @@ SQLite's; Postgres backups are the operator's ([storage.md](storage.md#backups))
 - **Polling:** connections that arrive during startup wait in the listen backlog until serving starts. `stage status --wait DUR` polls `/api/health` until it answers 200. `stage service start --wait DUR` waits for the service the same way and also checks that the data-dir holder is the service's own process.
 - **Client resolution** (CLI, `stage mcp`, and `stage status`):
   1. `--url`
-  2. `STAGE_URL`
-  3. The default socket of the data dir from `STAGE_DATA_DIR` (or the identity default), used only when its `.lock` is held. A stale socket file left by a crash is skipped, never dialed.
+  2. `STAGE_AGENT_URL` for agent commands, then `STAGE_URL`
+  3. The shared local agent socket for agent commands, then the ordinary default socket. Both derive from `STAGE_DATA_DIR` (or the identity default) and require a held `.lock`. A stale socket file left by a crash is skipped.
   4. `http://127.0.0.1:7380`
 
-  If both a socket service and a TCP server are running, the socket wins.
-  Resolution is read-only: no agent command starts a server.
+  `stage auth` and CLI commands with `--human` use the product address.
+  Resolution is read-only. Agent commands never start a server.
 - **`stage service`** ignores `--url`/`STAGE_URL`: it targets this
   installation's service and its socket only ([service.md](service.md)).
-- **`stage setup mcp`** (and `stage setup --mcp`) passes `STAGE_URL` to the stdio server only when one was given explicitly; otherwise the stdio server resolves the server itself. `--http` needs an http(s) URL; if the server is only on a socket, pass `--url`. `stage setup --check` reports which server the CLI resolves and whether it answers with this API version.
+- **`stage setup mcp`** (and `stage setup --mcp`) pins the verified private
+  shared agent socket or the selected network address with
+  `--credential-file FILE`. The MCP config carries the path and loads the
+  current file at runtime. Personal setup still uses the explicit
+  `STAGE_URL` or the stdio server's own resolution. For direct HTTP MCP on
+  shared Stage, add the bearer in the MCP client's secret settings.
+  `stage setup --check` reports the server, API version and caller detection.
 
 ## Health and version
 
@@ -583,6 +589,15 @@ resample watch clears the degraded state and retains that count.
 
 ## Agent gateway
 
+Shared Stage opens a local agent socket on the main machine, even if the
+product only listens on TCP. It takes the installation's default socket
+name with `-agent.sock` in place of `.sock`, with mode `0600` in the same
+owner-private `0700` directory. This listener serves scoped `/api/` and
+`/mcp` under the local machine's agent principal. The product listener and
+the owner-control socket keep their existing access rules. The launch
+journal names the local socket, or the worker's private socket for remote
+work. A network integration can use its own scoped, revocable agent bearer.
+
 A worker serves agents on its machine the main server's `/api` and `/mcp`
 ([ADR 0002](adr/0002-machines-and-workers.md#8-mcp-and-the-agent-gateway)),
 so `stage`, `stage mcp` and HTTP MCP clients there can report work. Code:
@@ -627,8 +642,7 @@ so `stage`, `stage mcp` and HTTP MCP clients there can report work. Code:
   worker or an explicit TCP or Unix gateway receives
   `403 private_gateway_required`. Paired workers keep channel negotiation,
   heartbeats and status while setup is pending and when gateway support is
-  unavailable. Shared agents on the main server use their own bearer
-  credential. The general-purpose product socket requires authentication.
+  unavailable. The general-purpose product socket requires authentication.
 - **Main server.** The worker route `/api/worker/gateway/{api/...|mcp}`
   checks the API version and the token, then serves the inner path with the
   same `/api` router or MCP handler as a direct request, with the machine

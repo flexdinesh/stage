@@ -29,7 +29,7 @@ func runHarness(ctx context.Context, env Env, args []string) error {
 		if len(c.pos) > 0 {
 			return usagef("harness list: unexpected argument %q", c.pos[0])
 		}
-		hs, err := client.New(client.Resolve(c.url, env.Getenv).URL).Harnesses(ctx)
+		hs, err := c.apiClient().Harnesses(ctx)
 		if err != nil {
 			return err
 		}
@@ -51,7 +51,7 @@ func runHarness(ctx context.Context, env Env, args []string) error {
 	if err := c.parse(rest); err != nil {
 		return err
 	}
-	cl := client.New(client.Resolve(c.url, env.Getenv).URL)
+	cl := c.apiClient()
 	hs, err := cl.Harnesses(ctx)
 	if err != nil {
 		return err

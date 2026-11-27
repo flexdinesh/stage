@@ -49,6 +49,8 @@ type Env struct {
 	Install func() install.Deps
 	// Releases is where `stage update` finds releases; nil is GitHub.
 	Releases install.Source
+	// ReadPassword reads a terminal password without echo. Nil uses Stdin.
+	ReadPassword func() ([]byte, error)
 }
 
 // cliName is this identity's installed CLI name, which agent guidance names.
@@ -104,6 +106,10 @@ func Run(ctx context.Context, args []string, env Env) int {
 		return 3
 	default:
 		fail(env.stderr(), "%s", err)
+		var apiErr *client.Error
+		if errors.As(err, &apiErr) && apiErr.Code == "authentication_required" {
+			fmt.Fprintln(env.Stderr, "For the CLI, run stage auth login and pass --human. For agents, use the private agent socket or a configured agent credential.")
+		}
 		return 1
 	}
 }
@@ -120,6 +126,11 @@ Usage:
                                       database and verify it (Docker image only; stage db help)
   stage status [--wait DUR]          the server this CLI reaches: version, readiness, harness states
                                       (exit 1 unreachable or API mismatch, 3 --wait timeout)
+  stage auth login --email EMAIL     sign in to the selected shared Stage server
+  stage auth whoami | logout         show or revoke the saved CLI session for this address
+  stage auth agent rotate --out FILE [--target URL]
+                                      write a new 30-day agent credential to a private file
+  stage auth agent revoke            revoke your agent credential
   stage harness [list]                the harnesses this server knows, its machine profile, and which
                                       ones can run here
   stage harness KIND [status]         KIND's connection setup on the server: state, settings, actions
@@ -241,6 +252,8 @@ Start mode: tasks inherit their tree by default (auto: roots wait for a start, o
   stage task|tree notes ID get ENTRY_ID
 Global: --url URL (env STAGE_URL; unix:///abs/path.sock for a socket; default: the private default
         socket when a server owns it, else http://127.0.0.1:7380) --json
+Shared: --human uses the saved CLI session for the selected address.
+        Agents can set STAGE_AGENT_URL and, for network access, STAGE_AGENT_CREDENTIAL_FILE.
 Caller: context, creation, notes and adoption accept --caller-connection ID --caller-session ID,
         else read STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>, else the harness's session
         variable (stage mcp too) on its connection on this machine. Harness MCP metadata and the
@@ -252,11 +265,12 @@ Creator filter: task ls --origin-connection ID --origin-session ID.
 
 // cmd holds a command's parsed global flags.
 type cmd struct {
-	env  Env
-	fs   *flag.FlagSet
-	url  string
-	json bool
-	pos  []string
+	env   Env
+	fs    *flag.FlagSet
+	url   string
+	json  bool
+	human bool
+	pos   []string
 }
 
 func newCmd(env Env, name string) *cmd {
@@ -264,6 +278,12 @@ func newCmd(env Env, name string) *cmd {
 	c.fs.SetOutput(io.Discard)
 	c.fs.StringVar(&c.url, "url", "", "server URL")
 	c.fs.BoolVar(&c.json, "json", false, "JSON output")
+	group, _, _ := strings.Cut(name, " ")
+	switch group {
+	case "auth", "setup", "mcp", "call", "tools", "context":
+	default:
+		c.fs.BoolVar(&c.human, "human", false, "use the saved human CLI session for this address")
+	}
 	return c
 }
 
@@ -313,8 +333,7 @@ func (c *cmd) set(name string) bool {
 }
 
 func (c *cmd) ops() *agenttools.Ops {
-	u := client.Resolve(c.url, c.env.Getenv).URL
-	return &agenttools.Ops{Client: client.New(u), Caller: c.env.Caller, HarnessEnv: c.env.Getenv, LocalFiles: true, CLI: c.env.cliName()}
+	return &agenttools.Ops{Client: c.apiClient(), Caller: c.env.Caller, HarnessEnv: c.env.Getenv, LocalFiles: true, CLI: c.env.cliName()}
 }
 
 // out prints v as JSON (--json) or with human.
@@ -345,6 +364,8 @@ func run(ctx context.Context, args []string, env Env) error {
 		return runContext(ctx, env, sub)
 	case "status":
 		return runStatus(ctx, env, sub)
+	case "auth":
+		return runAuth(ctx, env, sub)
 	case "harness":
 		return runHarness(ctx, env, sub)
 	case "machine", "machines":

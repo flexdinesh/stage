@@ -36,7 +36,7 @@ func ParseSession(v string) (db.SessionRef, error) {
 	id, session, ok := strings.Cut(strings.TrimSpace(v), ":")
 	n, err := strconv.ParseInt(id, 10, 64)
 	if !ok || err != nil || n <= 0 || strings.TrimSpace(session) == "" {
-		return db.SessionRef{}, fmt.Errorf("want <connectionId>:<externalSessionId>, got %q", v)
+		return db.SessionRef{}, errors.New("want <connectionId>:<externalSessionId>")
 	}
 	return db.SessionRef{ConnectionID: n, ExternalSessionID: strings.TrimSpace(session)}, nil
 }

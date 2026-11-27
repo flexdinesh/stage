@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +25,7 @@ type Service struct {
 
 	PublicURL            string // STAGE_PUBLIC_URL, named in launch journal instructions when set
 	SharedAccess         bool   // Shared launch guidance requires an authorized agent transport.
+	LocalAgentURL        string // owner-private endpoint for launches on the main machine
 	CLI                  string // installed CLI name (install.CLIName), named in launch journal instructions
 	LaunchAttemptTimeout time.Duration
 	OnTransition         func(context.Context, workevent.TaskChange)
@@ -92,11 +94,27 @@ func (s *Service) httpAPI(connection int64) string {
 	remote, gateways := s.conns.Machines().AgentGateways(s.store.ConnectionMachine(connection))
 	if s.SharedAccess {
 		if remote {
-			return "the HTTP API through this machine's private Stage worker socket"
+			return "the HTTP API through this machine's private Stage worker socket (the CLI and stdio MCP find the worker's default socket)"
+		}
+		if p, ok := strings.CutPrefix(s.LocalAgentURL, "unix://"); ok {
+			return agentSocketHint(s.LocalAgentURL, p, s.CLI)
 		}
 		return "the Stage server's HTTP API with a configured agent credential"
 	}
 	return httpAPI(s.PublicURL, remote, gateways)
+}
+
+func agentSocketHint(url, path, cli string) string {
+	if cli == "" {
+		cli = "stage"
+	}
+	return "the HTTP API on the private Stage agent socket (curl --unix-socket " + shellQuote(path) + " http://stage/api/...). " +
+		"Select this installation for CLI or stdio MCP with STAGE_AGENT_URL=" + shellQuote(url) +
+		" or run " + cli + " context --url " + shellQuote(url)
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 // attribution is kind's caller attribution (zero when unknown).

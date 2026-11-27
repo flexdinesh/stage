@@ -45,7 +45,11 @@ stage setup --check    # CLI on PATH, server, caller detection, per-agent skill 
 
 :::
 
-Every task Stage launches also tells the agent how to reach Stage and use its journal, so tasks you start need no extra prompting.
+Every task Stage launches tells the agent how to reach Stage and use its
+journal. On shared Stage, local agents get the private agent socket and
+remote agents get their worker's private socket. Use a separate
+[agent credential](/docs/reference/cli#sign-in-to-shared-stage) when an
+integration connects over the network.
 
 ## From inside an agent session
 
