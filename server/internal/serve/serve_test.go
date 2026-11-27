@@ -92,6 +92,9 @@ func cfg(t *testing.T, dataDir string, listens ...string) config.Config {
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
+// Race-instrumented SQLite can take longer to apply all the startup migrations.
+const testStartupTimeout = time.Minute
+
 type inst struct {
 	ready  serve.Ready
 	cancel context.CancelFunc
@@ -118,7 +121,7 @@ func startLogged(t *testing.T, c config.Config, tc t3.Client, logger *slog.Logge
 	case err := <-i.done:
 		cancel()
 		t.Fatalf("instance failed to start: %v", err)
-	case <-time.After(15 * time.Second):
+	case <-time.After(testStartupTimeout):
 		cancel()
 		t.Fatal("instance did not start")
 	}
