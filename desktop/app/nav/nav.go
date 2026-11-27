@@ -190,10 +190,13 @@ func appPath(u *url.URL) string {
 
 var taskNum = regexp.MustCompile(`^[1-9][0-9]{0,17}$`)
 
-// DeepLink maps an <identity>:// link to an app path: tasks/<n> →
-// /tasks/<n>, trees/<n> → /trees/<n>, and the bare scheme → /. The kind may be the host (`stage://tasks/12`) or follow a
-// `localhost` host (`stage://localhost/tasks/12`); query and fragment are
-// ignored.
+// DeepLink maps an <identity>:// link to an app path: tasks/<n>, trees/<n>,
+// schedules/<n> and projects/<n> → the same path,
+// connections/<c>/sessions/<id> → that path (id escaped), and the bare
+// scheme → /. A task or tree link keeps a valid `entry=<n>` (a journal
+// entry); any other query and the fragment are ignored. The kind may be the
+// host (`stage://tasks/12`) or follow a `localhost` host
+// (`stage://localhost/tasks/12`).
 func (p Policy) DeepLink(raw string) (string, bool) {
 	u, err := url.Parse(raw)
 	if err != nil || p.Identity == "" || !strings.EqualFold(u.Scheme, p.Identity) || u.User != nil || u.Port() != "" {
@@ -219,10 +222,17 @@ func (p Policy) DeepLink(raw string) (string, bool) {
 	switch {
 	case len(segs) == 0:
 		return "/", true
-	case len(segs) == 2 && segs[0] == "tasks" && taskNum.MatchString(segs[1]):
-		return "/tasks/" + segs[1], true
-	case len(segs) == 2 && segs[0] == "trees" && taskNum.MatchString(segs[1]):
-		return "/trees/" + segs[1], true
+	case len(segs) == 2 && (segs[0] == "tasks" || segs[0] == "trees") && taskNum.MatchString(segs[1]):
+		path := "/" + segs[0] + "/" + segs[1]
+		if entry := u.Query().Get("entry"); taskNum.MatchString(entry) {
+			path += "?entry=" + entry
+		}
+		return path, true
+	case len(segs) == 2 && (segs[0] == "schedules" || segs[0] == "projects") && taskNum.MatchString(segs[1]):
+		return "/" + segs[0] + "/" + segs[1], true
+	case len(segs) == 4 && segs[0] == "connections" && taskNum.MatchString(segs[1]) && segs[2] == "sessions" &&
+		segs[3] != "" && segs[3] != "." && segs[3] != "..":
+		return "/connections/" + segs[1] + "/sessions/" + url.PathEscape(segs[3]), true
 	}
 	return "", false
 }
@@ -258,9 +268,9 @@ func T3WebURL(publicURL, raw string) (string, error) {
 }
 
 // AlertPath validates the app path a native notification click opens:
-// /tasks/<n> and /sessions/<escaped id> (each optionally with #answer),
-// /settings and /?inbox. It returns p unchanged when allowed. Unlike
-// DeepLink it keeps the #answer fragment.
+// /tasks/<n>, /settings and /?inbox, exactly (no query or fragment;
+// historical /sessions and #answer paths are rejected). It returns p
+// unchanged when allowed.
 func AlertPath(p string) (string, bool) {
 	switch p {
 	case "/settings", "/?inbox":

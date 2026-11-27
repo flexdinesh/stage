@@ -165,11 +165,14 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
   const invalidate = useInvalidateWork();
   const newTask = useNewTask();
   const [params, setParams] = useSearchParams();
-  const view = treeTab(params.get("view"));
+  // A journal entry link (`?entry=45`) opens the notes it anchors.
+  const view = treeTab(params.get("view") ?? (params.has("entry") ? "notes" : null));
   const setView = (next: TreeTab) => {
     const updated = new URLSearchParams(params);
-    if (next === "tasks") updated.delete("view");
-    else updated.set("view", next);
+    if (next === "tasks") {
+      updated.delete("view");
+      updated.delete("entry");
+    } else updated.set("view", next);
     setParams(updated);
   };
   const layout = params.get("layout") === "graph" ? "graph" : "list";

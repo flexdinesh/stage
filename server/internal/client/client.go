@@ -853,13 +853,16 @@ type Ref struct {
 	Links        execution.Links `json:"links"`
 	SessionTitle string          `json:"sessionTitle,omitempty"`
 	Session      *db.SessionRef  `json:"session"`
-	Kind         string          `json:"kind"` // task | tree | session
+	Kind         string          `json:"kind"` // task | tree | schedule | project | journal | session
 	TaskID       *int64          `json:"taskId"`
 	TreeID       *int64          `json:"treeId,omitempty"`
+	ScheduleID   *int64          `json:"scheduleId,omitempty"`
+	ProjectID    *int64          `json:"projectId,omitempty"`
+	EntryID      *int64          `json:"entryId,omitempty"`
 }
 
-// ResolveRef reads a stage task, tree or session link, a harness session
-// link, #task id or session id.
+// ResolveRef reads a stage task, tree, schedule, project, journal entry or
+// session link, a harness session link, #task id or session id.
 func (c *Client) ResolveRef(ctx context.Context, ref string) (Ref, error) {
 	var out Ref
 	err := c.do(ctx, http.MethodGet, withQuery("/api/refs/resolve", url.Values{"ref": {ref}}), nil, &out)

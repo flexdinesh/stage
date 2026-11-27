@@ -920,20 +920,23 @@ func (o *Ops) PreviewSchedule(ctx context.Context, a PreviewArgs) (PreviewOut, e
 // RefArgs accepts one pasted reference or a connection-scoped session.
 type RefArgs struct {
 	Session *db.SessionRef `json:"session,omitempty" jsonschema:"explicit scoped session instead of ref"`
-	Ref     string         `json:"ref,omitempty" jsonschema:"what the user pasted: a stage task, tree or session link (any host; markdown link ok), a harness session link, #<task id> or a session id with connectionId in session"`
+	Ref     string         `json:"ref,omitempty" jsonschema:"what the user pasted: a stage task, tree, schedule, project, journal entry or session link (any host; markdown link ok), a harness session link, #<task id> or a session id with connectionId in session"`
 }
 
-// RefOut is read_ref: the task, tree and/or session a reference names. A
-// task reference includes its session (once launched); a session reference
-// includes the task that owns it (if any); a tree reference carries only the
-// tree.
+// RefOut is read_ref: the task, tree, schedule, project, journal entry and/or
+// session a reference names. A task reference includes its session (once
+// launched); a session reference includes the task that owns it (if any); a
+// tree, schedule, project or journal reference carries only what it names.
 type RefOut struct {
 	SessionRef   *db.SessionRef         `json:"sessionRef,omitempty"`
 	Links        execution.Links        `json:"links"`
 	SessionTitle string                 `json:"sessionTitle,omitempty"`
-	Kind         string                 `json:"kind"` // task | tree | session
+	Kind         string                 `json:"kind"` // task | tree | schedule | project | journal | session
 	Task         *client.TaskDetail     `json:"task"`
 	Tree         *client.TreeDetail     `json:"tree,omitempty"`
+	Schedule     *client.ScheduleDetail `json:"schedule,omitempty"`
+	Project      *db.Project            `json:"project,omitempty"`
+	Entry        *db.JournalEntry       `json:"entry,omitempty"`
 	Session      *client.SessionContext `json:"session"`
 	// Next: how to read the full conversation.
 	Next string `json:"next,omitempty"`
@@ -952,6 +955,29 @@ func (o *Ops) ReadRef(ctx context.Context, a RefArgs) (RefOut, error) {
 		return RefOut{}, err
 	}
 	out := RefOut{Kind: r.Kind, SessionRef: r.Session, SessionTitle: r.SessionTitle, Links: r.Links}
+	switch {
+	case r.EntryID != nil:
+		e, err := o.Client.GetJournalEntry(ctx, *r.EntryID)
+		if err != nil {
+			return out, err
+		}
+		out.Entry = &e
+		return out, nil
+	case r.ScheduleID != nil:
+		sc, err := o.Client.Schedule(ctx, *r.ScheduleID)
+		if err != nil {
+			return out, err
+		}
+		out.Schedule = &sc
+		return out, nil
+	case r.ProjectID != nil:
+		p, err := o.Client.Project(ctx, *r.ProjectID)
+		if err != nil {
+			return out, err
+		}
+		out.Project = &p
+		return out, nil
+	}
 	if r.TreeID != nil {
 		t, err := o.Client.Tree(ctx, *r.TreeID)
 		if err != nil {

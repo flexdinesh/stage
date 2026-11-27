@@ -15,7 +15,10 @@ import (
 
 // refJSON is GET /api/refs/resolve: what a pasted reference names. A task's
 // session is null before launch; a session's taskId is the task that owns it
-// (null for sessions started outside stage). A tree carries only treeId.
+// (null for sessions started outside stage). A tree carries only treeId, a
+// schedule scheduleId, a project its canonical projectId (an alias resolves
+// to the project it was merged into), and a journal entry entryId with its
+// owner's taskId or treeId.
 type refJSON struct {
 	State        *db.TaskState   `json:"state,omitempty"`
 	Links        execution.Links `json:"links"`
@@ -24,6 +27,9 @@ type refJSON struct {
 	Kind         refs.Kind       `json:"kind"`
 	TaskID       *int64          `json:"taskId"`
 	TreeID       *int64          `json:"treeId,omitempty"`
+	ScheduleID   *int64          `json:"scheduleId,omitempty"`
+	ProjectID    *int64          `json:"projectId,omitempty"`
+	EntryID      *int64          `json:"entryId,omitempty"`
 }
 
 func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
@@ -38,7 +44,7 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 		if ref.ConnectionID != 0 && ref.ConnectionID != id {
 			return db.Invalid("session link belongs to a different connection")
 		}
-		if ref.Kind != refs.KindTask && ref.Kind != refs.KindTree && ref.ConnectionID == 0 {
+		if (err != nil || ref.Kind == refs.KindSession) && ref.ConnectionID == 0 {
 			if err == nil && !strings.ContainsAny(raw, "/<>[]") {
 				ref.ConnectionID = id
 			} else {
@@ -92,6 +98,35 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			return notFoundAs(err, fmt.Sprintf("tree %d not found", ref.TreeID))
 		}
 		out.TreeID = &t.ID
+	case refs.KindSchedule:
+		sc, err := s.Store.GetSchedule(ctx, ref.ScheduleID)
+		if err != nil {
+			return notFoundAs(err, fmt.Sprintf("schedule %d not found", ref.ScheduleID))
+		}
+		out.ScheduleID = &sc.ID
+	case refs.KindProject:
+		id, err := s.projectID(ctx, ref.ProjectID)
+		if err != nil {
+			return notFoundAs(err, fmt.Sprintf("project %d not found", ref.ProjectID))
+		}
+		out.ProjectID = &id
+	case refs.KindJournal:
+		e, err := s.Store.GetJournalEntry(ctx, ref.EntryID)
+		if err != nil {
+			return notFoundAs(err, fmt.Sprintf("journal entry %d not found", ref.EntryID))
+		}
+		// The entry must belong to the task or tree the link names.
+		owner, want, name := e.TaskID, ref.TaskID, "task"
+		if ref.TreeID != 0 {
+			owner, want, name = e.TreeID, ref.TreeID, "tree"
+			out.TreeID = &ref.TreeID
+		} else {
+			out.TaskID = &ref.TaskID
+		}
+		if owner == nil || *owner != want {
+			return notFoundAs(db.ErrNotFound, fmt.Sprintf("journal entry %d not found on %s %d", ref.EntryID, name, want))
+		}
+		out.EntryID = &e.ID
 	case refs.KindSession:
 		id := ref.ConnectionID
 		if id == 0 {

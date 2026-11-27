@@ -4,8 +4,9 @@ import { useSearchParams } from "react-router";
 import { ApiError } from "../api/client.ts";
 import { keys, useInvalidateWork, useJournal, useJournalEntry } from "../api/queries.ts";
 import type { JournalEntry, JournalKind, JournalOwner, JournalQuery, NoteCategory, Task } from "../api/types.ts";
-import { useApi } from "../platform/context.tsx";
+import { useApi, usePlatform } from "../platform/context.tsx";
 import { isNoteCategory, journalEntryId, journalEntryPath, journalOwnerKey, MAX_NOTE_BYTES, NOTE_CATEGORIES, noteBytes, noteRequest, type NoteRequest } from "../lib/journal.ts";
+import { journalEntryMarkdown } from "../lib/refs.ts";
 import { SourceSessionLink } from "./StageLinks.tsx";
 import { ActorCause, ActorLabel } from "./ActorLabel.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
@@ -26,6 +27,7 @@ import {
   Skeleton,
   SkeletonBar,
   Combobox,
+  CopyButton,
   TextLink,
   cx,
   rowClass,
@@ -137,6 +139,10 @@ function NoteComposer({ owner, projectId, tasks }: { owner: JournalOwner; projec
 }
 
 export function JournalRow({ entry, anchored = false }: { entry: JournalEntry; anchored?: boolean }) {
+  const { links } = usePlatform();
+  const link = (path: string) => links.stageLink(path);
+  const markdown =
+    entry.taskId !== null ? journalEntryMarkdown(link, "task", entry.taskId, entry.id) : entry.treeId !== null ? journalEntryMarkdown(link, "tree", entry.treeId, entry.id) : null;
   const [expanded, setExpanded] = useState(false);
   const full = useJournalEntry(entry.id, expanded && entry.truncated);
   const shown = expanded ? full.data ?? entry : entry;
@@ -153,6 +159,7 @@ export function JournalRow({ entry, anchored = false }: { entry: JournalEntry; a
         <ActorLabel work={entry} />
         {entry.taskId === null ? <span>tree {entry.kind}</span> : <TextLink to={`/tasks/${entry.taskId}`} variant="rest">task #{entry.taskId}</TextLink>}
         {entry.attempt === null ? null : <span>attempt {entry.attempt}</span>}
+        {markdown === null ? null : <CopyButton text={markdown} label="Copy link" accessibleLabel={`Copy link to note #${entry.id}`} variant="ghost" title={markdown} className="ml-auto" />}
       </div>
       <div className="min-w-0 break-words">
         <Suspense fallback={<p className="text-small whitespace-pre-wrap">{shown.text}</p>}>
