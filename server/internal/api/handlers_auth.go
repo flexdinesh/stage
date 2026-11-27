@@ -86,15 +86,18 @@ func (s *server) registerAuth(mux *http.ServeMux) {
 	protected("DELETE /api/admin/invitations/{id}", adminRoute, s.revokeInvite)
 }
 
-func (s *server) authStatus(w http.ResponseWriter, _ *http.Request) {
+func (s *server) authStatus(w http.ResponseWriter, r *http.Request) {
 	var mode = store.AccessPersonal
 	id := s.InstallationID
-	status := map[string]string{}
+	status := map[string]any{}
 	if s.Access != nil {
 		mode, id = store.AccessClaimed, s.Access.id
 		status["canonicalUrl"] = s.Access.origin
 		if s.Access.Pending() {
 			mode = store.AccessPending
+		}
+		if actor, ok := principal.From(r.Context()); ok && actor.Kind == principal.Agent {
+			status["agentOnly"] = true
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -119,7 +122,11 @@ func (s *server) signedIn(w http.ResponseWriter, result auth.SignInResult) {
 }
 
 func (s *server) writeCredential(w http.ResponseWriter, result auth.SignInResult) {
-	writeJSON(w, http.StatusOK, issuedCredential{result.Token.Reveal(), result.Session.ExpiresAt, s.Access.id})
+	token := result.Token.Reveal()
+	if result.Session.Audience == store.SessionAgent {
+		token = principal.AgentTokenPrefix + token
+	}
+	writeJSON(w, http.StatusOK, issuedCredential{token, result.Session.ExpiresAt, s.Access.id})
 }
 
 func (s *server) signIn(audience store.SessionAudience) func(http.ResponseWriter, *http.Request) error {

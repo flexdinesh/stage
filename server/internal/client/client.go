@@ -60,6 +60,36 @@ func Resolve(flagURL string, getenv func(string) string) Resolution {
 	return Resolution{URL: DefaultURL, Source: "default"}
 }
 
+const AgentURLEnv = "STAGE_AGENT_URL"
+
+// ResolveAgent keeps explicit destinations intact and prefers the private
+// local agent socket when the caller has not selected an address.
+func ResolveAgent(flagURL string, getenv func(string) string) Resolution {
+	if flagURL == "" {
+		if v := getenv(AgentURLEnv); v != "" {
+			return Resolution{URL: v, Source: AgentURLEnv}
+		}
+		if getenv("STAGE_URL") == "" {
+			if r, ok := LocalAgent(getenv); ok {
+				return r
+			}
+		}
+	}
+	return Resolve(flagURL, getenv)
+}
+
+func LocalAgent(getenv func(string) string) (Resolution, bool) {
+	dir, err := config.DataDirFrom(getenv)
+	if err != nil {
+		return Resolution{}, false
+	}
+	path, err := config.AgentSocket(getenv, dir)
+	if err != nil || !heldSocket(path) {
+		return Resolution{}, false
+	}
+	return Resolution{URL: "unix://" + path, Source: "private agent socket"}, true
+}
+
 func liveDefaultSocket(getenv func(string) string) (string, bool) {
 	dir, err := config.DataDirFrom(getenv)
 	if err != nil {
@@ -69,8 +99,12 @@ func liveDefaultSocket(getenv func(string) string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	held, err := filelock.Held(listen.LockPath(sock))
-	return sock, err == nil && held
+	return sock, heldSocket(sock)
+}
+
+func heldSocket(path string) bool {
+	held, err := filelock.Held(listen.LockPath(path))
+	return err == nil && held
 }
 
 // VersionError: the server speaks another API version than this client.
@@ -94,6 +128,7 @@ type Client struct {
 	// err is an invalid BaseURL, returned by every request.
 	err           error
 	toolTransport bool
+	credential    func() (Credential, error)
 }
 
 // New returns a client for baseURL (DefaultURL when empty): http(s)://host:port,
@@ -314,10 +349,17 @@ func (c *Client) send(req *http.Request, out any) (int, error) {
 	if c.toolTransport {
 		req.Header.Set(principal.ToolTransportHeader, "mcp")
 	}
-	res, err := c.HTTP.Do(req)
+	res, err := c.roundTrip(req)
 	if err != nil {
+		if c.credential != nil {
+			return 0, fmt.Errorf("Stage request to %s: %w", c.BaseURL, err)
+		}
 		return 0, fmt.Errorf("stage unreachable at %s (set STAGE_URL, or start the local service: `stage service start`): %w", c.BaseURL, err)
 	}
+	return c.readResponse(res, out)
+}
+
+func (c *Client) readResponse(res *http.Response, out any) (int, error) {
 	defer res.Body.Close()
 	if err := c.checkVersion(res); err != nil {
 		return 0, err
@@ -325,6 +367,9 @@ func (c *Client) send(req *http.Request, out any) (int, error) {
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return 0, err
+	}
+	if res.StatusCode >= 300 && res.StatusCode < 400 {
+		return 0, &Error{Status: res.StatusCode, Msg: "Stage redirected the request. Select the exact Stage address."}
 	}
 	if res.StatusCode >= 400 {
 		var eb struct {
@@ -390,7 +435,7 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 	if err != nil {
 		return h, err
 	}
-	res, err := c.HTTP.Do(req)
+	res, err := c.roundTrip(req)
 	if err != nil {
 		return h, fmt.Errorf("stage unreachable at %s: %w", c.BaseURL, err)
 	}
@@ -413,11 +458,25 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 type AccessStatus struct {
 	Mode           string `json:"mode"`
 	InstallationID string `json:"installationId"`
+	AgentOnly      bool   `json:"agentOnly"`
 }
 
 func (c *Client) AccessStatus(ctx context.Context) (AccessStatus, error) {
 	var status AccessStatus
-	err := c.do(ctx, http.MethodGet, "/api/auth/status", nil, &status)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/api/auth/status", nil)
+	if err != nil {
+		return status, err
+	}
+	if c.err != nil {
+		return status, c.err
+	}
+	h := *c.HTTP
+	h.CheckRedirect = rejectRedirect
+	res, err := h.Do(req)
+	if err != nil {
+		return status, err
+	}
+	_, err = c.readResponse(res, &status)
 	return status, err
 }
 

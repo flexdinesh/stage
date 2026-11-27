@@ -8,6 +8,9 @@ import "context"
 // Shared access derives its actor from admitted credentials and transport.
 const ToolTransportHeader = "Stage-Tool-Transport"
 
+// AgentTokenPrefix marks a wire bearer for an agent audience only.
+const AgentTokenPrefix = "stage_agent_"
+
 type Kind uint8
 
 const (

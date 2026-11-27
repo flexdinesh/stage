@@ -87,8 +87,11 @@ type Service struct {
 type Ready struct {
 	DataDir   string        // canonical
 	Listeners []listen.Addr // resolved
+	AgentURL  string        // owner-private local agent endpoint, when shared
 	Meta      instance.Meta
 }
+
+type agentListenerKey struct{}
 
 // Run serves until ctx ends, then shuts down gracefully. Order:
 //  1. lock the data dir (a second server on it, on any address, exits here)
@@ -185,6 +188,8 @@ func Run(ctx context.Context, o Options) error {
 	}
 	var access *api.Access
 	var control *ownercontrol.Server
+	var localAgent *listen.Listener
+	var agentURL string
 	var setup auth.Link
 	var prepareWork func(time.Time)
 	workReady := make(chan time.Time, 1)
@@ -196,6 +201,17 @@ func Run(ctx context.Context, o Options) error {
 		}
 		origins = append(append([]string(nil), origins...), origin)
 		cfg.PublicURL = origin
+		agentSocket, err := config.AgentSocket(os.Getenv, cfg.DataDir)
+		if err != nil {
+			return config.Invalid(err)
+		}
+		agentAddr := listen.Addr{Network: "unix", Address: agentSocket, Private: true}
+		localAgent, err = agentAddr.Listen()
+		if err != nil {
+			return config.Invalid(fmt.Errorf("open private agent socket: %w", err))
+		}
+		defer localAgent.Close()
+		agentURL = agentAddr.URL()
 		svc := auth.New(database, origin, time.Now)
 		control, err = ownercontrol.Open(cfg.DataDir, svc)
 		if err != nil {
@@ -253,6 +269,7 @@ func Run(ctx context.Context, o Options) error {
 	eng := engine.New(engine.Options{Store: store, Machines: machines, Harnesses: registry, Log: logger})
 	eng.Coordinator.PublicURL = cfg.PublicURL
 	eng.Coordinator.SharedAccess = access != nil
+	eng.Coordinator.LocalAgentURL = agentURL
 	eng.Coordinator.CLI = cliName
 	// Retires connections whose instance moved to another machine (moved.go).
 	moved := newMovedRetirer(store, eng.Discovery.FullSyncEvery, logger)
@@ -451,12 +468,32 @@ func Run(ctx context.Context, o Options) error {
 	mux.Handle("/mcp", policy.Wrap(mcpHandler))
 	mux.Handle("/", webui.Handler())
 
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second,
-		BaseContext: func(net.Listener) context.Context { return ctx }}
-	errCh := make(chan error, len(lns)+1)
+	handler := http.Handler(mux)
+	if localAgent != nil {
+		agent := access.LocalAgent(mux)
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, local := r.Context().Value(agentListenerKey{}).(struct{}); local {
+				agent.ServeHTTP(w, r)
+				return
+			}
+			mux.ServeHTTP(w, r)
+		})
+	}
+	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second,
+		BaseContext: func(l net.Listener) context.Context {
+			if localAgent != nil && l == localAgent {
+				return context.WithValue(ctx, agentListenerKey{}, struct{}{})
+			}
+			return ctx
+		}}
+	errCh := make(chan error, len(lns)+2)
 	for _, l := range lns {
 		go func() { errCh <- srv.Serve(l) }()
 		logger.Info("listening", "addr", l.Spec.String())
+	}
+	if localAgent != nil {
+		go func() { errCh <- srv.Serve(localAgent) }()
+		logger.Info("local agent socket ready", "url", agentURL)
 	}
 	if control != nil {
 		wg.Go(func() { errCh <- control.Serve(ctx) })
@@ -466,7 +503,7 @@ func Run(ctx context.Context, o Options) error {
 		logger.Warn("readiness notification", "err", err)
 	}
 	if o.Ready != nil {
-		o.Ready(Ready{DataDir: cfg.DataDir, Listeners: addrs, Meta: meta})
+		o.Ready(Ready{DataDir: cfg.DataDir, Listeners: addrs, AgentURL: agentURL, Meta: meta})
 	}
 	var serveErr error
 	select {

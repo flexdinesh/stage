@@ -136,7 +136,7 @@ defines the staged rollout. Public mode opt-in is reserved for #460.
 
 | Request | Credential and result |
 | --- | --- |
-| `GET /api/auth/status` | Public `{mode, installationId}`. Mode is `personal`, `setup_pending` or `claimed`. The ID identifies the installation across process restarts. Shared responses also include `canonicalUrl`, the configured browser origin. Desktop verifies it before sending a password or session, including when dialing the local product socket. |
+| `GET /api/auth/status` | Public `{mode, installationId}`. Mode is `personal`, `setup_pending` or `claimed`. The ID identifies the installation across process restarts. Shared responses include `canonicalUrl`, the configured browser origin. Shared agent sockets also include `agentOnly: true`. |
 | `POST /api/auth/login` | Browser JSON `{email,password}`. Exact canonical origin. Returns the account and sets the browser session cookie. |
 | `POST /api/auth/cli/login` | Native JSON `{email,password}` without browser origin, cookie or fetch headers, at the canonical target or its product Unix socket. Returns `{token, expiresAt, installationId}` with CLI audience. |
 | `POST /api/auth/{setup\|invite\|reset}/inspect` | Exact browser origin and purpose-bound `{token}`. Returns `{email,expiresAt}` without consuming the grant. |
@@ -146,7 +146,7 @@ defines the staged rollout. Public mode opt-in is reserved for #460.
 | `POST /api/auth/logout` | Revokes the presented human session. Clears the browser cookie when used and returns 204. |
 | `PATCH /api/account` | Human session and `{name}`. Returns the updated account. |
 | `POST /api/account/password` | Human session and `{currentPassword,password}`. Returns 204 and revokes all of that account's sessions. |
-| `POST /api/account/agent-credential` | Human session. Replaces the calling account's agent credential and returns `{token, expiresAt, installationId}` once. |
+| `POST /api/account/agent-credential` | Human session. Replaces the calling account's 30-day agent credential and returns `{token, expiresAt, installationId}` once. Issued tokens have the `stage_agent_` prefix. |
 | `DELETE /api/account/agent-credential` | Human session. Revokes only that account's agent credential and returns 204. |
 | `GET /api/admin/accounts`, `GET /api/admin/invitations` | Admin session. Lists newest first with optional `beforeId` and `limit` (maximum 100). |
 | `PATCH /api/admin/accounts/{id}/role` | Admin session and `{role}`. Returns 204. |
@@ -165,14 +165,26 @@ CLI bearer credentials authorize human REST. Agent bearer credentials
 authorize scoped REST and HTTP MCP, independent of any caller-session hint.
 A signed-in browser with the canonical origin can invoke MCP with agent
 authority. MCP reuses the same policy on each tool's in-process REST
-requests. Shared mode requires authentication on direct Unix and TCP.
-Clients must bind stored credentials to both the installation ID and exact
-configured target. [Desktop](desktop.md#shared-access) captures the browser
-session in Go. Unauthenticated product clients receive
+requests. Shared product Unix and TCP listeners require a credential.
+The separate owner-private agent socket and the private worker gateway
+admit the agent principal through local OS access. The private agent socket
+serves scoped API and MCP calls without a bearer. The owner-control socket
+serves setup reissue and admin recovery separately.
+
+Clients bind stored credentials to the installation ID and exact configured
+target (scheme, host and port, or the Unix socket path). The CLI verifies the
+installation on the connection it uses for the credential request and
+declines redirects. CLI sessions and agent credentials have separate
+storage and use. Desktop captures the browser session in Go and verifies
+the canonical origin before sending a password or session, including over
+the local product socket. [Desktop shared access](desktop.md#shared-access).
+
+Unauthenticated product clients receive
 `401 authentication_required`. Valid credentials with an incompatible
 scope receive `403 principal_forbidden`. Pending setup returns
-`403 setup_pending`. Shared inbox, push and SSE use the authenticated
-account's [notification state](#notifications-inbox).
+`403 setup_pending`. Shared inbox, push and SSE use the signed-in
+account's [notification state](#notifications-inbox). Web Push subscription
+management requires a browser session.
 
 ## Machines
 

@@ -19,22 +19,24 @@ On a worker's machine, both reach the main server through the worker's agent gat
 
 ### HTTP MCP and the Host header
 
-HTTP MCP is reachable directly at a loopback address with a loopback Host (`http://127.0.0.1:7380/mcp`, `http://localhost:7380/mcp`), or on a non-loopback listen address reached by its network address. A request that arrives on loopback with another Host gets `403 Forbidden: invalid Host header`, even when the origin policy trusts that host.
+In personal mode, HTTP MCP is reachable at a loopback address with a loopback Host (`http://127.0.0.1:7380/mcp`, `http://localhost:7380/mcp`), or at a non-loopback listen address reached by its network address. A personal-mode request that arrives on loopback with another Host gets `403 Forbidden: invalid Host header`. To reach that personal server through a proxy, use stdio MCP or the CLI with `STAGE_URL` set to the proxy URL.
 
-:::note
-A reverse proxy forwarding to `127.0.0.1:7380` cannot serve HTTP MCP. Through a proxy, agents use stdio MCP or the CLI with `STAGE_URL` set to the proxy URL.
-:::
+Shared Stage serves HTTP MCP at the configured Stage origin. Set
+`Authorization: Bearer <agent token>` in the MCP client's secret settings
+for that exact `/mcp` endpoint. Disable credential forwarding on redirects.
+Use the installation ID from `GET /api/auth/status` to check the destination
+when configuring the client. [Create or rotate an agent credential](/docs/reference/cli#sign-in-to-shared-stage).
 
 ## Register
 
 ```sh
-stage setup mcp [--claude] [--codex] [--http]   # MCP only
+stage setup mcp [--claude] [--codex] [--http]   # personal server, MCP only
 stage setup --mcp                               # the skill, the instruction pointer and stdio MCP
 ```
 
-- Registers with `claude mcp add --scope user` and `codex mcp add`. `--http` registers `/mcp` instead of stdio.
-- Passes `STAGE_URL` to the stdio server only when one was given explicitly; otherwise the stdio server resolves the server itself.
-- `--http` needs an `http(s)` URL. If the server is only on a socket, use stdio (or pass `--url`).
+- Registers stdio with Claude Code and Codex. When setup finds a shared local agent socket for the selected installation, it pins that socket in the configuration.
+- For shared stdio over the network, pass `--url URL --credential-file FILE`. The registration stores the private file's path. A running stdio MCP process reads the updated file after rotation.
+- For direct HTTP in personal mode, `--http` registers `/mcp` at an HTTP(S) address. For direct HTTP in shared mode, configure the endpoint and scoped bearer in the client.
 
 ### OpenCode
 
@@ -48,6 +50,11 @@ opencode mcp list
 ```
 
 To expose the named Stage tools directly in OpenCode's MCP server configuration, set `"codemode": false` and `"protocol": "legacy"` alongside the Stage HTTP URL.
+
+For shared local OpenCode or another manually configured harness, use the
+private socket in the launch instructions as the `--url` argument to
+`stage mcp`. For a network stdio integration, use the selected Stage URL
+and set `STAGE_AGENT_CREDENTIAL_FILE` in that MCP process's environment.
 
 ## Caller identity
 
@@ -64,6 +71,7 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 - A header or `callerSession` that conflicts with the OpenCode claim returns an error.
 - Without session context, supply a project or journal owner explicitly; Stage leaves the author session empty.
 - Launch instructions name the connection id.
+- Caller context attributes the work. Keep credentials in the integration's secret settings.
 
 ## Tools
 

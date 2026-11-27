@@ -65,6 +65,7 @@ type credential struct {
 
 type credentialKey struct{}
 type gatewayCheckKey struct{}
+type localAgentKey struct{}
 
 type credentialCheck func(context.Context) error
 
@@ -95,6 +96,9 @@ func (a *Access) authRequest(r *http.Request, touch bool) (context.Context, erro
 		if check := gatewayCheck(ctx); actor.Kind == principal.Agent && actor.MachineID != 0 && check != nil {
 			return ctx, check(ctx)
 		}
+		if _, local := ctx.Value(localAgentKey{}).(struct{}); local && actor.Kind == principal.Agent {
+			return ctx, nil
+		}
 		return ctx, auth.ErrSession
 	}
 	if !guard.PrivatePeer(r) {
@@ -104,6 +108,9 @@ func (a *Access) authRequest(r *http.Request, touch bool) (context.Context, erro
 	var audiences []store.SessionAudience
 	if r.Header.Get("Authorization") != "" {
 		token, audiences = bearer(r), []store.SessionAudience{store.SessionCLI, store.SessionAgent}
+		if raw, scoped := strings.CutPrefix(token, principal.AgentTokenPrefix); scoped {
+			token, audiences = raw, []store.SessionAudience{store.SessionAgent}
+		}
 	} else if cookie, err := r.Cookie(sessionCookie); err == nil {
 		if !guard.CanonicalBrowser(r, a.origin, a.host) {
 			return ctx, errBrowserOrigin
@@ -130,6 +137,30 @@ func (a *Access) authRequest(r *http.Request, touch bool) (context.Context, erro
 		return principal.With(ctx, principal.Actor{Kind: kind, AccountID: id.Account.ID}), nil
 	}
 	return ctx, auth.ErrSession
+}
+
+// LocalAgent is installed only on the owner-private Unix listener. Routes
+// still pass through the normal shared principal policy, including MCP.
+func (a *Access) LocalAgent(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "private, no-store")
+		if !guard.Unix(r) || r.Host != "stage" ||
+			r.Header.Get("Origin") != "" || r.Header.Get("Sec-Fetch-Site") != "" ||
+			r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
+			accessError(w, http.StatusForbidden, "private_agent_required", "Connect to the private Stage agent socket without credentials.")
+			return
+		}
+		path := r.URL.Path
+		if path != "/mcp" && (!strings.HasPrefix(path, "/api/") ||
+			strings.HasPrefix(path, WorkerPrefix) || strings.HasPrefix(path, "/api/worker/")) {
+			http.NotFound(w, r)
+			return
+		}
+		ctx := db.WithMachine(r.Context(), db.LocalMachine)
+		ctx = principal.With(ctx, principal.Actor{Kind: principal.Agent, MachineID: db.LocalMachine})
+		ctx = context.WithValue(ctx, localAgentKey{}, struct{}{})
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 var errBrowserOrigin = errors.New("browser origin rejected")

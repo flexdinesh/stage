@@ -49,12 +49,16 @@ func newT3() *countingT3 { return &countingT3{Fake: t3.NewFake()} }
 // data dir or runtime dir) and returns a short dir for socket paths.
 func isolate(t *testing.T) string {
 	t.Helper()
-	short, err := os.MkdirTemp("", "srv")
+	short, err := os.MkdirTemp("/tmp", "srv")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(short) })
-	t.Setenv("HOME", t.TempDir())
+	home := filepath.Join(short, "home")
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
 	t.Setenv("XDG_DATA_HOME", "")
 	rt := filepath.Join(short, "rt")
 	if err := os.Mkdir(rt, 0o700); err != nil {

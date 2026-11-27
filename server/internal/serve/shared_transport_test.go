@@ -185,6 +185,17 @@ func TestSharedAccountsThroughHTTPSProxyAndUnix(t *testing.T) {
 	if _, err := unix.Projects(t.Context()); !client.IsStatus(err, 401) {
 		t.Fatalf("Unix granted implicit human access: %v", err)
 	}
+	socketSession, err := unix.Login(t.Context(), status.InstallationID, "owner@example.test", "spindrift persimmon telescope")
+	if err != nil {
+		t.Fatalf("CLI login via the product socket: %v", err)
+	}
+	socketHuman := unix.WithCredential(func() (client.Credential, error) { return socketSession, nil })
+	if account, err := socketHuman.Me(t.Context()); err != nil || account.Role != "admin" {
+		t.Fatalf("CLI session via the product socket: %+v %v", account, err)
+	}
+	if err := socketHuman.Logout(t.Context()); err != nil {
+		t.Fatalf("CLI logout via the product socket: %v", err)
+	}
 	get(anon, "/api/tasks", 401, nil)
 	var details struct{ Harnesses []any }
 	get(owner, "/api/health", 200, &details)
@@ -255,6 +266,10 @@ func TestSharedAccountsThroughHTTPSProxyAndUnix(t *testing.T) {
 		edited.Events[0].Actor.Kind != "personal" || edited.Events[0].Actor.UserID != 0 {
 		t.Fatalf("task actors: edits %+v, created %+v", edits, edited.Events[0].Actor)
 	}
+	(transportRequest{method: "GET", path: "/api/admin/accounts", headers: cliHeaders}).send(t, anon, origin, 403, nil)
+	role("admin")
+	(transportRequest{method: "GET", path: "/api/admin/accounts", headers: cliHeaders}).send(t, anon, origin, 200, nil)
+	role("member")
 	(transportRequest{method: "GET", path: "/mcp", headers: cliHeaders}).send(t, anon, origin, 403, nil)
 	(transportRequest{method: "GET", path: "/api/me", headers: http.Header{"Cookie": {"stage_session=" + native.Token}}}).send(t, anon, origin, 401, nil)
 	(transportRequest{method: "GET", path: "/api/me", headers: http.Header{"Authorization": {"Bearer " + cookies[0].Value}}}).send(t, anon, origin, 401, nil)
@@ -511,6 +526,9 @@ func TestSharedWorkerReadinessAndPrivateGateway(t *testing.T) {
 	owner := browserClient(t, proxy)
 	claimBrowser(t, owner, proxy.URL, output.String())
 	req.send(t, gw.HTTP, "http://stage", 200, nil)
+	if status, err := gw.AccessStatus(t.Context()); err != nil || !status.AgentOnly || status.Mode != "claimed" {
+		t.Fatalf("worker gateway must identify itself as agent-only: %+v, %v", status, err)
+	}
 	req.headers = http.Header{workerchan.PrivateGatewayHeader: {"1"}}
 	req.send(t, http.DefaultClient, tcp.URL(), 403, nil)
 	req.path = api.GatewayPrefix + "/api/projects"
