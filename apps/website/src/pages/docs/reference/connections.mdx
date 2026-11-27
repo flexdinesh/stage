@@ -80,7 +80,7 @@ Paste it as **Admin token** in Settings > Connections > T3 (Manage), or run `sta
 ### Disconnect and switch
 
 - **Disconnect** forgets the token, the T3 URL, the Browser URL and the admin token and stops syncing. Tasks and bindings stay; pairing the same T3 again resumes it.
-- A disconnected connection stays in Settings as a **Disconnected** row with what remains on it, **Reconnect** (opens its setup) and **Forget** (lets go of it; its tasks keep their history, read-only).
+- A disconnected connection stays in Settings as a **Disconnected** row with what remains on it, **Reconnect** (opens its setup) and **Remove connection**. Removing it clears its workspace bindings and keeps its task history read-only. Pairing again creates a new connection. Retired connections appear under **Previous connections**, with their machine name and usage. Their bindings are hidden from project pickers and workspace lists even before removal.
 - **Switch to another T3**: Disconnect, set the T3 URL, and pair the other T3. Tasks from the first T3 stay as read-only history, and discovery resolves the new T3's workspaces from available evidence. Pairing the first T3 again restores its tasks and bindings.
 - A disconnected T3 whose environment is paired again on another machine moves onto that connection automatically at the next sync.
 

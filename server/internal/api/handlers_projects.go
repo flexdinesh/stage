@@ -268,7 +268,7 @@ func (s *server) forgetConnection(w http.ResponseWriter, r *http.Request) error 
 	if !c.Active {
 		err = s.Store.ForgetConnection(r.Context(), id)
 	} else if m, ok := s.Engine.Connections.Machines().Get(c.MachineID); !ok || !m.Online() {
-		err = db.Conflict("This connection's machine is offline. Forget it once the machine is back.")
+		err = db.Conflict("This connection's machine is offline. Remove it once the machine is back.")
 	} else if s.configured(r.Context(), c).Configured {
 		err = db.Conflict("This connection is in use. Disconnect it first.")
 	} else if err = s.Store.RetireAndForget(r.Context(), id); err == nil {

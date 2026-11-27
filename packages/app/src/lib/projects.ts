@@ -56,9 +56,10 @@ export function projectDetail(project: Project): string {
 
 function matchDetail(project: Project, q: string): { range: MatchRange | null; repo: boolean } {
   const path = projectWorkspace(project);
-  const inPath = find(path, q);
+  const bindings = currentBindings(project.bindings);
+  const inPath = bindings.length === 0 ? null : find(path, q);
   if (inPath !== null) return { range: inPath, repo: false };
-  for (const binding of project.bindings) {
+  for (const binding of bindings) {
     const match = find(workspaceLocation(binding), q);
     if (match !== null) return { range: match, repo: false };
     const external = find(binding.externalProjectId, q);
@@ -106,9 +107,13 @@ export function matchProjects(projects: readonly Project[], query: string): Proj
 export function projectsForConnection(projects: readonly Project[], connectionId: number, keepId: string): Project[] {
   if (connectionId === 0) return [...projects];
   return projects.filter((p) => {
-    const active = p.bindings.filter((b) => b.connectionActive);
+    const active = currentBindings(p.bindings);
     return String(p.id) === keepId || active.length === 0 || active.some((b) => b.connectionId === connectionId);
   });
+}
+
+export function currentBindings(bindings: readonly ProjectBinding[]): ProjectBinding[] {
+  return bindings.filter((b) => b.connectionActive);
 }
 
 export function projectWorkspace(project: Project): string {
@@ -130,7 +135,7 @@ export function orderedWorkspaces(bindings: readonly ProjectBinding[]): ProjectB
 export function primaryWorkspace(ordered: readonly ProjectBinding[], connectionId = 0): ProjectBinding | undefined {
   const scoped = connectionId === 0 ? ordered : ordered.filter((b) => b.connectionId === connectionId);
   return scoped.find((b) => b.connectionActive && b.primary) ??
-    scoped.find((b) => b.connectionActive) ?? scoped[0];
+    scoped.find((b) => b.connectionActive);
 }
 
 export function suggestedWorkspaceFor(row: Workspace, projectId: number): boolean {

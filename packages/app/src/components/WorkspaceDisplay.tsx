@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useHarnesses, useMachines } from "../api/queries.ts";
 import type { ProjectBinding } from "../api/types.ts";
 import { machineStatusLabel } from "../lib/machines.ts";
-import { orderedWorkspaces, primaryWorkspace, workspaceLocation } from "../lib/projects.ts";
+import { currentBindings, orderedWorkspaces, primaryWorkspace, workspaceLocation } from "../lib/projects.ts";
 import { HarnessFacts } from "./HarnessPresentation.tsx";
 import { Chip, CopyButton, ErrorText, Meta, type ChipTone } from "./ui.tsx";
 
@@ -55,7 +55,7 @@ export function WorkspaceDisplay({
   renderActions?: (binding: ProjectBinding, site: Placement) => ReactNode;
 }) {
   const { machines, harnesses, placement } = connections;
-  const ordered = orderedWorkspaces(bindings);
+  const ordered = orderedWorkspaces(currentBindings(bindings));
   const summary = primaryWorkspace(ordered, connectionId);
   const more = ordered.length - 1;
   if (renderActions === undefined) {

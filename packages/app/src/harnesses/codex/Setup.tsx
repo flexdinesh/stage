@@ -19,7 +19,7 @@ import type { CodexStatus } from "./types.ts";
 /** The CLI path setting (the descriptor's `binary` field). */
 const BINARY: SetupField = { id: "binary", kind: "text", label: "Codex CLI", help: "Path to the codex binary. Empty uses codex on PATH." };
 
-export const CODEX_DISCONNECT_PROMPT = "Disconnect Codex? Tasks and history stay. You can connect again any time. It stays listed as disconnected until you forget it.";
+export const CODEX_DISCONNECT_PROMPT = "Disconnect Codex? Tasks and history stay. You can connect again any time. It stays listed as disconnected until you remove it.";
 
 /** `apply` stores the status a call answered with and refreshes what a connection change touches; `recheck` refetches it. */
 function useCodexCache() {

@@ -1,21 +1,21 @@
 // Settings > Connections: a machine's harness connections as one-line rows (name, where, state, Manage,
 // Disconnect), its Add connection menu, and the Manage drawer holding the harness's setup panel. Rows never expand;
 // Disconnect confirms inline under its row. On phone the whole row opens Manage (Disconnect lives in the drawer).
-// A disconnected connection stays a row (Reconnect, Forget) until it is forgotten or connected again.
+// A disconnected connection stays a row until it is removed or connected again.
 // A machine whose setup cannot run lists its connections on record, read-only.
 // Logic: lib/connectionRows.ts.
 import { useQuery } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useForgetConnection, useHarnesses, usePreferences, useScopedHarnessDescriptors } from "../api/queries.ts";
 import type { HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, ReplacedConnection } from "../api/types.ts";
 import { harnessSlots } from "../harnesses/index.ts";
 import { addConnectionOptions, addConnectionReason, connectShortcuts, connectionRows, machineLive, type ConnectionRowModel } from "../lib/connectionRows.ts";
 import { availableSetupActions } from "../lib/connectionSetup.ts";
-import { forgetPrompt, usageText } from "../lib/harnesses.ts";
+import { isDisconnected, removeConnectionPrompt, usageText } from "../lib/harnesses.ts";
 import { useApi } from "../platform/context.tsx";
 import { machineSetupAlert, machineStatusLabel } from "../lib/machines.ts";
 import { ConnectionDeclaredActions } from "./ConnectionDeclaredActions.tsx";
-import { CheckConnection, ConfirmConnectionAction, HarnessFacts, ReplacedConnectionNotice } from "./HarnessPresentation.tsx";
+import { CheckConnection, ConfirmConnectionAction, HarnessFacts, ReplacedConnectionNotice, type ConnectionConfirmation } from "./HarnessPresentation.tsx";
 import { IconMore } from "./icons.tsx";
 import { ConnectionCapabilities } from "./ConnectionCapabilities.tsx";
 import { ConnectionRow, MachineScope } from "./ConnectionRow.tsx";
@@ -200,7 +200,7 @@ function ManageBody({ machine, target, onClose }: { machine: Machine; target: Ma
               </Panel>
             )}
             {actionId !== undefined || target.disconnected !== undefined ? null : <ConnectionCapabilities descriptor={descriptor} />}
-            {actionId !== undefined || target.disconnected === undefined ? null : <ForgetDisconnected row={target.disconnected} name={descriptor.name} onForgotten={onClose} />}
+            {actionId !== undefined || target.disconnected === undefined ? null : <RemoveDisconnected id={target.disconnected.id} onRemoved={onClose} />}
           </div>
         );
       }}
@@ -243,11 +243,11 @@ function disconnectedDetail(row: ConnectionRowModel, c: Parameters<typeof usageT
   return [row.label === "" ? null : row.label, usage].filter((p) => p !== null).join(" · ");
 }
 
-/** A disconnected connection: its history stays; Reconnect opens its setup, Forget lets go of it. */
+/** A disconnected connection can be reconnected or removed. */
 function DisconnectedRow({ machine, row, isDefault, onManage }: { machine: Machine; row: ConnectionRowModel; isDefault: boolean; onManage: () => void }) {
   const harnesses = useHarnesses();
-  const forget = useForgetConnection();
   const c = harnesses.connection(row.id);
+  const remove = useRemoveAction(c);
   return (
     <ConnectionRow
       name={harnesses.kindName(row.harness)}
@@ -257,43 +257,46 @@ function DisconnectedRow({ machine, row, isDefault, onManage }: { machine: Machi
       onManage={onManage}
       manageLabel="Reconnect"
       isDefault={isDefault}
-      disconnect={{
-        label: "Forget",
-        prompt: forgetPrompt({ label: row.label }),
-        busy: forget.isPending,
-        error: forget.error,
-        run: (done) => forget.mutate(row.id, { onSuccess: done }),
-        reset: forget.reset,
-      }}
+      disconnect={remove}
     />
   );
 }
 
-function ForgetDisconnected({ row, name, onForgotten }: { row: ConnectionRowModel; name: string; onForgotten: () => void }) {
+function RemoveDisconnected({ id, onRemoved }: { id: number; onRemoved: () => void }) {
+  const connection = useHarnesses().connection(id);
   return (
-    <div className="flex flex-col gap-2 border-t border-line pt-3.5">
-      <Hint>Forget this {name} connection to remove it from Settings. Its tasks keep their history.</Hint>
-      <ForgetConnection connection={row} onForgotten={onForgotten} />
+    <div className="border-t border-line pt-3.5">
+      <RemoveConnection connection={connection && isDisconnected(connection) ? connection : undefined} onRemoved={onRemoved} />
     </div>
   );
 }
 
-function ForgetConnection({ connection, onForgotten }: {
-  connection: Pick<HarnessConnection, "id" | "label">;
-  onForgotten?: () => void;
-}) {
+function useRemoveAction(connection: HarnessConnection | undefined, onRemoved?: () => void): ConnectionConfirmation | null {
   const forget = useForgetConnection();
-  return <ConfirmConnectionAction accessibleLabel={`Forget ${connection.label || `connection #${connection.id}`}`} action={{
-    label: "Forget",
-    prompt: forgetPrompt(connection),
+  if (connection === undefined) return null;
+  return {
+    label: "Remove connection",
+    prompt: removeConnectionPrompt(connection),
     busy: forget.isPending,
     error: forget.error,
-    run: (done) => forget.mutate(connection.id, { onSuccess: () => { done(); onForgotten?.(); } }),
+    run: (done) => forget.mutate(connection.id, { onSuccess: () => { done(); onRemoved?.(); } }),
     reset: forget.reset,
-  }} />;
+  };
 }
 
-export function PreviousConnections() {
+function RemoveConnection({ connection, machine, onRemoved, children }: {
+  connection: HarnessConnection | undefined;
+  machine?: string;
+  onRemoved?: () => void;
+  children?: ReactNode;
+}) {
+  const action = useRemoveAction(connection, onRemoved);
+  if (connection === undefined || action === null) return null;
+  const label = `Remove connection ${connection.label || `#${connection.id}`}${machine ? ` on ${machine}` : ""}`;
+  return <ConfirmConnectionAction action={action} accessibleLabel={label}>{children}</ConfirmConnectionAction>;
+}
+
+export function PreviousConnections({ machines }: { machines: readonly Machine[] }) {
   const harnesses = useHarnesses();
   const previous = harnesses.list.filter((connection) => !connection.active && connection.forgottenAt === null);
   if (previous.length === 0) return null;
@@ -301,17 +304,19 @@ export function PreviousConnections() {
     <details className="border border-line bg-surface">
       <summary className="cursor-pointer bg-panel px-3 py-2 text-ui font-medium">Previous connections ({previous.length})</summary>
       <RowList label="Previous connections" className="border-t border-line">
-        {previous.map((connection) => (
-          <Row key={connection.id}>
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <p className="text-ui wrap-anywhere">{harnesses.kindName(connection.harness)} · {connection.label || `#${connection.id}`}</p>
-                <Hint>{usageText(connection)}</Hint>
-              </div>
-              <ForgetConnection connection={connection} />
-            </div>
-          </Row>
-        ))}
+        {previous.map((connection) => {
+          const machine = machines.find((m) => m.id === connection.machineId)?.label || `Machine #${connection.machineId}`;
+          return (
+            <Row key={connection.id}>
+              <RemoveConnection connection={connection} machine={machine}>
+                <div className="min-w-0 flex-[1_1_14rem]">
+                  <p className="text-ui font-medium wrap-anywhere">{harnesses.kindName(connection.harness)} · {connection.label || `#${connection.id}`}</p>
+                  <Hint className="wrap-anywhere">{machine} · {usageText(connection)}</Hint>
+                </div>
+              </RemoveConnection>
+            </Row>
+          );
+        })}
       </RowList>
     </details>
   );
