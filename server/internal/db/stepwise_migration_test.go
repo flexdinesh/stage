@@ -91,6 +91,11 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{"shared legacy devices removed", seedV0043SharedPush, checkV0043SharedPush},
 	},
 	44: {{"work attribution leaves old evidence untouched", seedV0044Attribution, checkV0044Attribution}},
+	45: {{"existing connection has unknown workspace freshness", seedV0037ConnectionFacts, checkV0045WorkspaceRefresh}},
+}
+
+func checkV0045WorkspaceRefresh(t *testing.T, pool *sqlite.DB) {
+	wantRows(t, pool, `SELECT id,identity,workspace_refreshed_at,workspace_refresh_error FROM harness_connections WHERE id=42`, "42|instance|NULL|NULL")
 }
 
 func seedV0043NotificationRecipients(t *testing.T, pool *sqlite.DB) {

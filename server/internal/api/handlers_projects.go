@@ -56,6 +56,19 @@ func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if projectSummaryRequest(r) {
+		destinations, err := s.destinations(r.Context())
+		if err != nil {
+			return err
+		}
+		available := availableDestinations(destinations)
+		summaries := make([]db.ProjectSummary, 0, len(ps))
+		for _, p := range ps {
+			summaries = append(summaries, projectSummary(p, available))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"projects": summaries, "destinations": destinations})
+		return nil
+	}
 	imports, err := s.Store.ImportSummaries(r.Context())
 	if err != nil {
 		return err
@@ -144,6 +157,14 @@ func (s *server) getProject(w http.ResponseWriter, r *http.Request) error {
 	p, err := s.Store.GetProject(r.Context(), id)
 	if err != nil {
 		return err
+	}
+	if projectSummaryRequest(r) {
+		destinations, err := s.destinations(r.Context())
+		if err != nil {
+			return err
+		}
+		writeJSON(w, http.StatusOK, projectSummary(p, availableDestinations(destinations)))
+		return nil
 	}
 	writeJSON(w, http.StatusOK, s.projectView(p))
 	return nil

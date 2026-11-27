@@ -147,7 +147,10 @@ func refreshWorkspaceRows(ctx context.Context, tx store.Tx, connectionID int64, 
 			return 0, err
 		}
 	}
-	return n, pr.RefreshBindingStatus(ctx, connectionID)
+	if err := pr.RefreshBindingStatus(ctx, connectionID); err != nil {
+		return 0, err
+	}
+	return n, tx.Connections().RecordWorkspaceRefresh(ctx, connectionID, nil)
 }
 
 // BoundProjectTitle is the title of the Stage project bound to a

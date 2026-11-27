@@ -41,6 +41,9 @@ func ParseRoster(b []byte) ([]Entry, error) {
 	if err := json.Unmarshal(b, &es); err != nil {
 		return nil, fmt.Errorf("malformed claude agents output: %w", err)
 	}
+	if es == nil {
+		return nil, fmt.Errorf("malformed claude agents output: expected a session array")
+	}
 	out := es[:0]
 	for _, e := range es {
 		if e.SessionID != "" {

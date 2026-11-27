@@ -87,8 +87,10 @@ func TestRosterFixturesMapStates(t *testing.T) {
 	if _, err := claudecode.MapState(claudecode.Entry{Kind: claudecode.KindBackground, State: "paused"}); err == nil {
 		t.Fatal("unknown state mapped")
 	}
-	if _, err := claudecode.ParseRoster([]byte("not json")); err == nil {
-		t.Fatal("malformed list parsed")
+	for _, input := range []string{"not json", "null"} {
+		if _, err := claudecode.ParseRoster([]byte(input)); err == nil {
+			t.Fatalf("malformed list parsed: %q", input)
+		}
 	}
 }
 

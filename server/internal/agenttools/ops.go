@@ -270,17 +270,24 @@ func (o *Ops) Context(ctx context.Context, a CallerArgs) (ContextOut, error) {
 
 // ProjectsOut is list_projects.
 type ProjectsOut struct {
-	Connections []db.HarnessConnection `json:"connections"`
-	Projects    []db.Project           `json:"projects"`
+	Connections []db.ConnectionSummary `json:"connections"`
+	client.ProjectSummaries
 }
 
 func (o *Ops) ListProjects(ctx context.Context, _ struct{}) (ProjectsOut, error) {
-	ps, err := o.Client.Projects(ctx)
+	ps, err := o.Client.ProjectSummaries(ctx)
 	if err != nil {
 		return ProjectsOut{}, err
 	}
 	cs, err := o.Client.Connections(ctx)
-	return ProjectsOut{Projects: ps, Connections: cs}, err
+	if err != nil {
+		return ProjectsOut{}, err
+	}
+	connections := make([]db.ConnectionSummary, 0, len(cs))
+	for _, c := range cs {
+		connections = append(connections, db.SummarizeConnection(c, ""))
+	}
+	return ProjectsOut{ProjectSummaries: ps, Connections: connections}, nil
 }
 
 type ModelsArgs struct {

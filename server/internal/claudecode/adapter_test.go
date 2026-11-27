@@ -699,11 +699,20 @@ func TestHealthAndWorkspaces(t *testing.T) {
 		t.Fatalf("%+v", h)
 	}
 	f.Update(func(s *fakestate.State) { s.LoggedIn = false })
-	if h := claudecode.New(claudecode.Options{Connection: conn, CLI: f.CLI(), Identity: f.ConfigDir()}).Health(t.Context()); h.Available || !strings.Contains(h.Reason, "claude auth login") {
+	signedOut := f.Adapter(conn)
+	if h := signedOut.Health(t.Context()); h.Available || !strings.Contains(h.Reason, "claude auth login") {
 		t.Fatalf("logged out %+v", h)
 	}
-	if h := claudecode.New(claudecode.Options{Connection: conn, CLI: f.CLI(), Identity: "/elsewhere"}).Health(t.Context()); h.Available {
+	if ws, err := signedOut.Workspaces(t.Context()); ws != nil || err == nil || !strings.Contains(err.Error(), "claude auth login") {
+		t.Fatalf("logged-out inventory: %+v %v", ws, err)
+	}
+	f.Update(func(s *fakestate.State) { s.LoggedIn = true })
+	other := claudecode.New(claudecode.Options{Connection: conn, CLI: f.CLI(), Identity: "/elsewhere"})
+	if h := other.Health(t.Context()); h.Available {
 		t.Fatalf("other identity %+v", h)
+	}
+	if ws, err := other.Workspaces(t.Context()); ws != nil || err == nil || !strings.Contains(err.Error(), "instead of /elsewhere") {
+		t.Fatalf("other identity inventory: %+v %v", ws, err)
 	}
 	plain := filepath.Join(f.Home, "notes")
 	if err := os.MkdirAll(plain, 0o755); err != nil {

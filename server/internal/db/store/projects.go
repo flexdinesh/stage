@@ -40,6 +40,7 @@ type ImportSummary struct {
 // Workspace is the persisted inventory and its current resolution.
 type Workspace struct {
 	ConnectionID    int64               `json:"connectionId"`
+	WorkspaceID     string              `json:"workspaceId"`
 	ExternalID      string              `json:"externalId"`
 	Title           string              `json:"title"`
 	Workspace       string              `json:"workspace"`

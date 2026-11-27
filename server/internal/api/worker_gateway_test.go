@@ -119,6 +119,10 @@ func TestWorkerGatewayScope(t *testing.T) {
 		{"PATCH", fmt.Sprintf("/api/machines/%d", other.MachineID)},
 		{"DELETE", fmt.Sprintf("/api/machines/%d", other.MachineID)},
 		{"POST", fmt.Sprintf("/api/machines/%d/ping", other.MachineID)},
+		{"GET", "/api/connections/1/workspaces"},
+		{"GET", "/api/workspaces/review"},
+		{"POST", "/api/connections/1/resolve"},
+		{"POST", "/api/sync"},
 	} {
 		out = errOut{}
 		if rec := e.gw(j.Token, c.method, c.path, map[string]any{"label": "x"}, &out); rec.Code != 403 || out.Code != "gateway_forbidden" {

@@ -10,8 +10,21 @@ import (
 
 // ProjectList is the GET /api/projects response.
 type ProjectList struct {
-	Projects []db.Project       `json:"projects"`
-	Imports  []db.ImportSummary `json:"imports"`
+	Projects     []db.Project       `json:"projects"`
+	Imports      []db.ImportSummary `json:"imports"`
+	Destinations []db.Destination   `json:"destinations,omitempty"`
+}
+
+type ProjectSummaries struct {
+	Projects     []db.ProjectSummary `json:"projects"`
+	Destinations []db.Destination    `json:"destinations"`
+}
+
+// ProjectSummaries reads the selection projection without refreshing a harness.
+func (c *Client) ProjectSummaries(ctx context.Context) (ProjectSummaries, error) {
+	var out ProjectSummaries
+	err := c.do(ctx, http.MethodGet, "/api/projects?view=destinations", nil, &out)
+	return out, err
 }
 
 func projectPath(id int64) string { return fmt.Sprintf("/api/projects/%d", id) }

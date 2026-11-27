@@ -19,7 +19,7 @@ type Poller interface {
 }
 
 type Service struct {
-	Reader
+	*Reader
 	store  *db.Store
 	conns  *machine.Connections
 	poller Poller
@@ -37,6 +37,7 @@ type Service struct {
 type Options struct {
 	Store       *db.Store
 	Connections *machine.Connections
+	Reader      *Reader
 	Poller      Poller
 	Log         *slog.Logger
 }
@@ -46,7 +47,7 @@ func New(o Options) *Service {
 		o.Log = slog.Default()
 	}
 	return &Service{
-		Reader: NewReader(o.Store, o.Connections), store: o.Store, conns: o.Connections,
+		Reader: o.Reader, store: o.Store, conns: o.Connections,
 		poller: o.Poller, log: o.Log, kick: make(chan struct{}, 1), FullSyncEvery: 5 * time.Minute,
 	}
 }
@@ -86,6 +87,7 @@ func (s *Service) Progress(id int64) Progress {
 	}
 	return Progress{}
 }
+
 func (s *Service) Kick() {
 	select {
 	case s.kick <- struct{}{}:
@@ -186,16 +188,10 @@ func (s *Service) syncConnection(ctx context.Context, id int64, freshSessions bo
 	}
 	st.progress.Store(&Progress{Running: true, StartedAt: &now})
 	defer func() { st.progress.Store(&Progress{}); st.running.Store(false) }()
-	a, err := s.conns.Inventory(id)
-	if err != nil {
-		return Result{}, err
-	}
 	r := Result{}
 	var errs []error
-	inventory, err := s.inventory(ctx, id, a)
-	if err == nil {
-		r.Projects, err = s.store.RefreshWorkspaces(ctx, id, inventory)
-	}
+	_, projects, err := s.RefreshInventory(ctx, id)
+	r.Projects = projects
 	if err != nil {
 		errs = append(errs, err)
 	} else {

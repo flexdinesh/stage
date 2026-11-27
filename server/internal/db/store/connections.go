@@ -48,6 +48,12 @@ type Move struct {
 	Old, New int64
 }
 
+// WorkspaceRefresh describes the last complete inventory and the latest failure.
+type WorkspaceRefresh struct {
+	RefreshedAt *time.Time `json:"refreshedAt"`
+	LastError   *string    `json:"lastError"`
+}
+
 // Connections is the harness connections repository.
 type Connections interface {
 	// Lock locks the connection rows id until the unit of work ends, on engines
@@ -68,6 +74,8 @@ type Connections interface {
 	Get(ctx context.Context, id int64) (HarnessConnection, error)
 	ConnectionFacts(ctx context.Context, id int64) (string, error)
 	SaveConnectionFacts(ctx context.Context, id int64, facts string) error
+	WorkspaceRefresh(ctx context.Context, id int64) (WorkspaceRefresh, error)
+	RecordWorkspaceRefresh(ctx context.Context, id int64, failure *string) error
 	SetAutoComplete(ctx context.Context, id int64, on bool) error
 	// SetNewTaskConfig: false when the connection is unknown.
 	SetNewTaskConfig(ctx context.Context, id int64, c *execution.Config) (bool, error)

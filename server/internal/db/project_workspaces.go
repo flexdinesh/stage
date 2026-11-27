@@ -3,6 +3,9 @@ package db
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 
@@ -11,11 +14,24 @@ import (
 )
 
 type Workspace = store.Workspace
+type WorkspaceRefresh = store.WorkspaceRefresh
 
 type workspaceRef struct {
 	connection int64
 	externalID string
 	path       string
+}
+
+// WorkspaceID derives a stable selector from the exact catalog key. A
+// different root or connection gets a different selector, regardless of
+// grouping or path canonicalization.
+func WorkspaceID(connection int64, externalID, root string) string {
+	key, _ := json.Marshal(struct {
+		Connection int64
+		NativeID   string
+		Root       string
+	}{connection, externalID, root})
+	return fmt.Sprintf("ws_%x", sha256.Sum256(key))
 }
 
 func refOf(w projectmatch.Workspace) workspaceRef {
@@ -62,6 +78,7 @@ func loadIdentity(ctx context.Context, pr store.Projects) (identityState, error)
 	for i := range state.rows {
 		row := &state.rows[i]
 		w := evidence(*row)
+		row.WorkspaceID = WorkspaceID(w.Connection, w.ExternalID, w.Path)
 		row.IdentityKey = projectmatch.Key(w)
 		row.Declined = declined[store.WorkspaceDecline{ConnectionID: w.Connection, Key: row.IdentityKey}] ||
 			declined[store.WorkspaceDecline{ConnectionID: w.Connection, Key: projectmatch.ExternalKey(w)}]
@@ -135,6 +152,69 @@ func (s *Store) Workspaces(ctx context.Context, connection int64) ([]Workspace, 
 		for _, r := range state.rows {
 			if r.ConnectionID == connection && r.Available {
 				out = append(out, r.Workspace)
+			}
+		}
+		return out, nil
+	})
+}
+
+// WorkspaceCatalog reads the last complete inventory and its refresh status.
+// Archived and missing rows stay in storage for history.
+func (s *Store) WorkspaceCatalog(ctx context.Context, connection int64) ([]Workspace, WorkspaceRefresh, error) {
+	var refresh WorkspaceRefresh
+	rows, err := read(ctx, s, func(tx store.Tx) ([]Workspace, error) {
+		var err error
+		refresh, err = tx.Connections().WorkspaceRefresh(ctx, connection)
+		if err != nil {
+			return nil, err
+		}
+		state, err := loadIdentity(ctx, tx.Projects())
+		if err != nil {
+			return nil, err
+		}
+		out := []Workspace{}
+		for _, row := range state.rows {
+			if row.ConnectionID == connection && row.Available && !row.HarnessArchived {
+				out = append(out, row.Workspace)
+			}
+		}
+		return out, nil
+	})
+	return rows, refresh, err
+}
+
+func (s *Store) RecordWorkspaceRefreshFailure(ctx context.Context, connection int64, failure string) error {
+	return s.e.Write(ctx, func(tx store.Tx) error {
+		return tx.Connections().RecordWorkspaceRefresh(ctx, connection, &failure)
+	})
+}
+
+// DestinationWorkspaces returns exact rows with a complete, successful
+// inventory. Callers still check reachability and launch policy.
+func (s *Store) DestinationWorkspaces(ctx context.Context) ([]Workspace, error) {
+	return read(ctx, s, func(tx store.Tx) ([]Workspace, error) {
+		rows, err := tx.Projects().WorkspaceRows(ctx)
+		if err != nil {
+			return nil, err
+		}
+		fresh := make(map[int64]bool)
+		out := []Workspace{}
+		for _, row := range rows {
+			if !row.ConnectionActive || !row.Available || row.HarnessArchived {
+				continue
+			}
+			ok, checked := fresh[row.ConnectionID]
+			if !checked {
+				status, err := tx.Connections().WorkspaceRefresh(ctx, row.ConnectionID)
+				if err != nil {
+					return nil, err
+				}
+				ok = status.RefreshedAt != nil && status.LastError == nil
+				fresh[row.ConnectionID] = ok
+			}
+			if ok {
+				row.WorkspaceID = WorkspaceID(row.ConnectionID, row.ExternalID, row.Workspace.Workspace)
+				out = append(out, row.Workspace)
 			}
 		}
 		return out, nil

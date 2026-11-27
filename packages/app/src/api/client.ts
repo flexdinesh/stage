@@ -61,7 +61,7 @@ import type {
   UpdateTaskRequest,
   UpdateSnippetRequest,
   User,
-  Workspace,
+  WorkspaceInventory,
   WorkspaceRef,
   WorkspaceResolveResult,
   WorkspaceReview,
@@ -237,7 +237,8 @@ export function createApi(transport: Transport) {
     project: (id: number) => apiFetch<Project>(`/projects/${id}`),
     createProject: (body: CreateProjectRequest) => apiFetch<Project>("/projects", post(body)),
     updateProject: (id: number, body: {title: string; archived: boolean}) => apiFetch<Project>(`/projects/${id}`, patch(body)),
-    workspaces: (connectionId: number) => apiFetch<{ workspaces: Workspace[] }>(`/connections/${connectionId}/workspaces`),
+    workspaces: (connectionId: number, refresh = true) =>
+      apiFetch<WorkspaceInventory>(`/connections/${connectionId}/workspaces${refresh ? "" : "?refresh=false"}`),
     resolveWorkspaces: (connectionId: number, body: { apply: boolean; previewToken?: string }) =>
       apiFetch<WorkspaceResolveResult>(`/connections/${connectionId}/resolve`, post(body)),
     workspaceReview: () => apiFetch<WorkspaceReview>("/workspaces/review"),

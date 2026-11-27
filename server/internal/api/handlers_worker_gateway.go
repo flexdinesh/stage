@@ -18,8 +18,8 @@ const GatewayPrefix = workerchan.GatewayPath
 // gatewayForbidden are the routes a machine token never reaches through
 // the gateway: machine management (a token that could mint pairing codes
 // could outlive its own revocation) and changes to a machine's harness
-// setup (pairing and credentials are the user's, from the UI or a CLI on
-// the main server). Reading setup status stays allowed.
+// setup (pairing and credentials belong to the user), and human workspace
+// inventory. Reading setup status and destination summaries stays allowed.
 var gatewayForbidden = func() *http.ServeMux {
 	m := http.NewServeMux()
 	for _, p := range []string{
@@ -34,6 +34,12 @@ var gatewayForbidden = func() *http.ServeMux {
 		"PUT /api/harnesses/{kind}/settings",
 		"POST /api/harnesses/{kind}/actions/{action}",
 		"DELETE /api/harnesses/{kind}/connection",
+		"GET /api/connections/{connectionId}/workspaces",
+		"POST /api/connections/{connectionId}/workspaces/decline",
+		"POST /api/connections/{connectionId}/workspaces/undecline",
+		"POST /api/connections/{connectionId}/resolve",
+		"GET /api/workspaces/review",
+		"POST /api/sync",
 	} {
 		m.HandleFunc(p, func(http.ResponseWriter, *http.Request) {})
 	}
@@ -90,7 +96,7 @@ func (s *server) workerGateway(w http.ResponseWriter, r *http.Request) error {
 		writeError(w, http.StatusNotFound, "not found")
 	default:
 		if _, pattern := gatewayForbidden.Handler(inner); pattern != "" {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "machine management and harness setup changes are not available through a worker's agent gateway; use the Stage UI or a CLI on the main server", "code": "gateway_forbidden"})
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "This operation requires the Stage UI or a human CLI session on the main server.", "code": "gateway_forbidden"})
 			return nil
 		}
 		s.mux.ServeHTTP(w, inner)

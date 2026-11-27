@@ -71,7 +71,7 @@ func NewServer(o *Ops) *mcp.Server {
 	del := &mcp.ToolAnnotations{DestructiveHint: &destructive}
 
 	add(s, o, "get_context", "Your session id, cwd, resolved Stage project, owning task, chosen bindingId and current treeId/treeTitle.", ro, o.Context)
-	add(s, o, "list_projects", "List Stage projects with workspace bindings and configured harness connections.", ro, o.ListProjects)
+	add(s, o, "list_projects", "List Stage projects, legacy workspace bindings, and available destinations, including unbound workspaces.", ro, o.ListProjects)
 	add(s, o, "list_models", "List execution capabilities for connectionId. Supply projectId for workspace-specific models and agents.", ro, o.ListModels)
 	add(s, o, "list_actions", "List harness actions for exactly one connectionId, taskId, or projectId. For a project, also supply onConnectionId and optionally bindingId.", ro, o.ListActions)
 	add(s, o, "run_action", "Run a harness action by actionId from list_actions. Use the same target and pass its declared input fields. A journalError in the result means the action succeeded and Stage could not record it.", nil, o.RunAction)

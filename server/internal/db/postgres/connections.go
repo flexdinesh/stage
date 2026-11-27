@@ -67,6 +67,20 @@ func (r connections) Get(ctx context.Context, id int64) (store.HarnessConnection
 	return scanConnection(r.QueryRow(ctx, `SELECT `+connectionCols+` FROM harness_connections c WHERE id=$1`, id))
 }
 
+func (r connections) WorkspaceRefresh(ctx context.Context, id int64) (store.WorkspaceRefresh, error) {
+	var out store.WorkspaceRefresh
+	err := r.QueryRow(ctx, `SELECT workspace_refreshed_at,workspace_refresh_error FROM harness_connections
+ WHERE id=$1 AND forgotten_at IS NULL`, id).Scan(&out.RefreshedAt, &out.LastError)
+	return out, notFound(err)
+}
+
+func (r connections) RecordWorkspaceRefresh(ctx context.Context, id int64, failure *string) error {
+	_, err := r.Exec(ctx, `UPDATE harness_connections SET workspace_refresh_error=$2,
+ workspace_refreshed_at=CASE WHEN $2::text IS NULL THEN `+nowSQL+` ELSE workspace_refreshed_at END
+ WHERE id=$1 AND active`, id, failure)
+	return err
+}
+
 func (r connections) ConnectionFacts(ctx context.Context, id int64) (string, error) {
 	var facts string
 	err := r.QueryRow(ctx, `SELECT COALESCE(last_known_facts,'[]') FROM harness_connections WHERE id=$1 AND forgotten_at IS NULL`, id).Scan(&facts)
@@ -201,7 +215,8 @@ func (r connections) ClearDefault(ctx context.Context, id int64) error {
 
 func (r connections) ClearDiscovery(ctx context.Context, id int64) error {
 	return r.execAll(ctx, id, `DELETE FROM external_projects WHERE connection_id=$1`,
-		`DELETE FROM workspace_declines WHERE connection_id=$1`)
+		`DELETE FROM workspace_declines WHERE connection_id=$1`,
+		`UPDATE harness_connections SET workspace_refreshed_at=NULL,workspace_refresh_error=NULL WHERE id=$1`)
 }
 
 func (r connections) Delete(ctx context.Context, id int64) error {

@@ -6,7 +6,7 @@
 // Logic: lib/connectionRows.ts.
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState, type ReactNode } from "react";
-import { useForgetConnection, useHarnesses, usePreferences, useScopedHarnessDescriptors } from "../api/queries.ts";
+import { keys, useForgetConnection, useHarnesses, usePreferences, useScopedHarnessDescriptors } from "../api/queries.ts";
 import type { HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, ReplacedConnection } from "../api/types.ts";
 import { harnessSlots } from "../harnesses/index.ts";
 import { addConnectionOptions, addConnectionReason, connectShortcuts, connectionRows, machineLive, type ConnectionRowModel } from "../lib/connectionRows.ts";
@@ -14,12 +14,14 @@ import { availableSetupActions } from "../lib/connectionSetup.ts";
 import { isDisconnected, removeConnectionPrompt, usageText } from "../lib/harnesses.ts";
 import { useApi } from "../platform/context.tsx";
 import { machineSetupAlert, machineStatusLabel } from "../lib/machines.ts";
+import { POLL } from "../lib/polling.ts";
 import { ConnectionDeclaredActions } from "./ConnectionDeclaredActions.tsx";
 import { CheckConnection, ConfirmConnectionAction, HarnessFacts, ReplacedConnectionNotice, type ConnectionConfirmation } from "./HarnessPresentation.tsx";
 import { IconMore } from "./icons.tsx";
 import { ConnectionCapabilities } from "./ConnectionCapabilities.tsx";
 import { ConnectionRow, MachineScope } from "./ConnectionRow.tsx";
-import { Button, Drawer, Hint, IconButton, Menu, MenuItem, Panel, Row, RowList, useMenu } from "./ui.tsx";
+import { WorkspaceInventoryStatus } from "./WorkspaceInventoryStatus.tsx";
+import { Button, Drawer, Hint, IconButton, Menu, MenuItem, Meta, Panel, QueryState, Row, RowList, useMenu } from "./ui.tsx";
 
 export { MachineScope } from "./ConnectionRow.tsx";
 
@@ -200,6 +202,7 @@ function ManageBody({ machine, target, onClose }: { machine: Machine; target: Ma
               </Panel>
             )}
             {actionId !== undefined || target.disconnected !== undefined ? null : <ConnectionCapabilities descriptor={descriptor} />}
+            {actionId === undefined && status?.configured && status.connectionId > 0 ? <ConnectionInventory id={status.connectionId} /> : null}
             {actionId !== undefined || target.disconnected === undefined ? null : <RemoveDisconnected id={target.disconnected.id} onRemoved={onClose} />}
           </div>
         );
@@ -230,10 +233,45 @@ function RecordedConnection({ machine, descriptor, id, retry }: {
           <Hint className="wrap-anywhere">{reason}</Hint>
           <HarnessFacts facts={saved.data?.facts ?? (status?.connectionId === id ? status?.facts : undefined)}
             offline={machine.status === "offline"} />
+          {id === undefined ? null : <ConnectionInventory id={id} />}
           {retry === undefined ? null : <CheckConnection run={retry} />}
         </div>
       )}
     </Presentation>
+  );
+}
+
+function ConnectionInventory({ id }: { id: number }) {
+  const api = useApi();
+  const inventory = useQuery({
+    queryKey: [...keys.workspaces, id, "status"],
+    queryFn: () => api.workspaces(id, false),
+    refetchInterval: (q) => {
+      const state = q.state.data?.inventory?.state;
+      return state === "pending" || state === "refreshing" ? POLL.live : POLL.slow;
+    },
+    retry: false,
+  });
+  if (inventory.data !== undefined && inventory.data.inventory === undefined) return null;
+  return (
+    <Panel title="Workspace inventory">
+      <QueryState isPending={inventory.isPending} error={inventory.error} hasData={inventory.data !== undefined}>
+        {inventory.data === undefined ? null : <WorkspaceInventoryStatus data={inventory.data} />}
+        {inventory.data === undefined || inventory.data.workspaces.length === 0 ? null : (
+          <details className="mt-2">
+            <summary className="cursor-pointer text-small font-medium">Browse workspaces</summary>
+            <ul className="mt-2 divide-y divide-line border-y border-line">
+              {inventory.data.workspaces.map((row) => (
+                <li key={row.workspaceId ?? JSON.stringify([row.externalId, row.workspace])} className="flex min-w-0 flex-col gap-0.5 py-2">
+                  <span className="wrap-anywhere text-small font-medium">{row.title || row.externalId}</span>
+                  {row.workspace === "" || row.workspace === row.title ? null : <Meta className="wrap-anywhere">{row.workspace}</Meta>}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+      </QueryState>
+    </Panel>
   );
 }
 
