@@ -23,6 +23,7 @@ type Service struct {
 	locks      sync.Map
 
 	PublicURL            string // STAGE_PUBLIC_URL, named in launch journal instructions when set
+	SharedAccess         bool   // Shared launch guidance requires an authorized agent transport.
 	CLI                  string // installed CLI name (install.CLIName), named in launch journal instructions
 	LaunchAttemptTimeout time.Duration
 	OnTransition         func(context.Context, workevent.TaskChange)
@@ -89,6 +90,12 @@ func harnessErr(err error) error {
 // public URL locally, the worker's agent gateway on a remote machine.
 func (s *Service) httpAPI(connection int64) string {
 	remote, gateways := s.conns.Machines().AgentGateways(s.store.ConnectionMachine(connection))
+	if s.SharedAccess {
+		if remote {
+			return "the HTTP API through this machine's private Stage worker socket"
+		}
+		return "the Stage server's HTTP API with a configured agent credential"
+	}
 	return httpAPI(s.PublicURL, remote, gateways)
 }
 

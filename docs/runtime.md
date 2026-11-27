@@ -22,10 +22,13 @@ process `instanceId` and the build identity (`stage` or `stage-dev`). Stage
 resolves the database's mode after migration and before starting the
 runtime. Shared state is sticky across restarts, including when the opt-in is
 omitted. An explicit false setting requires restarting with shared
-configuration. During account-service delivery, internal shared startup
-opens only the owner control socket. Product listeners and work runners stay
-closed until shared transport enforcement is available. The public opt-in
-ships with the integrated feature.
+configuration. Internal shared startup serves static files, setup, health
+and authenticated worker liveness while the first admin claim is pending.
+Product requests return `403 setup_pending`. Work-producing observation,
+discovery, release, and schedule runners start after claim. Recurring fires
+due before the claim are recorded as missed. Existing one-shot tasks and
+dependent work resume through their existing claim and launch fences. The
+public opt-in ships with the integrated feature.
 
 `STAGE_LISTEN` takes a comma list; `--listen` can be repeated (or take a
 comma list), and when given it replaces `STAGE_LISTEN` entirely. Each item is:
@@ -47,8 +50,13 @@ values keep their old meaning. Empty items and duplicates are errors.
 ### Shared setup and owner recovery
 
 Set `STAGE_PUBLIC_URL` to the origin people use in their browser. Use an
-HTTPS proxy for access from other machines. The proxy can use a protected
-Stage product socket or a private TCP upstream. For local HTTP testing, set
+HTTPS proxy for access from other machines. Bind Stage to loopback TCP or
+give the proxy access to a protected Stage product socket. Shared startup
+rejects non-loopback TCP listeners, including wildcard binds. For a
+container using loopback, the proxy needs access to the same network
+namespace. Preserve the canonical public `Host` and browser `Origin` at the
+proxy, including the port when it is non-default. Forwarding headers carry
+no authority. For local HTTP testing, set
 `STAGE_PUBLIC_URL=http://127.0.0.1:7380` and include `127.0.0.1:7380` in
 `STAGE_LISTEN`. A personal server on a private socket needs no browser URL.
 
@@ -57,7 +65,7 @@ On the first shared start, Stage issues a first-admin setup link valid for
 and redirected foreground runs write it to `<data dir>/owner/bootstrap.txt`
 with mode `0600`. Normal logs identify the file, and service status and Copy
 Diagnostics never include its contents. Stage removes the file on shutdown,
-restart or setup reissue. On a pending restart, Stage prints the reissue
+restart, setup reissue or successful claim. On a pending restart, Stage prints the reissue
 command and keeps any valid link until the owner replaces it.
 
 Run `stage owner reissue-setup` on the server as the installation owner to
@@ -70,6 +78,13 @@ socket in an owner-only directory. Shared startup requires the data directory
 to be owned by the Stage process user with mode `0700`. Keep the owner paths
 private when configuring volumes or proxies. Product Unix and TCP listeners
 do not carry owner control.
+
+Shared browser login and redemption use the exact configured origin. A
+browser session uses a host-only `stage_session` cookie with `HttpOnly`,
+`SameSite=Lax` and `Path=/`. The cookie is `Secure` for an HTTPS public
+origin, including when the protected upstream hop uses HTTP. Cookie-based
+writes, including logout, require the same exact origin. Production
+proxies must expose only the HTTPS browser origin.
 
 On the Docker image, run the commands through `docker exec CONTAINER /stage
 owner …` as the container's Stage user. Read the first setup link privately
@@ -286,6 +301,10 @@ SQLite's; Postgres backups are the operator's ([storage.md](storage.md#backups))
 - `engine` is `sqlite` or `postgres`; `stage status` shows it next to the
   database state.
 - It does not expose paths, the pid or the database URL.
+- Shared public health reports database readiness, service and API versions,
+  and whether setup is pending. The local service probe on the product Unix
+  socket also receives `instanceId` to match the data-dir holder. Active
+  human sessions receive the detailed fields, including harness status.
 
 Every `/api` response carries `Stage-Api-Version: <n>` (`buildinfo.APIVersion`,
 currently 9). Health reports the same value in `apiVersion`. Upgrade servers
@@ -379,8 +398,9 @@ Machine tokens are refused everywhere else: a Bearer value starting with
 `stage_mt_` on any other `/api` route or on `/mcp` is 401, after the origin
 policy. Agents on a worker's machine reach `/api` and `/mcp` only through
 the worker route `/api/worker/gateway/...` ([Agent gateway](#agent-gateway)),
-so the proxy bypass stays the one prefix. Other `Authorization` values are ignored, so a proxy that forwards its
-own credentials keeps working. Pairing codes and tokens are stored only as
+so the proxy bypass stays the one prefix. Personal mode passes other
+`Authorization` values through for proxies that forward their own
+credentials. Pairing codes and tokens are stored only as
 SHA-256 (high-entropy secrets need no slow hash) and compared in constant
 time; the id prefix selects the row.
 
@@ -390,8 +410,9 @@ forwarding the `Authorization` header unchanged. Creating a pairing code
 (`POST /api/machines/pairings`) stays behind user auth. Pairing requires
 `STAGE_PUBLIC_URL` (409 `public_url_required`), the address workers reach.
 The full proxy rules: [Remote main server and workers](#remote-main-server-and-workers).
-Without a proxy, any process that reaches a listener already has full API
-access, and the token adds nothing to or takes nothing from that.
+On a personal server, any process that reaches the product listener has
+operator access. Shared servers require the appropriate Stage principal on
+every endpoint, including over Unix.
 
 ## Worker channel
 
@@ -564,7 +585,7 @@ resample watch clears the degraded state and retains that count.
 
 A worker serves agents on its machine the main server's `/api` and `/mcp`
 ([ADR 0002](adr/0002-machines-and-workers.md#8-mcp-and-the-agent-gateway)),
-so `stage`, `stage mcp` and HTTP MCP clients there work unchanged. Code:
+so `stage`, `stage mcp` and HTTP MCP clients there can report work. Code:
 `server/internal/worker/gateway.go` (worker), `server/internal/api/handlers_worker_gateway.go`
 (main).
 
@@ -577,8 +598,8 @@ so `stage`, `stage mcp` and HTTP MCP clients there work unchanged. Code:
   `0600` in a `0700` dir, locked like a server's socket. Client resolution
   finds it because its lock is held. TCP is opt-in
   (`unix,127.0.0.1:7381`) for HTTP MCP clients; a wildcard host is reachable
-  from the network with full agent access, so prefer loopback. A bad list
-  exits 78.
+  from the network with full agent access in personal mode, so prefer
+  loopback. A bad list exits 78.
 - **Startup.** The listeners open after the worker dir is locked and before
   readiness and the channel, and stay open while the channel reconnects or
   the main server is down (requests then get 502). A socket held by another
@@ -599,6 +620,15 @@ so `stage`, `stage mcp` and HTTP MCP clients there work unchanged. Code:
   "gateway_unreachable"}`. The main server's answers (including 401
   `machine_token_invalid` after removal and 409 `api_version_mismatch`)
   pass through.
+- **Shared access.** Use the worker's owner-private default Unix socket.
+  Updated workers strip caller-supplied attestation and generate
+  `Stage-Private-Worker-Gateway` only on that listener. The main server
+  verifies its MAC using the authenticated machine credential. A legacy
+  worker or an explicit TCP or Unix gateway receives
+  `403 private_gateway_required`. Paired workers keep channel negotiation,
+  heartbeats and status while setup is pending and when gateway support is
+  unavailable. Shared agents on the main server use their own bearer
+  credential. The general-purpose product socket requires authentication.
 - **Main server.** The worker route `/api/worker/gateway/{api/...|mcp}`
   checks the API version and the token, then serves the inner path with the
   same `/api` router or MCP handler as a direct request, with the machine
@@ -606,8 +636,8 @@ so `stage`, `stage mcp` and HTTP MCP clients there work unchanged. Code:
   `source_machine_id` ([architecture.md](architecture.md#users)). The outer
   request already passed `guard.Policy`; the MCP SDK's loopback Host check
   is skipped for it (a proxy on the same host forwards the public Host).
-  Machine management routes and per-machine harness setup changes
-  (`PUT`/`POST`/`DELETE /api/machines/{id}/harnesses/...`) are 403
+  Machine management and harness setup changes through either
+  `/api/harnesses/...` or `/api/machines/{id}/harnesses/...` are 403
   `gateway_forbidden`, and so is pushing observations
   (`POST /api/connections/{id}/observations`) for another machine's
   connection; `/api/worker/*`

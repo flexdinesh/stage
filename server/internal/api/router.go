@@ -55,6 +55,11 @@ type Deps struct {
 	// MCP is the streamable HTTP MCP handler (no origin policy of its own)
 	// that worker agent gateways reach through GatewayPrefix/mcp (nil: 404).
 	MCP http.Handler
+	// Access is nil in personal mode. Shared routes and in-process MCP
+	// dispatch use this same policy.
+	Access *Access
+	// InstallationID is the installation discovered at runtime startup.
+	InstallationID string
 	// Machines hosts remote machines as they join and are removed (nil:
 	// none are hosted).
 	Machines MachineHosts
@@ -106,25 +111,35 @@ func NewRouter(deps Deps) http.Handler {
 	s.Channels.SetHarnessKinds(s.registry().Kinds())
 	mux := http.NewServeMux()
 	s.mux = mux
-	h := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
-		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+	handle := func(scope routeScope, pattern string, fn func(http.ResponseWriter, *http.Request) error) {
+		mux.HandleFunc(pattern, s.authorize(scope, func(w http.ResponseWriter, r *http.Request) {
 			if err := fn(w, r); err != nil {
 				s.writeErr(w, r, err)
 			}
-		})
+		}))
+	}
+	h := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
+		handle(humanRoute, pattern, fn)
+	}
+	agent := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
+		handle(agentRoute, pattern, fn)
+	}
+	staged := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
+		handle(stagedRoute, pattern, fn)
 	}
 
-	mux.HandleFunc("GET /api/health", s.health)
+	s.registerAuth(mux)
+	mux.HandleFunc("GET /api/health", s.accessHealth)
 	h("GET /api/me", s.me)
 
 	h("POST /api/sync", s.runSync)
 
-	h("GET /api/projects", s.listProjects)
+	agent("GET /api/projects", s.listProjects)
 	h("GET /api/shared-paths", removedRoute("GET /api/connections/{connectionId}/workspaces"))
 	h("PUT /api/shared-paths", removedRoute("PUT /api/projects/{id}/binding"))
 	h("POST /api/projects/{id}/bindings/{connectionId}/match", removedRoute("POST /api/connections/{connectionId}/resolve"))
 	h("POST /api/projects", s.createProject)
-	h("GET /api/projects/{id}", s.getProject)
+	agent("GET /api/projects/{id}", s.getProject)
 	h("PATCH /api/projects/{id}", s.updateProject)
 	h("PUT /api/projects/{id}/binding", s.bindProject)
 	h("DELETE /api/projects/{id}/binding", removedRoute("DELETE /api/projects/{id}/bindings/{bindingId}"))
@@ -135,18 +150,18 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/projects/{id}/split", s.splitProject)
 	h("GET /api/projects/{id}/events", s.projectEvents)
 	h("GET /api/workspaces/review", s.reviewWorkspaces)
-	h("GET /api/harnesses", s.listHarnesses)
-	h("GET /api/harnesses/{kind}/status", s.harnessStatus)
+	agent("GET /api/harnesses", s.listHarnesses)
+	agent("GET /api/harnesses/{kind}/status", s.harnessStatus)
 	h("PUT /api/harnesses/{kind}/settings", s.harnessSettings)
 	h("POST /api/harnesses/{kind}/actions/{action}", s.harnessAction)
 	h("DELETE /api/harnesses/{kind}/connection", s.harnessDisconnect)
 	// The same per machine (/api/harnesses is machine 1's).
-	h("GET /api/machines/{id}/harnesses", s.listHarnesses)
-	h("GET /api/machines/{id}/harnesses/{kind}/status", s.harnessStatus)
+	agent("GET /api/machines/{id}/harnesses", s.listHarnesses)
+	agent("GET /api/machines/{id}/harnesses/{kind}/status", s.harnessStatus)
 	h("PUT /api/machines/{id}/harnesses/{kind}/settings", s.harnessSettings)
 	h("POST /api/machines/{id}/harnesses/{kind}/actions/{action}", s.harnessAction)
 	h("DELETE /api/machines/{id}/harnesses/{kind}/connection", s.harnessDisconnect)
-	h("GET /api/machines", s.listMachines)
+	agent("GET /api/machines", s.listMachines)
 	h("POST /api/machines/pairings", s.createPairing)
 	// GET /api/machines/pairings/{id}, written so the mux can tell it from
 	// GET /api/machines/{id}/harnesses (the more specific pattern below).
@@ -157,28 +172,28 @@ func NewRouter(deps Deps) http.Handler {
 		return s.pairingStatus(w, r)
 	})
 	h("DELETE /api/machines/pairings/{id}", s.revokePairing)
-	h("GET /api/machines/{id}", s.getMachine)
+	agent("GET /api/machines/{id}", s.getMachine)
 	h("PATCH /api/machines/{id}", s.renameMachine)
 	h("DELETE /api/machines/{id}", s.removeMachine)
 	h("POST /api/machines/{id}/ping", s.pingMachine)
-	mux.Handle("POST /api/worker/join", s.worker(false, true, s.joinWorker))
-	mux.Handle("GET /api/worker/machine", s.worker(true, true, s.workerMachine))
-	mux.Handle("GET /api/worker/channel", s.worker(true, false, s.workerChannelStream))
-	mux.Handle("POST /api/worker/channel", s.worker(true, false, s.workerChannelPost))
-	mux.Handle("POST /api/worker/leave", s.worker(true, true, s.workerLeave))
-	mux.Handle(GatewayPrefix+"/", s.worker(true, true, s.workerGateway))
-	mux.Handle(WorkerPrefix, s.worker(true, true, func(w http.ResponseWriter, _ *http.Request) error {
+	mux.Handle("POST /api/worker/join", s.worker(false, true, false, s.joinWorker))
+	mux.Handle("GET /api/worker/machine", s.worker(true, true, true, s.workerMachine))
+	mux.Handle("GET /api/worker/channel", s.worker(true, false, true, s.workerChannelStream))
+	mux.Handle("POST /api/worker/channel", s.worker(true, false, true, s.workerChannelPost))
+	mux.Handle("POST /api/worker/leave", s.worker(true, true, false, s.workerLeave))
+	mux.Handle(GatewayPrefix+"/", s.worker(true, true, false, s.workerGateway))
+	mux.Handle(WorkerPrefix, s.worker(true, true, false, func(w http.ResponseWriter, _ *http.Request) error {
 		writeError(w, http.StatusNotFound, "not found")
 		return nil
 	}))
-	h("GET /api/connections", s.connections)
-	h("GET /api/connections/resolve", s.resolveConnection)
-	h("GET /api/connections/{connectionId}/capabilities", s.executionCapabilities)
+	agent("GET /api/connections", s.connections)
+	agent("GET /api/connections/resolve", s.resolveConnection)
+	agent("GET /api/connections/{connectionId}/capabilities", s.executionCapabilities)
 	h("PUT /api/connections/{connectionId}/auto-complete", s.setAutoComplete)
 	h("PUT /api/connections/{connectionId}/new-task-config", s.setNewTaskConfig)
 	h("GET /api/connections/{connectionId}/facts", s.connectionFacts)
 	h("DELETE /api/connections/{connectionId}", s.forgetConnection)
-	h("POST /api/connections/{connectionId}/observations", s.pushObservations)
+	agent("POST /api/connections/{connectionId}/observations", s.pushObservations)
 	h("POST /api/tasks/{id}/launch-link/preview", s.previewLaunchLink)
 	h("POST /api/tasks/{id}/launch-link", s.attachLaunchLink)
 	h("GET /api/connections/{connectionId}/projects", removedRoute("GET /api/connections/{connectionId}/workspaces"))
@@ -195,58 +210,58 @@ func NewRouter(deps Deps) http.Handler {
 		handle := func(w http.ResponseWriter, r *http.Request) error {
 			return s.actions(w, r, target)
 		}
-		h("GET "+path, handle)
-		h("POST "+path+"/{action}", handle)
+		agent("GET "+path, handle)
+		agent("POST "+path+"/{action}", handle)
 	}
 
-	h("GET /api/tasks", s.listTasks)
-	h("POST /api/tasks", s.createTask)
-	h("GET /api/tasks/{id}", s.getTask)
+	agent("GET /api/tasks", s.listTasks)
+	agent("POST /api/tasks", s.createTask)
+	agent("GET /api/tasks/{id}", s.getTask)
 	h("GET /api/tasks/{id}/completion-preview", s.completionPreview)
 	h("POST /api/tasks/{id}/complete", s.completeTask)
 	h("POST /api/tasks/{id}/reopen", s.reopenTask)
 	h("GET /api/tasks/{id}/opening-prompt", s.getOpeningPrompt)
-	h("PATCH /api/tasks/{id}", s.updateTask)
-	h("DELETE /api/tasks/{id}", s.deleteTask)
-	h("POST /api/tasks/{id}/start", s.startTask)
-	h("POST /api/tasks/{id}/stop", s.stopTask)
+	agent("PATCH /api/tasks/{id}", s.updateTask)
+	agent("DELETE /api/tasks/{id}", s.deleteTask)
+	agent("POST /api/tasks/{id}/start", s.startTask)
+	agent("POST /api/tasks/{id}/stop", s.stopTask)
 	h("GET /api/tasks/{id}/requests", s.taskRequests)
 	h("POST /api/tasks/{id}/requests/{rid}", s.respondRequest)
 	h("POST /api/tasks/{id}/messages", s.sendMessage)
-	h("POST /api/tasks/{id}/duplicate", s.duplicateTask)
-	h("POST /api/tasks/{id}/archive", s.archiveTask)
-	h("POST /api/tasks/{id}/unarchive", s.unarchiveTask)
-	h("PUT /api/tasks/{id}/needs", s.setNeeds)
-	h("GET /api/tasks/{id}/journal", s.taskJournal)
-	h("POST /api/tasks/{id}/journal", s.taskJournal)
+	agent("POST /api/tasks/{id}/duplicate", s.duplicateTask)
+	agent("POST /api/tasks/{id}/archive", s.archiveTask)
+	agent("POST /api/tasks/{id}/unarchive", s.unarchiveTask)
+	agent("PUT /api/tasks/{id}/needs", s.setNeeds)
+	agent("GET /api/tasks/{id}/journal", s.taskJournal)
+	agent("POST /api/tasks/{id}/journal", s.taskJournal)
 
-	h("GET /api/trees", s.listTrees)
-	h("POST /api/trees", s.createTree)
-	h("GET /api/trees/{id}", s.getTree)
-	h("PATCH /api/trees/{id}", s.updateTree)
-	h("DELETE /api/trees/{id}", s.deleteTree)
-	h("POST /api/trees/{id}/dissolve", s.dissolveTree)
-	h("POST /api/trees/{id}/tasks", s.addToTree)
-	h("DELETE /api/trees/{id}/tasks/{taskId}", s.removeFromTree)
-	h("POST /api/trees/{id}/start", s.startTree)
-	h("GET /api/trees/{id}/journal", s.treeJournal)
-	h("POST /api/trees/{id}/journal", s.treeJournal)
-	h("GET /api/journal/{id}", s.getJournalEntry)
+	agent("GET /api/trees", s.listTrees)
+	agent("POST /api/trees", s.createTree)
+	agent("GET /api/trees/{id}", s.getTree)
+	agent("PATCH /api/trees/{id}", s.updateTree)
+	agent("DELETE /api/trees/{id}", s.deleteTree)
+	agent("POST /api/trees/{id}/dissolve", s.dissolveTree)
+	agent("POST /api/trees/{id}/tasks", s.addToTree)
+	agent("DELETE /api/trees/{id}/tasks/{taskId}", s.removeFromTree)
+	agent("POST /api/trees/{id}/start", s.startTree)
+	agent("GET /api/trees/{id}/journal", s.treeJournal)
+	agent("POST /api/trees/{id}/journal", s.treeJournal)
+	agent("GET /api/journal/{id}", s.getJournalEntry)
 
-	h("GET /api/schedules", s.listSchedules)
-	h("POST /api/schedules", s.createSchedule)
-	h("POST /api/schedules/preview", s.previewSchedule)
-	h("GET /api/schedules/{id}", s.getSchedule)
-	h("PATCH /api/schedules/{id}", s.updateSchedule)
-	h("DELETE /api/schedules/{id}", s.deleteSchedule)
-	h("POST /api/schedules/{id}/run", s.runSchedule)
+	agent("GET /api/schedules", s.listSchedules)
+	agent("POST /api/schedules", s.createSchedule)
+	agent("POST /api/schedules/preview", s.previewSchedule)
+	agent("GET /api/schedules/{id}", s.getSchedule)
+	agent("PATCH /api/schedules/{id}", s.updateSchedule)
+	agent("DELETE /api/schedules/{id}", s.deleteSchedule)
+	agent("POST /api/schedules/{id}/run", s.runSchedule)
 
-	h("POST /api/uploads", s.uploadImage)
-	h("GET /api/attachments/{id}", s.getAttachment)
+	agent("POST /api/uploads", s.uploadImage)
+	agent("GET /api/attachments/{id}", s.getAttachment)
 	h("DELETE /api/attachments/{id}", s.deleteAttachment)
 
-	h("GET /api/connections/{connectionId}/sessions/{id}/context", s.sessionContext)
-	h("POST /api/connections/{connectionId}/sessions/{id}/adopt", s.adoptSession)
+	agent("GET /api/connections/{connectionId}/sessions/{id}/context", s.sessionContext)
+	agent("POST /api/connections/{connectionId}/sessions/{id}/adopt", s.adoptSession)
 
 	h("GET /api/snippets", s.listSnippets)
 	h("POST /api/snippets", s.createSnippet)
@@ -254,26 +269,26 @@ func NewRouter(deps Deps) http.Handler {
 	h("PATCH /api/snippets/{id}", s.updateSnippet)
 	h("DELETE /api/snippets/{id}", s.deleteSnippet)
 
-	h("GET /api/refs/resolve", s.resolveRef)
+	agent("GET /api/refs/resolve", s.resolveRef)
 
-	h("GET /api/preferences", s.getPreferences)
+	agent("GET /api/preferences", s.getPreferences)
 	h("PUT /api/preferences/default-connection", s.putDefaultConnection)
-	h("PUT /api/preferences/notifications", s.putNotifyEvents)
+	staged("PUT /api/preferences/notifications", s.putNotifyEvents)
 
-	h("GET /api/push/config", s.pushConfig)
-	h("POST /api/push/subscriptions", s.subscribePush)
-	h("DELETE /api/push/subscriptions", s.unsubscribePush)
-	h("POST /api/push/test", s.testPush)
-	h("GET /api/badge", s.badge)
-	h("GET /api/notifications", s.listNotifications)
-	h("GET /api/notifications/groups", s.listNotificationGroups)
-	h("POST /api/notifications/read", s.readNotifications)
-	h("GET /api/notifications/unread-tags", s.unreadNotificationTags)
-	h("GET /api/notifications/stream", s.streamNotifications)
+	staged("GET /api/push/config", s.pushConfig)
+	staged("POST /api/push/subscriptions", s.subscribePush)
+	staged("DELETE /api/push/subscriptions", s.unsubscribePush)
+	staged("POST /api/push/test", s.testPush)
+	staged("GET /api/badge", s.badge)
+	staged("GET /api/notifications", s.listNotifications)
+	staged("GET /api/notifications/groups", s.listNotificationGroups)
+	staged("POST /api/notifications/read", s.readNotifications)
+	staged("GET /api/notifications/unread-tags", s.unreadNotificationTags)
+	staged("GET /api/notifications/stream", s.streamNotifications)
 
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/", s.authorize(humanRoute, func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
-	})
+	}))
 	// Every response names the API contract version; clients refuse a
 	// server whose version differs from theirs.
 	apiVersion := strconv.Itoa(buildinfo.APIVersion)
@@ -312,7 +327,8 @@ type Health struct {
 	// Stage links use on hosts whose own origin is not shareable (desktop).
 	PublicURL *string `json:"publicUrl"`
 	// Harnesses is each connector's memory-only summary, in registry order.
-	Harnesses []HealthHarness `json:"harnesses"`
+	Harnesses    []HealthHarness `json:"harnesses"`
+	SharedAccess bool            `json:"sharedAccess,omitempty"`
 }
 
 // HealthHarness is one connected harness in Health.
@@ -328,7 +344,7 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	h := Health{
 		Status: "ok", DB: "ok", Service: buildinfo.Service, Identity: buildinfo.Identity,
 		Version: buildinfo.Version, Commit: buildinfo.Revision(), APIVersion: buildinfo.APIVersion,
-		InstanceID: s.Instance.InstanceID, Engine: s.Config.Database.Engine(),
+		InstanceID: s.Instance.InstanceID, Engine: s.Config.Database.Engine(), SharedAccess: s.Access != nil,
 	}
 	if !s.Instance.StartedAt.IsZero() {
 		t := s.Instance.StartedAt

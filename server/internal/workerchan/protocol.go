@@ -12,6 +12,9 @@ package workerchan
 import (
 	"bufio"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,7 +58,22 @@ const (
 	// GatewayHeader lists the worker's agent gateway listener URLs
 	// (comma-separated, listen.Addr.URL form) on the stream request.
 	GatewayHeader = "Stage-Worker-Gateway"
+	// PrivateGatewayHeader attests that a forwarded request arrived through
+	// the worker's owner-private default socket.
+	PrivateGatewayHeader = "Stage-Private-Worker-Gateway"
 )
+
+// PrivateGatewayProof is a MAC under the machine credential. A legacy
+// gateway may pass unknown headers through from a LAN client.
+func PrivateGatewayProof(token string) string {
+	mac := hmac.New(sha256.New, []byte(token))
+	_, _ = mac.Write([]byte("stage worker private gateway v1"))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func ValidPrivateGatewayProof(token, proof string) bool {
+	return hmac.Equal([]byte(PrivateGatewayProof(token)), []byte(proof))
+}
 
 // SSE event names on the down stream.
 const (

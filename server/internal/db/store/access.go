@@ -144,6 +144,7 @@ type Access interface {
 	ExtendSessionIdle(context.Context, int64, time.Time, time.Time) error
 	RevokeSession(context.Context, int64, int64, time.Time) error
 	RevokeUserSessions(context.Context, int64, time.Time) error
+	RevokeUserAudience(context.Context, int64, SessionAudience, time.Time) error
 
 	InsertGrant(context.Context, TokenDigest, AuthGrant) (int64, error)
 	Grant(context.Context, TokenDigest, GrantPurpose) (AuthGrant, error)

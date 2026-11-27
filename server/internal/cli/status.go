@@ -83,7 +83,9 @@ func printStatus(w io.Writer, s statusOut) {
 		t, state = toneWarn, "not ready"
 	}
 	line(w, t, "stage %s %s at %s %s", h.Version, t.paint(state), s.URL, dim("("+s.Source+")"))
-	kv(w, "identity", "%s", h.Identity)
+	if h.Identity != "" {
+		kv(w, "identity", "%s", h.Identity)
+	}
 	if h.Commit != "" {
 		kv(w, "commit", "%s", h.Commit)
 	}
@@ -98,6 +100,11 @@ func printStatus(w io.Writer, s statusOut) {
 	}
 	for _, hh := range h.Harnesses {
 		printHarnessState(w, hh.Kind, hh.Connected, hh.Configured, hh.LastError)
+	}
+	if h.SetupPending {
+		kv(w, "access", "Waiting for the installation owner to finish setup.")
+	} else if h.SharedAccess && h.Harnesses == nil {
+		kv(w, "access", "Sign in to view harness details.")
 	}
 	if h.Version != s.ClientVersion {
 		warn(w, "Server version %s differs from this CLI (%s)", h.Version, s.ClientVersion)

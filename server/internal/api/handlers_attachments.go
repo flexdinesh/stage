@@ -73,7 +73,9 @@ func (s *server) getAttachment(w http.ResponseWriter, r *http.Request) error {
 	h.Set("Content-Length", fmt.Sprint(len(a.Data)))
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	h.Set("Cache-Control", "private, max-age=31536000, immutable") // rows are never modified
+	if s.Access == nil {
+		h.Set("Cache-Control", "private, max-age=31536000, immutable") // rows are never modified
+	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(a.Data)
 	return nil

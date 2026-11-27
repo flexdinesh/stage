@@ -14,11 +14,11 @@ Shared access is per installation. There is one trusted workspace across project
 | `setup_pending` | Allow the owner to redeem a valid setup grant. Claim atomically consumes the grant, updates user 1 in place, creates its local identity and verifier, and persists `claimed`. Concurrent claims have one winner. |
 | `claimed` | Require sign-in for human work. User 1 remains the same account and the installation has a single first-owner claim. |
 
-A missing flag preserves the persisted shared state. Explicit false against shared data fails startup and directs the operator to use shared configuration. Mode can only advance through these transitions. The #453 internal startup runs only the owner control socket in either shared state. Product listeners are closed after bind and configuration checks, and work-producing runners stay stopped until #454 provides the transport gates. In the integrated pending state, reject product API and gateway work, pause work-producing runners, and keep readiness and worker liveness observable. Resume on claim without duplicate launches or implicit user-1 actions. Task #460 publishes `STAGE_MULTI_USER=1` and `stage serve --multi-user`.
+A missing flag preserves the persisted shared state. Explicit false against shared data fails startup and directs the operator to use shared configuration. Mode can only advance through these transitions. The internal shared runtime serves health, account setup and worker liveness during setup. Product and gateway work remain closed. Work-producing runners resume after claim with an internal system principal. Existing launch fences prevent duplicates, and recurring fires due before the claim are recorded as missed. Task #460 publishes `STAGE_MULTI_USER=1` and `stage serve --multi-user`.
 
 The first opt-in prints one 30-minute setup URL to the operator's foreground terminal, or writes it to the owner-only `owner/bootstrap.txt` under the data directory for managed, container and redirected runs. Pending restart directs the owner to run `stage owner reissue-setup`. Reissue revokes the prior grant. `stage owner recover-admin --email ADDRESS` issues a reset link for an active admin. Both commands use `owner/control.sock` under the protected data directory. Run them as the server's OS user with the same `STAGE_DATA_DIR`, including inside a TCP-only container. Ordinary product socket access, remote requests and machine tokens confer no owner capability. Keep grants, passwords and session secrets out of normal logs, service status, diagnostics and error reporting. See [runtime](../runtime.md) for listener and output configuration.
 
-Use `STAGE_PUBLIC_URL` as the canonical origin for links and exact browser origin checks. Shared browser access requires HTTPS except for loopback HTTP testing with a matching Stage TCP listener. A socket-only service can use a browser-reachable HTTPS proxy. Keep proxy upstream TCP private or use a protected socket. Use configured origins and hosts, and ignore forwarded headers for trust decisions.
+Use `STAGE_PUBLIC_URL` as the canonical origin for links and exact browser origin checks. Shared browser access requires HTTPS except for loopback HTTP testing with a matching Stage TCP listener. A browser-reachable HTTPS proxy forwards the configured Host to loopback TCP or a protected Unix socket. Shared startup rejects wildcard and non-loopback TCP binds. Forwarded headers carry no authority.
 
 ## Durable identity and disposable credentials
 
@@ -80,13 +80,31 @@ Apply one server policy across REST, HTTP MCP (including in-process dispatch), S
 | Shared projects, tasks, trees, schedules, journals, work streams and attachments | Active human. Agents get the existing scoped agent operations where explicitly allowed. Human-only actions such as answering an approval keep their existing restriction. |
 | Worker registry, pairing, default execution connection and harness management | Active human, including members. Agent and worker gateway reads remain limited by existing policy. |
 | Invitations, role changes, disable and member reset | Active admin. Admins retain member permissions. Enforce the last-active-admin rule transactionally. |
-| HTTP/stdio MCP and agent API paths | Trusted agent via its scoped bearer, owner-private agent-only Unix endpoint, or verified worker gateway. MCP retains agent operation limits, including when a signed-in person invokes it. Interactive CLI sign-in never silently supplies credentials to agent integrations. |
+| HTTP/stdio MCP and agent API paths | Trusted agent via its scoped bearer or verified worker gateway in this slice. MCP retains agent operation limits, including when a signed-in browser invokes it. The general-purpose Unix socket requires the corresponding credential. Interactive CLI sign-in never silently supplies credentials to agent integrations. |
 | `/api/worker/*`, including channel and gateway | Pairing grant for enrollment, machine token for worker routes. Preserve worker protocol negotiation. A worker gateway forwards allowed agent operations and records its machine. Require a private local gateway listener or agent authentication on remotely reachable gateways. |
 | Observation and hook ingress | Authenticate the sender under the ingress policy. Workers are restricted to their own connections. Existing hooks retain their scoped credentials. |
 | Setup reissue and admin recovery | Local installation owner through the dedicated OS-protected control path. |
 | Cron, dependent release, observation and other internal work | Internal system, with authorized machine or hook provenance where applicable. The system principal exists only inside Stage. |
 
 Browser sessions use a host-only `HttpOnly`, `SameSite=Lax`, `Path=/` cookie with `Secure` on HTTPS. Protect login, logout and all state changes with the browser origin policy. Native desktop Go captures and injects only the selected upstream's Stage credential for that exact target, including streams and assets. Store it in OS-protected storage or an atomic owner-only file in a protected directory. The webview receives no raw session cookie. CLI login uses a hidden password prompt and owner-only storage. Agent setup uses a private agent endpoint or explicit secret configuration. Caller-session headers, body fields and launch hints are provenance only. Keep secrets out of prompts.
+
+The [API contract](../api.md#shared-access-transport) publishes credential
+issuance for #455 and #458 and form endpoints for #457. A signed-in person
+can rotate or revoke one account-scoped 30-day agent credential. Rotation
+preserves human sessions. Each long-lived MCP request checks its admitted
+credential at one-second intervals without renewing browser idle expiry.
+The worker gateway verifies a machine-token MAC emitted only by the
+owner-private worker socket. Older workers retain status and channel
+negotiation. Their gateway requests are closed in shared mode, as are
+explicit TCP or group socket gateways. Existing harness hooks retain their
+own authentication. Inbox, badge and push access and delivery remain
+closed until #459 supplies recipient scoping.
+
+The principal is authoritative for access. The existing non-null
+`createdBy` columns still carry legacy attribution for system and machine
+writes with no person; #456 adds durable actor kind and cause. Scheduled
+tasks preserve their template creator, and worker writes keep
+`sourceMachineId`. Neither column is an authorization input.
 
 Record direct actor kind and optional human initiator separately from `sourceMachineId`, connection/session, schedule and request ID. Get human IDs from authenticated context. Keep actor and cause on delayed work and retries when known. Scheduled tasks and their initial notes keep the schedule creator. Cron is the actor on automatic fires. Run now records the requester. Releases and harness observations record automation with known cause. Keep old creator IDs and immutable journal/acceptance bytes. Label ambiguous pre-identity activity historical. Disabled accounts retain IDs and history. Existing workspace work and schedules continue under the normal execution policy. Audit access-management actions without secrets and omit login emails from operational display where unnecessary.
 

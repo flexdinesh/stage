@@ -182,6 +182,11 @@ func (r access) RevokeUserSessions(ctx context.Context, userID int64, at time.Ti
 	return err
 }
 
+func (r access) RevokeUserAudience(ctx context.Context, userID int64, audience store.SessionAudience, at time.Time) error {
+	_, err := r.Exec(ctx, `UPDATE auth_sessions SET revoked_at = $1 WHERE user_id = $2 AND audience = $3 AND revoked_at IS NULL`, at, userID, audience)
+	return err
+}
+
 const grantColumns = "id, purpose, issuer_user_id, email, target_user_id, created_at, expires_at, consumed_at, revoked_at"
 
 func scanGrant(row rowScanner) (store.AuthGrant, error) {

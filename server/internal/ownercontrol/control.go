@@ -15,6 +15,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/auth"
 	"github.com/flexdinesh/stage/server/internal/listen"
+	"github.com/flexdinesh/stage/server/internal/principal"
 )
 
 const (
@@ -106,6 +107,7 @@ func (s *Server) serveOne(ctx context.Context, conn net.Conn) {
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
+	ctx = principal.With(ctx, principal.Actor{Kind: principal.Owner})
 	_ = conn.SetDeadline(time.Now().Add(deadline))
 	d := json.NewDecoder(io.LimitReader(conn, messageLimit))
 	d.DisallowUnknownFields()

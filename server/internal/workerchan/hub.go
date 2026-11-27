@@ -35,6 +35,9 @@ type Options struct {
 	Version string
 	// ProtocolRange defaults to the current channel protocol version.
 	ProtocolRange VersionRange
+	// AllowUpcall gates work and setup calls. Core channel liveness and
+	// readiness negotiation remain available.
+	AllowUpcall func(kind string) bool
 }
 
 // Hub multiplexes calls to remote machines over their worker channels: at
@@ -425,6 +428,11 @@ func (h *Hub) Deliver(ctx context.Context, machineID int64, sessionID string, en
 	case KindPing:
 		body, _ := json.Marshal(Pong{Version: h.opts.Version, Time: h.opts.Now().UTC()})
 		return &Envelope{ID: env.ID, Kind: KindResult, Body: body}, nil
+	}
+	if h.opts.AllowUpcall != nil && !h.opts.AllowUpcall(env.Kind) {
+		return &Envelope{ID: env.ID, Kind: KindResult, Error: &Error{
+			Code: "setup_pending", Message: "Waiting for the installation owner to finish setup.",
+		}}, nil
 	}
 	h.mu.Lock()
 	ready, initializing := s.ready != nil, h.initializing[env.Kind]

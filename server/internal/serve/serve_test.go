@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
@@ -535,6 +536,9 @@ func TestRestartKeepsStateWithoutRelaunch(t *testing.T) {
 const helperEnv = "SERVE_HELPER"
 
 func TestMain(m *testing.M) {
+	if os.Getenv("SERVE_TEST_STAGE_CLI") == "1" {
+		os.Exit(cli.Run(context.Background(), os.Args[1:], cli.OSEnv()))
+	}
 	if spec := os.Getenv(helperEnv); spec != "" {
 		data, sock, ok := strings.Cut(spec, "|")
 		if !ok {

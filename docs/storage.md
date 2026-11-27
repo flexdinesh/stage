@@ -723,6 +723,11 @@ from the Docker image; any other binary exits 78 before touching anything.
   ID and sticky mode. Copy zero rows from `auth_sessions` and `auth_grants`.
   The target starts with interactive and agent credentials and setup, invite
   and reset links invalidated. Existing worker identity and pairing survive.
+  Authentication matches the requested audience and a currently active
+  account. Agent credential rotation revokes that account's previous
+  agent sessions and creates the replacement in one locked transaction.
+  Browser and CLI sessions keep their own lifetimes. Password replacement
+  and account disable revoke all audiences for the affected account.
 - **Verify:** inside the same transaction, before committing, compare
   durable rows with the source and confirm the two transient tables are
   empty. Verification uses row count and a checksum (sha256

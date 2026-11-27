@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/auth"
+	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
@@ -22,30 +24,24 @@ import (
 	"github.com/flexdinesh/stage/server/internal/serve"
 )
 
-const ownerReady = "Only installation owner commands are available"
-
 func startSharedOwner(t *testing.T, opts serve.Options) (*inst, *syncBuffer) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	i := &inst{cancel: cancel, done: make(chan error, 1)}
 	logger, logs := bufLogger()
 	opts.Logger = logger
-	opts.Ready = func(serve.Ready) { t.Error("served product traffic before shared transport integration") }
+	ready := make(chan serve.Ready, 1)
+	opts.Ready = func(r serve.Ready) { ready <- r }
 	go func() { i.done <- serve.Run(ctx, opts) }()
 	t.Cleanup(func() { i.stop(t) })
-	deadline := time.NewTimer(10 * time.Second)
-	defer deadline.Stop()
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	for !strings.Contains(logs.String(), ownerReady) {
-		select {
-		case err := <-i.done:
-			close(i.done)
-			t.Fatalf("shared owner startup: %v", err)
-		case <-deadline.C:
-			t.Fatal("owner control did not start")
-		case <-poll.C:
-		}
+	select {
+	case r := <-ready:
+		i.ready = r
+	case err := <-i.done:
+		close(i.done)
+		t.Fatalf("shared startup: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("shared server did not start")
 	}
 	return i, logs
 }
@@ -65,6 +61,14 @@ func sharedDataNeverStartsPersonalRuntime(t *testing.T, c config.Config) {
 	first, logs := startSharedOwner(t, opts)
 	link := setupLink(t, output.String(), c.PublicURL, "/auth/setup")
 	assertPrivateOwner(t, c, logs.String(), link)
+	probe := client.New(first.ready.Listeners[0].URL())
+	health, err := probe.Health(t.Context())
+	if err != nil || !health.SetupPending || !health.SharedAccess || health.InstanceID != first.ready.Meta.InstanceID {
+		t.Fatalf("pending readiness: %+v %v", health, err)
+	}
+	if _, err := probe.Projects(t.Context()); !client.IsStatus(err, http.StatusForbidden) {
+		t.Fatalf("pending product access: %v", err)
+	}
 	if err := first.stop(t); err != nil {
 		t.Fatal(err)
 	}
@@ -188,12 +192,27 @@ func TestSharedOriginNeedsBrowserReachability(t *testing.T) {
 		t.Fatal(err)
 	}
 	address := freePort(t)
+	_, port, err := net.SplitHostPort(address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicBind := cfg(t, data, "0.0.0.0:"+port)
+	publicBind.PublicURL = "https://stage.example"
+	if err := serve.Run(t.Context(), serve.Options{Config: publicBind, SharedAccess: &on, Logger: quiet()}); err == nil ||
+		!strings.Contains(err.Error(), "private upstream") {
+		t.Fatalf("accepted a public cleartext upstream: %v", err)
+	}
 	c = cfg(t, data, address)
 	c.PublicURL = "http://" + address
 	output := &syncBuffer{}
 	_, logs := startSharedOwner(t, serve.Options{Config: c, SharedAccess: &on, BootstrapOutput: output})
 	link := setupLink(t, output.String(), c.PublicURL, "/auth/setup")
 	assertPrivateOwner(t, c, logs.String(), link)
+	headers := claimBrowser(t, http.DefaultClient, c.PublicURL, output.String())
+	cookies := (&http.Response{Header: headers}).Cookies()
+	if len(cookies) != 1 || cookies[0].Secure || !cookies[0].HttpOnly {
+		t.Fatal("loopback development cookie has incorrect flags")
+	}
 }
 
 type failedBootstrap struct{ syncBuffer }
@@ -263,19 +282,13 @@ func assertPrivateOwner(t *testing.T, c config.Config, logs, link string) {
 		t.Fatal("owner control must use a separate private Unix socket")
 	}
 	_, meta, err := instance.ReadHolder(c.DataDir)
-	if err != nil || meta == nil || len(meta.Listeners) != 0 {
+	if err != nil || meta == nil || len(meta.Listeners) != len(c.Listen) ||
+		strings.Contains(strings.Join(meta.Listeners, " "), "control.sock") {
 		t.Fatal("service status must not advertise private owner control")
 	}
 	holder, err := os.ReadFile(filepath.Join(c.DataDir, instance.LockFile))
 	token := linkToken(t, link)
 	if err != nil || strings.Contains(logs, token) || strings.Contains(string(holder), token) {
 		t.Fatal("the setup or recovery grant reached diagnostics")
-	}
-	for _, l := range c.Listen {
-		conn, err := net.DialTimeout(l.Network, l.Address, 100*time.Millisecond)
-		if err == nil {
-			_ = conn.Close()
-			t.Fatal("a product listener offered traffic before shared transport integration")
-		}
 	}
 }

@@ -38,6 +38,9 @@ type Runner struct {
 	Every time.Duration
 	// Now is the clock (tests override it).
 	Now func() time.Time
+	// Since is the shared installation's first claim. Earlier recurring
+	// fires are missed, even if they are within the startup grace period.
+	Since time.Time
 
 	mu sync.Mutex
 }
@@ -80,7 +83,7 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 		return err
 	}
 	for _, id := range due {
-		res, err := r.store.FireSchedule(ctx, id, now, Grace)
+		res, err := r.store.FireScheduleSince(ctx, id, now, Grace, r.Since)
 		if err != nil {
 			errs = append(errs, err)
 			continue

@@ -17,10 +17,17 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/principal"
 	"github.com/flexdinesh/stage/server/internal/remote"
 )
 
 func actionCaller(r *http.Request) execution.Caller {
+	if a, ok := principal.From(r.Context()); ok && a.Kind != principal.Personal {
+		if a.IsHuman() {
+			return execution.CallerUser
+		}
+		return execution.CallerAgent
+	}
 	if db.ActingMachine(r.Context()) != nil || r.Header.Get("Stage-Action-Agent") == "1" || r.Header.Get(agentctx.CallerHeader) != "" {
 		return execution.CallerAgent
 	}
