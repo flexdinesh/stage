@@ -1166,12 +1166,12 @@ reason search is unsupported or requires a worker update. A 503
 A 502 `session_search_failed` indicates a failed search. Direct link or
 ID entry is still available under its existing policy.
 
-Claude Code matches case-insensitive substrings of the listed title,
-workspace path, UUID or short ID. It orders by start time descending
-(unknown times last), then UUID ascending. Pages reflect the live roster.
-Listed completed sessions appear, and sessions whose only record is a
-historical transcript are outside search. Browse creates no task,
-observation, subscription or notification.
+The current harness roster determines the results. Listed completed sessions
+can appear. T3, Codex and OpenCode may return a short or empty filtered
+page with a continuation. Follow `nextCursor` to continue searching.
+[Search scope and ordering by harness](execution.md#session-search)
+
+Browsing creates no task, observation, subscription or notification.
 
 ## Explicit session lookup and adoption
 

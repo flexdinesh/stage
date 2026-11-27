@@ -3,6 +3,7 @@ package opencode
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -187,5 +188,49 @@ func TestLiveOpenCode(t *testing.T) {
 				t.Fatalf("opening %+v %v", first, e)
 			}
 		})
+	}
+}
+
+func TestLiveOpenCodeSessionSearch(t *testing.T) {
+	f := newFixture(t)
+	ctx := t.Context()
+	features, err := f.a.Features(ctx)
+	if err != nil || !features.Operations[execution.OpSessionSearch].Available {
+		t.Fatalf("roster capability %+v: %v", features.Operations[execution.OpSessionSearch], err)
+	}
+	ids := []string{"ses_stage_roster_one", "ses_stage_roster_two"}
+	for _, id := range ids {
+		var created envelope[session]
+		input := map[string]any{"id": id, "title": "Stage roster", "location": location{Directory: f.dir}}
+		if err := f.a.request(ctx, http.MethodPost, "/api/session", input, &created); err != nil || created.Data.ID != id {
+			t.Fatalf("create fixture session %s: %+v, %v", id, created.Data, err)
+		}
+	}
+
+	seen := make(map[string]bool)
+	q := execution.SessionSearchQuery{Query: "STAGE ROSTER", Limit: 1}
+	for range len(ids) + 1 {
+		page, err := f.a.SearchSessions(ctx, q)
+		if err != nil || len(page.Sessions) > 1 {
+			t.Fatalf("bounded roster %+v: %v", page, err)
+		}
+		for _, item := range page.Sessions {
+			id := item.Session.ExternalSessionID
+			if seen[id] || item.Session.ConnectionID != f.a.connection || item.Workspace != f.dir || !item.Eligibility.Available {
+				t.Fatalf("invalid roster item %+v", item)
+			}
+			seen[id] = true
+		}
+		q.Cursor = page.NextCursor
+		if q.Cursor == "" {
+			break
+		}
+	}
+	if !seen[ids[0]] || !seen[ids[1]] || len(seen) != len(ids) || q.Cursor != "" || f.turns.Load() != 0 {
+		t.Fatalf("roster traversal: IDs %v, at end %v, model calls %d", seen, q.Cursor == "", f.turns.Load())
+	}
+	q.Cursor = "not-a-valid-cursor"
+	if _, err := f.a.SearchSessions(ctx, q); !errors.Is(err, execution.ErrSessionSearchCursor) {
+		t.Fatalf("invalid native cursor: %v", err)
 	}
 }

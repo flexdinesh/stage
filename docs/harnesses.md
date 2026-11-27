@@ -141,7 +141,10 @@ The Claude adapter checks only a bounded transcript prefix for origin
 on matches from the roster. Declare an unavailable reason when the
 harness or worker cannot safely enumerate. Keep collection browsing
 behind the human route, independent of Attention, the watch set and
-named lookup and adoption. [Session search API](api.md#session-search)
+named lookup and adoption. Keep provider pagination and query rules in
+the adapter. Preserve a continuation when filtering leaves a short or
+empty native page. [Session search API](api.md#session-search) ·
+[Current harness scope](execution.md#session-search)
 
 ## Choose an extension
 

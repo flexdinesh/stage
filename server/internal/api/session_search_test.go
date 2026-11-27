@@ -77,10 +77,10 @@ func TestPersonalOperatorCanBrowseLocalSessions(t *testing.T) {
 	if len(page.Sessions) != 1 || page.Sessions[0].Title != "Local" || page.Sessions[0].Session.ConnectionID != id {
 		t.Fatalf("local page: %+v", page)
 	}
-	var unsupported errOut
-	e.must(http.MethodGet, rosterPath(e.store.ActiveID(db.LocalMachine, t3.Kind)), nil, http.StatusConflict, &unsupported)
-	if unsupported.Code != "operation_unavailable" || !strings.Contains(unsupported.Error, "session link or ID") {
-		t.Fatalf("unsupported fallback: %+v", unsupported)
+	page = searchOutput{}
+	e.must(http.MethodGet, rosterPath(e.store.ActiveID(db.LocalMachine, t3.Kind)), nil, http.StatusOK, &page)
+	if page.Sessions == nil || len(page.Sessions) != 0 || page.NextCursor != "" {
+		t.Fatalf("empty T3 roster: %+v", page)
 	}
 }
 

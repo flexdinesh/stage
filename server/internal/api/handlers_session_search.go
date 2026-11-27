@@ -186,9 +186,12 @@ func (s *server) searchSessions(w http.ResponseWriter, r *http.Request) error {
 
 func writeSessionSearchError(w http.ResponseWriter, err error) error {
 	var conflict *db.ConflictError
+	var unsupported *execution.SessionSearchUnsupported
 	switch {
 	case errors.Is(err, execution.ErrSessionSearchCursor):
 		accessError(w, http.StatusBadRequest, "invalid_session_search_cursor", execution.ErrSessionSearchCursor.Error())
+	case errors.As(err, &unsupported):
+		return &db.ConflictError{Code: "operation_unavailable", Msg: unsupported.Reason}
 	case errors.As(err, &conflict):
 		return err
 	case errors.Is(err, execution.ErrUnavailable):

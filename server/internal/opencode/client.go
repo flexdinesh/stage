@@ -25,7 +25,7 @@ type Adapter struct {
 	endpoint, browserEndpoint, web, username, password string
 	http                                               *http.Client
 	contractMu                                         sync.Mutex
-	verified                                           serverInfo
+	verified                                           serverContract
 	onHealth                                           func()
 	// local: the service runs on Stage's machine (local auth), so its
 	// checkout paths are readable here for repository metadata.
@@ -155,6 +155,15 @@ func (a *Adapter) request(ctx context.Context, method, path string, input, out i
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if resp.StatusCode == http.StatusBadRequest && method == http.MethodGet &&
+			strings.HasPrefix(path, "/api/session?") && req.URL.Query().Has("cursor") {
+			var body struct {
+				Tag string `json:"_tag"`
+			}
+			if e := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&body); e == nil && body.Tag == "InvalidCursorError" {
+				return execution.ErrSessionSearchCursor
+			}
+		}
 		return responseError{resp.StatusCode}
 	}
 	if out == nil {
@@ -191,32 +200,44 @@ type schemaShape struct {
 	Properties map[string]json.RawMessage
 }
 type operation struct {
-	OperationID string
-	RequestBody struct {
+	OperationID           string
+	Parameters, Responses json.RawMessage
+	RequestBody           struct {
 		Content map[string]struct{ Schema schemaShape }
 	}
 }
 
+type serverContract struct {
+	info   serverInfo
+	search sessionListContract
+}
+
 func (a *Adapter) check(ctx context.Context) (serverInfo, error) {
-	var info serverInfo
-	if e := a.get(ctx, "/api/info", &info); e != nil {
-		return info, e
+	contract, err := a.checkContract(ctx)
+	return contract.info, err
+}
+
+func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
+	var contract serverContract
+	info := &contract.info
+	if e := a.get(ctx, "/api/info", info); e != nil {
+		return contract, e
 	}
 	// Any version is accepted while its OpenAPI contract has what Stage
 	// calls; version-specific handling can branch on info.Version.
 	a.contractMu.Lock()
 	defer a.contractMu.Unlock()
-	if info.PID > 0 && info.Hostname != "" && a.verified == info {
-		return info, nil
+	if info.PID > 0 && info.Hostname != "" && a.verified.info == *info {
+		return a.verified, nil
 	}
 	var spec struct {
 		Paths      map[string]map[string]operation
 		Components struct {
-			Schemas map[string]schemaShape
+			Schemas map[string]json.RawMessage
 		}
 	}
 	if e := a.get(ctx, "/openapi.json", &spec); e != nil {
-		return info, e
+		return contract, e
 	}
 	for _, op := range []struct{ method, path, id string }{
 		{"get", "/api/project", "project.list"},
@@ -237,7 +258,7 @@ func (a *Adapter) check(ctx context.Context) (serverInfo, error) {
 		{"get", "/api/session/{sessionID}/form", "session.form.list"},
 	} {
 		if spec.Paths[op.path][op.method].OperationID != op.id {
-			return info, fmt.Errorf("OpenCode %s is missing %s, which Stage needs.", info.Version, op.id)
+			return contract, fmt.Errorf("OpenCode %s is missing %s, which Stage needs.", info.Version, op.id)
 		}
 	}
 	for path, fields := range map[string][]string{
@@ -247,16 +268,23 @@ func (a *Adapter) check(ctx context.Context) (serverInfo, error) {
 	} {
 		shape := spec.Paths[path]["post"].RequestBody.Content["application/json"].Schema
 		if shape.Ref != "" {
-			shape = spec.Components.Schemas[strings.TrimPrefix(shape.Ref, "#/components/schemas/")]
+			ref := spec.Components.Schemas[strings.TrimPrefix(shape.Ref, "#/components/schemas/")]
+			shape = schemaShape{}
+			if len(ref) != 0 {
+				if err := json.Unmarshal(ref, &shape); err != nil {
+					return contract, fmt.Errorf("invalid OpenCode %s request schema: %w", path, err)
+				}
+			}
 		}
 		for _, field := range fields {
 			if shape.Properties[field] == nil {
-				return info, fmt.Errorf("OpenCode %s: the %s request lacks %s, which Stage needs.", info.Version, path, field)
+				return contract, fmt.Errorf("OpenCode %s: the %s request lacks %s, which Stage needs.", info.Version, path, field)
 			}
 		}
 	}
-	a.verified = info
-	return info, nil
+	contract.search = inspectSessionList(spec.Paths["/api/session"]["get"], spec.Components.Schemas)
+	a.verified = contract
+	return contract, nil
 }
 func (a *Adapter) Health(ctx context.Context) execution.Health {
 	if a.onHealth != nil {

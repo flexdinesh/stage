@@ -6,6 +6,7 @@
 package codextest
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -497,13 +498,37 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		_ = json.Unmarshal(p["includedThreadIds"], &ids)
 		var archived bool
 		_ = json.Unmarshal(p["archived"], &archived)
-		out := []any{}
-		for _, id := range ids {
-			if th, ok := s.threads[id]; ok && th.persisted && th.Archived == archived {
-				out = append(out, wireThread(th, false))
+		var threads []*Thread
+		for id, th := range s.threads {
+			if th.persisted && th.Archived == archived && (ids == nil || slices.Contains(ids, id)) {
+				threads = append(threads, th)
 			}
 		}
-		return map[string]any{"data": out, "nextCursor": nil, "backwardsCursor": nil}, nil
+		slices.SortFunc(threads, func(a, b *Thread) int {
+			if n := cmp.Compare(b.Created, a.Created); n != 0 {
+				return n
+			}
+			return cmp.Compare(a.ID, b.ID)
+		})
+		if cursor := str("cursor"); cursor != "" {
+			i := slices.IndexFunc(threads, func(th *Thread) bool { return cursor == "after/"+th.ID })
+			if i < 0 {
+				return nil, invalid("invalid cursor")
+			}
+			threads = threads[i+1:]
+		}
+		var limit int
+		_ = json.Unmarshal(p["limit"], &limit)
+		var next any
+		if limit > 0 && limit < len(threads) {
+			threads = threads[:limit]
+			next = "after/" + threads[len(threads)-1].ID
+		}
+		out := make([]any, 0, len(threads))
+		for _, th := range threads {
+			out = append(out, wireThread(th, false))
+		}
+		return map[string]any{"data": out, "nextCursor": next, "backwardsCursor": nil}, nil
 	case "thread/loaded/list":
 		ids := []string{}
 		for id, th := range s.threads {

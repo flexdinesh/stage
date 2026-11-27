@@ -150,7 +150,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	c := execution.Capabilities{
 		Operations: map[execution.Op]execution.Availability{
 			execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
-			execution.OpSessionSearch: {Reason: "Search is unavailable on Codex. Enter a session link or ID."},
+			execution.OpSessionSearch: available,
 			execution.OpImages:        available,
 			execution.OpRespond:       {Reason: answerInCodex},
 			execution.OpSend:          {Reason: answerInCodex},
