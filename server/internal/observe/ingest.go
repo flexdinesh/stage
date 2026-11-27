@@ -135,13 +135,12 @@ func (s *Service) applyRecord(ctx context.Context, tx *db.Store, machine int64, 
 		return result, err
 	case task.State == db.StateLaunching:
 		result.ingested = Launching
-	case r.Attention:
-		// A task adopted between watch publication and ingestion will receive
-		// its own cadence. An attention read cannot supersede that schedule.
+	case r.Attention && !rearmsTask(task.State, o):
+		// Owned sessions normally use their own polling cadence.
 		result.ingested = Unowned
 	default:
 		result.ingested = Applied
-		result.task, result.inferred, err = s.coord.ApplyObservation(ctx, tx, task, o, r.ObservedAt)
+		result.task, result.inferred, err = s.coord.ApplyObservation(ctx, tx, task, o, r.ObservedAt, r.captureTime())
 	}
 	if err == nil && s.RecordNotification != nil && (result.task != nil || result.session != nil) {
 		result.afterCommit, err = s.RecordNotification(ctx, tx, workevent.ObservationChange{
@@ -149,6 +148,12 @@ func (s *Service) applyRecord(ctx context.Context, tx *db.Store, machine int64, 
 		})
 	}
 	return result, err
+}
+
+// Active attention samples bring expired failed, interrupted and cancelled
+// tasks back onto the poll watch, even during the first attention pass.
+func rearmsTask(state db.TaskState, o execution.Observation) bool {
+	return o.Active && !o.Child && (state == db.StateFailed || state == db.StateInterrupted || state == db.StateCancelled)
 }
 
 func (s *Service) applyAttention(ctx context.Context, tx *db.Store, kind string, o execution.Observation, quiet bool) (*workevent.SessionChange, error) {

@@ -64,7 +64,7 @@ type Closure struct {
 	Setting string `json:"setting"`
 	// Completed is the accepted result line.
 	Completed string `json:"completed"`
-	// Via follows "completed 3h ago": "via T3 settle".
+	// Via names the closure signal after the completion timestamp.
 	Via string `json:"via"`
 	// Event is the journal event text of an inferred completion.
 	Event string `json:"-"`
@@ -79,9 +79,9 @@ type Descriptor struct {
 	Sessions       Sessions `json:"sessions"`
 	// StateReasons lists the nonempty observation reasons this harness may report.
 	StateReasons []string `json:"stateReasons"`
-	// StableIdentity: an instance identity names one instance for good (a
-	// T3 environment id), so a retired connection with the same identity is
-	// revived. Otherwise the harness proves continuity itself.
+	// StableIdentity means an instance identity always names the same instance.
+	// A retired connection with that identity is revived. Otherwise the
+	// harness proves continuity itself.
 	StableIdentity bool `json:"-"`
 	// ContinuityProof allows the module to select a retired connection using
 	// its own evidence when an address is insufficient to identify an instance.
@@ -111,8 +111,8 @@ type Descriptor struct {
 	SessionHint string `json:"sessionHint,omitempty"`
 	// DiscoveryHint explains how to make a workspace visible to this harness.
 	DiscoveryHint string `json:"discoveryHint,omitempty"`
-	// Wraps: this harness runs other harnesses' sessions (T3 runs Claude
-	// Code and Codex). Nil: it runs only its own.
+	// Wraps declares that this harness can run other harnesses' sessions.
+	// Nil means it runs only its own.
 	Wraps *Wraps `json:"wraps,omitempty"`
 }
 
@@ -123,8 +123,7 @@ type Descriptor struct {
 // harness's (one with Attribution.Origin) (docs/execution.md).
 type Wraps struct {
 	// Origins are the session origins it leaves, as the wrapped harness
-	// records them and its adapter reports them (execution.Observation
-	// Origin): Claude Code's entrypoint, Codex's originator.
+	// records them and its adapter reports them in execution.Observation.Origin.
 	Origins []string `json:"origins"`
 }
 

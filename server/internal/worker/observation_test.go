@@ -127,7 +127,9 @@ func TestObservationReplaysUnacknowledgedBatch(t *testing.T) {
 	if err := q.Enqueue(record); err != nil {
 		t.Fatal(err)
 	}
-	requests := make(chan observe.Batch, 2)
+	requests := make(chan observe.Batch, 3)
+	observer := &observationWorker{queue: q}
+	replacement := &channel{ctx: t.Context(), id: "after", serverKinds: []string{observe.KindBatch}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var env workerchan.Envelope
 		var batch observe.Batch
@@ -146,6 +148,9 @@ func TestObservationReplaysUnacknowledgedBatch(t *testing.T) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
+		if r.Header.Get(workerchan.SessionHeader) == "replaced" {
+			observer.attach(replacement)
+		}
 		ack, err := json.Marshal(observe.BatchAck{Cursor: batch.Cursor})
 		if err != nil {
 			t.Error(err)
@@ -158,20 +163,28 @@ func TestObservationReplaysUnacknowledgedBatch(t *testing.T) {
 	defer srv.Close()
 	w := &runner{api: newAPI(srv.URL, "token", srv.Client())}
 	c := &channel{w: w, ctx: t.Context(), id: "before", serverKinds: []string{observe.KindBatch}}
-	if sent, err := sendObservations(c, q); err == nil || sent {
+	replacement.w = w
+	observer.attach(c)
+	if sent, err := observer.sendObservations(c, q); err == nil || sent {
 		t.Fatalf("failed upload returned sent=%v, err=%v", sent, err)
 	}
 	q, err = outbox.Open(dir, "join", outbox.Limits{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.id = "after"
-	if sent, err := sendObservations(c, q); err != nil || !sent {
+	observer.mu.Lock()
+	observer.queue = q
+	observer.mu.Unlock()
+	c.id = "replaced"
+	if sent, err := observer.sendObservations(c, q); err != workerchan.ErrReplaced || sent {
+		t.Fatalf("replaced attachment returned sent=%v, err=%v", sent, err)
+	}
+	if sent, err := observer.sendObservations(replacement, q); err != nil || !sent {
 		t.Fatalf("replay returned sent=%v, err=%v", sent, err)
 	}
-	first, second := <-requests, <-requests
-	if !reflect.DeepEqual(first, second) || len(second.Records) != 1 {
-		t.Fatalf("replay changed batch: first %+v, second %+v", first, second)
+	first, second, third := <-requests, <-requests, <-requests
+	if !reflect.DeepEqual(first, second) || !reflect.DeepEqual(first, third) || len(first.Records) != 1 {
+		t.Fatalf("replay changed batch: first %+v, second %+v, third %+v", first, second, third)
 	}
 	q, err = outbox.Open(dir, "join", outbox.Limits{})
 	if err != nil {

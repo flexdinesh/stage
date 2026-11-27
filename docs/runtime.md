@@ -407,11 +407,12 @@ adapters and delivers batches to the main server.
   `hello.channelKinds`. The worker advertises `observe.watch` in
   `ready.channelKinds` and `observe.batch` in `ready.upKinds`. Remote observation requires both. The main sends the
   full watch set when the worker attaches and as the set changes. The
-  worker acknowledges it with its durable producer ID. Batches go up on
-  the authenticated channel independently of command requests. A reconnect
-  establishes a new channel session and keeps the producer and queued
-  cursors. Update the main server and its workers together for this
-  channel change. [Observation wire format](api.md#worker-observation)
+  worker acknowledges it with its durable producer ID and any released
+  cursor. Batches go up on the authenticated channel independently of
+  command requests. A reconnect establishes a new channel session and
+  keeps the producer and queued cursors. Update the main server and its
+  workers together for this channel change.
+  [Observation wire format](api.md#worker-observation)
 - **Presence.** The server reports `negotiating` until ready is accepted,
   then `online` while the session remains live. A refusal appears as
   `needs_update` with `statusReason` in Machines until compatible
@@ -493,6 +494,10 @@ keep their observed times. Cursors are assigned when a batch is sealed.
 Only one sealed batch is in flight at a time. Retries and restarts keep its
 IDs and records intact. A partial acknowledgement advances the confirmed
 cursor, and the sealed batch remains intact until fully acknowledged.
+The watch reply advertises only the cursor through records already removed.
+If the main database is restored behind that cursor, the main records the
+missing range and requests a fresh sample. The worker can then deliver the
+remaining batches under the same producer.
 
 The persisted queue holds at most 16 MiB and 10,000 records, including the sealed
 batch. Atomic writes use a temporary file before replacing the queue file.

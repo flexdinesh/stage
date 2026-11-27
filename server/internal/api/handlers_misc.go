@@ -43,12 +43,12 @@ func (s *server) adoptSession(w http.ResponseWriter, r *http.Request) error {
 		}
 		req.ProjectID = &id
 	}
-	binding, err := s.prepareAdoption(r, ref)
+	workspace, err := s.prepareAdoption(ctx, ref)
 	if err != nil {
 		return err
 	}
 	task, created, err := s.Store.AdoptSession(ctx, db.AdoptInput{
-		ProjectID: req.ProjectID, NewProjectTitle: req.NewProjectTitle, Binding: binding,
+		ProjectID: req.ProjectID, NewProjectTitle: req.NewProjectTitle, Workspace: workspace,
 		Session: ref, CallerSession: req.CallerSession, Title: req.Title, InitialNote: req.InitialNote, TreeID: req.TreeID,
 	})
 	if err != nil {
@@ -84,9 +84,13 @@ func (s *server) workspaceFor(r *http.Request, o execution.Observation) (*db.Pro
 	if err != nil {
 		return nil, &db.HarnessError{Err: err}
 	}
+	return adoptionBinding(o, ps)
+}
+
+func adoptionBinding(o execution.Observation, ps []execution.WorkspaceInfo) (*db.ProjectBinding, error) {
 	var binding *db.ProjectBinding
 	for _, p := range ps {
-		if p.ID != o.Project || p.DeletedAt != nil || p.ArchivedAt != nil {
+		if p.ID != o.Project || p.DeletedAt != nil || p.ArchivedAt != nil || p.Evidence != nil && p.Evidence.Gone {
 			continue
 		}
 		if binding != nil {
@@ -99,8 +103,8 @@ func (s *server) workspaceFor(r *http.Request, o execution.Observation) (*db.Pro
 	}
 	return binding, nil
 }
-func (s *server) prepareAdoption(r *http.Request, ref db.SessionRef) (*db.ProjectBinding, error) {
-	ctx := r.Context()
+
+func (s *server) prepareAdoption(ctx context.Context, ref db.SessionRef) (*db.AdoptionWorkspace, error) {
 	_, err := s.Store.TaskBySession(ctx, ref)
 	if err == nil {
 		return nil, nil
@@ -126,7 +130,15 @@ func (s *server) prepareAdoption(r *http.Request, ref db.SessionRef) (*db.Projec
 	if err != nil {
 		return nil, err
 	}
-	return s.workspaceFor(r, o)
+	inventory, err := s.Engine.Discovery.Inventory(ctx, ref.ConnectionID)
+	if err != nil {
+		return nil, &db.HarnessError{Err: err}
+	}
+	binding, err := adoptionBinding(o, inventory)
+	if err != nil {
+		return nil, err
+	}
+	return &db.AdoptionWorkspace{Binding: *binding, Inventory: inventory}, nil
 }
 
 // Resolve an owner entirely from Stage. Observe only an explicitly named unowned session.

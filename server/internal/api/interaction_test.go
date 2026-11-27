@@ -2,10 +2,12 @@ package api_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // T3 offers no interaction operations: the generic routes answer 409
@@ -18,12 +20,20 @@ func TestInteractionRoutesUnavailable(t *testing.T) {
 		t.Fatalf("no session: %d %v", code, body)
 	}
 	a := e.task(p.ID, "running", map[string]any{"start": true})
-	for _, c := range []struct{ method, path, body string }{
-		{"GET", fmt.Sprintf("/api/tasks/%d/requests", a.ID), ""},
-		{"POST", fmt.Sprintf("/api/tasks/%d/requests/q1", a.ID), `{"option":"yes"}`},
-		{"POST", fmt.Sprintf("/api/tasks/%d/messages", a.ID), `{"text":"hello"}`},
+	var caps execution.Capabilities
+	e.must("GET", fmt.Sprintf("/api/connections/%d/capabilities", p.Bindings[0].ConnectionID), nil, 200, &caps)
+	for _, c := range []struct {
+		method, path, body string
+		op                 execution.Op
+	}{
+		{"GET", fmt.Sprintf("/api/tasks/%d/requests", a.ID), "", execution.OpRespond},
+		{"POST", fmt.Sprintf("/api/tasks/%d/requests/q1", a.ID), `{"option":"yes"}`, execution.OpRespond},
+		{"POST", fmt.Sprintf("/api/tasks/%d/messages", a.ID), `{"text":"hello"}`, execution.OpSend},
 	} {
-		if code, body := e.raw(c.method, c.path, c.body); code != 409 || body["code"] != "operation_unavailable" {
+		reason := caps.Operations[c.op].Reason
+		code, body := e.raw(c.method, c.path, c.body)
+		message, _ := body["error"].(string)
+		if code != 409 || body["code"] != "operation_unavailable" || reason == "" || !strings.HasSuffix(message, reason) {
 			t.Errorf("%s %s: %d %v", c.method, c.path, code, body)
 		}
 	}

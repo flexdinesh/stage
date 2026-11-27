@@ -423,13 +423,19 @@ type Attempts interface {
 	Handoffs(ctx context.Context, taskID int64, n int) ([]Handoff, error)
 }
 
+// ObservationSnapshot stores Stage's capture time alongside the harness payload.
+type ObservationSnapshot struct {
+	execution.Observation
+	CapturedAt time.Time `json:"stageCapturedAt,omitzero"`
+}
+
 // Observations is the normalized execution observation repository.
 type Observations interface {
 	// Get is a session identity's observation (ErrNotFound).
 	Get(ctx context.Context, sessionID int64) (execution.Observation, error)
-	ByRef(ctx context.Context, ref SessionRef) (execution.Observation, error)
+	ByRef(ctx context.Context, ref SessionRef) (ObservationSnapshot, error)
 	// Put stores o and clears its unavailable reason.
-	Put(ctx context.Context, sessionID int64, o execution.Observation) error
+	Put(ctx context.Context, sessionID int64, o ObservationSnapshot) error
 	Unavailable(ctx context.Context, ref SessionRef, reason string) error
 	// Watched: connection's top-level sessions observed running, needing
 	// input or done.

@@ -1,13 +1,29 @@
 package api_test
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
+
+const openingUnavailable = "Read the opening prompt in the harness."
+
+type restrictedOpeningAdapter struct{ execution.Adapter }
+
+func (a restrictedOpeningAdapter) Features(ctx context.Context) (execution.Capabilities, error) {
+	caps, err := a.Adapter.Features(ctx)
+	if err == nil {
+		caps.Operations[execution.OpOpening] = execution.Availability{Reason: openingUnavailable}
+	}
+	return caps, err
+}
 
 func TestAdoptedOpeningPrompt(t *testing.T) {
 	e := newEnv(t)
@@ -66,4 +82,19 @@ func TestAdoptedOpeningPrompt(t *testing.T) {
 	e.must("GET", "/api/tasks/999999/opening-prompt", nil, 404, nil)
 	e.fake.RemoveThread(id)
 	e.must("GET", base, nil, 404, nil)
+
+	connectionID := p.Bindings[0].ConnectionID
+	adapter, err := e.engine.Connections.Adapter(connectionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, _ := e.engine.Connections.Machines().Get(db.LocalMachine)
+	local, ok := host.(*machine.Local)
+	if !ok {
+		t.Fatal("missing local fixture host")
+	}
+	local.Install(connectionID, connectionID, restrictedOpeningAdapter{adapter})
+	if msg := e.refused("GET", base, nil, 409); msg != openingUnavailable {
+		t.Fatalf("unavailable opening: %q", msg)
+	}
 }

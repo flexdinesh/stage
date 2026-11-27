@@ -89,6 +89,8 @@ export function localNote(s: OpenCodeStatus): string | null {
 
 export type AdvancedDraft = { endpoint: string; browserEndpoint: string; webClient: string };
 
+const urlFields: readonly (keyof AdvancedDraft)[] = ["endpoint", "browserEndpoint", "webClient"];
+
 /**
  * Advanced drawer save body: only the URL fields that changed (trimmed),
  * plus credentials when replaced, so an untouched
@@ -96,7 +98,7 @@ export type AdvancedDraft = { endpoint: string; browserEndpoint: string; webClie
  */
 export function advancedChanges(s: OpenCodeStatus, draft: AdvancedDraft, credentials: { username: string; password: string } | null): OpenCodeSettings {
   const body: OpenCodeSettings = {};
-  for (const key of ["endpoint", "browserEndpoint", "webClient"] as const) {
+  for (const key of urlFields) {
     const value = draft[key].trim();
     if (value !== s[key]) body[key] = value;
   }

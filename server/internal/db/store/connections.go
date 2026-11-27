@@ -16,7 +16,7 @@ type HarnessConnection struct {
 	Harness      string `json:"harness"`
 	AutoComplete bool   `json:"autoComplete"`
 	Active       bool   `json:"active"`
-	// Label names the instance (T3 environment, OpenCode address).
+	// Label is the display name of the instance.
 	Label       string  `json:"label"`
 	RetiredAt   *string `json:"retiredAt"`
 	ForgottenAt *string `json:"forgottenAt"`
@@ -95,10 +95,11 @@ type Connections interface {
 	HasRelations(ctx context.Context, id int64) (bool, error)
 	// HasWork: any task or schedule names it.
 	HasWork(ctx context.Context, id int64) (bool, error)
-	// Referenced: tasks, schedules, sessions or launch destinations name it.
+	// Referenced: tasks, schedules, sessions or launch destinations name it,
+	// or workspace choices still reference one of its bindings.
 	Referenced(ctx context.Context, id int64) (bool, error)
 	// FollowReplacement moves the default connection, unlaunched backlog
-	// tasks and schedules from one connection to another.
+	// tasks and schedules to a replacement, preserving workspace choices.
 	FollowReplacement(ctx context.Context, from, to int64) error
 	ClearDefault(ctx context.Context, id int64) error
 	ClearDiscovery(ctx context.Context, id int64) error

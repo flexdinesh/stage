@@ -229,6 +229,11 @@ func (o *observationWorker) accept(c *channel, ctx context.Context, env workerch
 	if err := ctx.Err(); err != nil {
 		return watchReceipt{}, err
 	}
+	released, err := o.queue.ReleasedCursor()
+	if err != nil {
+		o.report(observationRecovery, err)
+		return watchReceipt{}, err
+	}
 	if o.watch != nil && o.watch.Epoch == watch.Epoch && watch.Generation <= o.watch.Generation {
 		if !o.work.Replace(watch) {
 			return watchReceipt{}, errors.New("stale or conflicting observation watch")
@@ -252,7 +257,7 @@ func (o *observationWorker) accept(c *channel, ctx context.Context, env workerch
 	o.canResume = true
 	a.installed = true
 	o.activate(a)
-	return watchReceipt{ack: observe.WatchAck{Producer: o.queue.Producer()}, revision: o.revision}, nil
+	return watchReceipt{ack: observe.WatchAck{Producer: o.queue.Producer(), ReleasedCursor: released}, revision: o.revision}, nil
 }
 
 func (o *observationWorker) ready(c *channel) {
@@ -335,7 +340,7 @@ func (o *observationWorker) deliver(ctx context.Context) {
 	for ctx.Err() == nil {
 		c, q := o.deliveryTarget()
 		if c != nil {
-			sent, err := sendObservations(c, q)
+			sent, err := o.sendObservations(c, q)
 			if err != nil {
 				if c.ctx.Err() == nil {
 					o.worker.log.Warn("send observation batch", "err", err, "retryIn", backoff)
@@ -363,7 +368,7 @@ func (o *observationWorker) deliver(ctx context.Context) {
 	}
 }
 
-func sendObservations(c *channel, q *outbox.Queue) (bool, error) {
+func (o *observationWorker) sendObservations(c *channel, q *outbox.Queue) (bool, error) {
 	batch, err := q.Seal()
 	if err != nil || len(batch.Records) == 0 {
 		return false, err
@@ -380,6 +385,13 @@ func sendObservations(c *channel, q *outbox.Queue) (bool, error) {
 	}
 	if ack.Cursor > batch.Cursor {
 		return false, fmt.Errorf("observation acknowledgement %d exceeds sent cursor %d", ack.Cursor, batch.Cursor)
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	// Serialize releasing records with the replacement attachment's watch
+	// reply, which reports the exact durable prefix no longer replayable.
+	if o.attached == nil || o.attached.channel != c || c.ctx.Err() != nil {
+		return false, workerchan.ErrReplaced
 	}
 	if err := q.Ack(ack.Cursor); err != nil {
 		return false, err

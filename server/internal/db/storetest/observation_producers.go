@@ -77,11 +77,24 @@ func caseObservationProducerCursor(t *testing.T, open Factory) {
 	if err != nil || got != (db.ObservationCommit{Cursor: 2}) {
 		t.Fatalf("replay: %+v %v", got, err)
 	}
+	for _, want := range []int64{2, 0} {
+		lost, err := restarted.ReconcileObservationProducer(ctx, machine, producer, 4)
+		if err != nil || lost != want {
+			t.Fatalf("reconciled producer lost %d records, want %d: %v", lost, want, err)
+		}
+	}
+	got, err = s.CommitObservationRecord(ctx, machine, producer, 3, neverApply)
+	if err != nil || got != (db.ObservationCommit{Cursor: 4}) {
+		t.Fatalf("replay after reconciliation: %+v %v", got, err)
+	}
 
 	bind(other, producer)
 	bind(machine, "epoch-two")
 	if err := restarted.BindObservationProducer(ctx, machine, producer); !errors.Is(err, db.ErrObservationProducer) {
 		t.Fatalf("retired producer rebound: %v", err)
+	}
+	if _, err := restarted.ReconcileObservationProducer(ctx, machine, producer, 6); !errors.Is(err, db.ErrObservationProducer) {
+		t.Fatalf("retired producer reconciled: %v", err)
 	}
 	if _, err := restarted.CommitObservationRecord(ctx, machine, producer, 2, neverApply); !errors.Is(err, db.ErrObservationProducer) {
 		t.Fatalf("retired producer replay: %v", err)
@@ -135,10 +148,10 @@ func caseObservationWriteTransaction(t *testing.T, open Factory) {
 		if err != nil {
 			return err
 		}
-		if err := tx.PutObservation(ctx, o); err != nil {
+		if err := tx.PutObservationAt(ctx, o, seen); err != nil {
 			return err
 		}
-		if saved, err := tx.Observation(ctx, ref); err != nil || saved.State != o.State {
+		if saved, err := tx.ObservationSnapshot(ctx, ref); err != nil || saved.State != o.State || !saved.CapturedAt.Equal(seen) {
 			return fmt.Errorf("scoped observation %+v: %v", saved, err)
 		}
 		if _, err := tx.TransitionTask(ctx, db.Transition{TaskID: tracked.ID, To: db.StateDone, Detail: detail, ObservedAt: &seen}); err != nil {
@@ -193,6 +206,9 @@ func caseObservationWriteTransaction(t *testing.T, open Factory) {
 	})
 	if err != nil || got != (db.ObservationCommit{Cursor: 1, Applied: true}) {
 		t.Fatalf("retry observation: %+v %v", got, err)
+	}
+	if snapshot, err := s.ObservationSnapshot(ctx, ref); err != nil || !snapshot.CapturedAt.Equal(seen) {
+		t.Fatalf("committed snapshot: %+v %v", snapshot, err)
 	}
 	saved, err := s.GetTask(ctx, task.ID)
 	if err != nil || saved.State != db.StateDone || saved.AcceptanceID == nil || saved.FinishedAt == nil || !saved.FinishedAt.Equal(seen) {

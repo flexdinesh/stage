@@ -22,9 +22,17 @@ func (s *server) getOpeningPrompt(w http.ResponseWriter, r *http.Request) error 
 	if !task.Adopted || task.Session == nil {
 		return db.Invalid("opening prompt requires an adopted task")
 	}
-	adapter, err := s.Engine.Connections.Sessions(task.ConnectionID)
+	adapter, err := s.Engine.Connections.Adapter(task.ConnectionID)
 	if err != nil {
 		return err
+	}
+	caps, catalogErr := adapter.Features(r.Context())
+	if op, declared := caps.Operations[execution.OpOpening]; !op.Available && (catalogErr == nil || declared) {
+		reason := op.Reason
+		if reason == "" {
+			reason = "This connection does not provide opening prompts."
+		}
+		return &db.ConflictError{Code: "operation_unavailable", Msg: reason}
 	}
 	item, err := adapter.Opening(r.Context(), *task.Session, r.URL.Query().Get("full") == "true")
 	if errors.Is(err, execution.ErrNotFound) {

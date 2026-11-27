@@ -23,22 +23,45 @@ type ObservationCommit struct {
 // BindObservationProducer starts a new machine-scoped epoch at cursor zero.
 // Binding the current epoch preserves its cursor. Retired epochs stay fenced.
 func (s *Store) BindObservationProducer(ctx context.Context, machine int64, producer string) error {
+	_, err := s.ReconcileObservationProducer(ctx, machine, producer, 0)
+	return err
+}
+
+// ReconcileObservationProducer binds the producer and repairs a receipt
+// restored behind the durable prefix already released by the outbox.
+// The disposition marks the unavailable range ending at released.
+func (s *Store) ReconcileObservationProducer(ctx context.Context, machine int64, producer string, released int64) (int64, error) {
 	if producer == "" {
-		return ErrObservationProducer
+		return 0, ErrObservationProducer
 	}
-	return s.e.Write(ctx, func(tx store.Tx) error {
+	if released < 0 {
+		return 0, ErrObservationCursor
+	}
+	return write(ctx, s, func(tx store.Tx) (int64, error) {
 		producers := tx.ObservationProducers()
 		if err := lockObservationMachine(ctx, producers, machine); err != nil {
-			return err
+			return 0, err
 		}
 		state, err := producers.Get(ctx, machine, producer)
-		if errors.Is(err, ErrNotFound) {
-			return producers.Replace(ctx, machine, producer)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			if err := producers.Replace(ctx, machine, producer); err != nil {
+				return 0, err
+			}
+		case err != nil:
+			return 0, err
+		case !state.Active:
+			return 0, ErrObservationProducer
 		}
-		if err == nil && !state.Active {
-			return ErrObservationProducer
+		if released <= state.Cursor {
+			return 0, nil
 		}
-		return err
+		lost := released - state.Cursor
+		disposition := ObservationDisposition{Code: "receipt_rollback", Lost: uint64(lost)}
+		if err := producers.RecordDisposition(ctx, machine, producer, released, disposition); err != nil {
+			return 0, err
+		}
+		return lost, producers.SetCursor(ctx, machine, producer, released)
 	})
 }
 

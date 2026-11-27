@@ -55,7 +55,7 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 
 | Source | Applies to |
 |---|---|
-| The harness's session variable (`T3CODE_THREAD_ID`, `OPENCODE_SESSION_ID`, `CODEX_THREAD_ID`), on that harness's connection on this machine | stdio MCP, which runs as the agent's child process |
+| The harness's session variable (`T3CODE_THREAD_ID`, `OPENCODE_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`), on that harness's connection on this machine | stdio MCP, which runs as the agent's child process |
 | Per-call MCP metadata | OpenCode (2.3.0 sends native caller identity per call, also over shared connections) |
 | `Stage-Caller-Session: <connectionId>:<externalSessionId>` header | HTTP MCP, which never reads an environment |
 | `callerSession` parameter with `connectionId` and `externalSessionId` | any front end; for intermediaries |

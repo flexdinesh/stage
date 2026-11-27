@@ -3,11 +3,13 @@ package engine_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/notify"
@@ -56,7 +58,7 @@ func TestObservationBatchRollbackReplayAndBridgeOrdering(t *testing.T) {
 			after()
 		}, nil
 	}
-	if err := svc.Observe.BindWorkerProducer(ctx, remoteMachine, "producer"); err != nil {
+	if err := svc.Observe.BindWorkerProducer(ctx, remoteMachine, observe.WatchAck{Producer: "producer"}); err != nil {
 		t.Fatal(err)
 	}
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Millisecond)
@@ -113,19 +115,103 @@ func TestObservationBatchRollbackReplayAndBridgeOrdering(t *testing.T) {
 	}
 }
 
+func TestObservationBatchOrdersEqualHarnessUpdatesByCapture(t *testing.T) {
+	ctx := t.Context()
+	store, task, ref := observationTask(t, remotePlacement)
+	svc := engine.NewWithAdapters(store, documentHarnesses, nil, nil)
+	const producer = "producer"
+	if err := svc.Observe.BindWorkerProducer(ctx, remoteMachine, observe.WatchAck{Producer: producer}); err != nil {
+		t.Fatal(err)
+	}
+	updated := time.Now().UTC().Add(-time.Minute)
+	earlier := updated.Add(time.Second)
+	later := earlier.Add(time.Nanosecond)
+	waiting := sample(ref, db.StateNeedsInput, updated)
+	done := sample(ref, db.StateDone, updated)
+	commit := func(cursor int64, at time.Time, o execution.Observation) {
+		t.Helper()
+		batch := observe.Batch{Producer: producer, Cursor: cursor, Records: []observe.Record{
+			{Cursor: cursor, ConnectionID: ref.ConnectionID, ExternalSessionID: ref.ExternalSessionID, ObservedAt: at, Observation: &o},
+		}}
+		if ack, err := svc.Observe.CommitBatch(ctx, remoteMachine, batch); err != nil || ack.Cursor != cursor {
+			t.Fatalf("commit at %v: ack %+v, err %v", at, ack, err)
+		}
+	}
+	commit(1, earlier, waiting)
+	svc = engine.NewWithAdapters(store, documentHarnesses, nil, nil)
+	commit(2, later, done)
+	commit(3, earlier, waiting)
+	got, err := store.GetTask(ctx, task.ID)
+	if err != nil || got.State != db.StateDone {
+		t.Fatalf("task after equal harness updates = %s, %v", got.State, err)
+	}
+	snapshot, err := store.ObservationSnapshot(ctx, ref)
+	if err != nil || snapshot.State != string(db.StateDone) || !snapshot.CapturedAt.Equal(later) || !snapshot.UpdatedAt.Equal(updated) {
+		t.Fatalf("durable snapshot = %+v, %v", snapshot, err)
+	}
+}
+
 type localObservationAdapter struct {
 	execution.Adapter
-	sample atomic.Pointer[execution.Observation]
+	sample    atomic.Pointer[execution.Observation]
+	attention []execution.SessionRef
 }
 
 func (a *localObservationAdapter) Health(context.Context) execution.Health {
 	return execution.Health{Availability: execution.Availability{Available: true}}
 }
 func (a *localObservationAdapter) Attention(context.Context) ([]execution.SessionRef, error) {
-	return nil, nil
+	return a.attention, nil
 }
 func (a *localObservationAdapter) Observe(context.Context, execution.SessionRef) (execution.Observation, error) {
 	return *a.sample.Load(), nil
+}
+
+func ageObservationTask(t *testing.T, pool *sqlite.DB, store *db.Store, id int64, inactive execution.Observation) {
+	t.Helper()
+	ctx := t.Context()
+	if _, err := store.TransitionTask(ctx, db.Transition{TaskID: id, To: db.TaskState(inactive.State)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutObservation(ctx, inactive); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.ExecContext(ctx, "UPDATE tasks SET updated_at=$1 WHERE id=$2", inactive.UpdatedAt.Format(time.RFC3339Nano), id); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := store.PollableTasks(ctx, true)
+	if err != nil || slices.ContainsFunc(tasks, func(task db.Task) bool { return task.ID == id }) {
+		t.Fatalf("inactive task %d must be outside the poll watch: %+v, %v", id, tasks, err)
+	}
+}
+
+func TestInitialAttentionRearmsInactiveTask(t *testing.T) {
+	for _, state := range []db.TaskState{db.StateFailed, db.StateInterrupted, db.StateCancelled} {
+		t.Run(string(state), func(t *testing.T) {
+			ctx := t.Context()
+			store, task, ref := observationTask(t, placement{name: "local"})
+			at := time.Now().UTC().Truncate(time.Second)
+			ageObservationTask(t, testDB.Pool, store, task.ID, sample(ref, state, at.Add(-time.Hour)))
+
+			adapter := &localObservationAdapter{attention: []execution.SessionRef{ref}}
+			waiting := sample(ref, db.StateNeedsInput, at)
+			adapter.sample.Store(&waiting)
+			svc := engine.NewWithAdapters(store, documentHarnesses, map[int64]execution.Adapter{ref.ConnectionID: adapter}, nil)
+			n := notify.New(store, "https://stage.invalid", nil)
+			svc.Observe.RecordNotification = n.RecordObservation
+			if err := svc.Observe.WatchAttention(ctx); err != nil {
+				t.Fatal(err)
+			}
+			got, err := store.GetTask(ctx, task.ID)
+			if err != nil || got.State != db.StateNeedsInput {
+				t.Fatalf("first active attention sample: task state %s, want needs_input: %v", got.State, err)
+			}
+			rows, err := store.ListNotifications(ctx, 10, nil)
+			if err != nil || len(rows) != 1 || rows[0].Event != db.StateNeedsInput || rows[0].TaskID == nil || *rows[0].TaskID != task.ID {
+				t.Fatalf("notifications = %+v, %v", rows, err)
+			}
+		})
+	}
 }
 
 func TestObservationRunnerLocalUsesTransactionalIngest(t *testing.T) {

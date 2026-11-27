@@ -993,7 +993,7 @@ func (c *Controller) Logs(ctx context.Context, w io.Writer, n int, follow bool) 
 }
 
 // Status reports the service, its definition, the data dir holder, Stage's
-// health and T3 separately, plus problems, with its exit code.
+// server health and connection status separately, plus problems, with its exit code.
 func (c *Controller) Status(ctx context.Context) (Status, int) {
 	if err := c.prepare(ctx); err != nil {
 		var e *Error

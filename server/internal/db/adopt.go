@@ -16,10 +16,16 @@ type AdoptInput struct {
 	CallerSession   *SessionRef
 	ProjectID       *int64
 	NewProjectTitle string
-	Binding         *ProjectBinding
+	Workspace       *AdoptionWorkspace
 	Title           *string
 	InitialNote     *string
 	TreeID          *int64
+}
+
+// AdoptionWorkspace pairs the verified workspace with its connection's complete live inventory.
+type AdoptionWorkspace struct {
+	Binding   ProjectBinding
+	Inventory []execution.WorkspaceInfo
 }
 
 func (s *Store) AdoptSession(ctx context.Context, in AdoptInput) (Task, bool, error) {
@@ -77,6 +83,11 @@ func (s *Store) adoptSession(ctx context.Context, tx store.Tx, in AdoptInput) (i
 	if err != nil {
 		return 0, false, err
 	}
+	if in.Workspace != nil {
+		if err := resolveAll(ctx, tx); err != nil {
+			return 0, false, err
+		}
+	}
 	title := strings.TrimSpace(o.Title)
 	if in.Title != nil && strings.TrimSpace(*in.Title) != "" {
 		title = strings.TrimSpace(*in.Title)
@@ -130,11 +141,15 @@ func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput,
 		in.ProjectID = &id
 	}
 	var workspace *string
-	if in.Binding != nil {
-		if in.Binding.ExternalProjectID != o.Project || in.Binding.ConnectionID != o.Session.ConnectionID {
+	if in.Workspace != nil {
+		b := in.Workspace.Binding
+		if b.ExternalProjectID != o.Project || b.ConnectionID != o.Session.ConnectionID {
 			return 0, Conflict("session workspace changed; retry adoption")
 		}
-		workspace = &in.Binding.Workspace
+		workspace = &b.Workspace
+		if _, err := refreshWorkspaceRows(ctx, tx, b.ConnectionID, in.Workspace.Inventory); err != nil {
+			return 0, err
+		}
 	}
 	id, found, err := tx.Projects().AdoptionTarget(ctx, o.Session.ConnectionID, o.Project, workspace)
 	if err != nil {
@@ -146,7 +161,7 @@ func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput,
 		}
 		return id, nil
 	}
-	if in.Binding == nil || in.ProjectID == nil && strings.TrimSpace(in.NewProjectTitle) == "" {
+	if in.Workspace == nil || in.ProjectID == nil && strings.TrimSpace(in.NewProjectTitle) == "" {
 		return 0, Conflict("choose a bound Stage project or explicitly bind this session workspace before adoption")
 	}
 	if in.ProjectID != nil {
@@ -157,10 +172,10 @@ func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput,
 			return 0, err
 		}
 	}
-	b := *in.Binding
+	b := in.Workspace.Binding
 	b.ProjectID = id
 	if _, err := s.bind(ctx, tx, b); err != nil {
 		return 0, err
 	}
-	return id, resolveAll(ctx, tx)
+	return id, nil
 }

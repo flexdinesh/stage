@@ -180,6 +180,17 @@ func replacement(entries []entry, e entry, previous int) int {
 // Producer is the durable producer epoch carried in the worker's batches.
 func (q *Queue) Producer() string { return q.producer }
 
+// ReleasedCursor is the durable prefix no longer available for replay.
+// A partially acknowledged batch remains available in full.
+func (q *Queue) ReleasedCursor() (int64, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if err := q.ensureSynced(); err != nil {
+		return 0, err
+	}
+	return q.state.Cursor - int64(q.state.sealedCount()), nil
+}
+
 // Lost is the count of observations dropped for space in this producer epoch.
 func (q *Queue) Lost() uint64 {
 	q.mu.Lock()

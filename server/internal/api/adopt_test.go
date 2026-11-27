@@ -138,7 +138,18 @@ func TestAdoptSession(t *testing.T) {
 
 func TestAdoptionCreatesBindingAtomically(t *testing.T) {
 	e := newEnv(t)
-	external := e.fake.AddProject("External", "/adoption")
+	ctx := t.Context()
+	connection := e.store.ActiveID(db.LocalMachine, t3.Kind)
+	external := e.fake.AddProject("External", t.TempDir())
+	if err := e.fake.SetProject(external.ID, func(p *t3.Project) { p.Local = true }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.RefreshWorkspaces(ctx, connection, []execution.WorkspaceInfo{external}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.RefreshWorkspaces(ctx, connection, nil); err != nil {
+		t.Fatal(err)
+	}
 	session := launchSession(t, e, external.ID, "Planner")
 	path := "/api/connections/1/sessions/" + session + "/adopt"
 	e.must("POST", path, map[string]any{"newProjectTitle": "Plan", "treeId": 9999}, 404, nil)
@@ -149,12 +160,24 @@ func TestAdoptionCreatesBindingAtomically(t *testing.T) {
 	if len(projects.Projects) != 0 {
 		t.Fatal("failed adoption left a project", projects)
 	}
+	if workspaces, err := e.store.Workspaces(ctx, connection); err != nil || len(workspaces) != 0 {
+		t.Fatalf("failed adoption changed the inventory: %+v, %v", workspaces, err)
+	}
 	var adopted agentTask
 	e.must("POST", path, map[string]any{"newProjectTitle": "Plan"}, 201, &adopted)
 	e.must("POST", path, map[string]any{"newProjectTitle": "Duplicate"}, 200, nil)
 	e.must("GET", "/api/projects", nil, 200, &projects)
 	if len(projects.Projects) != 1 || projects.Projects[0].ID != adopted.ProjectID || projects.Projects[0].Title != "Plan" {
 		t.Fatal("adoption duplicated project", projects)
+	}
+	workspaces, err := e.store.Workspaces(ctx, connection)
+	if err != nil || len(workspaces) != 1 {
+		t.Fatalf("adoption did not refresh the inventory: %+v, %v", workspaces, err)
+	}
+	w := workspaces[0]
+	if w.ExternalID != external.ID || w.Workspace != external.WorkspaceRoot || w.ProjectID == nil || *w.ProjectID != adopted.ProjectID ||
+		w.FileHost == nil || *w.FileHost != db.LocalMachine || w.EvidenceSource != "machine" || w.CanonicalPath == "" {
+		t.Fatalf("adoption did not record the bound workspace with machine evidence: %+v", w)
 	}
 }
 

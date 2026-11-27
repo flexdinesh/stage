@@ -416,6 +416,8 @@ type Sessions interface {
 
 type Launcher interface {
 	Launch(context.Context, Intent, Checkpoint, SaveCheckpoint) (Observation, error)
+	// Stop validates that the scoped session can be stopped, even when its
+	// model catalog is unreachable.
 	Stop(context.Context, SessionRef) error
 }
 

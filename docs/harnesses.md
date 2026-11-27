@@ -1,178 +1,238 @@
 # Adding a harness
 
-[ADR 0007](adr/0007-harness-boundary.md) sets ownership. [ADR 0008](adr/0008-harness-foundation.md)
-defines the target for this series. The numbered layers below identify
-upcoming contracts. The OpenCode setup walkthrough uses the shipped API.
+Stage owns projects, tasks, trees, schedules, journals, acceptance and handoff.
+The harness owns sessions, their workspaces and worktrees, branches, archive,
+models, permissions and processes. Stage records a session as
+`{connectionId, externalSessionId}`. See [ADR 0007](adr/0007-harness-boundary.md),
+[ADR 0008](adr/0008-harness-foundation.md) and the [execution contract](execution.md).
 
-## Module contract
+## Minimum authoring footprint
 
-At the baseline, the [descriptor](../server/internal/harness/harness.go)
-defines the harness kind, name and policies. An
-[adapter](../server/internal/execution/types.go) translates harness calls
-into Stage's execution contract. A
-[connector](../server/internal/harness/connector.go) handles per-machine
-settings, setup actions, status and disconnect. The adapter launches with
-durable checkpoint and recovery semantics, reports session observations
-and replies, and supplies workspace inventory. The descriptor tells
-Stage how to attribute agent calls to a session.
-Its features report available operations and concrete reasons for
-unavailability. See [execution](execution.md) for the shipped contract.
+A new kind using the generic surfaces touches **eight files in five groups**
+in the layout below. Add seven files and edit the shared module list once.
+Split larger implementations or suites into more files as needed.
 
-Each harness supplies a [module](../server/internal/harness/module.go)
-with its descriptor and `Compose` function. The
-[registry](../server/internal/harnesses/modules.go) names each module once
-for serve and the worker. Keep typed settings, validation, client
-construction and secret keys in the setup package. The shared store
-persists public JSON and opaque secrets by machine and kind. Workers
-keep their secrets in their own credential file. A module declares stable
-identity, continuity proof or moved-retire policy as applicable. See
-[ADR 0008 D5–D6](adr/0008-harness-foundation.md#d5) and
-[worker setup](execution.md#remote-machines).
+| Group | Count | Files and responsibilities |
+| --- | ---: | --- |
+| Adapter package | 2 new | `server/internal/<kind>/adapter.go` implements execution. `server/internal/<kind>/descriptor.go` declares the kind and its policies. |
+| Setup package | 2 new | `server/internal/<kind>setup/module.go` declares the module, typed settings and validator. `server/internal/<kind>setup/connector.go` implements setup and installs the adapter. Larger modules can put their settings in a separate `settings.go`. |
+| Registration | 1 edit | Import the setup package and add its module once in [`server/internal/harnesses/modules.go`](../server/internal/harnesses/modules.go). The entry feeds both placements and the descriptor registry. |
+| Tests | 2 new | `server/internal/<kind>/adapter_test.go` for native and execution contracts and `server/internal/<kind>setup/connector_test.go` for setup and identity parity. Use the [existing suites](#verification) as templates. |
+| Guide | 1 new | `docs/<kind>.md` for setup, troubleshooting, supported operations and placement limits. |
 
-The worker handshake advertises protocol 2, supported kinds and traits,
-generic settings and status calls and `adapter.act`. Modules declare local
-process requirements separately from machine or cloud session locality.
-They also declare allowed state reasons and supply a connection status
-phase, facts and an optional fix. Layers 09
-and 10 separate command, observation and discovery roles, then move
-observation beside the adapter. Serve hosts the local observer and the
-worker hosts its own observer. Layer 10 adds cached public settings to the worker. The
-main server owns task state, acceptance and the database in both cases.
+Use the module's `Owners` field to name the adapter and setup package paths
+relative to the server root. Core consumers resolve the descriptor and roles
+by connection. The generic paths already supply storage, API, worker
+dispatch, setup UI and CLI commands.
 
-When the harness wraps another harness, declare its origin markers and
-caller attribution. Stage uses those declarations to prevent duplicate
-tracking and to attribute calls to the wrapper. Use the connection plus
-external session ID for all calls. Report workspace evidence using the
-[discovery contract](discovery.md). Filesystem evidence belongs in
-machine operations, and session worktrees belong to the harness.
+## Descriptor and identity
+
+The [descriptor](../server/internal/harness/harness.go) declares the kind,
+display name, setup fields and actions, link schemes, web-address support,
+session and discovery hints, allowed state reasons, attention policy and any
+closure signals. It declares `LocalProcesses` separately from `Sessions`
+(`machine` or `cloud`). The first controls machine eligibility and the second
+describes where sessions live.
+
+- **Launch identity.** Use `LaunchReserved` when launch reserves a session ID
+  before effects and can reconcile a replay. Persist each checkpoint before
+  the effect it guards. Use `LaunchCorrelated` for a harness-assigned ID when
+  Stage must dispatch once and then find the session by its launch marker
+  through `Correlator`. An unresolved match stays unconfirmed.
+- **Connection identity.** One connection per kind per machine is active
+  after setup. Replacement retires the old connection and preserves its
+  history. Declare `StableIdentity` when an instance key reliably names the
+  same instance and can revive its connection. If an address is ambiguous,
+  declare `ContinuityProof` and use the `Identity` port's stored workspace
+  and session evidence to choose a retired connection. A stable module can
+  declare `MovedRetire` for a confirmed move between reachable machines.
+- **Caller identity.** Give the agent a way to supply its Stage connection
+  and external session IDs. The generic channels are `callerSession`,
+  `Stage-Caller-Session` for HTTP MCP and `STAGE_CALLER_SESSION` for the CLI.
+  The header and environment variable take `<connectionId>:<externalSessionId>`.
+  Declare native MCP `_meta` keys or a native session environment variable
+  where the harness supplies them. A wrapper declares `Wraps.Origins`.
+  The wrapped adapter reports the native origin. Stage then gives attribution
+  to the wrapper and refuses duplicate tracking on the wrapped connection.
+  See [caller attribution](execution.md#ownership-stage-and-the-harness).
+
+## Setup ports and placement
+
+Implement [`harness.Module`](../server/internal/harness/module.go) with the
+descriptor, public settings validator and `Compose(ctx, ports)`. Return a
+[`Connector`](../server/internal/harness/connector.go) and optional cleanup
+for Stage's client resources. The connector provides an in-memory summary,
+status with a bounded refresh, configuration, actions and disconnect. Map
+status to a shared phase with action availability, display facts and an
+optional fix. Custom slots can read the connector's `Details`.
+
+Keep typed settings, validation, client construction and credential formats
+in the setup package. `Settings` reads public JSON per machine and kind
+and applies a top-level patch. Omitted fields keep their values and a null
+resets a field to its default. `Secrets` stores opaque values by kind and key.
+`Identity` supplies the machine's active and retired identities and continuity
+evidence. Use `Install(old, next, adapter)` to move or replace the active
+adapter. The ports also supply the machine's profile, data directory,
+environment and executable lookup, logging, test overrides and a change
+callback. The local placement can atomically save settings with a secret
+when `SaveSettingsWithSecret` is supplied.
+
+| Placement | Composition and call sites |
+| --- | --- |
+| Local | [`serve/localmachine.go`](../server/internal/serve/localmachine.go) composes the modules that the profile allows over machine-scoped store ports and installs into `machine.Local`. Connector and adapter calls are in process. [`observe.Service.Run`](../server/internal/observe/placement.go) starts the local observer. |
+| Worker | [`workersetup`](../server/internal/workersetup/workersetup.go) composes the same allowed modules from negotiated kinds. Public settings and identity go through [`remote.ServeSetup`](../server/internal/remote/setupserver.go), with cached setup inputs for offline restore. Secrets stay in the worker credential file. Main-server [connector](../server/internal/remote/connector.go) and [adapter](../server/internal/remote/adapter.go) proxies dispatch over the authenticated channel to [`remote.Host`](../server/internal/remote/host.go). The [worker observer](../server/internal/worker/observation.go) runs beside the adapter. |
+
+The [worker channel](../server/internal/workerchan/protocol.go) is protocol **3**,
+independent of API **v9**. Negotiation covers the protocol range, harness
+kinds, channel kinds and per-connection traits. Commands use request/response.
+The main server sends `observe.watch`. Workers poll or subscribe and send
+cursor-bearing `observe.batch` records, replayed from a bounded outbox after
+an outage. The main server ingests them and retains the task state and
+acceptance. External bridges use
+`POST /api/connections/{id}/observations` to reach the same observation
+service. See [worker setup and offline behavior](execution.md#remote-machines).
+
+## Adapter roles and traits
+
+[`execution.Adapter`](../server/internal/execution/types.go) embeds four roles.
+[`machine.Connections`](../server/internal/machine/connections.go) resolves
+the role on the connection's machine.
+
+| Role | Methods and consumers |
+| --- | --- |
+| `Catalog` | `Health` reports reachability and instance identity. `Features` declares launch choices and operation availability for setup and task controls. |
+| `Inventory` | `Workspaces` reports harness workspace IDs, paths, availability and provenance. [Discovery](../server/internal/discovery/inventory.go) enriches local paths with read-only evidence from the file host's `machine.Ops.Inventory` and resolves Stage projects on the main server. A failed read preserves the last inventory. See [workspace evidence](discovery.md). |
+| `Sessions` | `Observe` supplies normalized snapshots, including replies when available. `Opening` reads the first prompt and `Attention` lists sessions surfaced to Stage. The observer uses these snapshots and the coordinator applies them to tracked tasks. |
+| `Launcher` | `Launch` applies the frozen intent and saves durable checkpoints. `Stop` interrupts a scoped session when available. The coordinator owns dispatch and reconciliation. |
+
+Use [`execution.As[T]`](../server/internal/execution/optional.go) for
+`LinkResolver`, `WorkspaceFeatures`, `Correlator`, `EventSource`,
+`Interactive` and `Actor`. The adapter implements the Go interface.
+A partial adapter such as a worker proxy must also advertise the trait in
+its ready snapshot. The trait says whether the interface is callable.
+Check the corresponding operation, policy or action availability for the
+requested scope. Polling reconciles missed `EventSource` events.
 
 ## Choose an extension
 
-Use [ADR 0008 P4](adr/0008-harness-foundation.md#p4) to decide whether
-Stage needs to understand the capability. Type operations only when Stage
-branches on them. Declare the operations Stage relays as actions and extra
-display data as facts. Stage-wide features work without harness-specific
-actions or facts.
+Use [ADR 0008 P4](adr/0008-harness-foundation.md#p4) to decide which contract
+fits. Stage-wide behavior uses descriptor policy or typed operations and
+degrades through declared availability.
 
 | Extension | Use it for | Contract |
 | --- | --- | --- |
-| Descriptor policy | A rule Stage interprets, such as reserved or correlated launch, caller attribution, wrapper origins or completion signals. | Shipped descriptor. Layer 02 adds link schemes and provenance. Layer 04 adds identity policy. Layer 05 adds process placement, locality and state reasons. |
-| Typed operation | Stage behavior gated by capability, such as launch, stop, adopt, reply, opening, attention, images, respond or send. | Shipped `execution.Capabilities`. Layer 06 applies the declaration to UI controls. |
-| Launch option | A typed choice, boolean or text input the harness takes during launch, such as its worktree option. | Shipped `execution.Config` and capability options. The adapter validates and translates the value. |
-| Action | A harness-specific operation on a connection, session or project, such as labelling a session. | Declare the input schema, confirmation, availability and allowed callers. Use the connector for connection setup, or implement `execution.Actor` and declare session and project actions in capabilities. The owner validates opaque input. |
-| Fact | A display detail, such as a harness status detail. | Relay a fact on status, observations or action results. Stage renders them in the shared UI. |
-| Optional interface | A specialized adapter protocol for a declared policy or typed operation, such as event streaming or interaction. | Shipped `execution.As[T]` reaches the interface through local and proxy placements. Layer 03 negotiates the trait. |
+| Display fact | Show a harness detail such as an endpoint or extra usage information. | `execution.Fact` carries a label, value and tone in status, an observation or an action result. |
+| Scoped action | Relay a harness-specific operation such as labelling a session. | Declare the target, inputs, confirmation, caller authorization and availability. Connection setup uses the connector. Session and project actions use `execution.Actor` and capability declarations. The owner validates opaque input. |
+| Typed operation | Let Stage decide whether it can launch, stop, adopt, read a reply or opening, list attention, launch with images, respond or send. | Declare each [`execution.Op`](../server/internal/execution/ops.go) with availability and a reason when unavailable. Use `WorkspaceFeatures` for a workspace-specific declaration. |
+| Launch option | Pass a choice, boolean or text value at launch, such as a harness worktree option. | Declare the field in capabilities and validate and translate it from `execution.Config`. |
+| Descriptor policy | Apply a Stage invariant such as launch recovery, attribution, identity or completion from a closure signal. | Declare it in the descriptor. Stage interprets the policy for every kind that uses it. |
 
-An agent may invoke a declared action only when its declaration allows
-agents. A capability that belongs to one workspace can be exposed in that
-scope. Stage's generic consumers relay the fields and results. [Action API](api.md#declared-actions-and-facts)
-
-### Walkthrough: Connect local OpenCode
-
-1. The [OpenCode descriptor](../server/internal/opencode/descriptor.go)
-   declares `connect-local`, its label and the `newInstance` boolean.
-   The connector's status supplies current availability and a reason.
-2. The [connector](../server/internal/opencodesetup/connector.go) decodes
-   the input, then the setup service reads the local OpenCode service
-   registration on the selected machine. Its [module](../server/internal/opencodesetup/module.go)
-   composes that connector in both placements. The request goes through
-   the worker proxy when the connector runs on a worker.
-3. [The handler](../server/internal/api/handlers_actions.go) validates
-   the action declaration, caller, availability and input. The setup route is
-   `POST /api/harnesses/{kind}/actions/{action}`, with a machine-scoped
-   form under `/api/machines/{id}/harnesses/`.
-4. The custom [OpenCode panel](../packages/app/src/harnesses/opencode/Setup.tsx)
-   calls that route through its scoped client. The CLI's
-   `stage harness opencode run connect-local` uses the same setup
-   contract. The generic panel can render a setup action from its
-   declared fields and availability. [Public setup reference source](../apps/website/src/pages/docs/reference/connections.mdx).
-
-With a connection ID, `stage action ls --connection ID` lists its
-actions and `stage action run --connection ID connect-local` runs this
-action. Layer 06 owns shared rendering.
-
-### Candidates for later layers
-
-These are candidate declarations. The owning harness would need to verify
-support and define availability before exposing one.
-
-| Harness | Candidate actions |
-| --- | --- |
-| T3 | Attach a PR reference to a session; export a session transcript. |
-| OpenCode | Share or unshare a session; fork a session in OpenCode. |
-| Claude Code | Check hook delivery on the connection; export a session transcript. |
-| Codex | Archive or restore a session; check daemon diagnostics on the connection. |
-
-## UI slots
-
-The [slot registry](../packages/app/src/harnesses/index.ts) selects a
-harness's setup panel, connection row, status reader and query key, and live
-chip via [`HarnessSlots`](../packages/app/src/harnesses/types.ts).
-UI code outside `packages/app/src/harnesses/` consumes the slot,
-descriptor and declared capabilities. The descriptor carries the web-address
-policy. It can supply a `discoveryHint` with workspace inventory instructions.
+An agent can invoke an action only when the declaration allows agents.
 Project actions use the selected workspace's connection and binding.
+See the [action and facts API](api.md#declared-actions-and-facts).
 
-- **Generic panel.** A kind without a custom entry uses the
-  [generic slots](../packages/app/src/harnesses/generic.tsx). Define settings
-  and setup actions in the descriptor. Stage renders the fields, confirmation,
-  availability reasons, status facts and fix.
-- **Custom panel.** Register one slot entry to keep the harness's connection
-  workflow, vocabulary and settings. Share the presentation primitives and
-  declare which setup actions the panel renders. Manage renders additional
-  declared actions and the connection row offers them by label.
-- **Unavailable operation.** A harness without Stop declares its availability
-  and reason. Stage gates Start, Stop and Track on launch, stop and adopt
-  in the UI and checks the operations before dispatch on the server.
-- **Session and project actions.** Use the shared action renderer with the
-  appropriate target route. Session actions appear with the task's controls,
-  and session facts appear in its session panel.
+### Connect local OpenCode
 
-## Author checklist
+1. The [descriptor](../server/internal/opencode/descriptor.go) declares
+   `connect-local` and its `newInstance` boolean. The connector's status
+   reports current availability and a reason.
+2. The [connector](../server/internal/opencodesetup/connector.go) decodes
+   the input and its setup service reads the OpenCode service registration
+   on the selected machine. The [module](../server/internal/opencodesetup/module.go)
+   composes that connector in both placements. A remote setup action goes
+   through the worker proxy.
+3. The [action handler](../server/internal/api/handlers_actions.go) validates
+   the declaration, caller, availability and input. The setup route is
+   `POST /api/harnesses/{kind}/actions/{action}`, also available under
+   `/api/machines/{id}/harnesses/` for a selected machine.
+4. The [OpenCode panel](../packages/app/src/harnesses/opencode/Setup.tsx) calls
+   the route through its scoped client. `stage harness opencode run connect-local`
+   uses the same setup contract. With a connection ID, `stage action ls --connection ID`
+   lists actions and `stage action run --connection ID connect-local` dispatches it.
 
-- Implement the harness adapter and setup package. Keep native launch,
-  session IDs, workspace creation, archive, models and processes there.
-- Declare the module's identity and placement, durable launch policy,
-  destinations, caller attribution and any wrapper markers. Verify that
-  replacing and reviving instances preserves connection history.
-- Add the adapter under `server/internal/<harness>/` and its module, typed
-  settings and connector under `server/internal/<harness>setup/`.
-  Register the module in [modules.go](../server/internal/harnesses/modules.go).
-  Exercise first setup and reconnect through serve and the authenticated
-  [worker setup rig](../server/internal/workersetup/workersetup_test.go).
-  Test supported and unsupported channel traits.
-- If the harness has a custom UI or CLI panel, add the slot under
-  `packages/app/src/harnesses/<kind>/` or
-  `server/internal/cli/slots_<kind>.go`.
-- Report complete inventory and provenance for [read-only discovery](discovery.md).
-  Verify incomplete reads and unavailable operations. Exercise launch
-  recovery, session observation and attribution with contract tests.
-- Declare extras with the smallest relevant extension. Test typed
-  operations in each consumer, action inputs and caller authorization,
-  and generic or custom UI slot behavior where applicable.
-- Document setup, troubleshooting, capability limits and link the tests.
-  Re-run the [Go boundary check](../server/internal/harness/boundary_test.go)
-  and the [UI boundary check](../packages/app/tests/boundaries.test.mjs).
+## Optional UI and CLI slots
+
+- **UI, two additional files at minimum.** Add
+  `packages/app/src/harnesses/<kind>/index.tsx` and edit the
+  [UI registry](../packages/app/src/harnesses/index.ts) to register it and
+  call its status hook in the fixed order. Supply the
+  [`HarnessSlots`](../packages/app/src/harnesses/types.ts) setup panel,
+  connection row, status hook and query key, and live chip. Declare which
+  setup actions the panel handles. Manage and the connection row expose
+  the other declared actions. A kind without a custom slot uses the
+  [generic renderer](../packages/app/src/harnesses/generic.tsx) for settings,
+  action fields and confirmation, availability, facts and fixes.
+- **CLI, one additional file.** Add `server/internal/cli/slots_<kind>.go`
+  and register a status printer in `init`, following the
+  [OpenCode slot](../server/internal/cli/slots_opencode.go). The generic
+  [`stage harness` commands](../server/internal/cli/harness.go) already
+  use the setup schema. They use generic output when custom details are
+  absent or the printer returns an error.
+
+### Open items in generic surfaces
+
+- The custom UI registry also lists each status hook explicitly for React's
+  fixed hook order. Adding a custom slot touches both places in that file.
+  The UI boundary test currently derives kind literals from slot directory
+  names and display names from Go descriptors. A generic-only kind's
+  literal needs coverage without adding a custom slot directory.
+- `stage setup` for installing agent-side MCP, skills and instructions
+  still has per-agent CLI wiring and flags in
+  [`setup.go`](../server/internal/cli/setup.go) and
+  [`setup_agents.go`](../server/internal/cli/setup_agents.go). Those files
+  are outside module registration and exempt from the Go harness-name
+  check. Automatic agent-side installation for a new kind still requires
+  edits there.
+- Generic CLI status text prints settings, unavailable actions and an error
+  reason. Rendering the declared phase, facts and fix in that text view
+  remains open. They already travel in the status response.
+- Desktop native links still use a fixed scheme and fallback. A second native
+  scheme needs a desktop navigation policy extension in
+  [`desktop/app/nav/nav.go`](../desktop/app/nav/nav.go). The current fallback
+  also constructs the T3 web link from the local status in
+  [`desktop/app/launch/launch.go`](../desktop/app/launch/launch.go) and
+  [`desktop/app/shell.go`](../desktop/app/shell.go). Browser links and resume
+  commands use the supplied destinations directly.
+
+## Verification
+
+- **Adapter.** Test every declared operation, reasons for unavailable
+  operations, connection-scoped refs, normalized states and replies, wrapper
+  origins if declared, and workspace evidence. Test create, lost reply and
+  restart, including a lost checkpoint response or a correlation miss.
+  See the [execution contracts](../server/internal/engine/contract_v2_test.go)
+  and [remote launch tests](../server/internal/engine/contract_remote_test.go).
+- **Setup.** Exercise first connect, replacement, retirement and reconnect
+  through local serve and the [authenticated worker setup rig](../server/internal/workersetup/workersetup_test.go).
+  Verify settings validation, credential placement and machine ownership.
+  See the [OpenCode continuity tests](../server/internal/opencodesetup/instance_test.go).
+- **Discovery and observation.** Test inventory failures, file-host
+  provenance, polling and optional events, and worker replay after a
+  disconnect. See the [inventory tests](../server/internal/engine/inventory_test.go),
+  [identity tests](../server/internal/engine/identity_test.go) and
+  [worker observation contract](../server/internal/engine/observer_channel_test.go).
+- **Consumers.** Exercise both offered and absent traits, blocked operations,
+  action scopes and caller authorization in the relevant API, CLI, MCP and
+  UI paths. See [trait tests](../server/internal/execution/as_test.go),
+  [action tests](../server/internal/api/actions_test.go) and
+  [attribution tests](../server/internal/agenttools/harness_env_test.go).
+  Run `mise run check`, which covers the
+  [Go](../server/internal/harness/boundary_test.go) and
+  [UI](../packages/app/tests/boundaries.test.mjs) harness boundaries.
 
 ## Amp mapping
 
-Read from Amp's public docs on **2026-11-26** for [ADR 0008 D13](adr/0008-harness-foundation.md#d13).
-Layer 11 rechecks these sources. Verify the mapping when an adapter is
-built. Amp is a design case for this series.
+Rechecked against Amp's first-party docs on **2026-11-27** for
+[ADR 0008 D13](adr/0008-harness-foundation.md#d13). This is a design case.
+The gaps below need runtime evidence before a Stage module can rely on them.
 
-| Facility | Documented evidence and Stage mapping |
+| Facility | Documented evidence, Stage mapping and gaps |
 | --- | --- |
-| Account and machine | Amp supports saved CLI accounts and runs a headless runner that serves directories on a particular machine. **Inference:** declare local processes required for the proposed CLI or runner integration, and cloud session locality. Account plus machine is the proposed identity policy. Stable account and runner identifiers and continuity proof are **unverified**. [CLI accounts](https://ampcode.com/docs/cli), [runners](https://ampcode.com/docs/cli/runners), [cloud thread access](https://ampcode.com/docs/threads). |
-| Launch and identity | Amp's REST API creates a thread and its initial message for a cloud orb. Local `amp -x --stream-json` emits the `T-<uuid>` session ID in its initial JSON line. The CLI also starts detached runner and orb executions. Streamed execute runs can archive new threads at turn end unless configured otherwise. A launch adapter would capture the ID and report a connection-scoped session. Recovery if launch succeeds before Stage saves the ID is **unverified**. [External API](https://ampcode.com/api/external), [Streaming JSON](https://ampcode.com/docs/cli/streaming-json), [Execute Mode](https://ampcode.com/docs/cli/execute-mode), [Spawning Orbs](https://ampcode.com/docs/cli/spawning-orbs). |
-| Observation and reply | The external API lists a user's threads and reads metadata and messages by ID. Metadata reports `working`, `idle`, `awaiting_approval` and `error`. An experimental stream covers a subset of threads for a Sign in with Amp token. **Inference:** use connection-scoped metadata and messages for reconciliation and reply; verify credential scope and state semantics across execution modes before declaring a push trait. [External API](https://ampcode.com/api/external). |
-| Approval and input | Default tool execution needs no approval. Plugins can require approval and report that wait. **Unverified:** a general question state or a supervisor API for answering it. Map an observed approval wait through the declared reason and gate in-Stage responses on a verified operation. [Tools](https://ampcode.com/docs/tools), [Plugin API](https://ampcode.com/docs/plugin-api), [External API](https://ampcode.com/api/external). |
-| Stop | Execute-mode docs describe exit on a local signal. A remotely callable cancellation operation for a detached runner or orb thread is **unverified**. Gate Stop by verified execution mode. [Execute Mode](https://ampcode.com/docs/cli/execute-mode), [Runners](https://ampcode.com/docs/cli/runners), [External API](https://ampcode.com/api/external). |
-| Project evidence | Amp matches projects using Git remote URLs and aliases. Runners can serve selected directories. **Inference:** report the thread's repository evidence for Stage identity when its origin and subpath are known. A complete, authoritative local directory inventory for an external supervisor is **unverified**. [Projects](https://ampcode.com/docs/projects), [Runners](https://ampcode.com/docs/cli/runners). |
-| Caller attribution | Streaming JSON and the plugin's invocation API expose a thread ID. Runners can pass configured variables to MCP processes. A built-in per-call MCP field or environment variable carrying the current caller's thread ID is **unverified**. The adapter needs a trusted path to Stage's caller session contract. [Streaming JSON](https://ampcode.com/docs/cli/streaming-json), [Plugin API](https://ampcode.com/docs/plugin-api), [Runners](https://ampcode.com/docs/cli/runners). |
-| Extras | Amp documents continue, list, archive, share, label, export and native handoff. Its external API exposes thread usage with credential and retention limits. **Inference:** share, Amp handoff and labels fit declared session actions; usage fits facts. Stage's durable accepted handoff keeps its own contract. [Threads](https://ampcode.com/docs/threads), [External API](https://ampcode.com/api/external). |
-
-The mapping assumes a trusted caller can be attributed to the Stage
-connection and Amp thread. Supporting Amp without that attribution would
-change the contract. Requiring universal cancellation for detached
-execution would also change the declared-operation model above. Verify
-both before proposing an adapter.
+| Account and machine | The CLI lists saved accounts per Amp server and can select one by user ID. Running processes keep the account they started with. A runner can be given a stable, operator-selected `--runner-id`. REST thread metadata can include the CLI or runner hostname. **Inference:** key a CLI or runner connection by account and Stage machine, with server and runner identity where needed. Declare local process requirements for CLI or runner hosting and cloud session locality for Amp's synced threads. **Unverified:** how to prove the active principal for the actual credential, bind an operator-selected runner ID to one Stage machine, and prove continuity after replacement or a move. [CLI accounts](https://ampcode.com/docs/cli#manage-cli-accounts), [Runners](https://ampcode.com/docs/cli/runners#start-a-runner), [External API](https://ampcode.com/api/external), [Threads](https://ampcode.com/docs/threads) |
+| CLI and SDK launch | Local `amp -x --stream-json` starts its JSON output with a `type: system`, `subtype: init` object whose `session_id` is the `T-…` thread ID. Streamed `-ox` uses the same format. Detached `-ox` and `-x --executor runner:<id>` print the thread URL and exit while the turn runs remotely. Streamed execute can archive a new thread after the turn unless configured otherwise. The SDK can execute on a selected runner and served directory. **Inference:** capture the ID under the Stage connection and verify recovery after launch succeeds but before Stage saves the ID. A reserved ID, idempotency key and reliable marker lookup across modes are **unverified**. [Streaming JSON](https://ampcode.com/docs/cli/streaming-json), [Execute Mode](https://ampcode.com/docs/cli/execute-mode), [Spawning Orbs](https://ampcode.com/docs/cli/spawning-orbs), [SDK](https://ampcode.com/docs/sdk) |
+| REST launch, observation and reply | `POST /api/v2/threads` creates a project orb thread and its first message, returning `thread.id`. It requires a user-scoped Sign in with Amp token. Only M2M applications are generally available, and M2M cannot create threads. REST lists scoped threads and reads metadata and messages by ID with appropriate scopes. Metadata can lag and reports `working`, `idle`, `awaiting_approval` and `error`. REST follow-ups are limited to the token owner's own orb threads. The experimental list SSE stream covers a limited subset of recent threads for eligible Sign in with Amp tokens. **Unverified:** usable credentials and coverage for a Stage integration across local, runner and orb execution, plus authoritative turn completion or replay after a gap. [External API](https://ampcode.com/api/external) |
+| Approval and input | The documented machine-readable waiting state covers tool approvals. Amp normally runs tools without approval, while remote MCP policy and plugins can request approval. Amp clients also display questions and plugin input dialogs. **Inference:** map a verified approval wait to `needs_input` with a declared approval reason. **Unverified:** a distinct general question or free-text wait in the external state contract, and a supervisor API to enumerate and answer either kind of pending request. Keep Stage Respond unavailable until the relevant contract is verified. [External API](https://ampcode.com/api/external), [MCP approvals](https://ampcode.com/docs/customize/mcp#controlling-remote-tools), [Plugin API](https://ampcode.com/docs/plugin-api), [Threads](https://ampcode.com/docs/threads) |
+| Stop by execution mode | Local execute exits on SIGINT or SIGTERM. The TypeScript SDK accepts an abort signal. Inside a plugin, the thread handle from `amp.threads.get(threadID)` exposes `cancel()` to stop a current turn. **Unverified:** that local cancellation yields a durable cancelled result after process exit, that closing an attached stream or aborting the SDK stops the remote turn, and that Stage can cancel an already-detached runner or orb thread by ID with an authorized call. REST documents thread deletion. Orb archive pauses the orb. Gate Stop on a verified turn-cancellation path for the selected mode. [Execute Mode](https://ampcode.com/docs/cli/execute-mode), [TypeScript SDK](https://ampcode.com/docs/sdk/typescript), [Plugin API](https://ampcode.com/docs/plugin-api), [External API](https://ampcode.com/api/external), [Orb lifecycle](https://ampcode.com/docs/orbs/sizes-and-costs#when-an-orb-pauses) |
+| Workspace inventory | Amp matches projects by Git remote URL and aliases. REST lists workspace-owned projects. Runners serve selected directories or discover bounded Git checkouts, and `amp runner dirs list` lists served directories from the runner machine. **Inference:** use that list as a candidate inventory and enrich paths on their owning machine with Stage's read-only repository evidence. **Unverified:** a stable machine-readable list contract, full coverage for local CLI and remote runners, and authoritative deletion, repository subpath and file-host provenance across modes. [Projects](https://ampcode.com/docs/projects), [External API](https://ampcode.com/api/external), [Runners](https://ampcode.com/docs/cli/runners#change-directories-while-the-runner-runs) |
+| Caller attribution | A plugin has `ctx.thread.id` and local tool events carry a thread ID. Amp's hosted remote MCP definitions can send a signed workload identity token with `thread_id` and the owner's `user_id`. Orbs can also send an Amp ID token to configured HTTP MCP servers. Runner variables can be shared per served directory. **Unverified:** a trusted per-call stdio MCP field or CLI process variable for the current thread, and an end-to-end mapping from verified Amp claims or a plugin invocation to the right Stage connection and external session across modes. Thread ownership identifies the thread even when another person sent the latest message. [Plugin API](https://ampcode.com/docs/plugin-api), [MCP workload identity](https://ampcode.com/docs/customize/mcp#amp-workload-identity), [Orb identity](https://ampcode.com/docs/orbs/handling-secrets), [Runners](https://ampcode.com/docs/cli/runners) |
+| Extras | Amp documents archive, sharing, labels and native handoff. REST usage has credential and retention limits. **Inference:** use declared session actions for share, label and Amp-native handoff, and facts for display-only usage details. Stage retains its own durable, accepted handoff. [Threads](https://ampcode.com/docs/threads), [External API](https://ampcode.com/api/external) |

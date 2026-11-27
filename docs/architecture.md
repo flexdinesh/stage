@@ -50,13 +50,15 @@ Two homes, no shared or generated content between them:
 | Contract | Website page |
 | --- | --- |
 | [features.md](features.md), [api.md](api.md) (tree, journal, handoff, base rules), [runtime.md](runtime.md) (machines) | `/docs`, `/docs/concepts/*` |
+| [discovery.md](discovery.md) (workspace binding, review, project identity) | `/docs/concepts/projects` |
+| [execution.md](execution.md) (session lifecycle, capabilities and placement), [api.md](api.md) (connection operations) | `/docs/concepts/sessions`, `/docs/concepts/connections`, `/docs/concepts/machines` |
 | [desktop.md](desktop.md) | `/docs/usage/desktop` |
 | [service.md](service.md), [runtime.md](runtime.md) (listeners, origin policy) | `/docs/usage/server`, `/docs/guides/phone` |
 | [service.md](service.md) (worker service), [runtime.md](runtime.md) (worker process, agent gateway, remote main server), [storage.md](storage.md) (engines), `examples/kubernetes/`, `examples/postgres/` | `/docs/usage/workers` |
 | [features.md](features.md), [api.md](api.md) (MCP, tree rules) | `/docs/guides/first-tree`, `/docs/guides/agents` |
 | [features.md](features.md) (Claude Code), [execution.md](execution.md#claude-code-adapter) (Claude Code adapter), [api.md](api.md) (Claude setup, adopt) | `/docs/guides/claude-code` |
 | [install.md](install.md), [release.md](release.md) (assets, platforms) | `/docs/reference/install` |
-| [features.md](features.md) (T3 setup), [runtime.md](runtime.md) (T3 binding), [api.md](api.md) (T3 and OpenCode pairing) | `/docs/reference/connections` |
+| [features.md](features.md) (harness setup), [execution.md](execution.md) (placement and adapter behavior), [api.md](api.md) (connection setup) | `/docs/reference/connections` |
 | [service.md](service.md), [runtime.md](runtime.md) (listeners, data dir), [storage.md](storage.md) (engines), `.env.example` | `/docs/reference/configuration` |
 | [runtime.md](runtime.md) (origin policy, worker auth) | `/docs/reference/security` |
 | [features.md](features.md) (UI, Settings) | `/docs/reference/app` |
@@ -88,7 +90,7 @@ compares a harness display name, or imports a harness's files past `src/harnesse
 | `transport.assetUrl(path)` | Image/attachment URLs for `<img>` and links | `transport.ts`: `/api` + path | same |
 | `clipboard.writeText` | Copy link / URL / reference copying | `clipboard.ts`: Clipboard API, `execCommand` fallback over plain HTTP | `clipboard.ts`: the shell's system clipboard |
 | `links.stageLink(path)` | The copyable Stage link for an app path (`/tasks/12`) | `links.ts`: `window.location.origin` + path | `links.ts`: `STAGE_PUBLIC_URL` + path, else `stage://tasks/12` |
-| `links.openExternal` / `openApp` | Programmatic opens (palette Ctrl+Enter opens `t3code://`). Anchors stay native `<a>`; a desktop host routes them by navigation policy | `links.ts`: `window.open` / `location.assign` | the shell's URL policy |
+| `links.openExternal` / `openApp` | Programmatic opens of web and native app links. Anchors stay native `<a>` and the desktop host routes them by navigation policy | `links.ts`: `window.open` / `location.assign` | the shell's URL policy |
 | `notifications?` | System notification delivery: `channel` (`web-push` when absent, `native`), state, enable/disable/test, close shown, cross-device sync, `onDelivered`, `openSystemSettings?`. Absent: Settings shows only the global event filter | `webPush.ts`: service worker + Web Push | `notifications.ts`: `channel: "native"` over the generated MyGo client; the Go process shows OS notifications from the server's notification stream ([desktop.md](desktop.md#notifications)) |
 | `attention.setNeedsInput` | Needs-input signal outside the page | `attention.ts`: tab favicon + Badging API | no-op: the Go process owns the Dock/launcher badge |
 | `storage` | Per-device preferences (theme, projects sort). Never throws | `storage.ts`: `localStorage` | `storage.ts`: the webview's `localStorage` |
@@ -139,7 +141,7 @@ Not part of the contract: plain DOM and layout (`document` visibility,
 
 `internal/engine` composes the execution services on the main server. `coordinator` owns launch, handoff and applying observations to tasks. `observe` runs the streams and attention watcher and ingests pushed observations. `discovery` owns the workspace reader and full sync. `machine.Connections` resolves adapters and their roles for local and worker connections. The `workevent` package owns shared task and session transition events, and `notify` delivers them. Retired and legacy-only database columns were dropped in #417 (migrations 0027 and 0028). A historical row keeps its meaning through its session identity or `execution_config`, with its original journal text and accepted snapshot evidence. The list is in [storage.md](storage.md#legacy-columns-and-compatibility-triggers).
 
-Stage owns task acceptance separately from observed execution. SQLite stores immutable accepted evidence and idempotent acceptance requests; a launch claim atomically checks current acceptance and pins its inputs. The release runner consumes these claims, and handoff reads only Stage snapshots. See [API v4 acceptance](api.md#user-acceptance-api-v4).
+Stage owns task acceptance separately from observed execution. Both storage engines persist immutable accepted evidence and idempotent acceptance requests. A launch claim atomically checks current acceptance and pins its inputs. The release runner consumes these claims, and handoff reads only Stage snapshots. See [task acceptance](api.md#user-acceptance-api-v4).
 
 ## Users
 

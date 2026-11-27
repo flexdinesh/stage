@@ -4,15 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
-	"time"
 )
 
 // PutObservation keeps normalized state scoped by connection. A newer
 // stored observation wins; a reply the harness did not repeat is kept
 // within the same execution.
 func (s *Store) PutObservation(ctx context.Context, o execution.Observation) error {
+	return s.PutObservationAt(ctx, o, time.Time{})
+}
+
+// PutObservationAt also records when Stage captured the observation.
+func (s *Store) PutObservationAt(ctx context.Context, o execution.Observation, capturedAt time.Time) error {
 	if err := o.Valid(); err != nil {
 		return err
 	}
@@ -38,11 +44,18 @@ func (s *Store) PutObservation(ctx context.Context, o execution.Observation) err
 		if o.Usage == nil {
 			o.Usage = previous.Usage
 		}
-		return tx.Observations().Put(ctx, id, o)
+		return tx.Observations().Put(ctx, id, store.ObservationSnapshot{Observation: o, CapturedAt: capturedAt})
 	})
 }
 func (s *Store) Observation(ctx context.Context, ref execution.SessionRef) (execution.Observation, error) {
-	return read(ctx, s, func(tx store.Tx) (execution.Observation, error) { return tx.Observations().ByRef(ctx, ref) })
+	o, err := s.ObservationSnapshot(ctx, ref)
+	return o.Observation, err
+}
+
+// ObservationSnapshot includes the capture time for ordering observations when
+// the harness reports the same UpdatedAt.
+func (s *Store) ObservationSnapshot(ctx context.Context, ref execution.SessionRef) (store.ObservationSnapshot, error) {
+	return read(ctx, s, func(tx store.Tx) (store.ObservationSnapshot, error) { return tx.Observations().ByRef(ctx, ref) })
 }
 func (s *Store) ObservationUnavailable(ctx context.Context, ref execution.SessionRef, reason string) error {
 	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Observations().Unavailable(ctx, ref, reason) })

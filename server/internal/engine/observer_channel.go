@@ -128,5 +128,5 @@ func (c observationChannel) ReplaceWatch(parent context.Context, machine int64, 
 	if ctx.Err() != nil || c.hub.SessionID(machine) != session {
 		return workerchan.ErrReplaced
 	}
-	return c.observe.BindWorkerProducer(ctx, machine, ack.Producer)
+	return c.observe.BindWorkerProducer(ctx, machine, ack)
 }
