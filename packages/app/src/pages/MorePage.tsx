@@ -1,5 +1,6 @@
 import { Link } from "react-router";
-import { MORE_DESTINATIONS } from "../components/destinations.ts";
+import { moreDestinations } from "../components/destinations.ts";
+import { useIsAdmin } from "../components/access/SessionContext.ts";
 import { IconStep } from "../components/icons.tsx";
 import { StatusSections, useStatus } from "../components/StatusRow.tsx";
 import { PageHeader, Segmented, SubHeading, cx, rowButtonClass } from "../components/ui.tsx";
@@ -10,13 +11,14 @@ const THEME_OPTIONS = THEMES.map((theme) => ({ value: theme, label: theme }));
 export function MorePage() {
   const { theme, setTheme } = useTheme();
   const { row, details } = useStatus();
+  const admin = useIsAdmin();
 
   return (
     <>
       <PageHeader title="More" />
       <div className="flex max-w-lg flex-col gap-5">
         <nav className="flex flex-col border border-line" aria-label="More destinations">
-          {MORE_DESTINATIONS.map(({ to, label }) => (
+          {moreDestinations(admin).map(({ to, label }) => (
             <Link
               key={to}
               to={to}

@@ -136,8 +136,9 @@ with a 401 from `/api/me` shows **Sign in to Stage**. During first setup
 the desktop asks the user to finish in a browser. Open private setup,
 invite and reset links at the canonical browser URL. A remote shared server
 uses HTTPS. HTTP is available on loopback for local testing. Then sign in to
-the same account with email and password in the desktop app. Sign out
-from Settings, General, User.
+the same account with email and password in the desktop app. Open
+Settings → Account to edit your profile, change your password, manage your
+agent credential or sign out.
 
 The `mygo://localhost` origin serves the app. Go drops webview cookie and
 authorization headers on shared requests and strips every upstream

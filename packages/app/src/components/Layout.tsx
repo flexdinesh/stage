@@ -5,10 +5,12 @@ import type { SessionRef } from "../api/types.ts";
 import { usePlatform } from "../platform/context.tsx";
 import { INBOX_PARAM } from "../lib/inbox.ts";
 import { useTheme, type Theme } from "../lib/theme.ts";
-import { MORE_DESTINATIONS } from "./destinations.ts";
+import { ADMIN_DESTINATION, moreDestinations } from "./destinations.ts";
+import { useSharedAccount } from "./access/SessionContext.ts";
 import { CommandPalette } from "./CommandPalette.tsx";
 import { HostBanner } from "./Host.tsx";
 import {
+  IconAdmin,
   IconDashboard,
   IconMoon,
   IconMore,
@@ -102,6 +104,7 @@ function useAttention(count: number | undefined) {
 }
 
 function Shell() {
+  const admin = useSharedAccount()?.account.role === "admin";
   const badge = useBadge().data;
   useAttention(badge?.unread ?? badge?.needsInput);
   usePushRefresh();
@@ -157,7 +160,7 @@ function Shell() {
   }, [newTask]);
 
   const onMorePage = matchPath("/more", location.pathname) !== null;
-  const inMoreSection = MORE_DESTINATIONS.some(({ to }) => matchPath({ path: to, end: false }, location.pathname) !== null);
+  const inMoreSection = moreDestinations(admin).some(({ to }) => matchPath({ path: to, end: false }, location.pathname) !== null);
   const scopeLoad = useScopeLoad();
   const scope = useScope();
   const [scopeSheet, setScopeSheet] = useState(false);
@@ -204,6 +207,7 @@ function Shell() {
         <div className="flex shrink-0 flex-col border-t border-line px-2 py-2">
           <SideLink to="/snippets" icon={<IconSnippets />} label="Snippets" />
           <SideLink to="/settings" icon={<IconSettings />} label="Settings" />
+          {admin ? <SideLink to={ADMIN_DESTINATION.to} icon={<IconAdmin />} label={ADMIN_DESTINATION.label} /> : null}
         </div>
         {/* Bottom row: popovers here anchor to the row (their wrappers are static), opening above it. */}
         <div className="relative flex h-12 shrink-0 items-center gap-1.5 border-t border-line px-3">
