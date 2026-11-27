@@ -4,7 +4,7 @@ import { useNavigate } from "react-router";
 import { ApiError } from "../api/client.ts";
 import { keys, useInvalidateProjects, useProjects } from "../api/queries.ts";
 import type { Project, ProjectBinding, Workspace, WorkspaceRef } from "../api/types.ts";
-import { filterWorkspaceInventory, repoLabel, suggestedWorkspaceFor, workspaceLocation } from "../lib/projects.ts";
+import { currentBindings, filterWorkspaceInventory, repoLabel, suggestedWorkspaceFor, workspaceLocation } from "../lib/projects.ts";
 import { useApi } from "../platform/context.tsx";
 import { DeclaredActions } from "./DeclaredActions.tsx";
 import { ProjectReference, ResolveWorkspacesDrawer } from "./ProjectPreviews.tsx";
@@ -54,7 +54,7 @@ export function ProjectWorkspace({ project }: { project: Project }) {
 
   return (
     <>
-      <Panel title="Workspaces" meta={project.bindings.length} flush actions={
+      <Panel title="Workspaces" meta={currentBindings(project.bindings).length} flush actions={
         <>
           {archived ? null : <>
             <Button small disabled={live.length === 0} onClick={() => setBinding({ connectionId: live[0]?.id ?? 0 })}>Bind workspace</Button>

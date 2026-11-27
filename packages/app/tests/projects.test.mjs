@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  filterWorkspaceInventory, importNotice, matchProjects, orderedWorkspaces, primaryWorkspace, projectDetail,
+  currentBindings, filterWorkspaceInventory, importNotice, matchProjects, orderedWorkspaces, primaryWorkspace, projectDetail,
   projectsForConnection, projectWorkspace, repoLabel, suggestedWorkspaceFor, workspaceLocation,
 } from "../src/lib/projects.ts";
 import { fakeApi } from "./fake-transport.mjs";
@@ -140,6 +140,35 @@ test("a chosen harness narrows the picker to its projects and unbound ones", () 
 
 const row = (id, machineId, connectionId, workspace, primary = false, connectionActive = true) =>
   ({ id, machineId, connectionId, workspace, primary, connectionActive, externalProjectId: `workspace-${id}` });
+
+test("project workspaces and search keep all current bindings regardless of availability", () => {
+  const retired = row(9, 1, 1, "/old-checkout", true, false);
+  const primary = { ...row(10, 2, 2, "/main", true), status: "missing" };
+  const alternate = { ...row(11, 2, 2, "/branch"), status: "changed" };
+  const item = { ...stage, bindings: [retired, primary, alternate] };
+
+  assert.deepEqual(currentBindings(item.bindings), [primary, alternate]);
+  assert.equal(projectWorkspace(item), "/main");
+  assert.equal(primaryWorkspace(orderedWorkspaces(item.bindings), retired.connectionId), undefined);
+  for (const binding of [primary, alternate]) {
+    assert.deepEqual(ids(matchProjects([item], binding.workspace)), [item.id]);
+    assert.deepEqual(ids(matchProjects([item], binding.externalProjectId)), [item.id]);
+  }
+  assert.deepEqual(matchProjects([item], retired.workspace), []);
+  assert.deepEqual(matchProjects([item], retired.externalProjectId), []);
+});
+
+test("a project with only retired bindings remains selectable and displays as unbound", () => {
+  const retired = row(7, 1, 1, "/previous", true, false);
+  const item = { ...stage, bindings: [retired] };
+
+  assert.deepEqual(currentBindings(item.bindings), []);
+  assert.equal(projectDetail(item), "Workspace not bound");
+  assert.deepEqual(ids(matchProjects([item], item.title)), [item.id]);
+  assert.deepEqual(matchProjects([item], retired.workspace), []);
+  assert.deepEqual(matchProjects([item], retired.externalProjectId), []);
+  assert.deepEqual(item.bindings, [retired]);
+});
 
 test("orders workspaces by machine and connection, then primary, path and ID", () => {
   const retired = row(9, 1, 1, "/retired", true, false);

@@ -1,9 +1,10 @@
 // One Settings > Connections row (name and where, state chip, Manage and a confirmed Disconnect; on phone the whole
 // row opens Manage) and the harness scope of a machine. A harness's own row (src/harnesses/) fills it in.
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { HarnessScopeProvider, LOCAL_SCOPE, type HarnessScope } from "../api/harnessScope.tsx";
 import type { Machine } from "../api/types.ts";
 import { machineScopeId } from "../lib/machines.ts";
+import type { ConnectionConfirmation } from "./HarnessPresentation.tsx";
 import { IconStep } from "./icons.tsx";
 import { Button, Chip, ConfirmInline, Row, RowButton, type ChipTone } from "./ui.tsx";
 
@@ -15,18 +16,6 @@ export function MachineScope({ machine, children }: { machine: Pick<Machine, "id
     return machineId === null ? LOCAL_SCOPE : { machineId, label };
   }, [id, kind, label]);
   return <HarnessScopeProvider scope={scope}>{children}</HarnessScopeProvider>;
-}
-
-/** The row's confirmed secondary action: Disconnect, or Forget on a disconnected row. */
-export interface Disconnect {
-  /** Button and confirm label; "Disconnect" when omitted. */
-  label?: string;
-  prompt: string;
-  busy: boolean;
-  error: unknown;
-  /** Disconnects; `done` closes the confirm once it succeeded. */
-  run: (done: () => void) => void;
-  reset: () => void;
 }
 
 /** One connection: name (and the default chip) and where, state chip, Manage and Disconnect (laptop) or a whole-row button (phone). */
@@ -49,12 +38,13 @@ export function ConnectionRow({
   /** The primary button's label: Manage, or Reconnect on a disconnected row. */
   manageLabel?: string;
   /** null: the harness cannot disconnect from here. */
-  disconnect: Disconnect | null;
+  disconnect: ConnectionConfirmation | null;
   /** New tasks start on this connection (Preferences.defaultConnectionId). */
   isDefault: boolean;
   overflow?: ReactNode;
 }) {
   const [confirm, setConfirm] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
   const statusDescription = useId();
   const action = disconnect?.label ?? "Disconnect";
   const state = (
@@ -96,7 +86,7 @@ export function ConnectionRow({
           <div className="flex items-center gap-1.5">
             {onManage === undefined ? null : <Button small onClick={onManage} data-focus-return={`connection:${machine.id}:${name}`} aria-label={manageName}>{manageLabel}</Button>}
             {disconnect === null ? null : (
-              <Button small variant="ghost" aria-expanded={confirm} aria-label={`${action} ${name} on ${machine.label}`}
+              <Button ref={trigger} small variant="ghost" aria-expanded={confirm} aria-label={`${action} ${name} on ${machine.label}`}
                 onClick={() => {
                   if (disconnect.busy) return;
                   disconnect.reset();
@@ -113,7 +103,10 @@ export function ConnectionRow({
         <div className="pr-3 pb-2.5 pl-[30px] max-md:hidden">
           <ConfirmInline danger confirmLabel={action} busy={disconnect.busy} error={disconnect.error} onConfirm={() => {
             if (!disconnect.busy) disconnect.run(() => setConfirm(false));
-          }} onCancel={() => setConfirm(false)}>
+          }} onCancel={() => {
+            setConfirm(false);
+            trigger.current?.focus();
+          }}>
             {disconnect.prompt}
           </ConfirmInline>
         </div>

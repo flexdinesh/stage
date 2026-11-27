@@ -141,12 +141,12 @@ test("disconnect prompt names the T3, what stays, and the token's validity only 
   const date = isoDate;
   assert.equal(
     t3DisconnectPrompt(connected, date),
-    "Disconnect from controlbox? Stage forgets its token, URL, browser URL and admin token and stops syncing. Tasks and bindings stay; pair the same T3 again to resume. It stays listed as disconnected until you forget it. The token stays valid in T3 until 2026-12-17.",
+    "Disconnect from controlbox? Stage forgets its token, URL, browser URL and admin token and stops syncing. Tasks and bindings stay; pair the same T3 again to resume. It stays listed as disconnected until you remove it. The token stays valid in T3 until 2026-12-17.",
   );
   const expired = status({ state: "expired", t3: null, tokenExpiresAt: "2026-11-01T00:00:00Z" });
   assert.equal(
     t3DisconnectPrompt(expired, date),
-    "Disconnect T3? Stage forgets its token, URL, browser URL and admin token and stops syncing. Tasks and bindings stay; pair the same T3 again to resume. It stays listed as disconnected until you forget it.",
+    "Disconnect T3? Stage forgets its token, URL, browser URL and admin token and stops syncing. Tasks and bindings stay; pair the same T3 again to resume. It stays listed as disconnected until you remove it.",
   );
 });
 

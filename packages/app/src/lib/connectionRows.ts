@@ -1,5 +1,5 @@
 // Settings Connections: each machine's connection rows and what Add connection offers there. Rows are a machine's
-// active connections that are set up, and disconnected ones (set up once or holding history) to reconnect or forget;
+// active connections that are set up, and disconnected ones (set up once or holding history) to reconnect or remove;
 // one never set up (configured false, nothing on it) is not a row.
 import type { Harness, HarnessConnection, HarnessDescriptor, Machine } from "../api/types.ts";
 import { isDisconnected } from "./harnesses.ts";
@@ -9,7 +9,7 @@ export interface ConnectionRowModel {
   id: number;
   harness: Harness;
   label: string;
-  /** Disconnected: it offers Reconnect and Forget instead of Manage and Disconnect. */
+  /** Disconnected: it offers Reconnect and Remove connection instead of Manage and Disconnect. */
   disconnected: boolean;
 }
 

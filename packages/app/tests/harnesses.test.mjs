@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { ApiError } from "../src/api/client.ts";
 import {
   activeOn,
-  forgetPrompt,
+  removeConnectionPrompt,
   harnessLookup,
   isDisconnected,
   isRetired,
@@ -159,12 +159,20 @@ test("retired notice names the harness and the instance Stage no longer uses", (
   );
 });
 
-test("retired connection usage and forget copy", () => {
+test("removal names the connection and explains the effect on recorded bindings and tasks", () => {
   assert.equal(usageText(oldT3), "4 tasks · 2 bindings");
   assert.equal(usageText({ tasks: 1, bindings: 1 }), "1 task · 1 binding");
   assert.equal(
-    forgetPrompt(oldT3),
-    "Forget desktop? Its tasks keep their history and stay read-only. Its project bindings stop asking for repair, and pairing this instance again starts a new connection.",
+    removeConnectionPrompt(oldT3),
+    "Remove desktop from Stage? Stage will remove 2 workspace bindings. History for 4 tasks will stay read-only. Pairing again creates a new connection.",
+  );
+  assert.equal(
+    removeConnectionPrompt({ label: "worker", tasks: 1, bindings: 1 }),
+    "Remove worker from Stage? Stage will remove 1 workspace binding. History for 1 task will stay read-only. Pairing again creates a new connection.",
+  );
+  assert.equal(
+    removeConnectionPrompt({ label: "", tasks: 0, bindings: 0 }),
+    "Remove this connection from Stage? Pairing again creates a new connection.",
   );
 });
 

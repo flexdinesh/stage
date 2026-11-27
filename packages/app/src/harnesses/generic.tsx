@@ -47,7 +47,7 @@ function GenericRow({ descriptor, machine, onManage, isDefault, overflow }: Conn
   );
 }
 
-const disconnectText = (name: string) => `Disconnect ${name}? Tasks and history stay. You can reconnect or forget this connection later.`;
+const disconnectText = (name: string) => `Disconnect ${name}? Tasks and history stay. You can reconnect or remove this connection later.`;
 
 function GenericSetup({ descriptor }: { descriptor: HarnessDescriptor }) {
   const query = useHarnessStatus(descriptor.kind);

@@ -155,6 +155,10 @@ export const activeOn = (list: readonly HarnessConnection[], h: Harness, machine
 export const usageText = (c: Pick<HarnessConnection, "tasks" | "bindings">) =>
   `${count(c.tasks, "task")} · ${count(c.bindings, "binding")}`;
 
-export function forgetPrompt(c: Pick<HarnessConnection, "label">): string {
-  return `Forget ${c.label || "this connection"}? Its tasks keep their history and stay read-only. Its project bindings stop asking for repair, and pairing this instance again starts a new connection.`;
+export function removeConnectionPrompt(c: Pick<HarnessConnection, "label" | "tasks" | "bindings">): string {
+  const lines = [`Remove ${c.label || "this connection"} from Stage?`];
+  if (c.bindings > 0) lines.push(`Stage will remove ${count(c.bindings, "workspace binding")}.`);
+  if (c.tasks > 0) lines.push(`History for ${count(c.tasks, "task")} will stay read-only.`);
+  lines.push("Pairing again creates a new connection.");
+  return lines.join(" ");
 }

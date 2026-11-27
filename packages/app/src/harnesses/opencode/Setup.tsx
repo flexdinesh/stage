@@ -348,7 +348,7 @@ function SignInLost({ info, advanced }: { info: OpenCodeStatus; advanced: () => 
   }
 }
 
-export const OPENCODE_DISCONNECT_PROMPT = "Disconnect OpenCode? Tasks and history stay. You can connect again any time. It stays listed as disconnected until you forget it.";
+export const OPENCODE_DISCONNECT_PROMPT = "Disconnect OpenCode? Tasks and history stay. You can connect again any time. It stays listed as disconnected until you remove it.";
 
 /** Disconnects OpenCode on the harness scope's machine, then waits for the new status. */
 export function useDisconnectOpenCode(onDone?: () => void) {

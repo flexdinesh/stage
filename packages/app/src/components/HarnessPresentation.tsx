@@ -85,7 +85,7 @@ export interface ConnectionConfirmation {
   reset: () => void;
 }
 
-/** Shared inline disconnect and forget confirmation. */
+/** Shared inline confirmation for connection actions. */
 export function ConfirmConnectionAction({ action, accessibleLabel, children }: { action: ConnectionConfirmation; accessibleLabel?: string; children?: ReactNode }) {
   const [confirm, setConfirm] = useState(false);
   const inFlight = useRef(false);
@@ -111,7 +111,7 @@ export function ConfirmConnectionAction({ action, accessibleLabel, children }: {
         </Button>
       </div>
       {confirm ? (
-        <ConfirmInline danger confirmLabel={label} busy={action.busy} error={action.error} onConfirm={() => {
+        <ConfirmInline danger stackActionsOnPhone confirmLabel={label} busy={action.busy} error={action.error} onConfirm={() => {
           if (inFlight.current) return;
           inFlight.current = true;
           action.run(() => {

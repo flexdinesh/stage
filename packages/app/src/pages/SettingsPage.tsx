@@ -357,7 +357,7 @@ export function SettingsConnectionsPage() {
         )}
         <ErrorText error={sync.error} />
         <MachinesPanel meta="synced every 5 min" />
-        <PreviousConnections />
+        <PreviousConnections machines={machines} />
       </div>
       {adding ? <AddMachineDrawer onClose={() => setAdding(false)} /> : null}
     </>
