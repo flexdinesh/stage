@@ -26,8 +26,8 @@ test("startsText names each started task once", () => {
 const settles = { closures: [{ signal: "settled", provenance: "harness_settled", setting: "", completed: "Completed automatically: settled in Box.", via: "via Box settle" }] };
 const archives = { closures: [{ signal: "archived", provenance: "harness_archived", setting: "", completed: "Completed automatically: archived in Crate.", via: "via Crate archive" }] };
 
-test("provenanceText says who completed the result", () => {
-  assert.match(provenanceText("user"), /^Completed by you in Stage\./);
+test("provenanceText describes how the result was accepted", () => {
+  assert.match(provenanceText("user"), /^Completed in Stage\./);
   assert.match(provenanceText("historical_settlement"), /^Migrated from historical T3 settlement\./);
   assert.equal(provenanceText("harness_settled", settles), "Completed automatically: settled in Box.");
   assert.equal(provenanceText("harness_archived", archives), "Completed automatically: archived in Crate.");

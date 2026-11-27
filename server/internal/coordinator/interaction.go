@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -80,6 +81,12 @@ func (s *Service) Respond(ctx context.Context, id int64, requestID string, r exe
 		return t, db.Invalid("%s", invalid.Reason)
 	} else if err != nil {
 		return t, harnessErr(err)
+	}
+	record, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	record = db.WithWorkCause(record, db.Cause{Kind: "session_request", Session: t.Session, RequestID: requestID})
+	if err := s.store.RecordTaskOperation(record, id, *t.Session, "session_response", "Answered a session request"); err != nil {
+		return t, err
 	}
 	return s.observeAfter(ctx, t)
 }

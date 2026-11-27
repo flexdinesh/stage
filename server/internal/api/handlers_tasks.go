@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"slices"
@@ -496,7 +497,12 @@ func (s *server) stopTask(w http.ResponseWriter, r *http.Request) error {
 	if err := adapter.Stop(r.Context(), *task.Session); err != nil {
 		return &db.HarnessError{Err: err}
 	}
-	return s.touchAndWrite(w, r, task.ID)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancel()
+	if err := s.Store.RecordTaskOperation(ctx, task.ID, *task.Session, "task_stopped", "Stop requested from Stage"); err != nil {
+		return err
+	}
+	return s.pollAndWrite(w, r, task.ID)
 }
 
 // touchAndWrite bumps updated_at (re-arms polling), polls the session once so
@@ -506,6 +512,11 @@ func (s *server) touchAndWrite(w http.ResponseWriter, r *http.Request, id int64)
 	if err := s.Store.TouchTask(ctx, id); err != nil {
 		return err
 	}
+	return s.pollAndWrite(w, r, id)
+}
+
+func (s *server) pollAndWrite(w http.ResponseWriter, r *http.Request, id int64) error {
+	ctx := r.Context()
 	task, err := s.Store.GetTask(ctx, id)
 	if err != nil {
 		return err

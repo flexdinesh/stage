@@ -46,6 +46,10 @@ func TestObservationBatchRollbackReplayAndBridgeOrdering(t *testing.T) {
 	fail := true
 	var published int
 	svc.Observe.RecordNotification = func(ctx context.Context, tx *db.Store, c workevent.ObservationChange) (func(), error) {
+		if c.Actor.Kind != "system" || c.Actor.UserID != 0 || c.SourceMachine == nil || *c.SourceMachine != remoteMachine ||
+			c.Cause == nil || c.Cause.Session == nil || *c.Cause.Session != ref {
+			t.Fatalf("observer attribution = %+v", c.Attribution)
+		}
 		after, err := n.RecordObservation(ctx, tx, c)
 		if err != nil {
 			return nil, err
@@ -72,6 +76,10 @@ func TestObservationBatchRollbackReplayAndBridgeOrdering(t *testing.T) {
 	}
 	if got, err := store.GetTask(ctx, task.ID); err != nil || got.State != db.StateRunning {
 		t.Fatalf("uncommitted state = %s, %v", got.State, err)
+	}
+	events, err := store.TaskEvents(ctx, task.ID)
+	if err != nil || len(events) == 0 || events[len(events)-1].ToState != db.StateRunning {
+		t.Fatalf("uncommitted actor event: %+v, %v", events, err)
 	}
 	if got, err := store.ListNotifications(ctx, 10, nil); err != nil || len(got) != 0 || published != 0 {
 		t.Fatalf("uncommitted notifications = %+v, published %d, err %v", got, published, err)

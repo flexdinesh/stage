@@ -198,7 +198,8 @@ migration 0026 (#399).
 | Cause (helper) | Derived rows |
 | --- | --- |
 | Task event (`addTaskEvent`) | event `task_created` (no from state), `task_state_changed` (detail plus ` (from -> to)`) or `task_event` (same state), on the task and its tree, at the task event's time, with the task's session and launch attempt; the task records work when launched, adopted or entering launching, running, needs input, done, failed or interrupted, and a task with recorded work protects its tree |
-| Successful harness action on a linked session (`RecordSessionAction`) | `session_action` on the task and its tree with action ID, target and caller, including caller session provenance when available. Inputs and raw results are excluded. Dispatch occurs outside the database transaction. |
+| Task edit (`UpdateTask`) | `task_edited` and timeline event in the edit transaction. A start-time edit records the source of a later scheduled launch. |
+| Successful harness action on a linked session (`RecordSessionAction`, `RecordTaskOperation`) | `session_action`, `session_response` or `task_stopped` on the task and its tree. Session responses retain the request ID. Dispatch occurs outside the database transaction. |
 | Note (`insertNote`) | protects its task and tree; the tree's `updated_at` becomes the note's time |
 | Tree created, config, status (`insertTree`, `updateTree`, `setTreeStatus`, `archiveDissolved`) | `tree_created` (title), `tree_config_changed` (`Title: a -> b; start mode: x -> y`, only when either changed), `tree_status_changed` (`old -> new`, only on a change) |
 | Membership (`setMembership`, `detachMembers`) | `task_moved` (task title, from and to tree) in the old and the new tree; both trees' membership revision + 1, `updated_at` now, recorded work carried over; an emptied old tree is archived (closed now), with its status event |
@@ -206,9 +207,10 @@ migration 0026 (#399).
 | Acceptance (`insertAcceptance`) | `task_acceptances.source_session_id` = the task's session |
 | Handoff (`recordHandoff`) | source session: the evidence's session, else none (a bare legacy thread id names no connection, #420) |
 
-- **Attribution:** derived events keep the triggers' attribution, the
-  column defaults: the default user and no source machine
-  ([architecture.md](architecture.md#users)).
+- **Attribution:** new work records the admitted actor and known cause with
+  each event in the same transaction. Existing creator IDs retain their
+  semantics. Public names are resolved by stable user ID on reads.
+  [Work attribution](api.md#work-attribution)
 - **Changes from the triggers:** task events no longer copy the legacy
   `tasks.t3_thread_id` into `source_thread_id` (the API's `sourceThreadId`
   reads the source session's external id, for every harness); deleting an unstarted tree writes no
@@ -544,6 +546,12 @@ and paging. (Thread search was removed with API v3.)
   unclaimed push endpoints from already opted-in installations. The legacy
   columns stay available during the expansion.
   See [Notification receipts](#notification-receipts).
+  Paired migration 0044 `work_attribution` adds nullable attribution
+  columns to task events, journal entries, acceptances, execution attempts
+  and schedule runs. The text columns carry a structured actor and separate
+  cause and machine provenance. A null stamp reads as historical. Existing
+  creator IDs, journal text and acceptance evidence bytes are preserved.
+  Database copies preserve actor stamps and the user IDs they reference.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.

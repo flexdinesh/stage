@@ -66,6 +66,7 @@ func (e *AcceptedEvidence) UnmarshalJSON(b []byte) error {
 }
 
 type Acceptance struct {
+	Attribution
 	ID         int64            `json:"id"`
 	TaskID     int64            `json:"taskId"`
 	AcceptedAt time.Time        `json:"acceptedAt"`
@@ -100,6 +101,8 @@ type Acceptances interface {
 	List(ctx context.Context, taskID int64) ([]Acceptance, error)
 	// LaunchInputs are the acceptances the attempt read, by source task.
 	LaunchInputs(ctx context.Context, taskID int64, attempt int) ([]Acceptance, error)
+	// ReleaseCause returns the latest current acceptance among the task's needs.
+	ReleaseCause(ctx context.Context, taskID int64) (Acceptance, error)
 	// JournalThrough is the newest journal entry id of the task or tree.
 	JournalThrough(ctx context.Context, taskID int64, treeID *int64) (int64, error)
 	// Dependents are the tasks needing taskID, by id.
@@ -111,12 +114,12 @@ type Acceptances interface {
 	// MarkReopened suppresses inference for the task's observed execution.
 	MarkReopened(ctx context.Context, taskID int64) error
 	// Insert records an acceptance; sourceSessionID is the task's session.
-	Insert(ctx context.Context, taskID int64, provenance string, evidence AcceptedEvidence, note string, sourceSessionID *int64) (int64, error)
+	Insert(ctx context.Context, taskID int64, provenance string, evidence AcceptedEvidence, note string, sourceSessionID *int64, attribution Attribution) (int64, error)
 	// SetCurrent sets the task's current acceptance (nil clears) at
 	// revision and marks it and its tree as having recorded work.
 	SetCurrent(ctx context.Context, taskID, revision int64, acceptanceID *int64) error
 	// JournalEvent journals a task event in the task's tree too.
-	JournalEvent(ctx context.Context, taskID int64, event, detail string, createdBy int64, sourceMachine *int64) error
+	JournalEvent(ctx context.Context, taskID int64, event, detail string, createdBy int64, sourceMachine *int64, attribution Attribution) error
 	// ResetDependentsReady clears ready_at on the task's backlog dependents.
 	ResetDependentsReady(ctx context.Context, taskID int64) error
 	// InferenceEligible: a done, uncompleted task of ref on an auto-complete

@@ -104,14 +104,14 @@ WHERE t.tree_id = ANY($1) ORDER BY n.task_id, n.need_id`, ids)
 
 func (r trees) Events(ctx context.Context, id int64, limit int) ([]store.TaskEvent, error) {
 	rows, err := r.Query(ctx, `
-SELECT e.id, e.task_id, e.from_state, e.to_state, e.detail, e.at FROM task_events e JOIN tasks t ON t.id = e.task_id
+SELECT e.id, e.task_id, e.from_state, e.to_state, e.detail, e.at, `+attributionColumns("e.attribution")+` FROM task_events e JOIN tasks t ON t.id = e.task_id
 WHERE t.tree_id = $1 ORDER BY e.at DESC, e.id DESC LIMIT $2`, id, limit)
 	if err != nil {
 		return nil, err
 	}
 	return collectRows(rows, func(r rowScanner) (store.TaskEvent, error) {
 		var e store.TaskEvent
-		err := r.Scan(&e.ID, &e.TaskID, &e.FromState, &e.ToState, &e.Detail, &e.At)
+		err := r.Scan(&e.ID, &e.TaskID, &e.FromState, &e.ToState, &e.Detail, &e.At, &e.Attribution, &e.Actor.DisplayName)
 		return e, err
 	})
 }

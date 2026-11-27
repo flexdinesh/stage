@@ -97,6 +97,10 @@ func TestAdoptSession(t *testing.T) {
 		a.ExternalSessionID == nil || *a.ExternalSessionID != s || a.LaunchAttempt != 1 || a.TreeID != nil {
 		t.Fatalf("adopted %+v", a)
 	}
+	events, err := e.store.TaskEvents(t.Context(), a.ID)
+	if err != nil || len(events) != 1 || events[0].Actor.Kind != "personal" || events[0].Actor.UserID != 0 {
+		t.Fatalf("adopted task attribution: %+v, %v", events, err)
+	}
 	var again agentTask
 	e.must("POST", "/api/connections/1/sessions/"+s+"/adopt", map[string]any{"title": "ignored"}, 200, &again)
 	if again.ID != a.ID || again.Title != "Planner" {

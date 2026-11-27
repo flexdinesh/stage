@@ -5,6 +5,7 @@ import { useApi } from "../platform/context.tsx";
 import { isNotFound, useHarnesses, useInvalidateWork, useSchedule, useSchedulePreview } from "../api/queries.ts";
 import type { ScheduleDetail, ScheduleRun } from "../api/types.ts";
 import { RefText } from "../components/StageLinks.tsx";
+import { ActorLabel } from "../components/ActorLabel.tsx";
 import { HarnessConnectionState } from "../components/ConnectionState.tsx";
 import { ImageStrip } from "../components/Images.tsx";
 import { NextRun, ScheduleChip } from "../components/ScheduleList.tsx";
@@ -282,7 +283,7 @@ function RunRow({ run: r, tz }: { run: ScheduleRun; tz: string }) {
             {r.outcome === "manual" ? "ran" : "fire"} {wallTime(r.fireAt, tz)}
           </span>
           <RelTime at={r.at} className="tabular" />
-          {r.outcome === "manual" && r.taskId !== null ? <span>run now</span> : null}
+          <ActorLabel work={r} />
           {r.detail === "" ? null : <span>{r.detail}</span>}
           {r.task?.lastError == null ? null : (
             <InlineError truncate className="min-w-0">

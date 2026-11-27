@@ -591,7 +591,27 @@ export interface Task {
   deletable: boolean;
 }
 
-export interface TaskEvent {
+export interface WorkAttribution {
+  actor?: {
+    kind: "human" | "personal" | "agent" | "machine" | "system" | "cron" | "unknown" | "historical";
+    userId?: number;
+    initiatorUserId?: number;
+    credentialAccountId?: number;
+    displayName?: string;
+  };
+  sourceMachineId?: number | null;
+  cause?: {
+    kind: string;
+    taskId?: number;
+    acceptanceId?: number;
+    scheduleId?: number;
+    attempt?: number;
+    session?: SessionRef;
+    requestId?: string;
+  };
+}
+
+export interface TaskEvent extends WorkAttribution {
   id: number;
   taskId: number;
   fromState: TaskState | null;
@@ -655,7 +675,7 @@ export interface AcceptedEvidence {
 /** `user`, `historical_settlement`, or a harness closure’s provenance (`HarnessDescriptor.closures`). */
 export type Provenance = string;
 
-export interface Acceptance {
+export interface Acceptance extends WorkAttribution {
   id: number;
   taskId: number;
   acceptedAt: string;
@@ -911,7 +931,7 @@ export type JournalOwner = { taskId: number; treeId?: never } | { treeId: number
 export type JournalKind = "notes" | "events" | "all";
 export type NoteCategory = "" | "finding" | "decision" | "blocker" | "outcome";
 
-export interface JournalEntry {
+export interface JournalEntry extends WorkAttribution {
   sourceSession: SessionRef | null;
   id: number;
   kind: "note" | "event";
@@ -925,9 +945,9 @@ export interface JournalEntry {
   fromTreeId: number | null;
   toTreeId: number | null;
   createdAt: string;
-  /** User id of the note's author or of the user behind the event (trigger-written events: the default user). */
+  /** Legacy creator id. Actor attribution is in actor. */
   createdBy: number;
-  /** Machine whose agent gateway forwarded the write; null when not through a gateway (and for trigger-written events). */
+  /** Source machine recorded for the write, when known. */
   sourceMachineId: number | null;
   truncated: boolean;
 }
@@ -990,7 +1010,7 @@ export interface Schedule {
   updatedAt: string;
 }
 
-export interface ScheduleRun {
+export interface ScheduleRun extends WorkAttribution {
   id: number;
   scheduleId: number;
   fireAt: string;

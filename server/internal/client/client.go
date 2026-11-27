@@ -25,6 +25,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/filelock"
 	"github.com/flexdinesh/stage/server/internal/listen"
+	"github.com/flexdinesh/stage/server/internal/principal"
 )
 
 // DefaultURL is the server address when STAGE_URL is unset.
@@ -91,7 +92,8 @@ type Client struct {
 	// base prefixes request paths (BaseURL, or socketBase).
 	base string
 	// err is an invalid BaseURL, returned by every request.
-	err error
+	err           error
+	toolTransport bool
 }
 
 // New returns a client for baseURL (DefaultURL when empty): http(s)://host:port,
@@ -203,6 +205,7 @@ type TreeDetail struct {
 
 // ScheduleRun is one fire of a schedule (detail reads include the task).
 type ScheduleRun struct {
+	db.Attribution
 	ID         int64     `json:"id"`
 	ScheduleID int64     `json:"scheduleId"`
 	FireAt     time.Time `json:"fireAt"`
@@ -211,6 +214,13 @@ type ScheduleRun struct {
 	Detail     string    `json:"detail"`
 	At         time.Time `json:"at"`
 	Task       *Task     `json:"task"`
+}
+
+// AsToolTransport identifies requests from the local stdio MCP server.
+func (c *Client) AsToolTransport() *Client {
+	tool := *c
+	tool.toolTransport = true
+	return &tool
 }
 
 // ScheduleDetail is GET /api/schedules/:id.
@@ -300,6 +310,9 @@ func (c *Client) doStatus(ctx context.Context, method, path string, body any, ou
 func (c *Client) send(req *http.Request, out any) (int, error) {
 	if c.err != nil {
 		return 0, c.err
+	}
+	if c.toolTransport {
+		req.Header.Set(principal.ToolTransportHeader, "mcp")
 	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {

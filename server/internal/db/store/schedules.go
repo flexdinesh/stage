@@ -38,6 +38,7 @@ type Schedule struct {
 
 // ScheduleRun is one fire of a schedule.
 type ScheduleRun struct {
+	Attribution
 	ID         int64     `json:"id"`
 	ScheduleID int64     `json:"scheduleId"`
 	FireAt     time.Time `json:"fireAt"`
@@ -148,7 +149,7 @@ type Schedules interface {
 	// Runs are the newest limit runs.
 	Runs(ctx context.Context, id int64, limit int) ([]ScheduleRun, error)
 	Template(ctx context.Context, id int64) (ScheduleTemplate, error)
-	InsertRun(ctx context.Context, id int64, fireAt time.Time, outcome string, taskID *int64, detail string) error
+	InsertRun(ctx context.Context, id int64, fireAt time.Time, outcome string, taskID *int64, detail string, attribution Attribution) error
 	// Due: unpaused schedules (of connection; 0 = any) due at now.
 	Due(ctx context.Context, now time.Time, connection int64) ([]int64, error)
 	// DueTasks: open backlog tasks (of connection; 0 = any) whose start

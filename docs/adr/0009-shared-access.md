@@ -102,7 +102,7 @@ Web Push subscription management requires a browser session.
 
 The principal is authoritative for access. The existing non-null
 `createdBy` columns still carry legacy attribution for system and machine
-writes with no person; #456 adds durable actor kind and cause. Scheduled
+writes with no person. Work records carry a durable actor kind and cause. Scheduled
 tasks preserve their template creator, and worker writes keep
 `sourceMachineId`. Neither column is an authorization input.
 
@@ -141,7 +141,12 @@ replacement where the platform permits.
 
 ## Delivery and migration order
 
-Each task merges independently and uses merged predecessor contracts. Use paired SQLite/Postgres forward-only migrations. Reserve `0040_shared_access` (#452), leave `0041` available for access audit storage (#453), and reserve `0042` for actors (#456) and `0043` for notifications (#459). Integrate in that order or renumber an unmerged migration above the freshly fetched integration head. Keep merged migration numbers and contents fixed.
+Each task merges independently and uses merged predecessor contracts.
+Use paired SQLite/Postgres forward-only migrations. Shared access uses
+`0040` (#452), access audit uses `0041` (#453), notifications use `0043`
+(#459), and work attribution uses `0044` (#456). Renumber unmerged
+migrations above the freshly fetched integration head as needed.
+Keep merged migration numbers and contents fixed.
 
 | Task | Owner and evidence |
 | --- | --- |

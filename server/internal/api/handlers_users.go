@@ -6,8 +6,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 )
 
-// me returns the acting user (docs/api.md "Users"): the default user until
-// sign-in sets a request principal.
+// me returns the caller's profile. Other people's work uses the public
+// display-name projection on actor records.
 func (s *server) me(w http.ResponseWriter, r *http.Request) error {
 	if c, ok := credentialFrom(r.Context()); ok {
 		writeJSON(w, http.StatusOK, viewAccount(c.identity.Account))

@@ -179,14 +179,19 @@ func (s *Store) FinishAttempt(ctx context.Context, a Attempt, o execution.Observ
 			return Conflict("task no longer has this unresolved launch")
 		}
 		detail := "execution confirmed"
+		eventCtx := ctx
 		if manual {
 			detail = "existing session linked by user; no launch sent"
+			eventCtx = WithWorkCause(ctx, Cause{Kind: "launch_attempt", TaskID: a.TaskID, Attempt: a.Number, Session: &o.Session})
+		} else {
+			eventCtx = AttemptOutcome(ctx, a, &o.Session)
 		}
 		from := StateLaunching
-		return addTaskEvent(ctx, tx, a.TaskID, &from, TaskState(o.State), detail)
+		return addTaskEvent(eventCtx, tx, a.TaskID, &from, TaskState(o.State), detail)
 	})
 }
 func (s *Store) RejectAttempt(ctx context.Context, a Attempt, reason string) error {
+	ctx = AttemptOutcome(ctx, a, nil)
 	return s.e.Write(ctx, func(tx store.Tx) error {
 		rejected, err := tx.Attempts().Reject(ctx, a, reason)
 		if err != nil {
@@ -201,6 +206,16 @@ func (s *Store) RejectAttempt(ctx context.Context, a Attempt, reason string) err
 		from := StateLaunching
 		return addTaskEvent(ctx, tx, a.TaskID, &from, StateBacklog, fmt.Sprintf("launch rejected before execution: %s", reason))
 	})
+}
+
+// AttemptOutcome derives the automation stamp from the persisted claim,
+// including when a later request or process reconciles it.
+func AttemptOutcome(ctx context.Context, a Attempt, ref *SessionRef) context.Context {
+	cause := Cause{Kind: "launch_attempt", TaskID: a.TaskID, Attempt: a.Number, Session: ref}
+	if a.Intent != nil {
+		cause.RequestID = a.Intent.RequestID
+	}
+	return AutomatedWork(ctx, "system", cause, a.Attribution)
 }
 
 // WatchedSessions retains unowned observations after they leave the harness

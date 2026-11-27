@@ -67,7 +67,7 @@ func (s *Service) RecoverLaunching(ctx context.Context) {
 func (s *Service) transition(ctx context.Context, t db.Transition) (db.TransitionResult, error) {
 	r, e := s.store.TransitionTask(ctx, t)
 	if e == nil && r.Changed && s.OnTransition != nil {
-		s.OnTransition(ctx, workevent.TaskChange{TaskID: t.TaskID, From: r.From, To: t.To, Detail: t.Detail})
+		s.OnTransition(ctx, workevent.TaskChange{TaskID: t.TaskID, From: r.From, To: t.To, Detail: t.Detail, Attribution: r.Attribution})
 	}
 	return r, e
 }

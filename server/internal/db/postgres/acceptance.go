@@ -13,12 +13,12 @@ type acceptances struct{ *runner }
 
 func (t *tx) Acceptances() store.Acceptances { return acceptances{t.r} }
 
-const acceptanceColumns = `a.id,a.task_id,a.accepted_at,a.captured_at,a.provenance,a.evidence,a.note,(SELECT jsonb_build_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=a.source_session_id)`
+var acceptanceColumns = `a.id,a.task_id,a.accepted_at,a.captured_at,a.provenance,a.evidence,a.note,(SELECT jsonb_build_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=a.source_session_id),` + attributionColumns("a.attribution")
 
 func scanAcceptance(r rowScanner) (store.Acceptance, error) {
 	var a store.Acceptance
 	var session *store.SessionRef
-	err := r.Scan(&a.ID, &a.TaskID, &a.AcceptedAt, &a.CapturedAt, &a.Provenance, &a.Evidence, &a.Note, &session)
+	err := r.Scan(&a.ID, &a.TaskID, &a.AcceptedAt, &a.CapturedAt, &a.Provenance, &a.Evidence, &a.Note, &session, &a.Attribution, &a.Actor.DisplayName)
 	if a.Evidence.Session == nil {
 		a.Evidence.Session = session
 	}
@@ -39,6 +39,12 @@ func (r acceptances) LaunchInputs(ctx context.Context, id int64, attempt int) ([
 		return nil, err
 	}
 	return collectRows(rows, scanAcceptance)
+}
+
+func (r acceptances) ReleaseCause(ctx context.Context, id int64) (store.Acceptance, error) {
+	return scanAcceptance(r.QueryRow(ctx, `SELECT `+acceptanceColumns+` FROM task_needs n
+ JOIN tasks t ON t.id=n.need_id JOIN task_acceptances a ON a.id=t.acceptance_id
+ WHERE n.task_id=$1 ORDER BY a.accepted_at DESC,a.id DESC LIMIT 1`, id))
 }
 
 func (r acceptances) JournalThrough(ctx context.Context, id int64, treeID *int64) (int64, error) {
@@ -85,14 +91,14 @@ func (r acceptances) MarkReopened(ctx context.Context, id int64) error {
 	return err
 }
 
-func (r acceptances) Insert(ctx context.Context, id int64, provenance string, evidence store.AcceptedEvidence, note string, sourceSessionID *int64) (int64, error) {
+func (r acceptances) Insert(ctx context.Context, id int64, provenance string, evidence store.AcceptedEvidence, note string, sourceSessionID *int64, attribution store.Attribution) (int64, error) {
 	var acceptanceID int64
 	// evidence is text: its exact JSON bytes are the accepted snapshot.
 	raw, err := json.Marshal(evidence)
 	if err != nil {
 		return 0, err
 	}
-	err = r.QueryRow(ctx, `INSERT INTO task_acceptances(task_id,provenance,evidence,note,source_session_id) VALUES($1,$2,$3,$4,$5) RETURNING id`, id, provenance, string(raw), note, sourceSessionID).Scan(&acceptanceID)
+	err = r.QueryRow(ctx, `INSERT INTO task_acceptances(task_id,provenance,evidence,note,source_session_id,attribution) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, id, provenance, string(raw), note, sourceSessionID, attribution).Scan(&acceptanceID)
 	return acceptanceID, err
 }
 
@@ -104,8 +110,8 @@ func (r acceptances) SetCurrent(ctx context.Context, id, revision int64, accepta
 	return err
 }
 
-func (r acceptances) JournalEvent(ctx context.Context, id int64, event, detail string, createdBy int64, sourceMachine *int64) error {
-	_, err := r.Exec(ctx, `INSERT INTO journal_entries(kind,task_id,tree_id,event_type,text,created_by_user_id,source_machine_id) SELECT 'event',id,tree_id,$2,$3,$4,$5 FROM tasks WHERE id=$1`, id, event, detail, createdBy, sourceMachine)
+func (r acceptances) JournalEvent(ctx context.Context, id int64, event, detail string, createdBy int64, sourceMachine *int64, attribution store.Attribution) error {
+	_, err := r.Exec(ctx, `INSERT INTO journal_entries(kind,task_id,tree_id,event_type,text,created_by_user_id,source_machine_id,attribution) SELECT 'event',id,tree_id,$2,$3,$4,$5,$6 FROM tasks WHERE id=$1`, id, event, detail, createdBy, sourceMachine, attribution)
 	return err
 }
 

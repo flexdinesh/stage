@@ -44,11 +44,15 @@ func (s *Service) Apply(ctx context.Context, task db.Task, o execution.Observati
 		if err := tx.LockObservationConnection(ctx, o.Session.ConnectionID); err != nil {
 			return err
 		}
+		c, err := tx.GetHarnessConnection(ctx, o.Session.ConnectionID)
+		if err != nil {
+			return err
+		}
 		current, err := tx.GetTask(ctx, task.ID)
 		if err != nil {
 			return err
 		}
-		change, inferred, err = s.ApplyObservation(ctx, tx, current, o, at, at)
+		change, inferred, err = s.ApplyObservation(db.ObservedWork(ctx, o.Session, c.MachineID), tx, current, o, at, at)
 		return err
 	})
 	if err == nil {
@@ -101,7 +105,7 @@ func (s *Service) ApplyObservation(ctx context.Context, tx *db.Store, task db.Ta
 			return nil, false, err
 		}
 		if res.Changed {
-			transition = &workevent.TaskChange{TaskID: task.ID, From: res.From, To: change.To, Detail: detail}
+			transition = &workevent.TaskChange{TaskID: task.ID, From: res.From, To: change.To, Detail: detail, Attribution: res.Attribution}
 		}
 	}
 	closure, ok := s.closure(task.Harness, o)

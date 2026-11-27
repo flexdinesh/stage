@@ -15,6 +15,7 @@ import { HandoffRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
 import { JournalPanel } from "../components/Journal.tsx";
 import { AcceptedResult } from "../components/Completion.tsx";
+import { ActorCause, ActorLabel } from "../components/ActorLabel.tsx";
 import { BlockedReason, LaunchBlockAlert, useStartTask, useStopTask } from "../components/LaunchGate.tsx";
 import { DeclaredActions } from "../components/DeclaredActions.tsx";
 import { HarnessFacts } from "../components/HarnessPresentation.tsx";
@@ -505,6 +506,7 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
   const { kindName, connection } = useHarnesses();
   const { machines } = useMachines();
   const workspace = task.workspace;
+  const creation = task.events.find((event) => event.fromState === null);
   const location = workspace == null
     ? (task.bindingId == null ? null : `Binding #${task.bindingId}`)
     : taskWorkspaceLocation(workspace);
@@ -541,8 +543,8 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
           </Detail>
         )}
         {task.originSession === null ? null : (
-          <Detail label="Created by">
-            <span>{task.originSessionTitle ?? task.originSession.externalSessionId}</span>
+          <Detail label="Origin session">
+            <span className="wrap-anywhere">{task.originSessionTitle ?? task.originSession.externalSessionId}</span>
           </Detail>
         )}
         {task.scheduleId === null ? null : (
@@ -552,7 +554,7 @@ function ConfigPanel({ task }: { task: TaskDetail }) {
         )}
         <Detail label="Attempts">{task.launchAttempt}</Detail>
         <Detail label="Created">
-          <RelTime at={task.createdAt} />
+          <RelTime at={task.createdAt} /> · <ActorLabel work={creation ?? {}} />
         </Detail>
         <Detail label="Launched">
           <RelTime at={task.launchedAt} />
@@ -591,6 +593,8 @@ function TimelinePanel({ events }: { events: TaskEvent[] }) {
                 {e.detail === "" ? null : (
                   <Meta className="min-w-0 break-words">{e.detail}</Meta>
                 )}
+                <Meta><ActorLabel work={e} /></Meta>
+                <Meta className="empty:hidden"><ActorCause work={e} taskId={e.taskId} /></Meta>
               </span>
             </Row>
           ))}

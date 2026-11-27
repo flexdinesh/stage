@@ -18,7 +18,7 @@ func (s *Service) LaunchTask(ctx context.Context, id int64) (db.Task, error) {
 	return s.launch(ctx, id, "launch requested", true)
 }
 func (s *Service) LaunchScheduled(ctx context.Context, id int64, detail string) (db.Task, error) {
-	return s.launch(ctx, id, detail, false)
+	return s.launch(db.WithWorkCause(ctx, db.Cause{Kind: "scheduled_start"}), id, detail, false)
 }
 func (s *Service) launch(ctx context.Context, id int64, detail string, automatic bool) (db.Task, error) {
 	unlock := s.lock(id)
@@ -222,7 +222,8 @@ func (s *Service) resume(ctx context.Context, t db.Task, attempt db.Attempt) (db
 		return t, e
 	}
 	if s.OnTransition != nil {
-		s.OnTransition(record, workevent.TaskChange{TaskID: t.ID, From: db.StateLaunching, To: db.TaskState(o.State), Detail: "execution confirmed"})
+		s.OnTransition(record, workevent.TaskChange{TaskID: t.ID, From: db.StateLaunching, To: db.TaskState(o.State),
+			Detail: "execution confirmed", Attribution: db.WorkAttribution(db.AttemptOutcome(record, attempt, &o.Session))})
 	}
 	return s.store.GetTask(record, t.ID)
 }

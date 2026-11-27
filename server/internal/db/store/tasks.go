@@ -127,6 +127,7 @@ type Task struct {
 }
 
 type TaskEvent struct {
+	Attribution
 	ID        int64      `json:"id"`
 	TaskID    int64      `json:"taskId"`
 	FromState *TaskState `json:"fromState"`
@@ -136,6 +137,7 @@ type TaskEvent struct {
 }
 
 type Attempt struct {
+	Attribution
 	TaskID     int64                `json:"taskId"`
 	Number     int                  `json:"attempt"`
 	Intent     *execution.Intent    `json:"-"`
@@ -246,6 +248,7 @@ type Transition struct {
 // TransitionResult reports what happened. Changed=false: current state not
 // in From (or already To); nothing written.
 type TransitionResult struct {
+	Attribution
 	Changed bool
 	From    TaskState
 	Attempt int
@@ -338,7 +341,7 @@ type Tasks interface {
 	SessionOccupied(ctx context.Context, sessionID, taskID int64) (bool, error)
 	Events(ctx context.Context, taskID int64) ([]TaskEvent, error)
 	// AddEvent appends a task event (from nil: none) and returns its time.
-	AddEvent(ctx context.Context, taskID int64, from *TaskState, to TaskState, detail string, observedAt *time.Time) (time.Time, error)
+	AddEvent(ctx context.Context, taskID int64, from *TaskState, to TaskState, detail string, observedAt *time.Time, attribution Attribution) (time.Time, error)
 	// JournalState is what the task's derived journal events read
 	// (ErrNotFound).
 	JournalState(ctx context.Context, id int64) (TaskJournalState, error)
@@ -407,7 +410,7 @@ type Attempts interface {
 	Confirm(ctx context.Context, a Attempt) (bool, error)
 	Reject(ctx context.Context, a Attempt, reason string) (bool, error)
 	// Begin records a prepared attempt (kept when present).
-	Begin(ctx context.Context, taskID int64, n int) error
+	Begin(ctx context.Context, taskID int64, n int, attribution Attribution) error
 	// Claim claims the attempt's launch (false: already claimed).
 	Claim(ctx context.Context, taskID int64, n int) (bool, error)
 	// PinInputs records the accepted needs the attempt reads.

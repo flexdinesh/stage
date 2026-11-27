@@ -7,6 +7,7 @@ import type { JournalEntry, JournalKind, JournalOwner, JournalQuery, NoteCategor
 import { useApi } from "../platform/context.tsx";
 import { isNoteCategory, journalEntryId, journalEntryPath, journalOwnerKey, MAX_NOTE_BYTES, NOTE_CATEGORIES, noteBytes, noteRequest, type NoteRequest } from "../lib/journal.ts";
 import { SourceSessionLink } from "./StageLinks.tsx";
+import { ActorCause, ActorLabel } from "./ActorLabel.tsx";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import {
   Alert,
@@ -149,6 +150,7 @@ export function JournalRow({ entry, anchored = false }: { entry: JournalEntry; a
         <TextLink to={journalEntryPath(entry)} variant="rest" aria-label={`Link to journal entry ${entry.id}`}>#{entry.id}</TextLink>
         <RelTime at={entry.createdAt} />
         {entry.kind === "event" ? <span>{entry.eventType.replaceAll("_", " ")}</span> : <Chip>{entry.category || "uncategorized"}</Chip>}
+        <ActorLabel work={entry} />
         {entry.taskId === null ? <span>tree {entry.kind}</span> : <TextLink to={`/tasks/${entry.taskId}`} variant="rest">task #{entry.taskId}</TextLink>}
         {entry.attempt === null ? null : <span>attempt {entry.attempt}</span>}
       </div>
@@ -167,6 +169,7 @@ export function JournalRow({ entry, anchored = false }: { entry: JournalEntry; a
         </div>
       ) : null}
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-meta-sm text-muted empty:hidden">
+        <ActorCause work={entry} taskId={entry.taskId} sourceSession={entry.sourceSession} />
         {entry.sourceTaskId === null ? null : <TextLink to={`/tasks/${entry.sourceTaskId}`} variant="rest">source task #{entry.sourceTaskId}</TextLink>}
         {entry.sourceSession ? <SourceSessionLink id={entry.sourceSession.externalSessionId} connectionId={entry.sourceSession.connectionId} /> : null}
         {entry.fromTreeId === null ? null : <TextLink to={`/trees/${entry.fromTreeId}`} variant="rest">from tree #{entry.fromTreeId}</TextLink>}

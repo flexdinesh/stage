@@ -257,7 +257,14 @@ func (s *Store) UpdateTask(ctx context.Context, id int64, p TaskPatch) (Task, er
 			!p.Handoff.Set && !p.StartMode.Set && !p.AttachmentIDs.Set && !p.StartAt.Set {
 			return nil
 		}
-		return tx.Tasks().Update(ctx, id, u)
+		if err := tx.Tasks().Update(ctx, id, u); err != nil {
+			return err
+		}
+		eventCtx := ctx
+		if p.StartAt.Set {
+			eventCtx = WithWorkCause(ctx, Cause{Kind: "start_time"})
+		}
+		return addTaskEventType(eventCtx, tx, id, &e.State, e.State, "Task edited", nil, "task_edited")
 	})
 	if err != nil {
 		return Task{}, err
@@ -338,7 +345,7 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 			if err := tx.Attachments().CopyToTask(ctx, store.OwnerTask, src.ID, dst); err != nil {
 				return err
 			}
-			return tx.Journal().Duplicated(ctx, dst, src.ID, ActingUser(ctx), ActingMachine(ctx))
+			return tx.Journal().Duplicated(ctx, dst, src.ID, ActingUser(ctx), ActingMachine(ctx), WorkAttribution(ctx))
 		})
 	})
 	if err != nil {
@@ -383,6 +390,7 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 	err := s.e.Write(ctx, func(tx store.Tx) error {
 		// Write may rerun fn (Postgres retry): start each run from scratch.
 		res = TransitionResult{}
+		eventCtx := ctx
 		if t.BeginAttempt {
 			if err := tx.Projects().LockIdentity(ctx); err != nil {
 				return err
@@ -419,7 +427,17 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 		}
 		if t.BeginAttempt {
 			a := tx.Attempts()
-			if err := a.Begin(ctx, t.TaskID, res.Attempt); err != nil {
+			cause := WorkAttribution(ctx).Cause
+			switch {
+			case t.RequireAuto:
+				eventCtx, err = releaseAttribution(ctx, tx, t.TaskID)
+			case cause != nil && cause.Kind == "scheduled_start":
+				eventCtx, err = scheduledStart(ctx, tx, t.TaskID)
+			}
+			if err != nil {
+				return err
+			}
+			if err := a.Begin(ctx, t.TaskID, res.Attempt, WorkAttribution(eventCtx)); err != nil {
 				return err
 			}
 			if err := pinDestination(ctx, tx, t.TaskID, res.Attempt); err != nil {
@@ -436,7 +454,7 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 			}
 		}
 		from := res.From
-		if err := addTaskEventAt(ctx, tx, t.TaskID, &from, t.To, t.Detail, t.ObservedAt); err != nil {
+		if err := addTaskEventAt(eventCtx, tx, t.TaskID, &from, t.To, t.Detail, t.ObservedAt); err != nil {
 			return err
 		}
 		if t.To.Active() {
@@ -445,6 +463,7 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 			}
 		}
 		res.Changed = true
+		res.Attribution = WorkAttribution(eventCtx)
 		return nil
 	})
 	if err != nil && !errors.Is(err, ErrNotFound) {

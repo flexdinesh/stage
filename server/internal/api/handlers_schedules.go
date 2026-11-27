@@ -197,7 +197,7 @@ func (s *server) runSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.Engine.Coordinator.StartTask(ctx, task.ID); err != nil {
+	if _, err := s.Engine.Coordinator.StartTask(db.WithWorkCause(ctx, db.Cause{Kind: "schedule", ScheduleID: id}), task.ID); err != nil {
 		s.log.Warn("start schedule run", "schedule", id, "task", task.ID, "err", err)
 	}
 	if task, err = s.Store.GetTask(ctx, task.ID); err != nil {

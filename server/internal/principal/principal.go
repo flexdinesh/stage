@@ -4,6 +4,10 @@ package principal
 
 import "context"
 
+// ToolTransportHeader describes an agent tool request in personal mode.
+// Shared access derives its actor from admitted credentials and transport.
+const ToolTransportHeader = "Stage-Tool-Transport"
+
 type Kind uint8
 
 const (
@@ -21,6 +25,8 @@ type Actor struct {
 	Kind      Kind
 	AccountID int64
 	MachineID int64
+	// InitiatorID is set when a named person directly invokes an agent operation.
+	InitiatorID int64
 }
 
 func (a Actor) IsHuman() bool { return a.Kind == Human || a.Kind == Admin }

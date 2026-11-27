@@ -128,6 +128,14 @@ func TestSharedAccountsThroughHTTPSProxyAndUnix(t *testing.T) {
 	fake := newT3()
 	personal := start(t, c, fake)
 	task := startTask(t, fake, personal.ready.Listeners[1])
+	stdio := connectStdio(t, personal.ready.Listeners[1].URL())
+	entry, err := appendMCPNote(t, stdio, task.ID, "Personal stdio")
+	if err != nil || entry.Actor.Kind != "agent" || entry.Actor.UserID != 0 {
+		t.Fatalf("personal stdio actor %+v: %v", entry.Actor, err)
+	}
+	if err := stdio.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := personal.stop(t); err != nil {
 		t.Fatal(err)
 	}
@@ -229,6 +237,24 @@ func TestSharedAccountsThroughHTTPSProxyAndUnix(t *testing.T) {
 	}
 	cliHeaders := http.Header{"Authorization": {"Bearer " + native.Token}}
 	(transportRequest{method: "GET", path: "/api/me", headers: cliHeaders}).send(t, unix.HTTP, "http://stage", 200, nil)
+	taskPath := fmt.Sprintf("/api/tasks/%d", task.ID)
+	(transportRequest{method: "PATCH", path: taskPath, origin: origin, body: `{"title":"Owner edit"}`}).send(t, owner, origin, 200, nil)
+	editHeaders := cliHeaders.Clone()
+	editHeaders.Set(agentctx.CallerHeader, "1:guessed")
+	(transportRequest{method: "PATCH", path: taskPath, headers: editHeaders, body: `{"title":"Member edit"}`}).send(t, unix.HTTP, "http://stage", 200, nil)
+	var edited client.TaskDetail
+	get(owner, taskPath, 200, &edited)
+	var edits []store.Actor
+	for _, event := range edited.Events {
+		if event.Detail == "Task edited" {
+			edits = append(edits, event.Actor)
+		}
+	}
+	if len(edits) != 2 || edits[0].Kind != "human" || edits[0].UserID != admin.ID ||
+		edits[1].Kind != "human" || edits[1].UserID != standard.ID || edits[1].DisplayName != "Member" ||
+		edited.Events[0].Actor.Kind != "personal" || edited.Events[0].Actor.UserID != 0 {
+		t.Fatalf("task actors: edits %+v, created %+v", edits, edited.Events[0].Actor)
+	}
 	(transportRequest{method: "GET", path: "/mcp", headers: cliHeaders}).send(t, anon, origin, 403, nil)
 	(transportRequest{method: "GET", path: "/api/me", headers: http.Header{"Cookie": {"stage_session=" + native.Token}}}).send(t, anon, origin, 401, nil)
 	(transportRequest{method: "GET", path: "/api/me", headers: http.Header{"Authorization": {"Bearer " + cookies[0].Value}}}).send(t, anon, origin, 401, nil)
@@ -288,6 +314,10 @@ func TestSharedAccountsThroughHTTPSProxyAndUnix(t *testing.T) {
 	imageRequest.send(t, member, origin, 401, nil)
 	(transportRequest{method: "GET", path: "/api/me", headers: cliHeaders}).send(t, anon, origin, 401, nil)
 	get(owner, "/api/me", 200, nil)
+	get(owner, taskPath, 200, &edited)
+	if edited.State != db.StateRunning || edited.Title != "Member edit" {
+		t.Fatalf("disabling a member affected shared work: %s %q", edited.State, edited.Title)
+	}
 	browserPost(t, owner, origin, "/api/auth/logout", "", 204, nil)
 	get(owner, "/api/me", 401, nil)
 	browserPost(t, owner, origin, "/api/auth/login", `{"email":"owner@example.test","password":"spindrift persimmon telescope"}`, 200, nil)
@@ -325,20 +355,35 @@ func connectMCP(t *testing.T, h *http.Client, endpoint, token string) *mcp.Clien
 func assertMCP(t *testing.T, h *http.Client, endpoint, token string, taskID int64, note string, creator, machine int64) {
 	t.Helper()
 	s := connectMCP(t, h, endpoint, token)
+	entry, err := appendMCPNote(t, s, taskID, note)
+	if err != nil || entry.CreatedBy != creator || (entry.SourceMachineID == nil) != (machine == 0) ||
+		(entry.SourceMachineID != nil && *entry.SourceMachineID != machine) {
+		t.Fatalf("MCP creator/machine %+v, want %d/%d: %v", entry, creator, machine, err)
+	}
+	wantAccount := creator
+	if machine != 0 {
+		wantAccount = 0
+	}
+	if a := entry.Actor; a.Kind != "agent" || a.UserID != 0 || a.InitiatorUserID != 0 || a.CredentialAccountID != wantAccount || a.DisplayName != "" {
+		t.Fatalf("MCP actor %+v, want agent with account %d", a, wantAccount)
+	}
+}
+
+func appendMCPNote(t *testing.T, s *mcp.ClientSession, taskID int64, note string) (db.JournalEntry, error) {
+	t.Helper()
 	out, err := s.CallTool(t.Context(), &mcp.CallToolParams{Name: "append_note", Arguments: map[string]any{
 		"taskId": taskID, "text": note, "requestId": note,
 	}})
 	if err != nil || out.IsError {
-		t.Fatalf("authenticated MCP: %+v %v", out, err)
+		return db.JournalEntry{}, fmt.Errorf("MCP note failed: %+v %v", out, err)
 	}
 	data, err := json.Marshal(out.StructuredContent)
 	if err != nil {
-		t.Fatal(err)
+		return db.JournalEntry{}, err
 	}
-	var entry struct{ CreatedBy, SourceMachineID int64 }
-	if err := json.Unmarshal(data, &entry); err != nil || entry.CreatedBy != creator || entry.SourceMachineID != machine {
-		t.Fatalf("MCP creator/machine %+v, want %d/%d: %s, %v", entry, creator, machine, data, err)
-	}
+	var entry db.JournalEntry
+	err = json.Unmarshal(data, &entry)
+	return entry, err
 }
 
 func waitMCP(t *testing.T, h *http.Client, endpoint, token string, taskID int64) <-chan error {
@@ -374,18 +419,24 @@ func assertLegacyClients(t *testing.T, socket string) {
 	if code := cli.Run(t.Context(), []string{"status", "--url", socket}, env); code != 0 || !strings.Contains(stdout.String(), "Sign in to view harness details") {
 		t.Fatalf("CLI readiness: exit %d, stdout %s", code, &stdout)
 	}
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "mcp", "--url", socket)
-	cmd.Env = append(os.Environ(), "SERVE_TEST_STAGE_CLI=1", "STAGE_CALLER_SESSION=1:legacy")
-	m := mcp.NewClient(&mcp.Implementation{Name: "legacy stdio", Version: "1"}, nil)
-	session, err := m.Connect(t.Context(), &mcp.CommandTransport{Command: cmd}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	session := connectStdio(t, socket)
 	defer session.Close()
 	out, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "list_projects"})
 	if err != nil || !out.IsError || !strings.Contains(mcpText(out), "Sign in to continue") {
 		t.Fatalf("legacy stdio MCP: %+v %v", out, err)
 	}
+}
+
+func connectStdio(t *testing.T, socket string) *mcp.ClientSession {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "mcp", "--url", socket)
+	cmd.Env = append(os.Environ(), "SERVE_TEST_STAGE_CLI=1", "STAGE_CALLER_SESSION=1:legacy")
+	m := mcp.NewClient(&mcp.Implementation{Name: "stdio transport test", Version: "1"}, nil)
+	s, err := m.Connect(t.Context(), &mcp.CommandTransport{Command: cmd}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
 
 func mcpText(result *mcp.CallToolResult) string {

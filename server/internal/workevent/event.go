@@ -9,12 +9,14 @@ import (
 
 // ObservationChange describes a notification derived from a committed sample.
 type ObservationChange struct {
+	db.Attribution
 	Task    *TaskChange
 	Session *SessionChange
 	At      time.Time
 }
 
 type TaskChange struct {
+	db.Attribution
 	TaskID int64
 	From   db.TaskState
 	To     db.TaskState
@@ -23,6 +25,7 @@ type TaskChange struct {
 
 // SessionChange is emitted by a harness-specific observer for a session on its connection.
 type SessionChange struct {
+	db.Attribution
 	Session   *db.SessionRef
 	ProjectID string
 	Title     string

@@ -187,25 +187,25 @@ func (r tasks) SessionOccupied(ctx context.Context, sessionID, taskID int64) (bo
 
 func (r tasks) Events(ctx context.Context, taskID int64) ([]store.TaskEvent, error) {
 	rows, err := r.Query(ctx,
-		`SELECT id, task_id, from_state, to_state, detail, at FROM task_events WHERE task_id = $1 ORDER BY at, id`, taskID)
+		`SELECT id, task_id, from_state, to_state, detail, at, `+attributionColumns("task_events.attribution")+` FROM task_events WHERE task_id = $1 ORDER BY at, id`, taskID)
 	if err != nil {
 		return nil, err
 	}
 	return collectRows(rows, func(r rowScanner) (store.TaskEvent, error) {
 		var e store.TaskEvent
-		err := r.Scan(&e.ID, &e.TaskID, &e.FromState, &e.ToState, &e.Detail, &e.At)
+		err := r.Scan(&e.ID, &e.TaskID, &e.FromState, &e.ToState, &e.Detail, &e.At, &e.Attribution, &e.Actor.DisplayName)
 		return e, err
 	})
 }
 
-func (r tasks) AddEvent(ctx context.Context, taskID int64, from *store.TaskState, to store.TaskState, detail string, observedAt *time.Time) (time.Time, error) {
+func (r tasks) AddEvent(ctx context.Context, taskID int64, from *store.TaskState, to store.TaskState, detail string, observedAt *time.Time, attribution store.Attribution) (time.Time, error) {
 	var f *string
 	if from != nil {
 		v := string(*from)
 		f = &v
 	}
 	var at time.Time
-	err := r.QueryRow(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail, at) VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz,`+nowSQL+`)) RETURNING at`, taskID, f, string(to), detail, observedAt).Scan(&at)
+	err := r.QueryRow(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail, at, attribution) VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz,`+nowSQL+`), $6) RETURNING at`, taskID, f, string(to), detail, observedAt, attribution).Scan(&at)
 	return at, err
 }
 

@@ -621,13 +621,27 @@ func (s *Store) MarkReady(ctx context.Context) ([]int64, error) {
 		slices.Sort(ids)
 		from := StateBacklog
 		for _, id := range ids {
-			if err := addTaskEvent(ctx, tx, id, &from, StateBacklog, "ready: needs completed"); err != nil {
+			eventCtx, err := releaseAttribution(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if err := addTaskEvent(eventCtx, tx, id, &from, StateBacklog, "ready: needs completed"); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
 	return ids, err
+}
+
+func releaseAttribution(ctx context.Context, tx store.Tx, id int64) (context.Context, error) {
+	cause := Cause{Kind: "dependency_release"}
+	a, err := tx.Acceptances().ReleaseCause(ctx, id)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return ctx, err
+	}
+	cause.TaskID, cause.AcceptanceID = a.TaskID, a.ID
+	return AutomatedWork(ctx, "system", cause, a.Attribution), nil
 }
 
 func treeExists(ctx context.Context, tx store.Tx, id int64) error {
