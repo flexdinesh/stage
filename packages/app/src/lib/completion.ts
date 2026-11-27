@@ -54,11 +54,11 @@ type MoveTask = Pick<Task, "state" | "readiness" | "acceptanceId" | "treeId" | "
 export function stateMove(t: MoveTask, accepted: ReadonlySet<number>): StateMove {
   if (t.acceptanceId !== null) {
     const to = statusChips({ state: t.state, readiness: readinessWithout(t, accepted), acceptanceId: null })[0] ?? t.state;
-    return { kind: "uncomplete", to, detail: "clears acceptance; history stays", disabled: false };
+    return { kind: "uncomplete", to, detail: "clears acceptance", disabled: false };
   }
   if (isActiveState(t.state)) return { kind: "complete", to: "completed", detail: "stop execution first", disabled: true };
   const detail =
-    t.state === "backlog" ? "accept without a run" : t.state === "done" ? "review the result, then accept" : "accept the run as it ended";
+    t.state === "backlog" ? "accept without a run" : t.state === "done" ? "review, then accept" : "accept as it ended";
   return { kind: "complete", to: "completed", detail, disabled: false };
 }
 

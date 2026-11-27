@@ -10,10 +10,10 @@ import { Combobox, Marker, Muted } from "./ui.tsx";
 
 /**
  * The State picker: the task's current status and the one manual change it allows (Completed, or back from it), each
- * with its consequence. Picking a change opens its confirm drawer; the picker always shows the current state. `action`
- * holds buttons that act (Start, Retry, Open in T3), never a state change.
+ * with its consequence on the same line. Picking a change opens its confirm drawer; the picker always shows the current
+ * state. `action` holds buttons that act (Start, Retry, Open in T3), never a state change. `small` for dense panels.
  */
-export function StateControl({ task, tree, action }: { task: Task; tree: TreeDetail | null; action?: ReactNode }) {
+export function StateControl({ task, tree, action, small = false }: { task: Task; tree: TreeDetail | null; action?: ReactNode; small?: boolean }) {
   const [confirming, setConfirming] = useState(false);
   const { descriptor } = useHarnesses();
   const blocked = useLaunchGate()(task) !== null;
@@ -22,7 +22,7 @@ export function StateControl({ task, tree, action }: { task: Task; tree: TreeDet
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <Combobox
-        small
+        small={small}
         aria-label="Task state"
         listLabel="Task states"
         value="current"
@@ -30,8 +30,8 @@ export function StateControl({ task, tree, action }: { task: Task; tree: TreeDet
         className="w-full font-mono"
         leading={<Marker tone={current.tone} />}
         options={[
-          { value: "current", label: current.label, detail: "current" },
-          { value: "move", label: statusChipView(move.to).label, detail: move.detail, disabled: move.disabled },
+          { value: "current", label: current.label },
+          { value: "move", label: statusChipView(move.to).label, tag: move.detail, disabled: move.disabled },
         ]}
       />
       <Muted>{stateSummary(task, undefined, descriptor(task.harness))}</Muted>

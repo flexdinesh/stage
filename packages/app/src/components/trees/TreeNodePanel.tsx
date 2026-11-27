@@ -94,7 +94,7 @@ export function TreeNodePanel({
         <MetaLine>{task.projectTitle}</MetaLine>
       </div>
       <Section label="State">
-        <StateControl task={task} tree={tree} action={<NodeAction task={task} pending={[]} review={false} />} />
+        <StateControl small task={task} tree={tree} action={<NodeAction task={task} pending={[]} review={false} />} />
       </Section>
       <TreeNodeEditor tree={tree} task={task} onSelect={onSelect} onRemoved={onClose} />
     </Panel>

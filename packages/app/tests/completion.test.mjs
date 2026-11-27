@@ -65,8 +65,8 @@ const HOUR_AGO = "2026-11-20T11:00:00Z";
 test("stateMove offers Completed for open work, with what accepting means", () => {
   assert.deepEqual(stateMove(st(), NONE), { kind: "complete", to: "completed", detail: "accept without a run", disabled: false });
   assert.equal(stateMove(st({ readiness: "ready", needs: [3] }), NONE).detail, "accept without a run");
-  assert.equal(stateMove(st({ state: "done" }), NONE).detail, "review the result, then accept");
-  assert.equal(stateMove(st({ state: "failed" }), NONE).detail, "accept the run as it ended");
+  assert.equal(stateMove(st({ state: "done" }), NONE).detail, "review, then accept");
+  assert.equal(stateMove(st({ state: "failed" }), NONE).detail, "accept as it ended");
 });
 
 test("stateMove disables Completed while execution is active", () => {
@@ -79,7 +79,7 @@ const back = (extra, accepted = NONE) => stateMove(st({ acceptanceId: 7, ...extr
 const accepted = (extra) => stateSummary(st({ state: "done", acceptanceId: 7, completedAt: HOUR_AGO, ...extra }), NOW, settles);
 
 test("stateMove takes completed work back to the status it shows without acceptance", () => {
-  assert.deepEqual(back({ state: "done" }), { kind: "uncomplete", to: "to_review", detail: "clears acceptance; history stays", disabled: false });
+  assert.deepEqual(back({ state: "done" }), { kind: "uncomplete", to: "to_review", detail: "clears acceptance", disabled: false });
   assert.equal(back({}).to, "backlog");
   assert.equal(back({ state: "running", treeId: 1, treeStatus: "open" }).to, "running");
 });
