@@ -14,6 +14,7 @@ import (
 	"syscall"
 	_ "time/tzdata" // IANA zones for /api/stats tz even without system zoneinfo
 
+	"github.com/charmbracelet/x/term"
 	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/db/store"
@@ -27,10 +28,14 @@ import (
 )
 
 func main() {
-	// `db`: offline database commands (stage db copy).
-	if len(os.Args) > 1 && os.Args[1] == "db" {
+	// Local database and installation-owner commands bypass the product CLI.
+	if len(os.Args) > 1 && (os.Args[1] == "db" || os.Args[1] == "owner") {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		code := runDB(ctx, os.Args[2:], os.Stdout, os.Stderr)
+		runLocal := runDB
+		if os.Args[1] == "owner" {
+			runLocal = runOwner
+		}
+		code := runLocal(ctx, os.Args[2:], os.Stdout, os.Stderr)
 		stop()
 		os.Exit(code)
 	}
@@ -113,6 +118,9 @@ func run(args []string) (bool, error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	opts := serve.Options{Logger: slog.Default(), Profile: harness.ResolveProfile(*managed, *localHarnesses, os.Getenv)}
+	if !*managed && opts.Profile.Kind != harness.ProfileContainer && term.IsTerminal(os.Stdout.Fd()) {
+		opts.BootstrapOutput = os.Stdout
+	}
 	var err error
 	if *managed {
 		opts.Config, err = loadManaged()

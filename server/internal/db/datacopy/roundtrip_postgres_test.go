@@ -44,6 +44,9 @@ var seedSQL = []string{
 	`INSERT INTO auth_grants (token_digest, purpose, issuer_user_id, email, email_key, created_at, expires_at)
 	  VALUES (randomblob(32), 'invite', 1, 'invite@example.test', 'invite@example.test',
 	  '2026-11-01T00:00:00.000000Z', '2026-12-01T00:00:00.000000Z')`,
+	`INSERT INTO access_audit (action, actor_user_id, grant_id, created_at)
+	  SELECT 'invite_issued', issuer_user_id, id, '2026-11-01T00:00:00.000000Z'
+	  FROM auth_grants WHERE purpose = 'invite'`,
 	`INSERT INTO machines (id, label, created_by_user_id, last_seen_at, version) VALUES (2, 'worker', 2, '2026-11-02T10:00:00.000001Z', '1.2.3')`,
 	`INSERT INTO machine_tokens (machine_id, secret_hash) VALUES (2, X'00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF')`,
 	`INSERT INTO pairing_codes (secret_hash, label, created_by_user_id, expires_at, redeemed_at, machine_id) VALUES (X'FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00', 'pair', 1, '2026-11-03T00:00:00.000000Z', '2026-11-02T23:00:00.500000Z', 2)`,

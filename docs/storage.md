@@ -504,6 +504,15 @@ and paging. (Thread search was removed with API v3.)
   retained. The receipts are included in `db copy`. Update the main server
   and workers together.
   See [Worker observation receipts](#worker-observation-receipts).
+  Paired migration 0041 `access_audit` adds durable access-management events
+  on SQLite and Postgres. An event records an action, the account or local
+  installation owner who performed it, the affected account or grant ID
+  when applicable, and its time. The account service writes the event in
+  the same transaction as the change. Audit rows carry no addresses or
+  credential material. Grant IDs survive copy as historical references.
+  The migration also enforces a single unconsumed, unrevoked password
+  reset per account. Reissuing revokes the outstanding row, including an
+  expired one, before inserting the replacement.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -604,7 +613,7 @@ All gates run in `mise run check`; there is no CI.
 | --- | --- | --- |
 | `check:go` | always | `go vet` (plain, `smoke`, `postgres` tags), `CGO_ENABLED=0 go build -tags postgres` of the server, `go test ./...` (SQLite) |
 | `check:storage` (`scripts/check-storage.sh`) | always | the gate tests by name under `server/internal/db` (`TestMigrationVersionParity`, `TestStepwiseMigrations`, `TestDriverImportBoundary`) and the `internal/db/{store,sqlite,postgres,storetest}` packages; a gate or package not written yet prints `not present yet` and passes; the Postgres pin (the image in `examples/postgres/compose.yaml` is `STAGE_PG_IMAGE`) |
-| `check:postgres` (`scripts/check-postgres.sh`) | from `check` only when the branch changes `server/internal/db/**`, `server/internal/serve/engine*.go`, `server/internal/config/database*.go`, `server/cmd/stage/db*.go`, `docs/storage.md`, `server/go.mod` or `Dockerfile` vs the merge-base with `origin/main` (committed, uncommitted or untracked); always when run directly | a throwaway `stage-pgtest-<random>` container (`STAGE_PG_IMAGE`, random `127.0.0.1` port, tmpfs, always removed), `go test -tags postgres ./internal/db/... ./internal/api/... ./internal/serve/... ./internal/config/... ./cmd/stage/...` with `STAGE_TEST_DATABASE_URL`: migrate up, schema parity, step-wise from the baseline, `storetest`, db and api suites, `serve` on Postgres (engine reported, single owner across data dirs, newer schema refused, unreachable database), and the [data copy](#data-copy-and-cutover) round trip and command. Without Docker it fails, never skips |
+| `check:postgres` (`scripts/check-postgres.sh`) | from `check` only when the branch changes `server/internal/db/**`, `server/internal/auth/**`, `server/internal/serve/engine*.go`, `server/internal/config/database*.go`, `server/cmd/stage/db*.go`, `docs/storage.md`, `server/go.mod` or `Dockerfile` vs the merge-base with `origin/main` (committed, uncommitted or untracked); always when run directly | a throwaway `stage-pgtest-<random>` container (`STAGE_PG_IMAGE`, random `127.0.0.1` port, tmpfs, always removed), `go test -tags postgres ./internal/db/... ./internal/auth/... ./internal/api/... ./internal/serve/... ./internal/config/... ./cmd/stage/...` with `STAGE_TEST_DATABASE_URL`: migrate up, schema parity, step-wise from the baseline, `storetest`, db, auth and api suites, `serve` on Postgres (engine reported, single owner across data dirs, newer schema refused, unreachable database), and the [data copy](#data-copy-and-cutover) round trip and command. Without Docker it fails, never skips |
 
 - New gate tests use the names above; `check:storage` finds them by name.
 - `STAGE_PG_IMAGE` in `mise.toml` is the one Postgres pin (latest major, one
@@ -710,10 +719,10 @@ from the Docker image; any other binary exits 78 before touching anything.
   is at the head, where #417 has already dropped the
   [legacy columns](#legacy-columns-and-compatibility-triggers).
 - **Auth material:** preserve account IDs, identity mappings, password
-  verifiers, account roles and status, and the installation ID and sticky mode.
-  Copy zero rows from `auth_sessions` and `auth_grants`. The target starts
-  with all copied interactive and agent credentials and setup, invite and
-  reset links invalidated. Existing worker identity and pairing survive.
+  verifiers, roles, account status, access audit records, and the installation
+  ID and sticky mode. Copy zero rows from `auth_sessions` and `auth_grants`.
+  The target starts with interactive and agent credentials and setup, invite
+  and reset links invalidated. Existing worker identity and pairing survive.
 - **Verify:** inside the same transaction, before committing, compare
   durable rows with the source and confirm the two transient tables are
   empty. Verification uses row count and a checksum (sha256

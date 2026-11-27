@@ -74,11 +74,11 @@ description = "Storage gates: TestMigrationVersionParity, TestStepwiseMigrations
 run = "scripts/check-storage.sh"
 
 [tasks."check:postgres"]
-description = "db, api, serve, config + cmd/stage suites with -tags postgres against a throwaway stage-pgtest-* container (STAGE_PG_IMAGE, random port, tmpfs, always removed); needs Docker"
+description = "db, auth, api, serve, config + cmd/stage suites with -tags postgres against a throwaway stage-pgtest-* container (STAGE_PG_IMAGE, random port, tmpfs, always removed); needs Docker"
 run = "scripts/check-postgres.sh"
 
 [tasks."check:postgres:changed"]
-description = "check:postgres only when db code, the serve/config engine files or the stage db command changed vs the merge-base with origin/main (run by check)"
+description = "check:postgres when db, auth, engine config or copy code changed vs the merge-base with origin/main (run by check)"
 hide = true
 run = "scripts/check-postgres.sh --if-changed"
 

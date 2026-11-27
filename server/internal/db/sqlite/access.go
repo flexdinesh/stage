@@ -61,6 +61,16 @@ func (r access) AccountByEmail(ctx context.Context, email string) (store.Account
 	return scanAccount(r.QueryRow(ctx, "SELECT "+accountColumns+" FROM users WHERE email_key = $1", store.EmailKey(email)))
 }
 
+func (r access) ListAccounts(ctx context.Context, beforeID int64, limit int) ([]store.Account, error) {
+	rows, err := r.Query(ctx, `SELECT `+accountColumns+` FROM users
+		WHERE email IS NOT NULL AND ($1 = 0 OR id < $1)
+		ORDER BY id DESC LIMIT $2`, beforeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows, scanAccount)
+}
+
 func (r access) ClaimOwner(ctx context.Context, a store.AccountInput) error {
 	res, err := r.Exec(ctx, `UPDATE users SET display_name = $1, email = $2, email_key = $3
 		WHERE id = 1 AND email IS NULL AND role = 'admin' AND status = 'active'
@@ -96,6 +106,48 @@ func (r access) LocalVerifier(ctx context.Context, userID int64) (string, error)
 		JOIN identities i ON i.id = c.identity_id WHERE i.user_id = $1 AND i.provider = 'local' AND i.subject = $2`,
 		userID, "user:"+strconv.FormatInt(userID, 10)))
 	return v, notFound(err)
+}
+
+func (r access) UpdateLocalVerifier(ctx context.Context, userID int64, verifier string) error {
+	res, err := r.Exec(ctx, `UPDATE local_credentials SET password_verifier = $1
+		WHERE identity_id = (SELECT id FROM identities WHERE user_id = $2 AND provider = 'local' AND subject = $3)`,
+		verifier, userID, "user:"+strconv.FormatInt(userID, 10))
+	if err == nil && res.RowsAffected() != 1 {
+		return store.ErrNotFound
+	}
+	return err
+}
+
+func (r access) UpdateDisplayName(ctx context.Context, userID int64, name string) error {
+	res, err := r.Exec(ctx, `UPDATE users SET display_name = $1
+		WHERE id = $2 AND email IS NOT NULL AND status = 'active'`, strings.TrimSpace(name), userID)
+	if err == nil && res.RowsAffected() != 1 {
+		return store.ErrNotFound
+	}
+	return err
+}
+
+func (r access) CountActiveAdmins(ctx context.Context) (int, error) {
+	return rowTo[int](r.QueryRow(ctx, `SELECT count(*) FROM users
+		WHERE role = 'admin' AND status = 'active' AND email IS NOT NULL`))
+}
+
+func (r access) SetAccountRole(ctx context.Context, userID int64, role store.AccountRole) error {
+	res, err := r.Exec(ctx, `UPDATE users SET role = $1
+		WHERE id = $2 AND email IS NOT NULL AND status = 'active'`, role, userID)
+	if err == nil && res.RowsAffected() != 1 {
+		return store.ErrNotFound
+	}
+	return err
+}
+
+func (r access) DisableAccount(ctx context.Context, userID int64) error {
+	res, err := r.Exec(ctx, `UPDATE users SET status = 'disabled'
+		WHERE id = $1 AND email IS NOT NULL AND status = 'active'`, userID)
+	if err == nil && res.RowsAffected() != 1 {
+		return store.ErrNotFound
+	}
+	return err
 }
 
 func (r access) InsertSession(ctx context.Context, digest store.TokenDigest, s store.AuthSession) (int64, error) {
@@ -153,6 +205,34 @@ func (r access) Grant(ctx context.Context, digest store.TokenDigest, purpose sto
 	return scanGrant(r.QueryRow(ctx, "SELECT "+grantColumns+" FROM auth_grants WHERE token_digest = $1 AND purpose = $2", digest[:], purpose))
 }
 
+func (r access) GrantByID(ctx context.Context, id int64) (store.AuthGrant, error) {
+	return scanGrant(r.QueryRow(ctx, "SELECT "+grantColumns+" FROM auth_grants WHERE id = $1", id))
+}
+
+func (r access) OpenGrant(ctx context.Context, purpose store.GrantPurpose, email string, targetUserID int64) (store.AuthGrant, error) {
+	const open = "SELECT " + grantColumns + " FROM auth_grants WHERE consumed_at IS NULL AND revoked_at IS NULL"
+	switch purpose {
+	case store.GrantSetup:
+		return scanGrant(r.QueryRow(ctx, open+" AND purpose = 'setup'"))
+	case store.GrantInvite:
+		return scanGrant(r.QueryRow(ctx, open+" AND purpose = 'invite' AND email_key = $1", store.EmailKey(email)))
+	case store.GrantPasswordReset:
+		return scanGrant(r.QueryRow(ctx, open+" AND purpose = 'password_reset' AND target_user_id = $1", targetUserID))
+	default:
+		return store.AuthGrant{}, store.ErrNotFound
+	}
+}
+
+func (r access) ListInvites(ctx context.Context, beforeID int64, limit int) ([]store.AuthGrant, error) {
+	rows, err := r.Query(ctx, `SELECT `+grantColumns+` FROM auth_grants
+		WHERE purpose = 'invite' AND ($1 = 0 OR id < $1)
+		ORDER BY id DESC LIMIT $2`, beforeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return collectRows(rows, scanGrant)
+}
+
 func (r access) ConsumeGrant(ctx context.Context, digest store.TokenDigest, purpose store.GrantPurpose, now time.Time) (store.AuthGrant, error) {
 	return scanGrant(r.QueryRow(ctx, `UPDATE auth_grants SET consumed_at = $1
 		WHERE token_digest = $2 AND purpose = $3 AND created_at <= $1 AND expires_at > $1
@@ -161,6 +241,12 @@ func (r access) ConsumeGrant(ctx context.Context, digest store.TokenDigest, purp
 
 func (r access) RevokeGrant(ctx context.Context, id int64, at time.Time) error {
 	_, err := r.Exec(ctx, `UPDATE auth_grants SET revoked_at = $1 WHERE id = $2 AND consumed_at IS NULL AND revoked_at IS NULL`, at, id)
+	return err
+}
+
+func (r access) InsertAccessAudit(ctx context.Context, a store.AccessAudit) error {
+	_, err := r.Exec(ctx, `INSERT INTO access_audit(action, actor_user_id, target_user_id, grant_id, created_at)
+		VALUES ($1, $2, $3, $4, $5)`, a.Action, a.ActorUserID, a.TargetUserID, a.GrantID, a.CreatedAt)
 	return err
 }
 

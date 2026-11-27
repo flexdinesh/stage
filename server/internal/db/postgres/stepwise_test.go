@@ -50,6 +50,35 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	39: {{name: "observation producer history", check: checkV0039ObservationProducers}},
 	38: {{name: "identity history and workspace bindings", seed: seedV0038ProjectIdentity, check: checkV0038ProjectIdentity}},
 	40: {{name: "legacy identity and evidence retained", seed: seedV0040SharedAccess, check: checkV0040SharedAccess}},
+	41: {{name: "shared accounts kept and audit starts empty", seed: seedV0041AccessAudit, check: checkV0041AccessAudit}},
+}
+
+func seedV0041AccessAudit(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`UPDATE users SET display_name = 'Owner', email = 'Owner@example.test', email_key = 'owner@example.test' WHERE id = 1`,
+		`UPDATE installation_access SET installation_id = 'existing', mode = 'claimed', claimed_at = '2026-11-27T00:00:00.000000Z'`,
+		`INSERT INTO identities(user_id, provider, subject) VALUES (1, 'local', 'user:1')`,
+		`INSERT INTO local_credentials(identity_id, password_verifier) SELECT id, 'existing verifier' FROM identities WHERE provider = 'local'`,
+	} {
+		if _, err := pool.ExecContext(t.Context(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func checkV0041AccessAudit(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	for q, want := range map[string]int{
+		`SELECT count(*) FROM installation_access WHERE mode = 'claimed' AND installation_id = 'existing'`: 1,
+		`SELECT count(*) FROM local_credentials WHERE password_verifier = 'existing verifier'`:             1,
+		`SELECT count(*) FROM access_audit`: 0,
+	} {
+		var got int
+		if err := pool.QueryRowContext(t.Context(), q).Scan(&got); err != nil || got != want {
+			t.Fatalf("%s: %d, %v; want %d", q, got, err, want)
+		}
+	}
 }
 
 func seedV0040SharedAccess(t *testing.T, pool *sql.DB) {

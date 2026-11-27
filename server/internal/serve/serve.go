@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -49,6 +50,9 @@ type Options struct {
 	Config config.Config
 	// SharedAccess is internal until the shared transport gates are composed.
 	SharedAccess *bool
+	// BootstrapOutput designates private foreground output. When absent, and
+	// always for managed services and containers, use a separate private file.
+	BootstrapOutput io.Writer
 	// HarnessOverrides injects machine-local dependencies keyed by kind in tests.
 	HarnessOverrides map[string]any
 	Logger           *slog.Logger
@@ -167,15 +171,34 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	database := db.NewStore(pool)
-	state, err := database.ConfigureAccess(ctx, o.SharedAccess)
+	sharedRequested := o.SharedAccess != nil && *o.SharedAccess
+	intent := o.SharedAccess
+	if sharedRequested {
+		// Only the account service can opt in, along with the first setup grant.
+		intent = nil
+	}
+	state, err := database.ConfigureAccess(ctx, intent)
 	if err != nil {
 		if errors.Is(err, db.ErrSharedAccessRequired) {
 			return config.Invalid(err)
 		}
 		return err
 	}
-	if state.Mode != store.AccessPersonal {
-		return config.Invalid(errors.New("this database requires shared access. Start it with a Stage build that supports shared access"))
+	if sharedRequested || state.Mode != store.AccessPersonal {
+		origin, err := sharedOrigin(cfg.PublicURL, lns)
+		if err != nil {
+			return config.Invalid(err)
+		}
+		// The transport slice opens product traffic and resumes work after the
+		// initial claim. Until then the dedicated owner socket is all we serve.
+		for _, l := range lns {
+			_ = l.Close()
+		}
+		meta.Listeners = nil
+		if err := owner.Record(meta); err != nil {
+			return err
+		}
+		return runSharedOwner(ctx, o, cfg.DataDir, origin, database, lease, logger)
 	}
 	if w := cfg.WarnRemovedEnv(); w != "" {
 		logger.Warn(w)

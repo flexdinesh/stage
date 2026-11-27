@@ -85,6 +85,35 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	39: {{"observation producer history", nil, checkV0039ObservationProducers}},
 	38: {{"identity history and workspace bindings", seedV0038ProjectIdentity, checkV0038ProjectIdentity}},
 	40: {{"legacy identity and evidence retained", seedV0040SharedAccess, checkV0040SharedAccess}},
+	41: {{"shared accounts kept and audit starts empty", seedV0041AccessAudit, checkV0041AccessAudit}},
+}
+
+func seedV0041AccessAudit(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`UPDATE users SET display_name = 'Owner', email = 'Owner@example.test', email_key = 'owner@example.test' WHERE id = 1`,
+		`UPDATE installation_access SET installation_id = 'existing', mode = 'claimed', claimed_at = '2026-11-27T00:00:00.000000Z'`,
+		`INSERT INTO identities(user_id, provider, subject) VALUES (1, 'local', 'user:1')`,
+		`INSERT INTO local_credentials(identity_id, password_verifier) SELECT id, 'existing verifier' FROM identities WHERE provider = 'local'`,
+	} {
+		if _, err := pool.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func checkV0041AccessAudit(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	for q, want := range map[string]int{
+		`SELECT count(*) FROM installation_access WHERE mode = 'claimed' AND installation_id = 'existing'`: 1,
+		`SELECT count(*) FROM local_credentials WHERE password_verifier = 'existing verifier'`:             1,
+		`SELECT count(*) FROM access_audit`: 0,
+	} {
+		var got int
+		if err := pool.QueryRow(q).Scan(&got); err != nil || got != want {
+			t.Fatalf("%s: %d, %v; want %d", q, got, err, want)
+		}
+	}
 }
 
 func seedV0040SharedAccess(t *testing.T, pool *sqlite.DB) {

@@ -22,9 +22,10 @@ process `instanceId` and the build identity (`stage` or `stage-dev`). Stage
 resolves the database's mode after migration and before starting the
 runtime. Shared state is sticky across restarts, including when the opt-in is
 omitted. An explicit false setting requires restarting with shared
-configuration. During foundation delivery, the server refuses to serve
-shared data until shared transport enforcement is available. The public
-opt-in ships with the integrated feature.
+configuration. During account-service delivery, internal shared startup
+opens only the owner control socket. Product listeners and work runners stay
+closed until shared transport enforcement is available. The public opt-in
+ships with the integrated feature.
 
 `STAGE_LISTEN` takes a comma list; `--listen` can be repeated (or take a
 comma list), and when given it replaces `STAGE_LISTEN` entirely. Each item is:
@@ -42,6 +43,38 @@ values keep their old meaning. Empty items and duplicates are errors.
 | --- | --- |
 | Foreground / compose (unchanged) | `127.0.0.1:7380` (compose: `0.0.0.0:7380` inside the container) |
 | Per-user service ([service.md](service.md)) | `stage serve --managed`: listeners from `service.env` `STAGE_LISTEN`, default `unix`, which is required (TCP is opt-in: `unix,127.0.0.1:7380`) |
+
+### Shared setup and owner recovery
+
+Set `STAGE_PUBLIC_URL` to the origin people use in their browser. Use an
+HTTPS proxy for access from other machines. The proxy can use a protected
+Stage product socket or a private TCP upstream. For local HTTP testing, set
+`STAGE_PUBLIC_URL=http://127.0.0.1:7380` and include `127.0.0.1:7380` in
+`STAGE_LISTEN`. A personal server on a private socket needs no browser URL.
+
+On the first shared start, Stage issues a first-admin setup link valid for
+30 minutes and prints it once to the operator's terminal. Managed, container,
+and redirected foreground runs write it to `<data dir>/owner/bootstrap.txt`
+with mode `0600`. Normal logs identify the file, and service status and Copy
+Diagnostics never include its contents. Stage removes the file on shutdown,
+restart or setup reissue. On a pending restart, Stage prints the reissue
+command and keeps any valid link until the owner replaces it.
+
+Run `stage owner reissue-setup` on the server as the installation owner to
+replace the setup link. After claim, use
+`stage owner recover-admin --email EMAIL` to issue a 30-minute reset link for
+an active admin. The command prints the link for private delivery. Set
+`STAGE_DATA_DIR` to the server's data dir if it differs from the default.
+Commands connect to `<data dir>/owner/control.sock`, a separate `0600` Unix
+socket in an owner-only directory. Shared startup requires the data directory
+to be owned by the Stage process user with mode `0700`. Keep the owner paths
+private when configuring volumes or proxies. Product Unix and TCP listeners
+do not carry owner control.
+
+On the Docker image, run the commands through `docker exec CONTAINER /stage
+owner …` as the container's Stage user. Read the first setup link privately
+on the Docker host with `docker cp CONTAINER:/data/owner/bootstrap.txt - |
+tar -xO`, using the configured data directory if it differs from `/data`.
 
 ## Machine profile and hosted harnesses
 

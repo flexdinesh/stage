@@ -14,9 +14,11 @@ Shared access is per installation. There is one trusted workspace across project
 | `setup_pending` | Allow the owner to redeem a valid setup grant. Claim atomically consumes the grant, updates user 1 in place, creates its local identity and verifier, and persists `claimed`. Concurrent claims have one winner. |
 | `claimed` | Require sign-in for human work. User 1 remains the same account and the installation has a single first-owner claim. |
 
-A missing flag preserves the persisted shared state. Explicit false against shared data fails startup and directs the operator to use shared configuration. Mode can only advance through these transitions. During #452, startup refuses either shared state until #454 provides the transport gates. In the integrated pending state, reject product API and gateway work, pause work-producing runners, and keep readiness and worker liveness observable. Resume on claim without duplicate launches or implicit user-1 actions. Task #460 publishes `STAGE_MULTI_USER=1` and `stage serve --multi-user`.
+A missing flag preserves the persisted shared state. Explicit false against shared data fails startup and directs the operator to use shared configuration. Mode can only advance through these transitions. The #453 internal startup runs only the owner control socket in either shared state. Product listeners are closed after bind and configuration checks, and work-producing runners stay stopped until #454 provides the transport gates. In the integrated pending state, reject product API and gateway work, pause work-producing runners, and keep readiness and worker liveness observable. Resume on claim without duplicate launches or implicit user-1 actions. Task #460 publishes `STAGE_MULTI_USER=1` and `stage serve --multi-user`.
 
-The first opt-in prints one 30-minute setup URL through designated private operator output. Pending restart directs the owner to reissue it. Reissue revokes the prior grant. Use `STAGE_PUBLIC_URL` as the canonical origin for links and exact browser origin checks. Shared browser access requires HTTPS except for loopback HTTP testing. A socket-only service needs a browser-reachable listener or an HTTPS proxy. Keep proxy upstream TCP private or use a protected socket. Use configured origins and hosts, and ignore forwarded headers for trust decisions. Local owner setup and admin recovery use a dedicated OS-protected control path available in socket, TCP-only and container profiles. Ordinary product socket access, remote requests and machine tokens confer no owner capability. Keep grants, passwords and session secrets out of normal logs, service status, diagnostics and error reporting.
+The first opt-in prints one 30-minute setup URL to the operator's foreground terminal, or writes it to the owner-only `owner/bootstrap.txt` under the data directory for managed, container and redirected runs. Pending restart directs the owner to run `stage owner reissue-setup`. Reissue revokes the prior grant. `stage owner recover-admin --email ADDRESS` issues a reset link for an active admin. Both commands use `owner/control.sock` under the protected data directory. Run them as the server's OS user with the same `STAGE_DATA_DIR`, including inside a TCP-only container. Ordinary product socket access, remote requests and machine tokens confer no owner capability. Keep grants, passwords and session secrets out of normal logs, service status, diagnostics and error reporting. See [runtime](../runtime.md) for listener and output configuration.
+
+Use `STAGE_PUBLIC_URL` as the canonical origin for links and exact browser origin checks. Shared browser access requires HTTPS except for loopback HTTP testing with a matching Stage TCP listener. A socket-only service can use a browser-reachable HTTPS proxy. Keep proxy upstream TCP private or use a protected socket. Use configured origins and hosts, and ignore forwarded headers for trust decisions.
 
 ## Durable identity and disposable credentials
 
@@ -34,6 +36,37 @@ Postgres locks the row. Account lookup uses a Unicode case-folded login key.
 Reissue revokes the outstanding row before inserting a replacement, including
 when its deadline has passed. Browser idle extension is monotonic and capped
 by absolute expiry.
+
+The `internal/auth` service is the application boundary for #454. Authenticated
+callers supply the current human account ID to account and admin operations.
+The service rechecks account status and role when it acts. Setup and invite
+redemption return a browser session after commit. Reset and password change
+revoke every session for the account and return the user to sign-in. Role
+changes revoke outstanding reset links. Reset replacement and redemption check
+the target's current role, with member links issued by an admin and admin links
+issued through local owner control. Audited account mutations commit in the
+same transaction as their access, role or credential change. Audit records
+carry action, time and relevant account and grant IDs. They carry no email,
+password, verifier, digest or link. A missing issuer on a setup or recovery
+issuance identifies the local OS owner.
+
+Links use `/auth/setup`, `/auth/invite` and `/auth/reset` with `#token=`. The
+client reads the fragment into memory and replaces the current history entry
+with the clean URL before requesting account data. Form inspection may check a
+link in a request body without consuming it. Only the explicit redemption POST
+consumes it. The transport explicitly unwraps the one-time URL to return it to
+the authorized caller and unwraps session credentials only to deliver them to
+the intended client. Use the service's public error messages for auth responses
+and owner output. Exclude bodies, fragments, cookies, authorization headers and
+underlying storage error details from logs and diagnostics.
+
+V1 password derivation uses Argon2id v19 with 64 MiB, three passes, one lane,
+and a fresh 16-byte salt. The service runs at most two simultaneous derivations.
+It normalizes passwords with NFC after enforcing the Unicode length bound and
+checks a bundled list of common passphrases. Sign-in uses a five-minute window
+with 10 attempts per canonical account and 40 per peer address and bounded
+process-local state. The transport supplies the verified peer address. Passive
+stream checks must leave the browser idle deadline unchanged.
 
 ## Principals and endpoint policy
 
