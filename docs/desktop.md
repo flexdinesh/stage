@@ -317,11 +317,11 @@ Settings, General, Info, "Open Stage at login" turns on both MyGo `SetOpenAtLogi
 | In-app routes | stay in the webview (`mygo://localhost`) |
 | `http(s)` | the default browser |
 | `t3code://threads/<env>/<thread>` | the OS (T3 app); if no handler opens it, the T3 web URL (`/api/harnesses/t3/status` `details.publicUrl` + `/<env>/<thread>`) in the browser |
-| `<identity>://tasks/<n>`, `<identity>://trees/<n>` | shows the app at that page |
+| `<identity>://tasks/<n>`, `trees/<n>`, `schedules/<n>`, `projects/<n>`, `connections/<c>/sessions/<id>` | shows the app at that page; a task or tree link keeps a valid `?entry=<n>` (that journal entry), other queries and fragments are dropped; a session page opens its owning task or says it is not tracked |
 | attachment images (`/api/attachments/<id>`, new tab) | a child window without bindings |
 | anything else | refused and logged |
 
-- **Copied references** (Copy link, URL, `Alt+C`): `STAGE_PUBLIC_URL` + path when the server has one (`/api/health` `publicUrl`), so the link opens anywhere; otherwise the installation's deep link, `stage://tasks/12` or `stage://trees/4` (`stage-dev://` for the developer identity). Never a `mygo://` origin. `stage show`, MCP `read_ref`, `GET /api/refs/resolve` and the app's ref chips parse all forms (`server/internal/refs`, `packages/app/src/lib/refs.ts`); tree links resolve for agents but render as plain links, not chips.
+- **Copied references** (Copy link, URL, `Alt+C`): `STAGE_PUBLIC_URL` + path when the server has one (`/api/health` `publicUrl`), so the link opens anywhere; otherwise the installation's deep link, `stage://tasks/12`, `stage://trees/4`, `stage://schedules/7`, `stage://projects/3` or `stage://tasks/12?entry=45` for a journal note (`stage-dev://` for the developer identity). Never a `mygo://` origin. `stage show`, MCP `read_ref`, `GET /api/refs/resolve` and the app's ref chips parse all forms (`server/internal/refs`, `packages/app/src/lib/refs.ts`); task, tree, schedule, project, journal-note and scoped session links render as chips.
 - Markdown stays sanitized (DOMPurify); its URI allowlist adds `t3code:` and `stage(-x):`, and bare `stage://` links autolink.
 - Only app-owned content calls Go: MyGo trusts only the top frame on `mygo://` (or the dev server), and the navigation lock keeps foreign pages out of the main frame.
 

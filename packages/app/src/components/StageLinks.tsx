@@ -4,9 +4,15 @@ import { createPortal } from "react-dom";
 import { useApi } from "../platform/context.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
 import { keys } from "../api/queries.ts";
-import type { TaskState } from "../api/types.ts";
+import type { TreeStatus } from "../api/types.ts";
 import {
+  journalEntryMarkdown,
+  journalEntryUrl,
   parseStageRef,
+  projectMarkdown,
+  projectUrl,
+  scheduleMarkdown,
+  scheduleUrl,
   splitStageRefs,
   taskMarkdown,
   taskUrl,
@@ -18,14 +24,30 @@ import {
 import { usePlatform } from "../platform/context.tsx";
 import { IconChainLink, IconCheck } from "./icons.tsx";
 import { taskStateLabel, taskStateTone } from "./StateBadge.tsx";
-import { Button, ExternalLink, IconButton, Marker, Meta, copyStatusText, cx, linkClass, useCopy } from "./ui.tsx";
+import { Button, ExternalLink, IconButton, Marker, Meta, copyStatusText, cx, linkClass, useCopy, type ChipTone } from "./ui.tsx";
 
-/** What a copied link points at: a task or a tree. */
-export type LinkSubject = { kind: "task" | "tree"; id: number; title: string };
+/** What a copied link points at: a task, tree, schedule, project or journal entry. */
+export type LinkSubject =
+  | { kind: "task" | "tree" | "schedule" | "project"; id: number; title: string }
+  | { kind: "journal"; owner: "task" | "tree"; ownerId: number; entryId: number };
 
 export function subjectLinks(s: LinkSubject, link: StageLink): { markdown: string; url: string; name: string } {
-  if (s.kind === "tree") return { markdown: treeMarkdown(link, s.id, s.title), url: treeUrl(link, s.id), name: `tree #${s.id}` };
-  return { markdown: taskMarkdown(link, s.id, s.title), url: taskUrl(link, s.id), name: `task #${s.id}` };
+  switch (s.kind) {
+    case "journal":
+      return {
+        markdown: journalEntryMarkdown(link, s.owner, s.ownerId, s.entryId),
+        url: journalEntryUrl(link, s.owner, s.ownerId, s.entryId),
+        name: `note #${s.entryId}`,
+      };
+    case "tree":
+      return { markdown: treeMarkdown(link, s.id, s.title), url: treeUrl(link, s.id), name: `tree #${s.id}` };
+    case "schedule":
+      return { markdown: scheduleMarkdown(link, s.id, s.title), url: scheduleUrl(link, s.id), name: `schedule #${s.id}` };
+    case "project":
+      return { markdown: projectMarkdown(link, s.id, s.title), url: projectUrl(link, s.id), name: `project #${s.id}` };
+    case "task":
+      return { markdown: taskMarkdown(link, s.id, s.title), url: taskUrl(link, s.id), name: `task #${s.id}` };
+  }
 }
 
 /** Detail-page header: "Copy link" (self-describing markdown, for prompts) joined to "URL" (bare). */
@@ -79,15 +101,38 @@ export function RowCopyLink({ subject, className }: { subject: LinkSubject; clas
 
 // ---- Chips ----
 
-type Resolved = { title: string; state: TaskState | null; number: number | null; href: string | null };
+/** A chip's view: `tag` is the mono #id (or "session"), `name` heads the tooltip. */
+type Resolved = { name: string; tag: string; title: string; state: string; tone: ChipTone; href: string | null };
+
+const TREE_TONES: Record<TreeStatus, ChipTone> = { open: "plain", done: "done", archived: "idle" };
 
 function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } {
   const api = useApi();
   const destination = useSessionDestination();
+  const taskId = ref.kind === "task" ? ref.id : 0;
+  const treeId = ref.kind === "tree" ? ref.id : 0;
+  const scheduleId = ref.kind === "schedule" ? ref.id : 0;
+  const projectId = ref.kind === "project" ? ref.id : 0;
+  // Same keys as the page hooks, so a chip and its page share one cache entry.
   const task = useQuery({
-    queryKey: [...keys.task, ref.kind === "task" ? ref.id : 0],
-    queryFn: () => api.task(ref.kind === "task" ? ref.id : 0),
-    enabled: ref.kind === "task",
+    queryKey: [...keys.task, taskId],
+    queryFn: () => api.task(taskId),
+    enabled: taskId !== 0,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+  const tree = useQuery({ queryKey: [...keys.tree, treeId], queryFn: () => api.tree(treeId), enabled: treeId !== 0, refetchInterval: 30_000, retry: false });
+  const schedule = useQuery({
+    queryKey: [...keys.schedule, scheduleId],
+    queryFn: () => api.schedule(scheduleId),
+    enabled: scheduleId !== 0,
+    refetchInterval: 30_000,
+    retry: false,
+  });
+  const project = useQuery({
+    queryKey: [...keys.projects, "group", projectId],
+    queryFn: ({ signal }) => api.projectGroup(projectId, signal),
+    enabled: projectId !== 0,
     refetchInterval: 30_000,
     retry: false,
   });
@@ -101,38 +146,80 @@ function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } 
     refetchInterval: 30_000,
     retry: false,
   });
-  if (ref.kind === "task") {
-    const d = task.data;
-    return { data: d === undefined ? null : { title: d.title, state: d.state, number: d.id, href: `/tasks/${d.id}` }, failed: task.isError };
+  switch (ref.kind) {
+    case "task": {
+      const d = task.data;
+      return {
+        data: d === undefined ? null : { name: `Task #${d.id}`, tag: `#${d.id}`, title: d.title, state: taskStateLabel(d.state), tone: taskStateTone(d.state), href: `/tasks/${d.id}` },
+        failed: task.isError,
+      };
+    }
+    case "tree": {
+      const d = tree.data;
+      return { data: d === undefined ? null : { name: `Tree #${d.id}`, tag: `#${d.id}`, title: d.title, state: `tree ${d.status}`, tone: TREE_TONES[d.status], href: `/trees/${d.id}` }, failed: tree.isError };
+    }
+    case "schedule": {
+      const d = schedule.data;
+      return {
+        data: d === undefined ? null : { name: `Schedule #${d.id}`, tag: `#${d.id}`, title: d.title, state: d.paused ? "paused" : "schedule", tone: d.paused ? "idle" : "plain", href: `/schedules/${d.id}` },
+        failed: schedule.isError,
+      };
+    }
+    case "project": {
+      const d = project.data;
+      const archived = d?.archivedAt != null;
+      return {
+        data: d === undefined ? null : { name: `Project #${d.id}`, tag: `#${d.id}`, title: d.title, state: archived ? "archived" : "project", tone: archived ? "idle" : "plain", href: `/projects/${d.id}` },
+        failed: project.isError,
+      };
+    }
+    case "journal":
+      // Not fetched: the entry's owner page shows and anchors it.
+      return {
+        data: { name: `Note #${ref.entryId}`, tag: `note #${ref.entryId}`, title: `on ${ref.owner} #${ref.ownerId}`, state: "note", tone: "plain", href: `/${ref.owner}s/${ref.ownerId}?entry=${ref.entryId}#journal-${ref.entryId}` },
+        failed: false,
+      };
+    case "session": {
+      const t = session.data;
+      return {
+        data:
+          t === undefined
+            ? null
+            : {
+                name: "Session",
+                tag: t.taskId === null ? "session" : `#${t.taskId}`,
+                title: t.sessionTitle || ref.id,
+                state: t.state === undefined ? "session" : taskStateLabel(t.state),
+                tone: t.state === undefined ? "idle" : taskStateTone(t.state),
+                href: t.taskId === null ? destination(t) : `/tasks/${t.taskId}`,
+              },
+        failed: session.isError,
+      };
+    }
   }
-  const t = session.data;
-  return { data: t === undefined ? null : { title: t.sessionTitle || ref.id, state: t.state ?? null, number: t.taskId, href: t.taskId === null ? destination(t) : `/tasks/${t.taskId}` }, failed: session.isError };
 }
 
-/** A stage link as a live chip: mono #id (or "session"), title, square state marker; opens in stage. */
+/** A stage link as a live chip: mono #id (or "session", "note #45"), title, square state marker; opens in stage. */
 export function RefChip({ stageRef, text, href }: { stageRef: StageRef; text: string; href: string }) {
   const { data } = useResolved(stageRef);
   if (data === null) {
-    // Loading, or not this stage's task/session: keep what was written.
+    // Loading, or not this stage's record/session: keep what was written.
     return (
       <ExternalLink href={href} className="break-all">
         {text}
       </ExternalLink>
     );
   }
-  const tag = data.number === null ? "session" : `#${data.number}`;
-  const state = data.state === null ? "session" : taskStateLabel(data.state);
-  const tone = data.state === null ? "idle" : taskStateTone(data.state);
   return (
     <a
       href={data.href ?? undefined}
-      title={`${stageRef.kind === "task" ? `Task ${tag}` : "Session"}: ${data.title} (${state})`}
+      title={`${data.name}: ${data.title} (${data.state})`}
       className="mx-px inline-flex max-w-full items-center gap-1.5 border border-line-strong bg-surface px-1.5 align-middle font-sans text-small leading-[18px] font-medium whitespace-nowrap text-fg no-underline transition-colors duration-150 hover:bg-panel"
     >
-      <Marker tone={tone} size="md" />
-      <Meta className="font-normal tabular">{tag}</Meta>
+      <Marker tone={data.tone} size="md" />
+      <Meta className="font-normal tabular">{data.tag}</Meta>
       <span className="max-w-[36ch] min-w-0 truncate">{data.title}</span>
-      <span className="sr-only">, {state}</span>
+      <span className="sr-only">, {data.state}</span>
     </a>
   );
 }

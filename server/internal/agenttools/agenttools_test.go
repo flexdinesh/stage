@@ -1065,7 +1065,7 @@ func TestReadRefTool(t *testing.T) {
 		t.Fatalf("external ref %+v", r)
 	}
 
-	if msg := call(t, cs, "read_ref", map[string]any{"ref": "https://github.com/o/r/pull/3"}, nil); !strings.Contains(msg, "not a stage task, tree or session reference") {
+	if msg := call(t, cs, "read_ref", map[string]any{"ref": "https://github.com/o/r/pull/3"}, nil); !strings.Contains(msg, "not a stage task, tree, schedule, project, journal entry or session reference") {
 		t.Fatalf("bad ref error %q", msg)
 	}
 	if msg := call(t, cs, "read_ref", map[string]any{"ref": "#99999"}, nil); !strings.Contains(msg, "task 99999 not found") {
@@ -1083,6 +1083,34 @@ func TestReadRefTool(t *testing.T) {
 	}
 	if msg := call(t, cs, "read_ref", map[string]any{"ref": "http://phone.lan:7380/trees/99999"}, nil); !strings.Contains(msg, "tree 99999 not found") {
 		t.Fatalf("missing tree error %q", msg)
+	}
+
+	// Schedule link: as get_schedule.
+	var sc db.Schedule
+	mustCall(t, cs, "create_schedule", map[string]any{"project": p.Title, "connectionId": dbtest.T3Connection, "workspaceId": workspace, "title": "nightly", "prompt": "bump", "cron": "0 2 * * *", "tz": "UTC"}, &sc)
+	r = agenttools.RefOut{}
+	mustCall(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("[stage schedule #%d: nightly](http://phone.lan:7380/schedules/%d)", sc.ID, sc.ID)}, &r)
+	if r.Kind != "schedule" || r.Schedule == nil || r.Schedule.ID != sc.ID || r.Schedule.Prompt != "bump" || r.Task != nil {
+		t.Fatalf("schedule ref %+v", r)
+	}
+
+	// Project link: the project.
+	r = agenttools.RefOut{}
+	mustCall(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("stage://projects/%d", p.ID)}, &r)
+	if r.Kind != "project" || r.Project == nil || r.Project.ID != p.ID || r.Project.Title != p.Title {
+		t.Fatalf("project ref %+v", r)
+	}
+
+	// Journal entry link: the full entry, checked against its owner.
+	var note db.JournalEntry
+	mustCall(t, cs, "append_note", map[string]any{"taskId": tk.ID, "text": "Token refresh races logout.", "category": "finding", "requestId": "ref-note"}, &note)
+	r = agenttools.RefOut{}
+	mustCall(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("http://phone.lan:7380/tasks/%d?entry=%d#journal-%d", tk.ID, note.ID, note.ID)}, &r)
+	if r.Kind != "journal" || r.Entry == nil || r.Entry.ID != note.ID || r.Entry.Text != "Token refresh races logout." || r.Task != nil {
+		t.Fatalf("journal ref %+v", r)
+	}
+	if msg := call(t, cs, "read_ref", map[string]any{"ref": fmt.Sprintf("/trees/%d?entry=%d", tr.ID, note.ID)}, nil); !strings.Contains(msg, fmt.Sprintf("journal entry %d not found on tree %d", note.ID, tr.ID)) {
+		t.Fatalf("owner mismatch error %q", msg)
 	}
 }
 

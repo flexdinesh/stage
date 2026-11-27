@@ -42,6 +42,8 @@ const workRoutes: RouteObject[] = [
           { path: "tasks/:id", element: <TaskDetailPage /> },
           { path: "schedules", ...lazyPage(async () => (await import("./pages/SchedulesPage.tsx")).SchedulesPage) },
           { path: "schedules/:id", ...lazyPage(async () => (await import("./pages/ScheduleDetailPage.tsx")).ScheduleDetailPage) },
+          { path: "connections/:connectionId/sessions/:sessionId", ...lazyPage(async () => (await import("./pages/SessionRefPage.tsx")).SessionRefPage) },
+          { path: "sessions/:sessionId", ...lazyPage(async () => (await import("./pages/SessionRefPage.tsx")).SessionRefPage) },
           { path: "more", element: <MorePage /> },
           { path: "snippets", ...lazyPage(async () => (await import("./pages/SnippetsPage.tsx")).SnippetsPage) },
           { path: "settings", ...lazyPage(async () => (await import("./pages/SettingsPage.tsx")).SettingsGeneralPage) },

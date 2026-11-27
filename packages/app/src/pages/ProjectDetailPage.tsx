@@ -8,6 +8,7 @@ import { TASK_STATES, type TaskListQuery } from "../api/types.ts";
 import { IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
 import { ScheduleRows } from "../components/ScheduleList.tsx";
+import { CopyLinkPair } from "../components/StageLinks.tsx";
 import { taskStateLabel } from "../components/StateBadge.tsx";
 import { TaskRows } from "../components/TaskList.tsx";
 import { Button, PageHeader, Panel, QueryState, Segmented, Combobox } from "../components/ui.tsx";
@@ -69,6 +70,7 @@ function ProjectDetail({ id }: { id: number }) {
             }
             actions={
               <>
+                <CopyLinkPair subject={{ kind: "project", id: project.data.id, title: project.data.title }} />
                 <TrackSessionButton />
                 {project.data.archivedAt === null && scheduleList.length === 0 ? (
                   <Button onClick={() => newTask(projectId, "repeat")}>New schedule</Button>

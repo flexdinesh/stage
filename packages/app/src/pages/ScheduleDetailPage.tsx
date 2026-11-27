@@ -4,7 +4,7 @@ import { useNavigate } from "react-router";
 import { useApi } from "../platform/context.tsx";
 import { isNotFound, useHarnesses, useInvalidateWork, useSchedule, useSchedulePreview } from "../api/queries.ts";
 import type { ScheduleDetail, ScheduleRun } from "../api/types.ts";
-import { RefText } from "../components/StageLinks.tsx";
+import { CopyLinkPair, RefText } from "../components/StageLinks.tsx";
 import { ActorLabel } from "../components/ActorLabel.tsx";
 import { HarnessConnectionState } from "../components/ConnectionState.tsx";
 import { ImageStrip } from "../components/Images.tsx";
@@ -79,6 +79,7 @@ function ScheduleBody({ schedule: s }: { schedule: ScheduleDetail }) {
         title={s.title}
         trail={[{ label: s.projectTitle, to: `/projects/${s.projectId}` }, { label: `schedule ${s.id}` }]}
         meta={`${cronSummary(s.cron)} · ${s.tz}`}
+        actions={<CopyLinkPair subject={{ kind: "schedule", id: s.id, title: s.title }} />}
       />
       <div className="-mt-1 mb-3 flex flex-wrap gap-1.5">
         <ScheduleChip paused={s.paused} />

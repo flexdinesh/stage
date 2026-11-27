@@ -4,7 +4,7 @@ import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
-import { useInvalidateWork, useProjectGroups, useTasks, useTrees } from "../api/queries.ts";
+import { useInvalidateWork, useProjectGroups, useSchedules, useTasks, useTrees } from "../api/queries.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { paletteHits } from "../lib/palette.ts";
 import { taskClosedLabel, treeMeta } from "../lib/trees.ts";
@@ -29,7 +29,7 @@ interface Item {
   key: string;
   group: string;
   label: string;
-  /** A task or tree's #id before the label; `matched` when the query named it. */
+  /** A task, tree or schedule's #id before the label; `matched` when the query named it. */
   idTag?: { id: number; matched: boolean };
   hint?: string;
   /** Why it matched (e.g. "branch", "you said"); stays visible when the hint truncates. */
@@ -82,6 +82,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
   const tasks = useTasks({ closed: "all" }, { live: false });
   const projects = useProjectGroups();
   const trees = useTrees({ status: "all" }, { live: false });
+  const schedules = useSchedules();
   const items = useMemo<Item[]>(() => {
     const go = (to: string) => () => {
       onClose();
@@ -112,8 +113,26 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           run: go(`/trees/${tr.id}`),
           link: { kind: "tree", id: tr.id, title: tr.title },
         });
+      for (const { item: sc, byId } of paletteHits(schedules.data?.schedules ?? [], q, 4))
+        out.push({
+          key: `schedule-${sc.id}`,
+          group: "Schedules",
+          label: sc.title,
+          idTag: { id: sc.id, matched: byId },
+          hint: sc.projectTitle,
+          badge: <ClosedBadge label={sc.paused ? "paused" : null} />,
+          run: go(`/schedules/${sc.id}`),
+          link: { kind: "schedule", id: sc.id, title: sc.title },
+        });
       for (const p of (projects.data?.groups ?? []).filter((proj) => proj.archivedAt === null && has(proj.title, q)).slice(0, 4))
-        out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: groupWorkspaceSummary(p), run: go(`/projects/${p.id}`) });
+        out.push({
+          key: `project-${p.id}`,
+          group: "Projects",
+          label: p.title,
+          hint: groupWorkspaceSummary(p),
+          run: go(`/projects/${p.id}`),
+          link: { kind: "project", id: p.id, title: p.title },
+        });
     }
     const actions: Item[] = [
       { key: "new", group: "Actions", label: "New task", hint: "N", run: () => {
@@ -133,7 +152,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
     ];
     out.push(...(q === "" ? actions : actions.filter((a) => has(a.label, q))));
     return out;
-  }, [q, tasks.data, trees.data, projects.data, navigate, onClose, onNewTask, setTheme, sync, destination, account]);
+  }, [q, tasks.data, trees.data, schedules.data, projects.data, navigate, onClose, onNewTask, setTheme, sync, destination, account]);
 
   const found = items.findIndex((item) => item.key === activeKey);
   const active = found < 0 ? 0 : found;
@@ -184,7 +203,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
             }}
             autoFocus
             data-autofocus
-            placeholder="Search tasks, trees, projects, #id"
+            placeholder="Search tasks, trees, schedules, projects, #id"
             aria-label="Search"
             role="combobox"
             aria-expanded="true"

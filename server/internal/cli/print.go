@@ -369,11 +369,19 @@ func printSessionDetail(w io.Writer, d client.SessionContext) {
 }
 
 // printRef prints what a reference names: a task (with its session id), a
-// tree, or a session (with its task), then how to read the full conversation.
+// tree, a schedule, a project, a journal entry, or a session (with its task),
+// then how to read the full conversation.
 func printRef(w io.Writer, r agenttools.RefOut) {
 	switch {
 	case r.Tree != nil:
 		printTree(w, *r.Tree)
+	case r.Schedule != nil:
+		printScheduleDetail(w, *r.Schedule)
+	case r.Project != nil:
+		fmt.Fprintf(w, "project %d  %s\n", r.Project.ID, r.Project.Title)
+	case r.Entry != nil:
+		printJournalEntry(w, *r.Entry)
+		fmt.Fprintf(w, "\n%s\n", strings.TrimRight(r.Entry.Text, "\n"))
 	case r.Kind == "session" && r.Session != nil:
 		printSessionDetail(w, *r.Session)
 	case r.Task != nil:

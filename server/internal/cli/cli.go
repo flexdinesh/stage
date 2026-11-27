@@ -194,8 +194,8 @@ Usage:
                                       expired, 4 not running, 5 data dir in use, 6 no service
                                       manager, 7 invalid config; --url/STAGE_URL do not apply
   stage context                       your session, cwd and resolved project
-  stage show REF                      the task, tree or session a stage link, harness session
-                                      link or #TASK_ID names (with its session/task)
+  stage show REF                      the task, tree, schedule, project, journal entry or session
+                                      a stage link, harness session link or #TASK_ID names
   stage projects ls
   stage models ls --connection ID [--workspace-id ID]
   stage action ls TARGET

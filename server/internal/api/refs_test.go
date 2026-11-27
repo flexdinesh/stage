@@ -10,11 +10,16 @@ import (
 )
 
 type resolved struct {
-	Kind    string      `json:"kind"`
-	TaskID  *int64      `json:"taskId"`
-	TreeID  *int64      `json:"treeId"`
-	Session *sessionRef `json:"session"`
+	Kind       string      `json:"kind"`
+	TaskID     *int64      `json:"taskId"`
+	TreeID     *int64      `json:"treeId"`
+	ScheduleID *int64      `json:"scheduleId"`
+	ProjectID  *int64      `json:"projectId"`
+	EntryID    *int64      `json:"entryId"`
+	Session    *sessionRef `json:"session"`
 }
+
+func isID(p *int64, want int64) bool { return p != nil && *p == want }
 
 func (e *env) resolve(ref string, want int) resolved {
 	e.t.Helper()
@@ -111,4 +116,85 @@ func TestResolveTreeRef(t *testing.T) {
 		t.Fatalf("with connection %+v", out)
 	}
 	e.resolve("http://localhost:7380/trees/9999", 404)
+}
+
+func TestResolveScheduleRef(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/app")
+	var sc struct {
+		ID int64 `json:"id"`
+	}
+	e.must("POST", "/api/schedules", e.taskBody(p.ID, "nightly", map[string]any{"prompt": "go", "cron": "0 2 * * *", "tz": "UTC"}), 201, &sc)
+	for _, ref := range []string{
+		fmt.Sprintf("https://phone.lan/schedules/%d", sc.ID),
+		fmt.Sprintf("[stage schedule #%d: nightly](http://localhost:7380/schedules/%d)", sc.ID, sc.ID),
+		fmt.Sprintf("stage://schedules/%d", sc.ID),
+	} {
+		got := e.resolve(ref, 200)
+		if got.Kind != "schedule" || !isID(got.ScheduleID, sc.ID) || got.TaskID != nil || got.Session != nil {
+			t.Fatalf("%q -> %+v", ref, got)
+		}
+	}
+	// A connection selection leaves a schedule link alone.
+	var out resolved
+	e.must("GET", "/api/refs/resolve?connectionId=1&ref="+url.QueryEscape(fmt.Sprintf("/schedules/%d", sc.ID)), nil, 200, &out)
+	if out.Kind != "schedule" || !isID(out.ScheduleID, sc.ID) {
+		t.Fatalf("with connection %+v", out)
+	}
+	e.resolve("http://localhost:7380/schedules/9999", 404)
+}
+
+func TestResolveProjectRef(t *testing.T) {
+	e := newEnv(t)
+	into := e.project("/w/into")
+	from := e.project("/w/from")
+	got := e.resolve(fmt.Sprintf("[stage project #%d: into](http://localhost:7380/projects/%d)", into.ID, into.ID), 200)
+	if got.Kind != "project" || !isID(got.ProjectID, into.ID) || got.TaskID != nil {
+		t.Fatalf("project %+v", got)
+	}
+	// A merged project's link resolves to the project it was merged into.
+	_, err := e.store.MergeProjects(t.Context(), into.ID, from.ID, true)
+	mustValue(t, struct{}{}, err)
+	for _, ref := range []string{fmt.Sprintf("https://phone.lan/projects/%d", from.ID), fmt.Sprintf("stage://projects/%d", from.ID)} {
+		if got := e.resolve(ref, 200); got.Kind != "project" || !isID(got.ProjectID, into.ID) {
+			t.Fatalf("alias %q -> %+v", ref, got)
+		}
+	}
+	e.resolve("http://localhost:7380/projects/9999", 404)
+}
+
+func TestResolveJournalRef(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/app")
+	a := e.task(p.ID, "a", nil)
+	b := e.task(p.ID, "b", nil)
+	var tr treeDetail
+	e.must("POST", "/api/trees", map[string]any{"title": "Ship", "tasks": []any{map[string]any{"taskId": a.ID}}}, 201, &tr)
+	taskNote := e.note(taskPath(a.ID, "/journal"), "found it", "finding", "ref-1")
+	treeNote := e.note(treePath(tr.ID, "/journal"), "decided", "decision", "ref-2")
+
+	for _, ref := range []string{
+		fmt.Sprintf("https://phone.lan/tasks/%d?entry=%d#journal-%d", a.ID, taskNote.ID, taskNote.ID),
+		fmt.Sprintf("[note](http://localhost:7380/tasks/%d?entry=%d)", a.ID, taskNote.ID),
+		fmt.Sprintf("stage://tasks/%d?entry=%d", a.ID, taskNote.ID),
+	} {
+		got := e.resolve(ref, 200)
+		if got.Kind != "journal" || !isID(got.EntryID, taskNote.ID) || !isID(got.TaskID, a.ID) || got.TreeID != nil || got.Session != nil {
+			t.Fatalf("%q -> %+v", ref, got)
+		}
+	}
+	got := e.resolve(fmt.Sprintf("/trees/%d?view=notes&entry=%d", tr.ID, treeNote.ID), 200)
+	if got.Kind != "journal" || !isID(got.EntryID, treeNote.ID) || !isID(got.TreeID, tr.ID) || got.TaskID != nil {
+		t.Fatalf("tree entry %+v", got)
+	}
+	// Without entry the link stays a task link.
+	if got := e.resolve(fmt.Sprintf("/tasks/%d?view=notes", a.ID), 200); got.Kind != "task" || got.EntryID != nil {
+		t.Fatalf("task link %+v", got)
+	}
+	// The entry must belong to the task or tree the link names.
+	e.resolve(fmt.Sprintf("/tasks/%d?entry=%d", b.ID, taskNote.ID), 404)
+	e.resolve(fmt.Sprintf("/tasks/%d?entry=%d", a.ID, treeNote.ID), 404)
+	e.resolve(fmt.Sprintf("/trees/%d?entry=%d", tr.ID, taskNote.ID), 404)
+	e.resolve(fmt.Sprintf("/tasks/%d?entry=99999", a.ID), 404)
+	e.resolve(fmt.Sprintf("/tasks/%d?entry=x", a.ID), 400)
 }
