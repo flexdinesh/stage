@@ -1,4 +1,4 @@
-import type { Capabilities, HarnessConnection, Machine, ProjectBinding, Task } from "../api/types.ts";
+import type { Capabilities, Destination, HarnessConnection, Machine, ProjectBinding, Task } from "../api/types.ts";
 import type { HarnessSummary } from "./connections.ts";
 import { relativeTime } from "./format.ts";
 import { machineSetupState } from "./machines.ts";
@@ -74,6 +74,8 @@ export interface LaunchContext {
   live: Pick<HarnessSummary, "tone" | "label"> | undefined;
   /** The task's project bindings; undefined until projects load. */
   bindings: readonly ProjectBinding[] | undefined;
+  destinations?: readonly Destination[];
+  destinationError?: boolean;
   /** The connection's display name ("T3", or "T3 · desk" with two or more machines). */
   name: string;
   /** "on desk" with two or more machines, else "". */
@@ -116,12 +118,25 @@ export function connectionBlock(c: Omit<LaunchContext, "bindings">, op: SessionO
   return null;
 }
 
-export type LaunchTarget = Pick<Task, "connectionId" | "projectId" | "projectTitle" | "bindingId">;
+export type LaunchTarget = Pick<Task, "connectionId" | "projectId" | "projectTitle" | "bindingId" | "workspaceId"> & { id?: number };
 
 export function launchBlock(t: LaunchTarget, c: LaunchContext): LaunchBlock | null {
   const block = connectionBlock(c, "launch");
   if (block !== null) return block;
   const { connection, bindings, name } = c;
+  if (t.id !== undefined || t.workspaceId !== undefined) {
+    if (!t.workspaceId) return { kind: "unbound", reason: "Choose a workspace in Edit before starting.", fix: null };
+    if (c.destinations === undefined) {
+      const reason = c.destinationError ? "Stage could not check the saved workspace." : "Checking the saved workspace…";
+      return { kind: "unbound", reason, fix: null };
+    }
+    const row = c.destinations.find((d) => d.connectionId === t.connectionId && d.workspaceId === t.workspaceId);
+    return row?.available === true ? null : {
+      kind: "unbound",
+      reason: row?.reason || "The saved workspace is unavailable. Choose another workspace in Edit.",
+      fix: null,
+    };
+  }
   if (connection === undefined || !connection.active) return null;
   if (bindings !== undefined && workspaceBinding(bindings, t.connectionId, t.bindingId)?.status !== "available") {
     return {

@@ -7,7 +7,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-// ConnectionEvidence includes retired bindings and all session identities.
+// ConnectionEvidence includes bindings, current inventory, saved workspace
+// pins, and all session identities on the connection.
 // An unobserved identity cannot establish continuity across an address change.
 func (s *Store) ConnectionEvidence(ctx context.Context, id int64) ([]ProjectBinding, []execution.Observation, bool, error) {
 	var bindings []ProjectBinding

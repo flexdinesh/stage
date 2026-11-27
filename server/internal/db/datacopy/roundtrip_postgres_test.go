@@ -82,11 +82,11 @@ var seedSQL = []string{
 	  (9, 1, 'workspace_moved', 'Moved /old/w2', '2026-11-06T02:00:00.000000Z', 1)`,
 	`DELETE FROM project_events WHERE id = 9`,
 	`INSERT INTO project_merge_dismissals (project_id, other_id) VALUES (1, 2)`,
-	`INSERT INTO schedules (id, project_id, title, prompt, cron, tz, next_run_at, connection_id, origin_session_id, execution_config, binding_id) VALUES (1, 1, 'Nightly', 'p', '0 0 * * *', 'UTC', '2026-11-07T00:00:00.000000Z', 1, 1, '{"model":"x","options":[]}', 2)`,
+	`INSERT INTO schedules (id, project_id, title, prompt, cron, tz, next_run_at, connection_id, origin_session_id, execution_config, binding_id, workspace_pin) VALUES (1, 1, 'Nightly', 'p', '0 0 * * *', 'UTC', '2026-11-07T00:00:00.000000Z', 1, 1, '{"model":"x","options":[]}', 2, '{"root":"/old/w2","externalId":"ext-1-secondary"}')`,
 	`INSERT INTO task_trees (id, title, status, closed_at, recorded_work, membership_revision) VALUES (1, 'Tree', 'done', '2026-11-08T00:00:00.000000Z', 1, 2)`,
 	`INSERT INTO tasks (id, project_id, title, prompt, state, launch_attempt, launched_at, finished_at, schedule_id, tree_id, start_at, start_tz, connection_id, session_id, execution_config, recorded_work, acceptance_revision, acceptance_id, binding_id) VALUES (1, 1, 'First', 'do it', 'done', 1, '2026-11-09T00:00:00.000001Z', '2026-11-09T01:00:00.999999Z', 1, 1, '2026-11-09T00:00:00.000000Z', 'UTC', 1, 1, '{"permission":"full-access","options":[{"id":"worktree","value":true},{"id":"branch","value":"b"}]}', 1, 1, 1, 1)`,
-	`INSERT INTO tasks (id, project_id, title, prompt, tree_id) VALUES (2, 1, 'needle %_\ "quoted"', 'prompt with
-newline and 日本語', 1)`,
+	`INSERT INTO tasks (id, project_id, title, prompt, tree_id, workspace_pin, launch_attempt) VALUES (2, 1, 'needle %_\ "quoted"', 'prompt with
+newline and 日本語', 1, '{"externalId":"next","root":"/next"}', 1)`,
 	`INSERT INTO task_needs (task_id, need_id) VALUES (2, 1)`,
 	`INSERT INTO task_events (task_id, from_state, to_state, detail, at) VALUES (1, NULL, 'backlog', 'created', '2026-11-09T00:00:00.000000Z'), (1, 'backlog', 'done', '', '2026-11-09T01:00:00.000000Z')`,
 	`INSERT INTO task_acceptances (id, task_id, provenance, evidence, note, source_session_id) VALUES (1, 1, 'user', '` + legacyEvidence + `', 'n', 1)`,
@@ -99,7 +99,8 @@ newline and 日本語', 1)`,
 	`UPDATE journal_entries SET attribution = '{ "actor": { "kind": "human", "userId": 2 } }' WHERE kind = 'note'`,
 	`INSERT INTO journal_launch_context (task_id, attempt, instructions) VALUES (1, 1, 'context')`,
 	`INSERT INTO task_launch_claims (task_id, attempt) VALUES (1, 1)`,
-	`INSERT INTO task_launch_destinations (task_id, attempt, connection_id, external_project_id, workspace, binding_id, binding_revision) VALUES (1, 1, 1, 'ext-1', '/w', 1, 1)`,
+	`INSERT INTO task_launch_destinations (task_id, attempt, connection_id, external_project_id, workspace, binding_id, binding_revision) VALUES
+	  (1, 1, 1, 'ext-1', '/w', 1, 1), (2, 1, 1, 'unbound', '/unbound', NULL, 0)`,
 	`INSERT INTO task_launch_inputs (task_id, attempt, source_task_id, acceptance_id) VALUES (1, 1, 1, 1)`,
 	`INSERT INTO task_handoffs (task_id, attempt, source_task_id, source_title, status, text, source_session_id) VALUES (2, 1, 1, 'First', 'sent', 'handoff', 1)`,
 	`INSERT INTO task_attachments (task_id, name, mime_type, size_bytes, data) VALUES (1, 'a.png', 'image/png', 4, X'89504E47')`,
@@ -353,6 +354,36 @@ func TestRoundTrip(t *testing.T) {
 		}
 		if w, g := canonical(t, want), canonical(t, got); !reflect.DeepEqual(w, g) {
 			t.Errorf("%s differs:\nsqlite   %v\npostgres %v", name, w, g)
+		}
+	}
+	for _, engine := range []store.Engine{lite, dst} {
+		if err := engine.Read(ctx, func(tx store.Tx) error {
+			task, err := tx.Tasks().Get(ctx, 2)
+			if err != nil {
+				return err
+			}
+			pin := store.WorkspacePin{ExternalID: "next", Root: "/next"}
+			frozen := store.TaskWorkspace{Path: "/unbound", Source: "pinned", ExternalID: "unbound"}
+			if task.WorkspacePin == nil || *task.WorkspacePin != pin || task.Workspace == nil || *task.Workspace != frozen {
+				t.Fatalf("copied task pin %+v and frozen projection %+v", task.WorkspacePin, task.Workspace)
+			}
+			d, err := tx.Attempts().Destination(ctx, 2, 1)
+			if err != nil {
+				return err
+			}
+			if want := (store.LaunchDestination{ConnectionID: 1, ExternalProjectID: "unbound", Workspace: "/unbound"}); d != want {
+				t.Fatalf("copied unbound destination %+v, want %+v", d, want)
+			}
+			template, err := tx.Schedules().Template(ctx, 1)
+			if err != nil {
+				return err
+			}
+			if want := (store.WorkspacePin{ExternalID: "ext-1-secondary", Root: "/old/w2"}); template.WorkspacePin == nil || *template.WorkspacePin != want {
+				t.Fatalf("copied schedule template pin %+v, want %+v", template.WorkspacePin, want)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
 		}
 	}
 	lite.Close()

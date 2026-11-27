@@ -106,11 +106,9 @@ type Connections interface {
 	// Referenced: tasks, schedules, sessions or launch destinations name it,
 	// or workspace choices still reference one of its bindings.
 	Referenced(ctx context.Context, id int64) (bool, error)
-	// FollowReplacement moves the default connection, unlaunched backlog
-	// tasks and schedules to a replacement, preserving workspace choices.
+	// FollowReplacement updates the default connection prefill.
 	FollowReplacement(ctx context.Context, from, to int64) error
 	ClearDefault(ctx context.Context, id int64) error
-	ClearDiscovery(ctx context.Context, id int64) error
 	// Delete deletes a connection with its discovery and shared paths.
 	Delete(ctx context.Context, id int64) error
 	// RetireState reads a not forgotten connection (ErrNotFound otherwise).
@@ -128,9 +126,9 @@ type Connections interface {
 	// Retired lists machine's retired, not forgotten connections of
 	// harness, newest first.
 	Retired(ctx context.Context, machine int64, harness string) ([]int64, error)
-	// Evidence: the connection's bindings (external project and workspace,
-	// retired included), its sessions' observations (nil: unobserved), and
-	// whether a task on it is launching.
+	// Evidence returns exact workspace keys from bindings, current inventory
+	// and saved pins, session observations (nil when unobserved), and whether
+	// a task on the connection is launching.
 	Evidence(ctx context.Context, id int64) ([]ProjectBinding, []*execution.Observation, bool, error)
 }
 

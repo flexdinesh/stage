@@ -603,7 +603,7 @@ func (s *Service) replacement(ctx context.Context, a *opencode.Adapter, confirm 
 }
 
 // holds reports whether a connection stores anything a service must prove
-// it serves (bindings, sessions, or a launch without a known session).
+// it serves (workspaces, sessions, or a launch without a known session).
 func (s *Service) holds(ctx context.Context, id int64) (bool, error) {
 	bindings, sessions, unknown, err := s.identity.ConnectionEvidence(ctx, id)
 	return unknown || len(bindings)+len(sessions) > 0, err

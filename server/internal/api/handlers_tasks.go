@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -75,6 +74,7 @@ type createTaskReq struct {
 type taskConfigReq struct {
 	ConnectionID    *int64            `json:"connectionId"`
 	BindingID       *int64            `json:"bindingId"`
+	WorkspaceID     *string           `json:"workspaceId"`
 	NeedsSession    *db.SessionRef    `json:"needsSession"`
 	ExecutionConfig *execution.Config `json:"executionConfig"`
 	OriginSession   *db.SessionRef    `json:"originSession"`
@@ -95,6 +95,14 @@ type taskConfigReq struct {
 // connection when the caller leaves connectionId unset.
 func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 	ctx := r.Context()
+	if req.WorkspaceID != nil {
+		if *req.WorkspaceID == "" || req.ConnectionID == nil {
+			return db.DestinationRequired()
+		}
+		if req.BindingID != nil {
+			return db.Invalid("Choose workspaceId or the legacy bindingId.")
+		}
+	}
 	if req.ConnectionID != nil {
 		if req.ProjectID != nil {
 			id, err := s.projectID(ctx, *req.ProjectID)
@@ -122,22 +130,25 @@ func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 		}
 		return db.ErrInvalidBinding
 	}
-	prefs, err := s.Store.GetPreferences(r.Context())
-	if err != nil {
-		return err
+	var id int64
+	available := 0
+	for _, b := range project.Bindings {
+		if !b.ConnectionActive {
+			continue
+		}
+		if id != 0 && id != b.ConnectionID {
+			return db.DestinationRequired()
+		}
+		id = b.ConnectionID
+		if b.Status == "available" {
+			available++
+		}
 	}
-	// Bindings on replaced connections take no new work.
-	active := slices.ContainsFunc(project.Bindings, func(b db.ProjectBinding) bool { return b.ConnectionActive })
-	id := db.NewTaskDestination(project.Bindings, prefs.DefaultConnectionID, s.Store.ConnectionMachine)
-	switch {
-	case id != 0:
+	if id != 0 && available <= 1 {
 		req.ConnectionID = &id
-		return s.plannedConnection(r.Context(), id)
-	case !active:
-		return db.Invalid("connectionId is required: this project has no harness binding")
-	default:
-		return db.Invalid("This project has multiple harness bindings. Choose a connectionId.")
+		return s.plannedConnection(ctx, id)
 	}
+	return db.DestinationRequired()
 }
 
 func (req createTaskReq) validate() (db.NewTask, error) {
@@ -182,10 +193,15 @@ func (req taskConfigReq) validate() (db.NewTask, error) {
 	if err := attachmentIDs(req.AttachmentIDs); err != nil {
 		return in, err
 	}
-	if req.ProjectID == nil {
+	if req.WorkspaceID != nil {
+		in.WorkspaceID = *req.WorkspaceID
+	}
+	if req.ProjectID == nil && in.WorkspaceID == "" {
 		return in, db.Invalid("projectId is required")
 	}
-	in.ProjectID = *req.ProjectID
+	if req.ProjectID != nil {
+		in.ProjectID = *req.ProjectID
+	}
 	if in.Title == "" {
 		return in, db.Invalid("title is required")
 	}
@@ -292,6 +308,7 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.loadTaskAttempt(ctx, &task)
+	task.ExecutionConfig = configForClient(task.ExecutionConfig)
 	out := taskDetailJSON{taskJSON: taskJSON{Task: task}, Events: events, CurrentHandoffs: []db.Handoff{}}
 	if task.Session != nil {
 		obs, e := s.Store.Observation(ctx, *task.Session)
@@ -340,14 +357,15 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	p.ValidatedConnection, p.ValidatedProject, p.ValidatedBinding = current.ConnectionID, current.ProjectID, current.BindingID
+	p.ValidatedWorkspace = current.WorkspacePin
 	if err := validateConfigPatch(configPatch{
 		ProjectID: &p.ProjectID, Title: &p.Title, Prompt: &p.Prompt,
 		AttachmentIDs: &p.AttachmentIDs,
 	}); err != nil {
 		return err
 	}
-	original := taskDestination{current.ConnectionID, current.ProjectID, current.BindingID}
-	if err := s.validateDestinationPatch(r.Context(), original, p.ConnectionID, &p.ProjectID, p.BindingID,
+	original := taskDestination{current.ConnectionID, current.ProjectID, current.BindingID, current.WorkspaceID}
+	if err := s.validateDestinationPatch(r.Context(), original, p.ConnectionID, &p.ProjectID, p.BindingID, p.WorkspaceID,
 		current.ExecutionConfig, p.ExecutionConfig, current.Attachments, p.AttachmentIDs); err != nil {
 		return err
 	}

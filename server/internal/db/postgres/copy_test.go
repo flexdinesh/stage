@@ -141,4 +141,11 @@ func TestCopySchema(t *testing.T) {
 	if kinds["evidence"] != store.CopyText || kinds["accepted_at"] != store.CopyTime || kinds["id"] != store.CopyInt || schema[i].Identity != "id" {
 		t.Fatalf("task_acceptances: %+v", schema[i])
 	}
+
+	for _, table := range []string{"tasks", "schedules"} {
+		cols := schema[pos[table]].Columns
+		if !slices.Contains(cols, store.CopyColumn{Name: "workspace_pin", Kind: store.CopyJSON}) {
+			t.Errorf("%s.workspace_pin missing from JSON copy columns", table)
+		}
+	}
 }

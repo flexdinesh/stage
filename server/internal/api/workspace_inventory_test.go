@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -182,6 +183,43 @@ func TestConnectionInventoryAccessAndProjection(t *testing.T) {
 	}
 	if a.calls.Load() != calls {
 		t.Fatal("agent or denied request refreshed the harness")
+	}
+
+	// Caller-session metadata cannot admit an unauthenticated request, and
+	// a bearer can pick an unbound row using only the scoped summary.
+	selection := map[string]any{"workspaceId": byRoot[privateRoot+"two"], "connectionId": 1,
+		"title": "Agent planning task", "prompt": "Inspect the checkout"}
+	payload, err := json.Marshal(selection)
+	payload = mustValue(t, payload, err)
+	create := func(token string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", notificationOrigin+"/api/tasks", bytes.NewReader(payload))
+		req.RemoteAddr = "127.0.0.1:32101"
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Stage-Caller-Session", "1:unverified-session")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+principal.AgentTokenPrefix+token)
+		}
+		rec := httptest.NewRecorder()
+		claimed.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := create(""); rec.Code != 401 {
+		t.Fatalf("caller hint admitted task creation: %d %s", rec.Code, rec.Body)
+	}
+	rec := create(agent.Token.Reveal())
+	if rec.Code != 201 {
+		t.Fatalf("scoped create: %d %s", rec.Code, rec.Body)
+	}
+	var created db.Task
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.ConnectionID != 1 || created.WorkspaceID != byRoot[privateRoot+"two"] || created.ProjectID == p.ID || created.CreatedBy != member.Account.ID {
+		t.Fatalf("scoped selection lost identity or attribution: %+v", created)
+	}
+	group, err := e.store.GetProject(ctx, created.ProjectID)
+	if err != nil || len(group.Bindings) != 0 {
+		t.Fatalf("selecting an unbound workspace created a binding: %+v, %v", group, err)
 	}
 }
 

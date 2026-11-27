@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApi } from "../platform/context.tsx";
-import { useConnectionCapabilities, useHarnesses, useMachines, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
+import { useConnectionCapabilities, useDestinations, useHarnesses, useMachines, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
 import { connectionOptions, machineTag, withMachine } from "../lib/machines.ts";
 import {
   type ExecutionConfig,
@@ -33,7 +33,7 @@ import {
 } from "../lib/schedules.ts";
 import { handoffHint } from "../lib/handoff.ts";
 import { isFullyEditable } from "../lib/tasks.ts";
-import { blockedStartModes, scheduleBody, taskCreateBody, taskUpdateBody, taskWorkspaceSelection, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
+import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceSelection, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
 import { projectsForConnection } from "../lib/projects.ts";
 import { HandoffToggle } from "./Handoff.tsx";
 import { LaunchBlockAlert, useLaunchGate } from "./LaunchGate.tsx";
@@ -61,6 +61,7 @@ import {
   Textarea,
   errorText,
   Combobox,
+  type ComboboxOption,
 } from "./ui.tsx";
 
 /** How a saved task starts: right away, parked, at a time, or as a recurring schedule. */
@@ -235,10 +236,11 @@ function TaskFormDrawer({
   const [s, setS] = useState(() => initialState(task, schedule, defaultProjectId, defaultMode, defaultTree));
   // The task and form state as the form opened: a save sends only what differs from them.
   const [opened] = useState(() => (task === undefined ? null : { task, state: s }));
+  const [openedSchedule] = useState(schedule);
   const set = (patch: Partial<FormState>) => setS((prev) => ({ ...prev, ...patch }));
   const invalidate = useInvalidateWork();
   const { machines } = useMachines();
-  const existing = task ?? schedule;
+  const existing = opened?.task ?? openedSchedule;
   const {
     harnesses,
     selectedProject,
@@ -249,6 +251,10 @@ function TaskFormDrawer({
     workspace,
     workspaceIssue,
     chooseWorkspace,
+    exactWorkspace,
+    workspaceId,
+    destinationChanged,
+    chooseExactWorkspace,
     pickable,
     bound,
     caps,
@@ -256,6 +262,7 @@ function TaskFormDrawer({
     prefilled,
     setConfig,
     effectiveConfig,
+    configEdited,
     issues,
     chooseHarness,
     chooseProject,
@@ -267,16 +274,21 @@ function TaskFormDrawer({
   // The API verifies images when the destination changes or when a draft adds an image.
   const checksImages =
     existing === undefined ||
-    existing.connectionId !== connection ||
-    String(existing.projectId) !== s.projectId ||
-    (existing.bindingId ?? null) !== bindingId ||
+    destinationChanged ||
     images.ids.some((id) => !existing.attachments?.some((attachment) => attachment.id === id));
   // Start options: all for a new task, timing only for a backlog task without needs, none otherwise (or for a schedule).
   const needs = task?.needs ?? [];
   const modes: readonly StartMode[] = isNew ? newModes(defaultTree) : task !== undefined && full && needs.length === 0 ? ["backlog", "at"] : [];
   // A harness that cannot launch now leaves Backlog (and an edited task's own timing); the choice returns with it.
   const launchGate = useLaunchGate();
-  const block = selectedProject === undefined || connection === 0 ? null : launchGate({ connectionId: connection, projectId: selectedProject.id, projectTitle: selectedProject.title, bindingId });
+  const block = (existing === undefined && selectedProject === undefined) || connection === 0 ? null : launchGate({
+    connectionId: connection,
+    projectId: Number(s.projectId),
+    projectTitle: selectedProject?.title ?? existing?.projectTitle ?? "",
+    bindingId,
+    ...(existing === undefined ? {} : { id: existing.id }),
+    ...(workspaceId === undefined ? {} : { workspaceId }),
+  });
   const offModes = blockedStartModes(modes, block !== null, opened === null ? null : opened.state.mode);
   const mode: StartMode = offModes.includes(s.mode) ? "backlog" : s.mode;
   const snippetProject = s.projectId === "" ? null : Number(s.projectId);
@@ -293,8 +305,8 @@ function TaskFormDrawer({
       title: s.title.trim(),
       prompt: s.prompt,
       connectionId: connection,
-      bindingId,
-      executionConfig: effectiveConfig,
+      ...(isNew ? { bindingId } : workspaceId === undefined ? {} : { workspaceId }),
+      ...(isNew || existing.executionConfig != null || configEdited ? { executionConfig: effectiveConfig } : {}),
     };
   }
 
@@ -302,7 +314,9 @@ function TaskFormDrawer({
     mutationFn: async (): Promise<Saved> => {
       if (mode === "repeat") {
         const body = scheduleBody(template(), { notes: s.notes, attachmentIds: images.ids, cron, tz: s.tz });
-        const saved = schedule === undefined ? await api.createSchedule(body) : await api.updateSchedule(schedule.id, body);
+        if (openedSchedule === undefined) return { kind: "schedule", schedule: await api.createSchedule(body) };
+        const patch = scheduleUpdateBody(openedSchedule, body);
+        const saved = Object.keys(patch).length === 0 ? openedSchedule : await api.updateSchedule(openedSchedule.id, patch);
         return { kind: "schedule", schedule: saved };
       }
       const timed = mode === "at" ? { startLocal: s.startLocal, startTz: s.tz } : null;
@@ -344,6 +358,7 @@ function TaskFormDrawer({
     s.title.trim() === "" && "title",
     full && s.prompt.trim() === "" && "prompt",
     full && connection === 0 && "harness",
+    full && destinationChanged && connection > 0 && !bound && "workspace",
     full && issues.length > 0 && `resolve ${issues.join(", ")}`,
     full && checksImages && !acceptsImages && images.items.length > 0 && "remove images",
     images.uploading && "images still uploading",
@@ -355,7 +370,7 @@ function TaskFormDrawer({
     previewError !== null && "a valid schedule",
   ].filter((m) => m !== false);
 
-  const blocked = missing.length > 0 || save.isPending || (full && workspaceIssue !== null) || (mode === "now" && !bound);
+  const blocked = missing.length > 0 || save.isPending || (isNew && workspaceIssue !== null) || (mode === "now" && !bound);
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
     if (!blocked) save.mutate();
@@ -431,17 +446,18 @@ function TaskFormDrawer({
                 }}
                 placeholder="Select project…"
                 autoFocus={isNew}
-                emptyText={chosen === 0 || pickable.length > 0 ? undefined : <NoHarnessProjects connectionId={chosen} />}
+                emptyText={!isNew || chosen === 0 || pickable.length > 0 ? undefined : <NoHarnessProjects connectionId={chosen} />}
               />
             )}
           </Field>
           <Field label="Harness">{id=><Combobox id={id} disabled={!full} value={connection ? String(connection) : ""} onChange={next=>chooseHarness(Number(next))} listLabel="Harnesses" showTag options={[
             {value: "", label: "Choose a harness"},
             // Machine > Harness: the machine is the tag once there is more than one; a chosen project's bindings list first.
-            ...connectionOptions(harnesses.connectedList, machines, harnesses.kindName, selectedProject === undefined ? null : new Set(bindings.map(b => b.connectionId)), defaultConnection),
+            ...connectionOptions(harnesses.connectedList, machines, harnesses.kindName, !isNew || selectedProject === undefined ? null : new Set(bindings.map(b => b.connectionId)), defaultConnection),
             // The current harness of a task or schedule that can no longer launch shows, disabled, so the field is not blank.
             ...(connection > 0 && harnesses.retired(connection) ? [{value: String(connection), label: `${harnesses.name(connection)} (replaced)`, disabled: true}] : []),
             ...(connection > 0 && harnesses.unconfigured(connection) ? [{value: String(connection), label: `${harnesses.name(connection)} (disconnected)`, disabled: true}] : []),
+            ...(!isNew && connection > 0 && harnesses.connection(connection) === undefined ? [{value: String(connection), label: harnesses.loaded ? "Saved harness (unavailable)" : "Loading harnesses…", disabled: true}] : []),
           ]}/>}</Field>
         </div>
         {fellBack === null || selectedProject === undefined ? null : (
@@ -450,10 +466,12 @@ function TaskFormDrawer({
             {connection ? `Using ${connectionName(connection)}.` : "Choose a harness."}
           </Hint>
         )}
-        {!full || selectedProject === undefined || connection === 0 ? null : (
+        {full && exactWorkspace !== null ? (
+          <ExactWorkspaceField workspace={exactWorkspace} workspaceId={workspaceId} onChange={chooseExactWorkspace} />
+        ) : full && selectedProject !== undefined && connection > 0 ? (
           <WorkspaceField workspace={workspace} bindingId={bindingId} onChange={chooseWorkspace} />
-        )}
-        {full && workspaceIssue !== null ? (
+        ) : null}
+        {isNew && full && workspaceIssue !== null ? (
           <div aria-live="polite">
             <InlineError>
               {workspaceIssue}
@@ -464,7 +482,7 @@ function TaskFormDrawer({
           </div>
         ) : null}
         <ErrorText error={harnesses.error}/>
-        {block === null || !full || (block.kind === "unbound" && workspaceIssue !== null) ? null : (
+        {block === null || !full || (block.kind === "unbound" && (exactWorkspace !== null || workspaceIssue !== null)) ? null : (
           <LaunchBlockAlert block={block} {...(modes.includes("backlog") && mode === "backlog" ? { after: "Saves to backlog until then." } : {})} />
         )}
         <Field label="Title">
@@ -499,7 +517,7 @@ function TaskFormDrawer({
             )
           }
         </Field>
-        {connection > 0 && workspaceIssue === null ? (
+        {connection > 0 && (isNew ? workspaceIssue === null : bound) ? (
           <HarnessFields
             title={`Harness · ${connectionName(connection)}`}
             config={effectiveConfig}
@@ -588,6 +606,8 @@ function useHarnessConfig(
 ) {
   const projects = useProjects();
   const harnesses = useHarnesses();
+  const exact = existing !== undefined;
+  const catalog = useDestinations(exact);
   const projectFor = (id: string) => projects.data?.projects.find((project) => String(project.id) === id);
   const activeProject = projectFor(projectId);
   // An edited task or schedule can still reference an archived project.
@@ -596,13 +616,8 @@ function useHarnessConfig(
   const selectedProject = needsArchived ? archived.data?.projects.find((project) => project.id === existing.projectId) : activeProject;
   const placementProjects = needsArchived ? archived : projects;
   const [chosen, setChosen] = useState(existing?.connectionId ?? 0);
-  const [workspaceChoice, setWorkspaceChoice] = useState(() =>
-    existing?.bindingId == null ? null : {
-      projectId: String(existing.projectId),
-      connectionId: existing.connectionId,
-      bindingId: existing.bindingId,
-    },
-  );
+  const [workspaceId, setWorkspaceId] = useState(() => existing?.workspaceId || undefined);
+  const [workspaceChoice, setWorkspaceChoice] = useState<{ projectId: string; connectionId: number; bindingId: number } | null>(null);
   const [draftConfig, setDraftConfig] = useState<{ connectionId: number; config: ExecutionConfig } | null>(null);
   // Bindings on replaced or disconnected connections never pick the destination.
   const bindingsFor = (project: Project | undefined) =>
@@ -615,20 +630,62 @@ function useHarnessConfig(
     if (project === undefined) return preferred ?? 0;
     return newTaskConnection(projectBindings, preferred, (id) => harnesses.connection(id)?.machineId ?? Number.MAX_SAFE_INTEGER);
   };
-  const connection = chosen || implicit(selectedProject, bindings);
+  const connection = exact ? chosen : chosen || implicit(selectedProject, bindings);
   const fellBack = chosen === 0 && fallbackDefault !== null && selectedProject !== undefined && connection !== fallbackDefault ? fallbackDefault : null;
   // An explicitly chosen harness narrows the picker; the current Stage project stays selected.
-  const pickable = projectsForConnection(projects.data?.projects ?? [], chosen, projectId);
+  const pickable = projectsForConnection(projects.data?.projects ?? [], exact ? 0 : chosen, projectId);
   if (needsArchived && selectedProject !== undefined) pickable.push(selectedProject);
   const bindingId = workspaceChoice?.projectId === projectId && workspaceChoice.connectionId === connection ? workspaceChoice.bindingId : null;
   const workspace = taskWorkspaceSelection(bindings, connection, bindingId);
-  const workspaceIssue = bindingId === null || placementProjects.data !== undefined
+  const bindingIssue = bindingId === null || placementProjects.data !== undefined
     ? workspace.issue
     : placementProjects.isError ? "Stage could not verify the selected workspace. Try again when projects are available." : "Checking the selected workspace…";
-  const caps = useConnectionCapabilities(connection, workspaceIssue === null, workspace.available);
+  const catalogRows = catalog.data?.destinations?.filter((d) => d.connectionId === connection) ?? [];
+  const selected = catalogRows.find((d) => d.workspaceId === workspaceId);
+  const savedBinding = workspaceId === undefined ? undefined : catalog.data?.projects
+    .flatMap((p) => p.bindings)
+    .find((b) => b.connectionId === connection && b.workspaceId === workspaceId);
+  const catalogLoading = catalog.data === undefined && catalog.isPending;
+  const catalogFailed = catalog.data?.destinations === undefined && (catalog.isError || catalog.isSuccess);
+  let exactIssue: string | null = null;
+  if (connection === 0) {
+    exactIssue = "Choose a harness to see its workspaces.";
+  } else if (!catalogLoading && !catalogFailed && selected?.available !== true) {
+    if (harnesses.retired(connection)) {
+      exactIssue = "This harness was replaced. Choose another harness and workspace.";
+    } else if (workspaceId === undefined) {
+      exactIssue = "Choose a workspace before running.";
+    } else if (savedBinding?.status === "missing") {
+      exactIssue = "The harness no longer reports the saved workspace. Choose another workspace.";
+    } else {
+      exactIssue = selected?.reason || "The saved workspace is unavailable on this harness. Choose another workspace.";
+    }
+  }
+  const exactWorkspace = !exact ? null : {
+    choices: catalogRows.filter((d) => d.available),
+    selected,
+    savedTitle: savedBinding?.title,
+    issue: exactIssue,
+    loading: catalogLoading,
+    failed: catalogFailed,
+    retry: () => void catalog.refetch(),
+    connection,
+  };
+  const bound = exact ? selected?.available === true : workspace.available !== undefined;
+  const workspaceIssue = exact ? exactIssue : bindingIssue;
+  const caps = useConnectionCapabilities(
+    connection,
+    exact ? bound : workspaceIssue === null,
+    exact ? workspaceId === undefined ? undefined : { workspaceId } : workspace.available,
+  );
 
   function chooseWorkspace(nextBindingId: number | null) {
     setWorkspaceChoice(nextBindingId === null ? null : { projectId, connectionId: connection, bindingId: nextBindingId });
+  }
+  function chooseExactWorkspace(id: string) {
+    if (id === workspaceId) return;
+    setWorkspaceId(id);
+    setDraftConfig({ connectionId: connection, config: harnessDefaults });
   }
   const acceptsImages = caps.data === undefined || caps.data.operations.images?.available === true;
   // The first connection uses its pin. Switching connections starts with the harness defaults.
@@ -636,6 +693,8 @@ function useHarnessConfig(
   const original = existing?.connectionId === connection ? existing.executionConfig : prefilled;
   const initialConfig = original ? { ...original, options: original.options ?? [] } : harnessDefaults;
   const effectiveConfig = draftConfig === null ? initialConfig : draftConfig.connectionId === connection ? draftConfig.config : harnessDefaults;
+  const destinationChanged = exact && (connection !== existing.connectionId || workspaceId !== (existing.workspaceId || undefined));
+  const configEdited = destinationChanged || draftConfig !== null;
 
   function resetForConnection(connectionId: number) {
     if (connectionId !== connection && (connection > 0 || draftConfig !== null)) {
@@ -643,12 +702,16 @@ function useHarnessConfig(
     }
   }
   function chooseHarness(id: number) {
-    const next = id || implicit(selectedProject, bindings);
-    if (next !== connection) setWorkspaceChoice(null);
+    const next = exact ? id : id || implicit(selectedProject, bindings);
+    if (next !== connection) {
+      setWorkspaceChoice(null);
+      setWorkspaceId(undefined);
+    }
     resetForConnection(next);
     setChosen(id);
   }
   function chooseProject(id: string) {
+    if (exact) return;
     if (id !== projectId) setWorkspaceChoice(null);
     if (chosen !== 0) return;
     const nextProject = projectFor(id);
@@ -664,18 +727,58 @@ function useHarnessConfig(
     workspace,
     workspaceIssue,
     chooseWorkspace,
+    exactWorkspace,
+    workspaceId,
+    destinationChanged,
+    chooseExactWorkspace,
     pickable,
-    bound: workspace.available !== undefined,
+    bound,
     caps,
     acceptsImages,
     prefilled,
     setConfig: (config: ExecutionConfig) => setDraftConfig({ connectionId: connection, config }),
     effectiveConfig,
-    issues: incompatibleSettings(effectiveConfig, caps.data),
+    configEdited,
+    issues: exact && !configEdited ? [] : incompatibleSettings(effectiveConfig, caps.data),
     chooseHarness,
     chooseProject,
     fellBack,
   };
+}
+
+function ExactWorkspaceField({ workspace, workspaceId, onChange }: {
+  workspace: NonNullable<ReturnType<typeof useHarnessConfig>["exactWorkspace"]>;
+  workspaceId: string | undefined;
+  onChange: (workspaceId: string) => void;
+}) {
+  const { choices, selected, savedTitle, issue, loading, failed, retry, connection } = workspace;
+  const options: ComboboxOption[] = choices.map((d) => ({ value: d.workspaceId, label: d.title, detail: d.discriminator }));
+  const available = selected?.available === true;
+  if (workspaceId !== undefined && !available) {
+    options.push({ value: workspaceId, label: selected?.title || savedTitle || "Saved workspace", detail: selected?.discriminator, disabled: true });
+  }
+  const empty = connection === 0 ? "Choose a harness first"
+    : loading ? "Loading workspaces…"
+      : failed ? "Could not load workspaces"
+        : choices.length === 0 ? "No workspaces available" : "Choose a workspace…";
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Field label="Workspace" hint={available ? selected.discriminator : undefined}>
+        {(id) => (
+          <Combobox id={id} value={workspaceId ?? ""} onChange={onChange} options={options} listLabel="Workspaces" placeholder={empty} disabled={choices.length === 0} />
+        )}
+      </Field>
+      <div aria-live="polite" className="empty:hidden">
+        {failed && connection !== 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <InlineError>Stage could not load workspaces for this harness.</InlineError>
+            <Button small variant="ghost" onClick={retry}>Try again</Button>
+          </div>
+        ) : loading && workspaceId !== undefined ? <Hint>Checking the saved workspace…</Hint>
+          : issue === null ? null : <Hint>{issue}</Hint>}
+      </div>
+    </div>
+  );
 }
 
 function workspaceOptionLocation(binding: ProjectBinding): string {

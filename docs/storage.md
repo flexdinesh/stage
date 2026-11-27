@@ -894,18 +894,26 @@ use the same lock to serialize the selected workspace with identity changes.
 Session tracking uses the exact workspace's current project when bound.
 Otherwise it reuses its historical project or a unique strong match, and
 creates a project when neither exists. The association survives workspace
-refreshes and project merges. It grants no launch authority.
-Launch claims take it before the task lock and pin the active, available
-chosen binding or primary. Each attempt keeps its pinned path, external
-workspace ID and binding revision. Task readers take the pinned workspace
-address from the launch destination on both engines.
+refreshes and project merges. Task and schedule creation uses the same
+association when the caller selects a workspace without naming a project.
 
-When a connection is replaced, unlaunched backlog tasks and schedules follow
-the replacement with their saved workspace choice. An explicit choice stays
-unavailable until its binding resolves on the replacement or the choice is
-edited. A null choice uses the replacement's primary workspace when available.
-Forgetting a retired connection deactivates its bindings and retains their
-rows if workspace choices still reference them.
+Migration 0047 adds nullable `workspace_pin` to tasks and schedules on both
+engines. With the owner's `connection_id`, its native ID and root identify one
+catalog row. Legacy selections backfill when the recorded binding and catalog
+prove the key. Prior claims provide the exact key for later retries. Other
+work stays unresolved until edited. The database copy includes these fields
+and the attempt rows.
+
+Launch claims take the identity lock before the task lock, compare the
+verified selection with the saved pin, and check its current catalog row.
+Each attempt keeps its original connection, path, native workspace ID and
+any binding revision. A nullable binding ID supports unbound destinations.
+Task readers use the attempt's destination for launch history.
+
+Replacement and retirement leave task and schedule pins on the previous
+connection. Backlog work and schedule templates can be edited to select a
+current destination. Forgetting a connection retains historical references
+and deactivates its bindings.
 
 Review reads the undismissed project pairs from the per-pair dismissal records.
 See [workspace discovery](discovery.md) for rule priority

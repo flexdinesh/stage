@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -161,9 +162,6 @@ func (s *Store) moveBinding(ctx context.Context, tx store.Tx, next, old ProjectB
 	if err != nil {
 		return 0, err
 	}
-	if err := pr.RepointBindingChoices(ctx, old.ID, id); err != nil {
-		return 0, err
-	}
 	label := conn.Label
 	if label == "" {
 		label = conn.Harness
@@ -302,7 +300,9 @@ func (s *Store) SessionIdentity(ctx context.Context, id int64) (SessionRef, erro
 
 type LaunchDestination = store.LaunchDestination
 
-func pinDestination(ctx context.Context, tx store.Tx, taskID int64, attempt int) error {
+type LaunchCheck = store.LaunchCheck
+
+func pinDestination(ctx context.Context, tx store.Tx, taskID int64, attempt int, check *LaunchCheck) error {
 	exists, err := tx.Attempts().HasDestination(ctx, taskID, attempt)
 	if err != nil {
 		return err
@@ -310,25 +310,30 @@ func pinDestination(ctx context.Context, tx store.Tx, taskID int64, attempt int)
 	if exists {
 		return nil
 	}
-	b, err := tx.Attempts().BoundDestination(ctx, taskID)
-	if errors.Is(err, ErrNotFound) {
-		task, err := tx.Tasks().Get(ctx, taskID)
-		if err != nil {
-			return err
-		}
-		if task.BindingID != nil {
-			return BindingUnavailable()
-		}
-		return &ConflictError{Code: "binding_required", Msg: "Bind or confirm this project's workspace before launching."}
+	task, err := tx.Tasks().Get(ctx, taskID)
+	if err != nil {
+		return err
 	}
+	if check != nil && (task.ConnectionID != check.ConnectionID || task.WorkspacePin == nil ||
+		*task.WorkspacePin != check.WorkspacePin || !sameLaunchConfig(task.ExecutionConfig, check.Config)) {
+		return Conflict("The destination or launch options changed. Review the task and start again.")
+	}
+	b, err := workDestination(ctx, tx, task)
 	if err != nil {
 		return err
 	}
 	return tx.Attempts().PinDestination(ctx, taskID, attempt, b)
 }
 
+func sameLaunchConfig(a, b *execution.Config) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Model == b.Model && a.Mode == b.Mode && a.Permission == b.Permission && slices.Equal(a.Options, b.Options)
+}
+
 func BindingUnavailable() error {
-	return &ConflictError{Code: "binding_unavailable", Msg: "The workspace chosen for this task is no longer available in its project. Choose a workspace."}
+	return &ConflictError{Code: "binding_unavailable", Msg: "The saved workspace is unavailable on this connection. Restore it or choose a connection and workspace again."}
 }
 func (s *Store) LaunchDestination(ctx context.Context, taskID int64, attempt int) (LaunchDestination, error) {
 	return read(ctx, s, func(tx store.Tx) (LaunchDestination, error) { return tx.Attempts().Destination(ctx, taskID, attempt) })

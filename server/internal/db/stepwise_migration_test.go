@@ -93,6 +93,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	44: {{"work attribution leaves old evidence untouched", seedV0044Attribution, checkV0044Attribution}},
 	45: {{"existing connection has unknown workspace freshness", seedV0037ConnectionFacts, checkV0045WorkspaceRefresh}},
 	46: {{"existing workspace has no historical project", seedV0046HistoricalWorkspaceProject, checkV0046HistoricalWorkspaceProject}},
+	47: {{"backfill proven workspace pins and preserve attempts", seedV0047WorkspacePins, checkV0047WorkspacePins}},
 }
 
 func seedV0046HistoricalWorkspaceProject(t *testing.T, pool *sqlite.DB) {
@@ -102,6 +103,74 @@ func seedV0046HistoricalWorkspaceProject(t *testing.T, pool *sqlite.DB) {
 
 func checkV0046HistoricalWorkspaceProject(t *testing.T, pool *sqlite.DB) {
 	wantRows(t, pool, `SELECT external_id,workspace,historical_project_id FROM external_projects WHERE connection_id=42`, "ext|/w|NULL")
+}
+
+func seedV0047WorkspacePins(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	for _, stmt := range []string{
+		`INSERT INTO harness_connections(id,machine_id,harness,active,retired_at) VALUES
+	 (2,1,'t3',true,NULL),(3,1,'claude',true,NULL),(4,1,'t3',false,'2026-11-27T00:00:00Z')`,
+		`INSERT INTO projects(id,title) VALUES
+	 (1,'Recorded primary'),(2,'Moved root'),(3,'Archived workspace'),
+	 (4,'Alternate only'),(5,'Offline primary'),(6,'Retired connection')`,
+		`INSERT INTO project_bindings(id,project_id,connection_id,external_project_id,workspace,active,is_primary,status) VALUES
+	 (1,1,2,'shared','/primary',true,true,'available'),
+	 (2,1,2,'shared','/offline',false,false,'missing'),
+	 (3,2,2,'moved','/former',true,true,'changed'),
+	 (4,2,2,'alternate','/alternate',true,false,'available'),
+	 (5,3,2,'archived','/archived',true,true,'available'),
+	 (6,4,2,'secondary','/secondary',true,false,'available'),
+	 (7,5,2,'missing','/missing',true,true,'missing'),
+	 (8,6,4,'retired','/retired',true,true,'available'),
+	 (9,1,3,'remote','/remote',true,true,'available'),
+	 (10,1,2,'unknown','/unknown',true,false,'available'),
+	 (11,1,2,'pathless','',true,false,'available')`,
+		`INSERT INTO external_projects(connection_id,external_id,workspace,title,available,archived) VALUES
+	 (2,'shared','/primary','Primary',true,false),
+	 (2,'shared','/offline','Offline',false,false),
+	 (2,'moved','/new','Moved',true,false),
+	 (2,'alternate','/alternate','Alternate',true,false),
+	 (3,'moved','/former','Other connection',true,false),
+	 (2,'archived','/archived','Archived',true,true),
+	 (2,'secondary','/secondary','Secondary',true,false),
+	 (2,'missing','/missing','Missing',false,false),
+	 (4,'retired','/retired','Retired',true,false),
+	 (3,'remote','/remote','Remote',true,false),
+	 (2,'pathless','','Pathless',true,false)`,
+		`INSERT INTO tasks(id,project_id,title,prompt,connection_id,binding_id) VALUES
+	 (1,1,'Primary','p',2,NULL),(2,1,'Offline explicit','p',2,2),
+	 (3,2,'Moved primary','p',2,NULL),(4,3,'Archived primary','p',2,NULL),
+	 (5,4,'Alternate only','p',2,NULL),(6,5,'Offline primary','p',2,NULL),
+	 (7,6,'Retired connection','p',4,NULL),(8,1,'Foreign explicit','p',2,9),
+	 (9,1,'Unproven explicit','p',2,10),(10,1,'Pathless','p',2,11),
+	 (11,3,'Archived explicit','p',2,5),(12,2,'Explicit after split','p',2,1)`,
+		`INSERT INTO schedules(id,project_id,title,prompt,cron,tz,connection_id,binding_id)
+	 SELECT id,project_id,title,prompt,'@daily','UTC',connection_id,binding_id FROM tasks`,
+		`INSERT INTO tasks(id,project_id,title,prompt,connection_id,launch_attempt,binding_id)
+	 VALUES (13,1,'Existing attempt','p',2,1,1)`,
+		`INSERT INTO task_launch_destinations(task_id,attempt,connection_id,external_project_id,workspace,binding_id,binding_revision)
+	 VALUES (13,1,2,'historic','/historic',1,7)`,
+	} {
+		mustExec(t, pool, stmt)
+	}
+}
+
+func checkV0047WorkspacePins(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	want := []string{
+		"1|shared|/primary", "2|shared|/offline", "3|NULL|NULL", "4|NULL|NULL",
+		"5|NULL|NULL", "6|NULL|NULL", "7|NULL|NULL", "8|NULL|NULL",
+		"9|NULL|NULL", "10|pathless|", "11|NULL|NULL", "12|shared|/primary",
+	}
+	const pins = `SELECT id, json_extract(workspace_pin,'$.externalId'), json_extract(workspace_pin,'$.root') FROM `
+	wantRows(t, pool, pins+`schedules ORDER BY id`, want...)
+	wantRows(t, pool, pins+`tasks ORDER BY id`, append(want, "13|historic|/historic")...)
+
+	mustExec(t, pool, `INSERT INTO task_launch_destinations
+		 (task_id,attempt,connection_id,external_project_id,workspace,binding_revision)
+		 VALUES (13,2,2,'unbound','/unbound',0)`)
+	wantRows(t, pool, `SELECT task_id,attempt,connection_id,external_project_id,workspace,binding_id,binding_revision
+	FROM task_launch_destinations ORDER BY attempt`, "13|1|2|historic|/historic|1|7", "13|2|2|unbound|/unbound|NULL|0")
 }
 
 func checkV0045WorkspaceRefresh(t *testing.T, pool *sqlite.DB) {

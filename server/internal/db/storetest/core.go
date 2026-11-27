@@ -9,6 +9,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -27,6 +28,17 @@ func session(external string) db.SessionRef {
 
 func mustProject(t *testing.T, s *db.Store, ctx context.Context, t3id string) db.Project {
 	t.Helper()
+	current, err := s.Workspaces(ctx, dbtest.T3Connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory := []execution.WorkspaceInfo{{ID: t3id, WorkspaceRoot: "/w/" + t3id}}
+	for _, workspace := range current {
+		inventory = append(inventory, execution.WorkspaceInfo{ID: workspace.ExternalID, WorkspaceRoot: workspace.Workspace})
+	}
+	if _, err := s.RefreshWorkspaces(ctx, dbtest.T3Connection, inventory); err != nil {
+		t.Fatal(err)
+	}
 	p, err := s.InsertProject(ctx, db.Project{Title: t3id, Bindings: []db.ProjectBinding{{ConnectionID: dbtest.T3Connection, ExternalProjectID: t3id, Workspace: "/w/" + t3id}}})
 	if err != nil {
 		t.Fatal(err)

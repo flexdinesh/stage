@@ -95,13 +95,13 @@ func TestConnectCreatesTheConnectionRowAndInstallsItsAdapter(t *testing.T) {
 		t.Fatalf("same identity moved to %d", id)
 	}
 
-	// Another identity on a connection that holds nothing restamps it in
-	// place (db.Store.SwitchInstance): nothing is replaced.
-	if res, err = machine.Connect(ctx, ports, local.Install, hostedKind.Kind, "/home/v/.claude", "v", newAdapter); err != nil || res.Replaced != 0 {
-		t.Fatalf("restamp %+v %v", res, err)
+	// A new identity gets a new connection even when the old one had no work.
+	if res, err = machine.Connect(ctx, ports, local.Install, hostedKind.Kind, "/home/v/.claude", "v", newAdapter); err != nil || res.Replaced != first {
+		t.Fatalf("replacement %+v %v", res, err)
 	}
-	if id, _ := ports.Active(ctx, hostedKind.Kind); id != first {
-		t.Fatalf("restamp moved to %d", id)
+	second, err := ports.Active(ctx, hostedKind.Kind)
+	if err != nil || second == 0 || second == first || moves[len(moves)-1] != [2]int64{first, second} {
+		t.Fatalf("replacement connection %d, adapter moves %v, %v", second, moves, err)
 	}
 }
 

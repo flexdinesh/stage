@@ -136,14 +136,6 @@ func (r projects) PromoteBinding(ctx context.Context, project, connection, id in
 	return err
 }
 
-func (r projects) RepointBindingChoices(ctx context.Context, from, to int64) error {
-	if _, err := r.Exec(ctx, `UPDATE tasks SET binding_id=$2 WHERE binding_id=$1`, from, to); err != nil {
-		return err
-	}
-	_, err := r.Exec(ctx, `UPDATE schedules SET binding_id=$2 WHERE binding_id=$1`, from, to)
-	return err
-}
-
 func (r projects) MarkUnavailable(ctx context.Context, connectionID int64) error {
 	_, err := r.Exec(ctx, `UPDATE external_projects SET available=false WHERE connection_id=$1`, connectionID)
 	return err

@@ -1,12 +1,10 @@
 package agenttools
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"slices"
 
-	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
@@ -44,60 +42,38 @@ func (in ConfigInput) config() (execution.Config, error) {
 	return c, nil
 }
 
-func (o *Ops) destination(ctx context.Context, a ConfigArgs, p db.Project, c agentctx.Caller) (int64, error) {
-	h, err := o.harnesses(ctx)
-	if err != nil {
-		return 0, err
-	}
-	// Replaced connections take no new work; neither do their bindings.
-	cs := h.active()
-	var bindings []db.ProjectBinding
-	for _, b := range p.Bindings {
-		if b.ConnectionActive {
-			bindings = append(bindings, b)
-		}
-	}
+const destinationHelp = "select connectionId and workspaceId from list_projects, or use projects ls to find values for --connection and --workspace-id"
+
+func legacyConnection(a ConfigArgs, p db.Project) (int64, error) {
 	id := a.ConnectionID
 	if a.BindingID != nil {
-		i := slices.IndexFunc(bindings, func(b db.ProjectBinding) bool { return b.ID == *a.BindingID })
-		if i < 0 || (id != 0 && id != bindings[i].ConnectionID) {
-			return 0, db.ErrInvalidBinding
+		i := slices.IndexFunc(p.Bindings, func(b db.ProjectBinding) bool { return b.ConnectionActive && b.ID == *a.BindingID })
+		if i < 0 || (id != 0 && id != p.Bindings[i].ConnectionID) {
+			return 0, fmt.Errorf("%w, %s", db.ErrInvalidBinding, destinationHelp)
 		}
-		id = bindings[i].ConnectionID
+		return p.Bindings[i].ConnectionID, nil
+	}
+	if id != 0 {
+		return id, nil
+	}
+	available := 0
+	for _, b := range p.Bindings {
+		if !b.ConnectionActive {
+			continue
+		}
+		if id != 0 && id != b.ConnectionID {
+			return 0, fmt.Errorf("this project has bindings on multiple connections, %s", destinationHelp)
+		}
+		id = b.ConnectionID
+		if b.Status == "available" {
+			available++
+		}
 	}
 	if id == 0 {
-		prefs, err := o.Client.Preferences(ctx)
-		if err != nil {
-			return 0, err
-		}
-		// The default connection, else the only binding, like the web app's new-task form.
-		id = db.NewTaskDestination(p.Bindings, prefs.DefaultConnectionID, h.machine)
+		return 0, fmt.Errorf("this project has no active binding, %s", destinationHelp)
 	}
-	if id == 0 {
-		var configured []int64
-		for _, conn := range cs {
-			if conn.Configured {
-				configured = append(configured, conn.ID)
-			}
-		}
-		switch {
-		case len(bindings) > 1:
-			return 0, errors.New("this project has multiple harness bindings; select connectionId from list_projects")
-		case c.Session != nil:
-			id = c.Session.ConnectionID
-		case len(configured) == 1:
-			id = configured[0]
-		case len(cs) == 1:
-			id = cs[0].ID
-		default:
-			return 0, errors.New("choose a destination connectionId from list_projects")
-		}
-	}
-	if !slices.ContainsFunc(cs, func(c db.HarnessConnection) bool { return c.ID == id }) {
-		if slices.ContainsFunc(h, func(c db.HarnessConnection) bool { return c.ID == id }) {
-			return 0, fmt.Errorf("connection %d was replaced; select the current connection from list_projects", id)
-		}
-		return 0, fmt.Errorf("connection %d is unavailable; select a configured connection from list_projects", id)
+	if available > 1 {
+		return 0, fmt.Errorf("this project has multiple available workspaces, %s", destinationHelp)
 	}
 	return id, nil
 }

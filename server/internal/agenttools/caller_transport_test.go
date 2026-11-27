@@ -302,6 +302,10 @@ func TestDestinationAndScheduleProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defaultConnection := int64(1)
+	if _, err := e.store.SetDefaultConnection(ctx, &defaultConnection); err != nil {
+		t.Fatal(err)
+	}
 	cs := connect(t, &agenttools.Ops{Client: e.client})
 	ref := db.SessionRef{ConnectionID: 7, ExternalSessionID: "remote-caller"}
 	args := map[string]any{"project": fmt.Sprint(p.ID), "title": "nightly", "prompt": "test", "callerSession": ref}
@@ -342,7 +346,12 @@ func TestDestinationAndScheduleProvenance(t *testing.T) {
 	env.Stdout = &out
 	env.Stderr = &out
 	env.Caller = agentctx.Caller{Session: &db.SessionRef{ConnectionID: 1, ExternalSessionID: "inherited"}}
-	code := cli.Run(ctx, []string{"task", "add", "--url", e.url, "--project", fmt.Sprint(unbound.ID), "--title", "CLI", "--prompt", "Work", "--caller-connection", "7", "--caller-session", ref.ExternalSessionID, "--json"}, env)
+	add := []string{"task", "add", "--url", e.url, "--project", fmt.Sprint(unbound.ID), "--title", "CLI", "--prompt", "Work", "--caller-connection", "7", "--caller-session", ref.ExternalSessionID, "--json"}
+	if code := cli.Run(ctx, add, env); code == 0 || !strings.Contains(out.String(), "select connectionId and workspaceId") {
+		t.Fatal(code, out.String())
+	}
+	out.Reset()
+	code := cli.Run(ctx, append(add, "--connection", "7"), env)
 	var created client.Task
 	if code != 0 || json.Unmarshal(out.Bytes(), &created) != nil || created.ConnectionID != 7 || created.OriginSession == nil || *created.OriginSession != ref {
 		t.Fatal(code, out.String())

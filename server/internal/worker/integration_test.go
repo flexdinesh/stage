@@ -498,7 +498,7 @@ func TestAgentThroughGateway(t *testing.T) {
 		}
 		return out.String()
 	}
-	_ = stage("task", "add", "--project", fmt.Sprint(proj.ID), "--title", "from the laptop", "--prompt", "p")
+	_ = stage("task", "add", "--project", fmt.Sprint(proj.ID), "--connection", fmt.Sprint(conn), "--title", "from the laptop", "--prompt", "p")
 	tasks, err := m.client().Tasks(ctx, client.TaskQuery{})
 	if err != nil {
 		t.Fatal(err)
@@ -513,11 +513,12 @@ func TestAgentThroughGateway(t *testing.T) {
 		t.Fatalf("task not created on main: %+v", tasks)
 	}
 	var task struct {
+		ConnectionID    int64  `json:"connectionId"`
 		SourceMachineID *int64 `json:"sourceMachineId"`
 		CreatedBy       int64  `json:"createdBy"`
 	}
 	mainJSON(t, m, "GET", fmt.Sprintf("/api/tasks/%d", taskID), "", 200, &task)
-	if task.SourceMachineID == nil || *task.SourceMachineID != c.MachineID || task.CreatedBy != 1 {
+	if task.ConnectionID != conn || task.SourceMachineID == nil || *task.SourceMachineID != c.MachineID || task.CreatedBy != 1 {
 		t.Fatalf("task %+v, want source machine %d", task, c.MachineID)
 	}
 	_ = stage("task", "notes", fmt.Sprint(taskID), "add", "--text", "cli note", "--request-id", "cli-1")

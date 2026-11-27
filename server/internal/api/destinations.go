@@ -4,8 +4,6 @@ import (
 	"cmp"
 	"context"
 	"net/http"
-	"path"
-	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/principal"
@@ -15,21 +13,6 @@ func projectSummaryRequest(r *http.Request) bool {
 	actor, _ := principal.From(r.Context())
 	return actor.Kind == principal.Agent || r.Header.Get(principal.ToolTransportHeader) == "mcp" ||
 		r.URL.Query().Get("view") == "destinations"
-}
-
-func workspaceTitle(title, root string) string {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		title = root
-	}
-	title = strings.ReplaceAll(title, "\\", "/")
-	if title == root || path.IsAbs(title) || (len(title) >= 3 && title[1:3] == ":/") || strings.Contains(title, "://") {
-		title = path.Base(title)
-	}
-	if title == "." || title == "/" || title == "" {
-		return "Workspace"
-	}
-	return title
 }
 
 func (s *server) destinations(ctx context.Context) ([]db.Destination, error) {
@@ -75,7 +58,7 @@ func (s *server) destinations(ctx context.Context) ([]db.Destination, error) {
 			machine = cmp.Or(m.Label, "This computer")
 			machines[c.MachineID] = machine
 		}
-		key := displayed{workspaceTitle(row.Title, row.Workspace), db.SummarizeConnection(c, s.registry().Name(c.Harness)).Label, machine}
+		key := displayed{db.WorkspaceTitle(row.Title, row.Workspace), db.SummarizeConnection(c, s.registry().Name(c.Harness)).Label, machine}
 		counts[key]++
 		keys = append(keys, key)
 		out = append(out, db.Destination{
@@ -104,7 +87,7 @@ func projectSummary(p db.Project, available map[string]bool) db.ProjectSummary {
 			status = "workspace_unavailable"
 		}
 		out.Bindings = append(out.Bindings, db.BindingSummary{
-			ID: b.ID, ConnectionID: b.ConnectionID, WorkspaceID: id, Title: workspaceTitle(b.Title, b.Workspace),
+			ID: b.ID, ConnectionID: b.ConnectionID, WorkspaceID: id, Title: db.WorkspaceTitle(b.Title, b.Workspace),
 			ConnectionActive: b.ConnectionActive, Primary: b.Primary, Status: status,
 		})
 	}

@@ -234,6 +234,16 @@ export const useProjects = (archived: ArchivedFilter = "false", { enabled = true
   });
 };
 
+export function useDestinations(enabled = true) {
+  const api = useApi();
+  return useQuery({
+    queryKey: [...keys.projects, "destinations"],
+    queryFn: ({ signal }) => api.destinations(signal),
+    refetchInterval: POLL.slow,
+    enabled,
+  });
+}
+
 /** The server answered 404: the record was deleted or never existed. */
 export const isNotFound = (error: unknown): boolean => error instanceof ApiError && error.status === 404;
 
@@ -485,13 +495,17 @@ const NO_REQUESTS: SessionRequest[] = [];
 /** How often pending requests are re-read while a task needs input: a request can appear or be answered elsewhere at any time. */
 const REQUESTS_POLL = 3000;
 
-type CapabilityScope = { projectId: number; id: number; revision: number };
+type CapabilityScope = { projectId: number; id: number; revision: number } | { workspaceId: string };
 
-/** One cached capability read per connection and binding revision. Omit the binding for harness-wide declarations. */
+/** One cached read per connection and workspace scope. Omit the scope for harness-wide declarations. */
 export function connectionCapabilityOptions(api: Pick<ReturnType<typeof useApi>, "capabilities">, connectionId: number, scope?: CapabilityScope) {
+  const key = scope === undefined ? ["", false] : "workspaceId" in scope
+    ? ["workspace", scope.workspaceId]
+    : [scope.projectId, scope.id, scope.revision];
+  const params = scope === undefined || "workspaceId" in scope ? scope : { projectId: scope.projectId, bindingId: scope.id };
   return queryOptions({
-    queryKey: scope === undefined ? ["capabilities", connectionId, "", false] : ["capabilities", connectionId, scope.projectId, scope.id, scope.revision],
-    queryFn: () => api.capabilities(connectionId, scope === undefined ? undefined : { projectId: scope.projectId, bindingId: scope.id }),
+    queryKey: ["capabilities", connectionId, ...key],
+    queryFn: ({ signal }) => api.capabilities(connectionId, params, signal),
     staleTime: 60_000,
     retry: false,
   });

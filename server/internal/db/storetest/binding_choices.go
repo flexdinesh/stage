@@ -1,7 +1,6 @@
 package storetest
 
 import (
-	"context"
 	"errors"
 	"slices"
 	"testing"
@@ -11,7 +10,6 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
-	"github.com/flexdinesh/stage/server/internal/schedule"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -97,20 +95,20 @@ func caseTaskAndScheduleWorkspaceChoices(t *testing.T, open Factory) {
 		t.Fatalf("pinned task workspace %+v, %v", pinned.Workspace, err)
 	}
 	blocked, err := s.CreateTask(ctx, newTask)
-	if err != nil || blocked.BindingID == nil || *blocked.BindingID != chosenID || blocked.Workspace != nil {
+	if err != nil || blocked.BindingID == nil || *blocked.BindingID != chosenID || blocked.WorkspaceID != task.WorkspaceID {
 		t.Fatalf("missing choice %+v, %v", blocked, err)
 	}
 	var conflict *db.ConflictError
 	if err := start(blocked.ID); !errors.As(err, &conflict) || conflict.Code != "binding_unavailable" {
 		t.Fatalf("missing chosen workspace launch: %v", err)
 	}
-	clear := db.Optional[int64]{Set: true, Null: true}
-	blocked, err = s.UpdateTask(ctx, blocked.ID, db.TaskPatch{BindingID: clear})
-	if err != nil || blocked.BindingID != nil || blocked.Workspace == nil || *blocked.Workspace != wantPrimary {
+	primarySelector := db.Optional[string]{Set: true, V: db.WorkspaceID(connection, primary.ID, primary.WorkspaceRoot)}
+	blocked, err = s.UpdateTask(ctx, blocked.ID, db.TaskPatch{WorkspaceID: primarySelector})
+	if err != nil || blocked.BindingID != nil || blocked.WorkspaceID != primarySelector.V || blocked.Workspace == nil || *blocked.Workspace != wantPrimary {
 		t.Fatalf("task after clearing choice %+v, %v", blocked, err)
 	}
 	sc, err = s.UpdateSchedule(ctx, sc.ID, db.SchedulePatch{ProjectID: db.Optional[int64]{Set: true, V: other.ID}})
-	if err != nil || sc.BindingID != nil {
+	if err != nil || sc.ProjectID != other.ID || sc.WorkspaceID != task.WorkspaceID {
 		t.Fatalf("schedule after changing project %+v, %v", sc, err)
 	}
 
@@ -124,148 +122,79 @@ func caseTaskAndScheduleWorkspaceChoices(t *testing.T, open Factory) {
 	}
 }
 
-type scheduledLaunchFunc func(context.Context, int64, string) (db.Task, error)
-
-func (f scheduledLaunchFunc) LaunchScheduled(ctx context.Context, id int64, detail string) (db.Task, error) {
-	return f(ctx, id, detail)
-}
-
 func caseConnectionReplacementWorkspaceChoices(t *testing.T, open Factory) {
-	for _, tc := range []struct {
-		name        string
-		pinTask     bool
-		pinSchedule bool
-		forget      bool
-	}{
-		{name: "pinned", pinTask: true, pinSchedule: true},
-		{name: "forgotten_task_pin", pinTask: true, forget: true},
-		{name: "forgotten_schedule_pin", pinSchedule: true, forget: true},
-		{name: "unpinned"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			s, ctx := setup(t, open)
-			old, err := s.SwitchInstance(ctx, db.LocalMachine, t3.Descriptor, "env-a", "", 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			p, err := s.InsertProject(ctx, db.Project{Title: "Project", Bindings: []db.ProjectBinding{
-				{ConnectionID: old.New, ExternalProjectID: "chosen", Workspace: "/old/chosen"},
-			}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			chosen := p.Bindings[0].ID
-			var taskPin, schedulePin *int64
-			if tc.pinTask {
-				taskPin = &chosen
-			}
-			if tc.pinSchedule {
-				schedulePin = &chosen
-			}
-			manual, err := s.CreateTask(ctx, db.NewTask{
-				ProjectID: p.ID, ConnectionID: old.New, BindingID: taskPin, Title: "Manual", Prompt: "p",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			sc, err := s.CreateSchedule(ctx, db.NewSchedule{
-				ProjectID: p.ID, ConnectionID: old.New, BindingID: schedulePin,
-				Title: "Schedule", Prompt: "p", Cron: "*/5 * * * *", Tz: "UTC",
-			})
-			if err != nil || sc.NextRunAt == nil {
-				t.Fatalf("create schedule: %+v, %v", sc, err)
-			}
-			sw, err := s.SwitchInstance(ctx, db.LocalMachine, t3.Descriptor, "env-b", "", 0)
-			if err != nil || !sw.Changed || sw.Old != old.New || sw.New == old.New {
-				t.Fatalf("replace connection: %+v, %v", sw, err)
-			}
-			p, err = s.BindProject(ctx, db.ProjectBinding{ProjectID: p.ID, ConnectionID: sw.New, ExternalProjectID: "primary", Workspace: "/new/primary"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			newPrimary := slices.IndexFunc(p.Bindings, func(b db.ProjectBinding) bool { return b.ConnectionID == sw.New && b.Primary })
-			if newPrimary < 0 {
-				t.Fatalf("replacement primary missing: %+v", p.Bindings)
-			}
-			primary := p.Bindings[newPrimary]
-			if tc.forget {
-				if err := s.ForgetConnection(ctx, sw.Old); err != nil {
-					t.Fatal(err)
-				}
-			}
+	s, ctx := setup(t, open)
+	old, err := s.SwitchInstance(ctx, db.LocalMachine, t3.Descriptor, "env-a", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := mustProject(t, s, ctx, "chosen")
+	manual := mustTask(t, s, ctx, p.ID, "Manual", nil)
+	sc := mustSchedule(t, s, ctx, p.ID, "*/5 * * * *")
+	if manual.WorkspaceID == "" || sc.WorkspaceID != manual.WorkspaceID {
+		t.Fatalf("initial selectors task %q, schedule %q", manual.WorkspaceID, sc.WorkspaceID)
+	}
+	history := mustTask(t, s, ctx, p.ID, "History", nil)
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: history.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
+		t.Fatal(err)
+	}
+	frozen, err := s.LaunchDestination(ctx, history.ID, 1)
+	if err != nil || frozen.ConnectionID != old.New || frozen.Workspace != "/w/chosen" {
+		t.Fatalf("historical claim %+v, %v", frozen, err)
+	}
 
-			start := scheduledLaunchFunc(func(ctx context.Context, id int64, detail string) (db.Task, error) {
-				_, err := s.TransitionTask(ctx, db.Transition{
-					TaskID: id, From: []db.TaskState{db.StateBacklog}, To: db.StateLaunching, Detail: detail, BeginAttempt: true,
-				})
-				if err != nil {
-					return db.Task{}, err
-				}
-				return s.GetTask(ctx, id)
-			})
-			assertDestination := func(t *testing.T, id int64) {
-				t.Helper()
-				dest, err := s.LaunchDestination(ctx, id, 1)
-				if err != nil || dest.ConnectionID != sw.New || dest.BindingID != primary.ID || dest.Workspace != primary.Workspace {
-					t.Fatalf("launch destination: %+v, %v", dest, err)
-				}
-			}
+	sw, err := s.SwitchInstance(ctx, db.LocalMachine, t3.Descriptor, "env-b", "", 0)
+	if err != nil || !sw.Changed || sw.Old != old.New || sw.New == old.New {
+		t.Fatalf("replace connection: %+v, %v", sw, err)
+	}
+	if _, err := s.RefreshWorkspaces(ctx, sw.New, []execution.WorkspaceInfo{{ID: "chosen", WorkspaceRoot: "/w/chosen"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForgetConnection(ctx, sw.Old); err != nil {
+		t.Fatal(err)
+	}
+	begin := db.Transition{TaskID: manual.ID, From: []db.TaskState{db.StateBacklog}, To: db.StateLaunching, BeginAttempt: true}
+	_, err = s.TransitionTask(ctx, begin)
+	assertProjectConflict(t, err, "destination_unavailable")
+	if got := getTask(t, s, ctx, manual.ID); got.ConnectionID != sw.Old || got.ConnectionActive ||
+		got.WorkspaceID != manual.WorkspaceID || got.State != db.StateBacklog || got.LaunchAttempt != 0 {
+		t.Fatalf("task after replacement: %+v", got)
+	}
+	_, err = s.RunScheduleNow(ctx, sc.ID)
+	assertProjectConflict(t, err, "destination_unavailable")
+	if got := mustFire(t, s, ctx, sc.ID, *sc.NextRunAt); got.Outcome != db.RunSkipped || got.TaskID != nil {
+		t.Fatalf("retired schedule fire: %+v", got)
+	}
+	if got, err := s.GetSchedule(ctx, sc.ID); err != nil || got.ConnectionID != sw.Old ||
+		got.WorkspaceID != sc.WorkspaceID || got.NextRunAt == nil || !got.NextRunAt.After(*sc.NextRunAt) {
+		t.Fatalf("schedule after blocked fire: %+v, %v", got, err)
+	}
 
-			t.Run("manual", func(t *testing.T) {
-				started, err := start(ctx, manual.ID, "manual start")
-				if tc.pinTask {
-					assertProjectConflict(t, err, "binding_unavailable")
-					blocked, getErr := s.GetTask(ctx, manual.ID)
-					if getErr != nil || blocked.ConnectionID != sw.New || blocked.BindingID == nil || *blocked.BindingID != chosen ||
-						blocked.Workspace != nil || blocked.State != db.StateBacklog || blocked.LaunchAttempt != 0 {
-						t.Fatalf("blocked manual task: %+v, %v", blocked, getErr)
-					}
-					if _, err := s.UpdateTask(ctx, manual.ID, db.TaskPatch{BindingID: db.Optional[int64]{Set: true, V: primary.ID}}); err != nil {
-						t.Fatal(err)
-					}
-					started, err = start(ctx, manual.ID, "manual start after choosing a workspace")
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !tc.pinTask && started.BindingID != nil {
-					t.Fatalf("unpinned task got binding %d", *started.BindingID)
-				}
-				assertDestination(t, manual.ID)
-			})
-			t.Run("due schedule", func(t *testing.T) {
-				runner := schedule.NewRunner(s, start, nil)
-				runner.ConnectionID = sw.New
-				runner.Now = func() time.Time { return sc.NextRunAt.Add(time.Second) }
-				if err := runner.Reconcile(ctx); err != nil {
-					t.Fatal(err)
-				}
-				saved, err := s.GetSchedule(ctx, sc.ID)
-				if err != nil || saved.ConnectionID != sw.New || saved.LastTaskID == nil {
-					t.Fatalf("schedule after firing: %+v, %v", saved, err)
-				}
-				id := *saved.LastTaskID
-				spawned, err := s.GetTask(ctx, id)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !tc.pinSchedule {
-					if saved.BindingID != nil || spawned.BindingID != nil {
-						t.Fatalf("unpinned schedule or task got a binding: %+v, %+v", saved, spawned)
-					}
-					assertDestination(t, id)
-					return
-				}
-				if saved.BindingID == nil || *saved.BindingID != chosen || saved.Workspace != nil ||
-					spawned.BindingID == nil || *spawned.BindingID != chosen || spawned.Workspace != nil ||
-					spawned.State != db.StateBacklog || spawned.LaunchAttempt != 0 || spawned.StartAt != nil || spawned.LastError == nil {
-					t.Fatalf("occurrence was not held: schedule %+v, task %+v", saved, spawned)
-				}
-				repaired, err := s.UpdateSchedule(ctx, sc.ID, db.SchedulePatch{BindingID: db.Optional[int64]{Set: true, Null: true}})
-				if err != nil || repaired.BindingID != nil || repaired.Workspace == nil || repaired.Workspace.BindingID != primary.ID {
-					t.Fatalf("schedule after choosing primary: %+v, %v", repaired, err)
-				}
-			})
-		})
+	connection := db.Optional[int64]{Set: true, V: sw.New}
+	selector := db.Optional[string]{Set: true, V: db.WorkspaceID(sw.New, "chosen", "/w/chosen")}
+	config := db.Optional[execution.Config]{Set: true}
+	if got, err := s.UpdateTask(ctx, manual.ID, db.TaskPatch{ConnectionID: connection, WorkspaceID: selector, ExecutionConfig: config}); err != nil || got.WorkspaceID != selector.V {
+		t.Fatalf("repaired task: %+v, %v", got, err)
+	}
+	if _, err := s.TransitionTask(ctx, begin); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.LaunchDestination(ctx, manual.ID, 1); err != nil || got.ConnectionID != sw.New ||
+		got.ExternalProjectID != "chosen" || got.Workspace != "/w/chosen" {
+		t.Fatalf("repaired launch: %+v, %v", got, err)
+	}
+	repaired, err := s.UpdateSchedule(ctx, sc.ID, db.SchedulePatch{ConnectionID: connection, WorkspaceID: selector, ExecutionConfig: config})
+	if err != nil || repaired.WorkspaceID != selector.V || repaired.NextRunAt == nil {
+		t.Fatalf("repaired schedule: %+v, %v", repaired, err)
+	}
+	fire := mustFire(t, s, ctx, sc.ID, *repaired.NextRunAt)
+	if fire.Outcome != db.RunStarted || fire.TaskID == nil {
+		t.Fatalf("repaired schedule fire: %+v", fire)
+	}
+	if got := getTask(t, s, ctx, *fire.TaskID); got.ConnectionID != sw.New || got.WorkspaceID != selector.V {
+		t.Fatalf("repaired schedule spawn: %+v", got)
+	}
+	if got, err := s.LaunchDestination(ctx, history.ID, 1); err != nil || got != frozen {
+		t.Fatalf("historical claim changed from %+v to %+v, %v", frozen, got, err)
 	}
 }

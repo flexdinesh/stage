@@ -7,12 +7,21 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // launchedTask creates a task in project and launches it on the local T3
 // under thread, ending running.
 func launchedTask(t *testing.T, s *Store, ctx context.Context, project int64, thread string) int64 {
 	t.Helper()
+	p, err := s.GetProject(ctx, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := p.Bindings[0]
+	if _, err := s.RefreshWorkspaces(ctx, b.ConnectionID, []execution.WorkspaceInfo{{ID: b.ExternalProjectID, WorkspaceRoot: b.Workspace}}); err != nil {
+		t.Fatal(err)
+	}
 	task, err := s.CreateTask(ctx, NewTask{ConnectionID: dbtest.T3Connection, ProjectID: project, Title: "t", Prompt: "p"})
 	if err != nil {
 		t.Fatal(err)

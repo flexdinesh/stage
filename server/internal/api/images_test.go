@@ -70,6 +70,11 @@ func imagesEnv(t *testing.T) (e *env, local *machine.Local, imageConn, textConn,
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, connection := range []int64{imageConn, textConn} {
+		if _, err := e.store.RefreshWorkspaces(t.Context(), connection, []execution.WorkspaceInfo{{ID: "repo", WorkspaceRoot: hostedWorkspace}}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return e, local, imageConn, textConn, p.ID
 }
 

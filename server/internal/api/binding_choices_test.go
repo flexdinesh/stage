@@ -40,6 +40,65 @@ func TestTaskWorkspaceChoiceAndLaunchSnapshot(t *testing.T) {
 	}
 }
 
+func TestExactUnboundWorkspaceSurvivesEditAndDuplicate(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/group")
+	unbound := e.fake.AddProject("Unbound", "/w/unbound")
+	var catalog workspaceInventory
+	e.must("GET", "/api/connections/1/workspaces", nil, 200, &catalog)
+	selector := db.WorkspaceID(1, unbound.ID, unbound.WorkspaceRoot)
+	var draft db.Task
+	e.must("POST", "/api/tasks", map[string]any{"connectionId": 1, "workspaceId": selector, "projectId": p.ID,
+		"title": "Draft", "prompt": "Reply OK"}, 201, &draft)
+	if draft.ExecutionConfig == nil || draft.ExecutionConfig.Options == nil {
+		t.Fatal("default execution options must serialize as an array")
+	}
+	var detail db.Task
+	e.must("GET", taskPath(draft.ID, ""), nil, 200, &detail)
+	if detail.ExecutionConfig == nil || detail.ExecutionConfig.Options == nil {
+		t.Fatal("task detail must return an array for default execution options")
+	}
+	e.must("PATCH", taskPath(draft.ID, ""), map[string]string{"title": "Ready to start"}, 200, &draft)
+	var duplicate db.Task
+	e.must("POST", taskPath(draft.ID, "/duplicate"), nil, 201, &duplicate)
+	if draft.WorkspaceID != selector || duplicate.WorkspaceID != selector || duplicate.BindingID != nil {
+		t.Fatalf("draft and duplicate did not preserve the exact unbound choice: %+v, %+v", draft, duplicate)
+	}
+	if err := e.fake.SetProject(unbound.ID, func(w *execution.WorkspaceInfo) { w.WorkspaceRoot = "/w/moved" }); err != nil {
+		t.Fatal(err)
+	}
+	e.must("POST", taskPath(duplicate.ID, "/start"), nil, 409, nil)
+	if len(e.t3.launchRequestIDs()) != 0 {
+		t.Fatal("an unavailable selection fell back to the group workspace")
+	}
+	reselected := db.WorkspaceID(1, unbound.ID, "/w/moved")
+	e.must("PATCH", taskPath(duplicate.ID, ""), map[string]any{"workspaceId": reselected}, 200, &duplicate)
+	e.must("POST", taskPath(duplicate.ID, "/start"), nil, 200, &duplicate)
+	frozen, err := e.store.LaunchDestination(t.Context(), duplicate.ID, duplicate.LaunchAttempt)
+	if err != nil || duplicate.WorkspaceID != reselected || frozen.BindingID != 0 || frozen.Workspace != "/w/moved" {
+		t.Fatalf("reselected launch destination %+v, %v", frozen, err)
+	}
+}
+
+func TestLegacyProjectCannotBorrowSharedDefault(t *testing.T) {
+	e, _, preferred, other, projectID := imagesEnv(t)
+	if _, err := e.store.SetDefaultConnection(t.Context(), &preferred); err != nil {
+		t.Fatal(err)
+	}
+	in := map[string]any{"projectId": projectID, "title": "Choose a destination", "prompt": "p"}
+	var refused errOut
+	e.must("POST", "/api/tasks", in, 409, &refused)
+	if refused.Code != "destination_required" {
+		t.Fatalf("legacy selector repair = %+v", refused)
+	}
+	in["connectionId"] = other
+	in["workspaceId"] = db.WorkspaceID(preferred, "repo", hostedWorkspace)
+	e.must("POST", "/api/tasks", in, 409, &refused)
+	if refused.Code != "destination_unavailable" {
+		t.Fatalf("foreign connection selector = %+v", refused)
+	}
+}
+
 const alternateWorkspace = "/home/u/alternate"
 
 type scopedWorkspaceAdapter struct{ hostedAdapter }

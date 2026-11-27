@@ -12,6 +12,8 @@ type Schedule struct {
 	ExecutionConfig *execution.Config `json:"executionConfig"`
 	ConnectionID    int64             `json:"connectionId"`
 	BindingID       *int64            `json:"bindingId"`
+	WorkspaceID     string            `json:"workspaceId,omitempty"`
+	WorkspacePin    *WorkspacePin     `json:"-"`
 	Workspace       *TaskWorkspace    `json:"-"`
 	OriginSession   *SessionRef       `json:"originSession"`
 	ID              int64             `json:"id"`
@@ -65,6 +67,7 @@ type DueTask struct {
 type ScheduleInsert struct {
 	ProjectID       int64
 	BindingID       *int64
+	WorkspacePin    *WorkspacePin `json:"-"`
 	Title           string
 	Prompt          string
 	Notes           string
@@ -88,13 +91,15 @@ type ScheduleEditState struct {
 	ConnectionID    int64
 	ProjectID       int64
 	BindingID       *int64
+	WorkspacePin    *WorkspacePin `json:"-"`
 }
 
-// ScheduleUpdate is the columns an edit sets (unset fields are kept;
-// ExecutionConfig and NextRunAt Null clears).
+// ScheduleUpdate lists the editable columns. Unset fields are kept.
+// Null clears nullable fields.
 type ScheduleUpdate struct {
 	ConnectionID    Optional[int64]
 	BindingID       Optional[int64]
+	WorkspacePin    Optional[WorkspacePin]
 	ExecutionConfig Optional[execution.Config]
 	ProjectID       Optional[int64]
 	Title           Optional[string]
@@ -110,6 +115,7 @@ type ScheduleUpdate struct {
 type ScheduleTemplate struct {
 	ProjectID       int64
 	BindingID       *int64
+	WorkspacePin    *WorkspacePin `json:"-"`
 	Title           string
 	Prompt          string
 	Notes           string

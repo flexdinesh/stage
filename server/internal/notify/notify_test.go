@@ -536,6 +536,9 @@ func TestNotificationNavigationWithExternalSessionID(t *testing.T) {
 func TestTaskNotificationGroupSurvivesSessionChange(t *testing.T) {
 	n, store := newNotifier(t)
 	ctx := context.Background()
+	if _, err := store.RefreshWorkspaces(ctx, dbtest.T3Connection, []t3.Project{{ID: "proj-1", WorkspaceRoot: "/w/1"}}); err != nil {
+		t.Fatal(err)
+	}
 	task := seedTask(t, store, db.StateBacklog)
 	for _, sessionID := range []string{"first-session", "second-session"} {
 		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {

@@ -54,6 +54,8 @@ type Task struct {
 	Launch          *Attempt          `json:"launch,omitempty"`
 	ConnectionID    int64             `json:"connectionId"`
 	BindingID       *int64            `json:"bindingId"`
+	WorkspaceID     string            `json:"workspaceId,omitempty"`
+	WorkspacePin    *WorkspacePin     `json:"-"`
 	Workspace       *TaskWorkspace    `json:"workspace"`
 	// Harness of the connection; ConnectionActive is false once its
 	// instance was replaced (ConnectionLabel names that instance).
@@ -199,19 +201,25 @@ func (s HandoffSource) Label() string {
 	return fmt.Sprintf("session %q", s.Title)
 }
 
+// WorkspacePin is the exact workspace key on the owner's connection.
+type WorkspacePin struct {
+	ExternalID string `json:"externalId"`
+	Root       string `json:"root"`
+}
+
 // TaskWorkspace describes the workspace projected for a task or schedule.
 type TaskWorkspace struct {
 	BindingID  int64  `json:"bindingId"`
 	Path       string `json:"path"`
 	Source     string `json:"source"`               // pinned, chosen or primary
-	ExternalID string `json:"externalId,omitempty"` // from the pinned launch destination
+	ExternalID string `json:"externalId,omitempty"` // exact workspace or historical binding identity
 }
 
 type LaunchDestination struct {
 	ConnectionID      int64
 	ExternalProjectID string
 	Workspace         string
-	BindingID         int64
+	BindingID         int64 // zero when the attempt has no binding
 	BindingRevision   int64
 }
 
@@ -238,11 +246,19 @@ type Transition struct {
 	To          TaskState
 	Detail      string
 
-	BeginAttempt  bool        // launch start: attempt+1 and a new launch_request_id, clear session/error/finished/start/ready_at
+	BeginAttempt  bool // launch start: attempt+1 and a new launch_request_id, clear session/error/finished/start/ready_at
+	LaunchCheck   *LaunchCheck
 	Session       *SessionRef // set the session (+ launched_at)
 	ObservedStart *time.Time  // first native execution of an adopted backlog session
 	ObservedAt    *time.Time  // observation time for the event and first finish
 	LastError     *string     // set last_error
+}
+
+// LaunchCheck is the destination and configuration validated by the coordinator.
+type LaunchCheck struct {
+	ConnectionID int64
+	WorkspacePin WorkspacePin
+	Config       *execution.Config
 }
 
 // TransitionResult reports what happened. Changed=false: current state not
@@ -261,6 +277,7 @@ type TransitionResult struct {
 type TaskInsert struct {
 	ProjectID       int64
 	BindingID       *int64
+	WorkspacePin    *WorkspacePin `json:"-"`
 	Title           string
 	Prompt          string
 	StartAt         *time.Time
@@ -297,14 +314,16 @@ type TaskEditState struct {
 	ConnectionID    int64
 	ProjectID       int64
 	BindingID       *int64
+	WorkspacePin    *WorkspacePin `json:"-"`
 	Needs           int
 }
 
-// TaskUpdate is the columns an edit sets (unset fields are kept;
-// ExecutionConfig and StartMode Null clears).
+// TaskUpdate lists the editable columns. Unset fields are kept.
+// Null clears nullable fields.
 type TaskUpdate struct {
 	ConnectionID    Optional[int64]
 	BindingID       Optional[int64]
+	WorkspacePin    Optional[WorkspacePin]
 	ExecutionConfig Optional[execution.Config]
 	ProjectID       Optional[int64]
 	Title           Optional[string]
@@ -417,8 +436,6 @@ type Attempts interface {
 	PinInputs(ctx context.Context, taskID int64, n int) error
 	Destination(ctx context.Context, taskID int64, n int) (LaunchDestination, error)
 	HasDestination(ctx context.Context, taskID int64, n int) (bool, error)
-	// BoundDestination is the task's active available binding (ErrNotFound).
-	BoundDestination(ctx context.Context, taskID int64) (LaunchDestination, error)
 	PinDestination(ctx context.Context, taskID int64, n int, d LaunchDestination) error
 	// RecordHandoff replaces the attempt's handoff from h's source.
 	RecordHandoff(ctx context.Context, taskID int64, h Handoff, sourceSessionID *int64) error

@@ -49,9 +49,11 @@ SELECT t.id, t.project_id, p.title, t.title, t.prompt,
   t.connection_id,t.session_id,t.origin_session_id,
  (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.session_id),
  (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),(SELECT provenance FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config,
- hc.harness,hc.active,hc.label,t.created_by_user_id,t.source_machine_id,t.binding_id,
- CASE WHEN d.binding_id IS NOT NULL THEN json_object('bindingId',d.binding_id,'path',d.workspace,'source','pinned','externalId',d.external_project_id)
-      WHEN b.id IS NOT NULL THEN json_object('bindingId',b.id,'path',b.workspace,'externalId',b.external_project_id,'source',CASE WHEN t.binding_id IS NULL THEN 'primary' ELSE 'chosen' END)
+ hc.harness,hc.active,hc.label,t.created_by_user_id,t.source_machine_id,t.binding_id,t.workspace_pin,
+ CASE WHEN d.task_id IS NOT NULL THEN json_object('bindingId',COALESCE(d.binding_id,0),'path',d.workspace,'source','pinned','externalId',d.external_project_id)
+      WHEN t.workspace_pin IS NOT NULL THEN json_object('bindingId',COALESCE(b.id,0),'path',json_extract(t.workspace_pin,'$.root'),
+       'source',CASE WHEN t.binding_id IS NULL AND b.id IS NOT NULL THEN 'primary' ELSE 'chosen' END,'externalId',json_extract(t.workspace_pin,'$.externalId'))
+      WHEN t.launch_attempt>0 AND b.id IS NOT NULL THEN json_object('bindingId',b.id,'path',b.workspace,'externalId',b.external_project_id,'source',CASE WHEN t.binding_id IS NULL THEN 'primary' ELSE 'chosen' END)
  END
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
@@ -60,7 +62,14 @@ LEFT JOIN task_trees tr ON tr.id = t.tree_id
 LEFT JOIN execution_observations obs ON obs.session_id=t.session_id
 LEFT JOIN schedules sc ON sc.id = t.schedule_id
 LEFT JOIN task_launch_destinations d ON d.task_id=t.id AND d.attempt=t.launch_attempt
-LEFT JOIN project_bindings b ON ` + effectiveBindingSQL("t")
+LEFT JOIN project_bindings b ON ` + projectedBindingSQL("t")
+
+// projectedBindingSQL only associates a legacy binding with a pin when both
+// still describe the same workspace.
+func projectedBindingSQL(owner string) string {
+	return effectiveBindingSQL(owner) + ` AND (` + owner + `.workspace_pin IS NULL OR (
+b.external_project_id=json_extract(` + owner + `.workspace_pin,'$.externalId') AND b.workspace=json_extract(` + owner + `.workspace_pin,'$.root')))`
+}
 
 func scanTask(row rowScanner) (store.Task, error) {
 	var t store.Task
@@ -72,7 +81,7 @@ func scanTask(row rowScanner) (store.Task, error) {
 		&t.UpdatedAt, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginSessionTitle, &t.Handoff, &t.Attachments,
 		&t.StateSince, &t.SessionUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
-		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID, &t.BindingID, &t.Workspace)
+		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID, &t.BindingID, &t.WorkspacePin, &t.Workspace)
 	if err != nil {
 		return store.Task{}, notFound(err)
 	}
@@ -227,10 +236,10 @@ func (r tasks) Insert(ctx context.Context, in store.TaskInsert) (int64, error) {
 	var id int64
 	err := r.QueryRow(ctx, `
 INSERT INTO tasks (project_id, title, prompt, start_at, start_tz, schedule_id, handoff, start_mode,
-  connection_id, origin_session_id, execution_config, created_by_user_id, source_machine_id, binding_id)
-VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7, true),$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+  connection_id, origin_session_id, execution_config, created_by_user_id, source_machine_id, binding_id, workspace_pin)
+VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7, true),$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
 		in.ProjectID, in.Title, in.Prompt, in.StartAt, in.StartTz, in.ScheduleID, in.Handoff, in.StartMode,
-		in.ConnectionID, in.OriginSessionID, in.ExecutionConfig, in.CreatedBy, in.SourceMachineID, in.BindingID,
+		in.ConnectionID, in.OriginSessionID, in.ExecutionConfig, in.CreatedBy, in.SourceMachineID, in.BindingID, in.WorkspacePin,
 	).Scan(&id)
 	return id, err
 }
@@ -245,9 +254,9 @@ func (r tasks) InsertAdopted(ctx context.Context, in store.AdoptedInsert) (int64
 
 func (r tasks) EditState(ctx context.Context, id int64) (store.TaskEditState, error) {
 	var e store.TaskEditState
-	err := r.QueryRow(ctx, `SELECT state, execution_config, adopted, connection_id, project_id, binding_id,
+	err := r.QueryRow(ctx, `SELECT state, execution_config, adopted, connection_id, project_id, binding_id, workspace_pin,
   (SELECT count(*) FROM task_needs WHERE task_id = tasks.id) FROM tasks WHERE id = $1`, id).
-		Scan(&e.State, &e.ExecutionConfig, &e.Adopted, &e.ConnectionID, &e.ProjectID, &e.BindingID, &e.Needs)
+		Scan(&e.State, &e.ExecutionConfig, &e.Adopted, &e.ConnectionID, &e.ProjectID, &e.BindingID, &e.WorkspacePin, &e.Needs)
 	return e, notFound(err)
 }
 
@@ -272,6 +281,9 @@ func (r tasks) Update(ctx context.Context, id int64, u store.TaskUpdate) error {
 	}
 	if u.BindingID.Set {
 		set("binding_id", u.BindingID.Ptr())
+	}
+	if u.WorkspacePin.Set {
+		set("workspace_pin", u.WorkspacePin.Ptr())
 	}
 	if u.Title.Set {
 		set("title", u.Title.V)

@@ -151,7 +151,6 @@ type Projects interface {
 	DeactivateBinding(ctx context.Context, id int64) error
 	// PromoteBinding selects id, or the lowest active binding id when id is zero.
 	PromoteBinding(ctx context.Context, project, connection, id int64) error
-	RepointBindingChoices(ctx context.Context, from, to int64) error
 	// AdoptionTarget is the sole project actively and availably bound to
 	// (connection, external project[, workspace]) (false: none or several).
 	AdoptionTarget(ctx context.Context, connectionID int64, externalID string, workspace *string) (int64, bool, error)

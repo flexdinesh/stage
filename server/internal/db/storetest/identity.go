@@ -103,12 +103,32 @@ func caseMoveRebinds(t *testing.T, open Factory) {
 		t.Fatalf("binding %+v", b)
 	}
 	task, err = s.GetTask(ctx, task.ID)
-	if err != nil || task.BindingID == nil || *task.BindingID != b.ID {
+	if err != nil || task.BindingID == nil || *task.BindingID != oldID || task.WorkspaceID != db.WorkspaceID(connection, old.ID, old.WorkspaceRoot) {
 		t.Fatalf("task %+v: %v", task, err)
 	}
 	schedule, err = s.GetSchedule(ctx, schedule.ID)
-	if err != nil || schedule.BindingID == nil || *schedule.BindingID != b.ID {
+	if err != nil || schedule.BindingID == nil || *schedule.BindingID != oldID || schedule.WorkspaceID != task.WorkspaceID {
 		t.Fatalf("schedule %+v: %v", schedule, err)
+	}
+	_, err = s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateLaunching, BeginAttempt: true})
+	assertProjectConflict(t, err, "binding_unavailable")
+	_, err = s.RunScheduleNow(ctx, schedule.ID)
+	assertProjectConflict(t, err, "destination_unavailable")
+	selector := db.Optional[string]{Set: true, V: db.WorkspaceID(connection, next.ID, next.WorkspaceRoot)}
+	if task, err = s.UpdateTask(ctx, task.ID, db.TaskPatch{WorkspaceID: selector}); err != nil || task.WorkspaceID != selector.V || task.BindingID != nil {
+		t.Fatalf("repaired task %+v: %v", task, err)
+	}
+	if schedule, err = s.UpdateSchedule(ctx, schedule.ID, db.SchedulePatch{WorkspaceID: selector}); err != nil || schedule.WorkspaceID != selector.V || schedule.BindingID != nil {
+		t.Fatalf("repaired schedule %+v: %v", schedule, err)
+	}
+	if _, err := s.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
+		t.Fatal(err)
+	}
+	if dest, err := s.LaunchDestination(ctx, task.ID, 1); err != nil || dest.BindingID != b.ID || dest.Workspace != next.WorkspaceRoot {
+		t.Fatalf("repaired launch %+v: %v", dest, err)
+	}
+	if spawned, err := s.RunScheduleNow(ctx, schedule.ID); err != nil || spawned.WorkspaceID != selector.V {
+		t.Fatalf("repaired schedule spawn %+v: %v", spawned, err)
 	}
 	events, err := s.ProjectEvents(ctx, project.ID)
 	if err != nil || len(events) != 1 || events[0].Type != "workspace_moved" {

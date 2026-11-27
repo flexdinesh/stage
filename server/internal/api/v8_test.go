@@ -77,12 +77,12 @@ func TestConnectionRequiredWithoutBinding(t *testing.T) {
 	e := newEnv(t)
 	var p project
 	e.must("POST", "/api/projects", map[string]any{"title": "Unbound"}, 201, &p)
-	msg := e.refused("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y"}, 400)
-	if !strings.Contains(msg, "connectionId is required") {
+	msg := e.refused("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y"}, 409)
+	if !strings.Contains(msg, "Choose a connection and workspace") {
 		t.Fatalf("task without connection: %q", msg)
 	}
-	msg = e.refused("POST", "/api/schedules", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "cron": "0 2 * * *", "tz": "UTC"}, 400)
-	if !strings.Contains(msg, "connectionId is required") {
+	msg = e.refused("POST", "/api/schedules", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "cron": "0 2 * * *", "tz": "UTC"}, 409)
+	if !strings.Contains(msg, "Choose a connection and workspace") {
 		t.Fatalf("schedule without connection: %q", msg)
 	}
 }

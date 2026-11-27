@@ -53,11 +53,24 @@ func (s *server) treeDetail(t db.TreeDetail) treeDetailJSON {
 func (s *server) task(t db.Task) taskJSON {
 	ctx := context.Background()
 	s.loadTaskAttempt(ctx, &t)
+	t.ExecutionConfig = configForClient(t.ExecutionConfig)
+	if t.WorkspacePin != nil {
+		t.WorkspaceID = db.WorkspaceID(t.ConnectionID, t.WorkspacePin.ExternalID, t.WorkspacePin.Root)
+	}
 	out := taskJSON{Task: t}
 	if t.Session != nil {
 		out.Links = s.sessionLinks(ctx, t.Session.ConnectionID, &t.Session.ExternalSessionID)
 	}
 	return out
+}
+
+func configForClient(config *execution.Config) *execution.Config {
+	if config == nil || config.Options != nil {
+		return config
+	}
+	out := *config
+	out.Options = []execution.ModelOption{}
+	return &out
 }
 
 func (s *server) loadTaskAttempt(ctx context.Context, t *db.Task) {

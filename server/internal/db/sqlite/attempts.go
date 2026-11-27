@@ -89,7 +89,7 @@ func (r attempts) PinInputs(ctx context.Context, taskID int64, n int) error {
 
 func (r attempts) Destination(ctx context.Context, taskID int64, n int) (store.LaunchDestination, error) {
 	var b store.LaunchDestination
-	err := r.QueryRow(ctx, `SELECT connection_id,external_project_id,workspace,binding_id,binding_revision FROM task_launch_destinations WHERE task_id=$1 AND attempt=$2`, taskID, n).Scan(&b.ConnectionID, &b.ExternalProjectID, &b.Workspace, &b.BindingID, &b.BindingRevision)
+	err := r.QueryRow(ctx, `SELECT connection_id,external_project_id,workspace,COALESCE(binding_id,0),binding_revision FROM task_launch_destinations WHERE task_id=$1 AND attempt=$2`, taskID, n).Scan(&b.ConnectionID, &b.ExternalProjectID, &b.Workspace, &b.BindingID, &b.BindingRevision)
 	return b, notFound(err)
 }
 
@@ -109,14 +109,8 @@ func effectiveBindingSQL(owner string) string {
  AND pb.active=1 AND pb.is_primary=1))`
 }
 
-func (r attempts) BoundDestination(ctx context.Context, taskID int64) (store.LaunchDestination, error) {
-	var b store.LaunchDestination
-	err := r.QueryRow(ctx, `SELECT b.connection_id,b.external_project_id,b.workspace,b.id,b.revision FROM tasks t JOIN project_bindings b ON `+effectiveBindingSQL("t")+` WHERE t.id=$1`, taskID).Scan(&b.ConnectionID, &b.ExternalProjectID, &b.Workspace, &b.BindingID, &b.BindingRevision)
-	return b, notFound(err)
-}
-
 func (r attempts) PinDestination(ctx context.Context, taskID int64, n int, b store.LaunchDestination) error {
-	_, err := r.Exec(ctx, `INSERT INTO task_launch_destinations(task_id,attempt,connection_id,external_project_id,workspace,binding_id,binding_revision) VALUES($1,$2,$3,$4,$5,$6,$7)`, taskID, n, b.ConnectionID, b.ExternalProjectID, b.Workspace, b.BindingID, b.BindingRevision)
+	_, err := r.Exec(ctx, `INSERT INTO task_launch_destinations(task_id,attempt,connection_id,external_project_id,workspace,binding_id,binding_revision) VALUES($1,$2,$3,$4,$5,NULLIF($6,0),$7)`, taskID, n, b.ConnectionID, b.ExternalProjectID, b.Workspace, b.BindingID, b.BindingRevision)
 	return err
 }
 

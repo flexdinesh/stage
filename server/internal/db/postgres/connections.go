@@ -197,26 +197,12 @@ func (r connections) execAll(ctx context.Context, id any, qs ...string) error {
 }
 
 func (r connections) FollowReplacement(ctx context.Context, from, to int64) error {
-	for _, q := range []string{
-		`UPDATE preferences SET default_connection_id=$2 WHERE default_connection_id=$1`,
-		`UPDATE tasks SET connection_id=$2,updated_at=` + nowSQL + ` WHERE connection_id=$1 AND state='backlog' AND session_id IS NULL`,
-		`UPDATE schedules SET connection_id=$2,updated_at=` + nowSQL + ` WHERE connection_id=$1`,
-	} {
-		if _, err := r.Exec(ctx, q, from, to); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := r.Exec(ctx, `UPDATE preferences SET default_connection_id=$2 WHERE default_connection_id=$1`, from, to)
+	return err
 }
 
 func (r connections) ClearDefault(ctx context.Context, id int64) error {
 	return r.execAll(ctx, id, `UPDATE preferences SET default_connection_id=NULL WHERE default_connection_id=$1`)
-}
-
-func (r connections) ClearDiscovery(ctx context.Context, id int64) error {
-	return r.execAll(ctx, id, `DELETE FROM external_projects WHERE connection_id=$1`,
-		`DELETE FROM workspace_declines WHERE connection_id=$1`,
-		`UPDATE harness_connections SET workspace_refreshed_at=NULL,workspace_refresh_error=NULL WHERE id=$1`)
 }
 
 func (r connections) Delete(ctx context.Context, id int64) error {
@@ -281,7 +267,12 @@ func (r connections) Retired(ctx context.Context, machine int64, harness string)
 }
 
 func (r connections) Evidence(ctx context.Context, id int64) ([]store.ProjectBinding, []*execution.Observation, bool, error) {
-	rows, err := r.Query(ctx, `SELECT DISTINCT external_project_id,workspace FROM project_bindings WHERE connection_id=$1`, id)
+	rows, err := r.Query(ctx, `SELECT external_project_id,workspace FROM project_bindings WHERE connection_id=$1
+ UNION SELECT external_id,workspace FROM external_projects WHERE connection_id=$1 AND available AND NOT archived
+ UNION SELECT workspace_pin->>'externalId',workspace_pin->>'root'
+       FROM tasks WHERE connection_id=$1 AND workspace_pin IS NOT NULL
+ UNION SELECT workspace_pin->>'externalId',workspace_pin->>'root'
+       FROM schedules WHERE connection_id=$1 AND workspace_pin IS NOT NULL`, id)
 	if err != nil {
 		return nil, nil, false, err
 	}

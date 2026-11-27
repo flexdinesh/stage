@@ -53,6 +53,9 @@ func printContext(w io.Writer, c agenttools.ContextOut) {
 	if c.BindingID != nil {
 		fmt.Fprintf(w, "binding  %d\n", *c.BindingID)
 	}
+	if c.WorkspaceID != "" {
+		fmt.Fprintf(w, "workspace %s\n", c.WorkspaceID)
+	}
 	if c.TreeID != nil {
 		fmt.Fprintf(w, "tree     %d %s\n", *c.TreeID, orDash(c.TreeTitle))
 	}
@@ -68,10 +71,10 @@ func dash(s string) string {
 	return s
 }
 
-func printProjects(w io.Writer, ps []db.Project) {
-	table(w, "ID\tTITLE\tROOT", func(tw io.Writer) {
+func printProjects(w io.Writer, ps []db.ProjectSummary) {
+	table(w, "ID\tTITLE", func(tw io.Writer) {
 		for _, p := range ps {
-			fmt.Fprintf(tw, "%d\t%s\t%s\n", p.ID, p.Title, projectWorkspace(p))
+			fmt.Fprintf(tw, "%d\t%s\n", p.ID, p.Title)
 		}
 	})
 }
@@ -137,6 +140,9 @@ func printTask(w io.Writer, t client.Task) {
 	}
 	if t.ConnectionID > 0 {
 		fmt.Fprintf(w, "  connection %d\n", t.ConnectionID)
+	}
+	if t.WorkspaceID != "" {
+		fmt.Fprintf(w, "  workspace %s\n", t.WorkspaceID)
 	}
 	if cfg := t.ExecutionConfig; cfg != nil {
 		if cfg.Model != "" {
@@ -331,6 +337,9 @@ func printSchedules(w io.Writer, ss []db.Schedule) {
 
 func printSchedule(w io.Writer, s db.Schedule) {
 	fmt.Fprintf(w, "schedule %d  %s  %s  (%s %s)  next %s\n", s.ID, s.Title, s.ProjectTitle, s.Cron, s.Tz, ts(s.NextRunAt))
+	if s.WorkspaceID != "" {
+		fmt.Fprintf(w, "  connection %d  workspace %s\n", s.ConnectionID, s.WorkspaceID)
+	}
 	if s.Paused {
 		fmt.Fprintln(w, "  paused")
 	}
