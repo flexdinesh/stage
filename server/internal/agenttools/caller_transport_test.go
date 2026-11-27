@@ -309,8 +309,11 @@ func TestDestinationAndScheduleProvenance(t *testing.T) {
 	cs := connect(t, &agenttools.Ops{Client: e.client})
 	ref := db.SessionRef{ConnectionID: 7, ExternalSessionID: "remote-caller"}
 	args := map[string]any{"project": fmt.Sprint(p.ID), "title": "nightly", "prompt": "test", "callerSession": ref}
-	if msg := call(t, cs, "create_task", args, nil); !strings.Contains(msg, "select connectionId") {
-		t.Fatal(msg)
+	var backlog client.Task
+	mustCall(t, cs, "create_task", args, &backlog)
+	if backlog.ProjectID != p.ID || backlog.ConnectionID != 7 || backlog.WorkspaceID != "" ||
+		backlog.OriginSession == nil || *backlog.OriginSession != ref {
+		t.Fatalf("backlog lost caller planning context: %+v", backlog)
 	}
 	args["connectionId"] = 7
 	args["executionConfig"] = map[string]any{"model": "blocked"}
@@ -321,9 +324,14 @@ func TestDestinationAndScheduleProvenance(t *testing.T) {
 	args["cron"] = "0 2 * * *"
 	args["tz"] = "UTC"
 	args["notes"] = "template"
+	if _, err := e.client.Workspaces(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	workspace := e.workspaceID(db.ProjectBinding{ConnectionID: 7, ExternalProjectID: "external", Workspace: "volume://remote/root"})
+	args["workspaceId"] = workspace
 	var sched db.Schedule
 	mustCall(t, cs, "create_schedule", args, &sched)
-	if sched.ConnectionID != 7 || sched.OriginSession == nil || *sched.OriginSession != ref {
+	if sched.ConnectionID != 7 || sched.WorkspaceID != workspace || sched.OriginSession == nil || *sched.OriginSession != ref {
 		t.Fatal(sched)
 	}
 	task, err := e.store.RunScheduleNow(ctx, sched.ID)
@@ -347,14 +355,20 @@ func TestDestinationAndScheduleProvenance(t *testing.T) {
 	env.Stderr = &out
 	env.Caller = agentctx.Caller{Session: &db.SessionRef{ConnectionID: 1, ExternalSessionID: "inherited"}}
 	add := []string{"task", "add", "--url", e.url, "--project", fmt.Sprint(unbound.ID), "--title", "CLI", "--prompt", "Work", "--caller-connection", "7", "--caller-session", ref.ExternalSessionID, "--json"}
-	if code := cli.Run(ctx, add, env); code == 0 || !strings.Contains(out.String(), "select connectionId and workspaceId") {
-		t.Fatal(code, out.String())
-	}
-	out.Reset()
-	code := cli.Run(ctx, append(add, "--connection", "7"), env)
-	var created client.Task
-	if code != 0 || json.Unmarshal(out.Bytes(), &created) != nil || created.ConnectionID != 7 || created.OriginSession == nil || *created.OriginSession != ref {
-		t.Fatal(code, out.String())
+	for _, tc := range []struct {
+		args       []string
+		connection int64
+	}{
+		{add, 7},
+		{append(add, "--connection", "1"), 1},
+	} {
+		out.Reset()
+		code := cli.Run(ctx, tc.args, env)
+		var created client.Task
+		if code != 0 || json.Unmarshal(out.Bytes(), &created) != nil || created.ProjectID != unbound.ID ||
+			created.ConnectionID != tc.connection || created.WorkspaceID != "" || created.OriginSession == nil || *created.OriginSession != ref {
+			t.Fatal(code, out.String())
+		}
 	}
 }
 

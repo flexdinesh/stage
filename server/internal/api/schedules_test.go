@@ -46,7 +46,7 @@ func TestTaskStartTime(t *testing.T) {
 	wall := time.Now().In(loc).Add(2 * time.Hour).Truncate(time.Minute)
 	local := wall.Format("2006-01-02T15:04")
 	body := func(extra map[string]any) map[string]any {
-		b := map[string]any{"projectId": p.ID, "title": "later", "prompt": "x"}
+		b := e.taskBody(p.ID, "later", map[string]any{"prompt": "x"})
 		for k, v := range extra {
 			b[k] = v
 		}
@@ -77,6 +77,7 @@ func TestTaskStartTime(t *testing.T) {
 	path := fmt.Sprintf("/api/tasks/%d", tk.ID)
 	e.must("PUT", path+"/needs", map[string]any{"needs": []int64{other.ID}}, 400, nil)
 	e.must("PATCH", path, map[string]any{"startLocal": local}, 400, nil)
+	e.must("PATCH", path, map[string]any{"workspaceId": nil}, 409, nil)
 	var got startTask
 	e.must("PATCH", path, map[string]any{"startLocal": nil, "startTz": nil}, 200, &got)
 	e.must("PUT", path+"/needs", map[string]any{"needs": []int64{other.ID}}, 200, &got)
@@ -107,7 +108,7 @@ func TestSchedulesAPI(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/sched")
 	img := e.mustUpload("s.png")
-	base := map[string]any{"projectId": p.ID, "title": "nightly", "prompt": "bump deps", "tz": "Asia/Kolkata"}
+	base := e.taskBody(p.ID, "nightly", map[string]any{"prompt": "bump deps", "tz": "Asia/Kolkata"})
 	with := func(extra map[string]any) map[string]any {
 		b := map[string]any{}
 		for k, v := range base {
@@ -145,7 +146,7 @@ func TestSchedulesAPI(t *testing.T) {
 		t.Fatalf("nextRunAt = %v", sc.NextRunAt)
 	}
 	// Schedule images are not staged uploads: a task cannot take them.
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "steal", "prompt": "x", "attachmentIds": []int64{img.ID}}, 400, nil)
+	e.must("POST", "/api/tasks", e.taskBody(p.ID, "steal", map[string]any{"attachmentIds": []int64{img.ID}}), 400, nil)
 
 	path := fmt.Sprintf("/api/schedules/%d", sc.ID)
 	var tk startTask

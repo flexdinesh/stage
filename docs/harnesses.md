@@ -117,7 +117,7 @@ requested scope. Polling reconciles missed `EventSource` events.
 ### Workspace and session selection
 
 [ADR 0010](adr/0010-harness-workspaces-and-logical-projects.md) defines
-the target contract as clients move off shipped project bindings. Report
+the workspace and grouping contract. Report
 meaningful catalog rows even when they lack Git evidence or would be
 ineligible for automatic import. Supply the stable native ID and the
 discriminator for each exact launchable workspace, including distinct
@@ -161,7 +161,7 @@ degrades through declared availability.
 | Descriptor policy | Apply a Stage invariant such as launch recovery, attribution, identity or completion from a closure signal. | Declare it in the descriptor. Stage interprets the policy for every kind that uses it. |
 
 An agent can invoke an action only when the declaration allows agents.
-Project actions use the selected workspace's connection and binding.
+Project actions use an exact workspace scoped to its owning connection.
 See the [action and facts API](api.md#declared-actions-and-facts).
 
 ### Connect local OpenCode

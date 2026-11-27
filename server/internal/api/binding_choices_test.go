@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -14,23 +15,27 @@ func TestTaskWorkspaceChoiceAndLaunchSnapshot(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/primary")
 	alt := e.fake.AddProject("Alternative", "/w/alternative")
-	e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", p.ID),
-		map[string]any{"connectionId": 1, "externalProjectId": alt.ID, "workspace": alt.WorkspaceRoot}, 200, &p)
-	idx := slices.IndexFunc(p.Bindings, func(b db.ProjectBinding) bool { return b.ExternalProjectID == alt.ID })
+	bound, err := e.store.BindProject(t.Context(), db.ProjectBinding{
+		ProjectID: p.ID, ConnectionID: 1, ExternalProjectID: alt.ID, Workspace: alt.WorkspaceRoot,
+	})
+	bound = mustValue(t, bound, err)
+	idx := slices.IndexFunc(bound.Bindings, func(b db.ProjectBinding) bool { return b.ExternalProjectID == alt.ID })
 	if idx < 0 {
-		t.Fatalf("alternative binding missing: %+v", p.Bindings)
+		t.Fatalf("alternative fixture missing: %+v", bound.Bindings)
 	}
-	chosen := p.Bindings[idx].ID
-	body := map[string]any{"projectId": p.ID, "title": "Launch", "prompt": "Reply OK", "start": true, "bindingId": chosen}
+	chosen := bound.Bindings[idx].ID
+	e.must("GET", "/api/connections/1/workspaces", nil, 200, nil)
+	selector := db.WorkspaceID(1, alt.ID, alt.WorkspaceRoot)
+	body := map[string]any{"projectId": p.ID, "connectionId": 1, "workspaceId": selector, "title": "Launch", "prompt": "Reply OK", "start": true}
 	var started db.Task
 	e.must("POST", "/api/tasks", body, 201, &started)
-	if started.BindingID == nil || *started.BindingID != chosen || started.Session == nil ||
+	if started.BindingID != nil || started.WorkspaceID != selector || started.Session == nil ||
 		started.Workspace == nil || started.Workspace.BindingID != chosen || started.Workspace.Path != alt.WorkspaceRoot ||
 		started.Workspace.Source != "pinned" || started.Workspace.ExternalID != alt.ID {
 		t.Fatalf("started task %+v, workspace %+v", started, started.Workspace)
 	}
 	dest, err := e.store.LaunchDestination(t.Context(), started.ID, started.LaunchAttempt)
-	if err != nil || dest.ExternalProjectID != alt.ID || dest.Workspace != alt.WorkspaceRoot {
+	if err != nil || dest.ExternalProjectID != alt.ID || dest.Workspace != alt.WorkspaceRoot || dest.BindingID != chosen {
 		t.Fatalf("launch destination %+v, %v", dest, err)
 	}
 	var listed struct{ Tasks []db.Task }
@@ -59,6 +64,9 @@ func TestExactUnboundWorkspaceSurvivesEditAndDuplicate(t *testing.T) {
 		t.Fatal("task detail must return an array for default execution options")
 	}
 	e.must("PATCH", taskPath(draft.ID, ""), map[string]string{"title": "Ready to start"}, 200, &draft)
+	var schedule db.Schedule
+	e.must("POST", "/api/schedules", map[string]any{"connectionId": 1, "workspaceId": selector, "projectId": p.ID,
+		"title": "Run unbound", "prompt": "Reply OK", "cron": "0 2 * * *", "tz": "UTC"}, 201, &schedule)
 	var duplicate db.Task
 	e.must("POST", taskPath(draft.ID, "/duplicate"), nil, 201, &duplicate)
 	if draft.WorkspaceID != selector || duplicate.WorkspaceID != selector || duplicate.BindingID != nil {
@@ -68,6 +76,12 @@ func TestExactUnboundWorkspaceSurvivesEditAndDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.must("POST", taskPath(duplicate.ID, "/start"), nil, 409, nil)
+	schedulePath := fmt.Sprintf("/api/schedules/%d", schedule.ID)
+	var refused errOut
+	e.must("POST", schedulePath+"/run", nil, 409, &refused)
+	if refused.Code != "destination_unavailable" {
+		t.Fatalf("schedule with an unavailable workspace: %+v", refused)
+	}
 	if len(e.t3.launchRequestIDs()) != 0 {
 		t.Fatal("an unavailable selection fell back to the group workspace")
 	}
@@ -80,23 +94,103 @@ func TestExactUnboundWorkspaceSurvivesEditAndDuplicate(t *testing.T) {
 	}
 }
 
-func TestExplicitUnresolvedBacklogDoesNotInheritThePrimary(t *testing.T) {
+func TestUnresolvedBacklogRequiresExactWorkspaceBeforeLaunch(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/primary")
-	body := map[string]any{"connectionId": 1, "projectId": p.ID, "workspaceId": nil, "title": "Plan", "prompt": "p"}
-	var planned db.Task
-	e.must("POST", "/api/tasks", body, 201, &planned)
-	if planned.WorkspaceID != "" || planned.BindingID != nil || planned.ProjectID != p.ID || planned.State != db.StateBacklog {
-		t.Fatalf("unresolved task inherited a destination: %+v", planned)
+	for _, tc := range []struct {
+		name string
+		null bool
+	}{{"omitted", false}, {"null", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := map[string]any{"connectionId": 1, "projectId": p.ID, "title": "Plan " + tc.name, "prompt": "p"}
+			if tc.null {
+				body["workspaceId"] = nil
+			}
+			var planned db.Task
+			e.must("POST", "/api/tasks", body, 201, &planned)
+			if planned.WorkspaceID != "" || planned.BindingID != nil || planned.ProjectID != p.ID ||
+				planned.ConnectionID != 1 || planned.State != db.StateBacklog {
+				t.Fatalf("unresolved task inherited a destination: %+v", planned)
+			}
+			checkRequired := func(path string, body any) {
+				t.Helper()
+				var out errOut
+				e.must("POST", path, body, 409, &out)
+				if out.Code != "destination_required" || !strings.Contains(out.Error, "Choose a connection and workspace") {
+					t.Fatalf("destination guidance: %+v", out)
+				}
+			}
+			checkRequired(taskPath(planned.ID, "/start"), nil)
+			body["start"] = true
+			checkRequired("/api/tasks", body)
+			delete(body, "start")
+			body["startLocal"], body["startTz"] = "2999-01-01T00:00", "UTC"
+			checkRequired("/api/tasks", body)
+			delete(body, "startLocal")
+			delete(body, "startTz")
+			body["cron"], body["tz"] = "0 2 * * *", "UTC"
+			checkRequired("/api/schedules", body)
+			if got := e.getTask(planned.ID); got.State != "backlog" || got.LaunchAttempt != 0 {
+				t.Fatalf("refused launch changed the task: %+v", got)
+			}
+		})
 	}
-	e.must("POST", taskPath(planned.ID, "/start"), nil, 409, nil)
-	body["start"] = true
-	e.must("POST", "/api/tasks", body, 409, nil)
-	delete(body, "start")
-	body["cron"], body["tz"] = "0 2 * * *", "UTC"
-	e.must("POST", "/api/schedules", body, 409, nil)
 	if len(e.t3.launchRequestIDs()) != 0 {
 		t.Fatal("planning work launched without a destination")
+	}
+
+	var planned db.Task
+	e.must("POST", "/api/tasks", map[string]any{"connectionId": 1, "projectId": p.ID, "title": "Repair", "prompt": "p"}, 201, &planned)
+	path := taskPath(planned.ID, "")
+	e.must("PATCH", path, map[string]any{"startLocal": "2999-01-01T00:00", "startTz": "UTC"}, 409, nil)
+	e.must("PATCH", path, map[string]any{"workspaceId": p.workspaceID()}, 200, &planned)
+	e.must("POST", path+"/start", nil, 200, &planned)
+	if planned.WorkspaceID != p.workspaceID() || planned.State != db.StateRunning || planned.Session == nil {
+		t.Fatalf("repaired task did not launch: %+v", planned)
+	}
+	e.must("PATCH", path, map[string]any{"workspaceId": nil}, 409, nil)
+}
+
+func TestConnectionPatchRequiresWorkspaceSelection(t *testing.T) {
+	e, _, first, second, projectID := imagesEnv(t)
+	firstWorkspace := db.WorkspaceID(first, "repo", hostedWorkspace)
+	secondWorkspace := db.WorkspaceID(second, "repo", hostedWorkspace)
+	body := map[string]any{"connectionId": first, "workspaceId": firstWorkspace, "projectId": projectID, "title": "Move", "prompt": "p"}
+	var draft db.Task
+	e.must("POST", "/api/tasks", body, 201, &draft)
+	body["cron"], body["tz"] = "0 2 * * *", "UTC"
+	var schedule db.Schedule
+	e.must("POST", "/api/schedules", body, 201, &schedule)
+
+	draftPath := taskPath(draft.ID, "")
+	schedulePath := fmt.Sprintf("/api/schedules/%d", schedule.ID)
+	checkPatch := func(path string, body map[string]any, want string) {
+		t.Helper()
+		var out errOut
+		e.must("PATCH", path, body, 409, &out)
+		if out.Code != want {
+			t.Fatalf("PATCH %s: %+v, want %s", path, out, want)
+		}
+	}
+	config := map[string]any{}
+	for _, path := range []string{draftPath, schedulePath} {
+		checkPatch(path, map[string]any{"connectionId": second, "executionConfig": config}, "destination_required")
+		checkPatch(path, map[string]any{"connectionId": second, "workspaceId": firstWorkspace, "executionConfig": config}, "destination_unavailable")
+	}
+	checkPatch(schedulePath, map[string]any{"connectionId": second, "workspaceId": nil, "executionConfig": config}, "destination_required")
+	e.must("GET", schedulePath, nil, 200, &schedule)
+	if schedule.ConnectionID != first || schedule.WorkspaceID != firstWorkspace {
+		t.Fatalf("rejected patch moved schedule: %+v", schedule)
+	}
+	var cleared db.Task
+	e.must("PATCH", draftPath, map[string]any{"connectionId": second, "workspaceId": nil, "executionConfig": config}, 200, &cleared)
+	if cleared.ConnectionID != second || cleared.WorkspaceID != "" || cleared.BindingID != nil {
+		t.Fatalf("connection change populated an omitted workspace: %+v", cleared)
+	}
+	e.must("POST", draftPath+"/start", nil, 409, nil)
+	e.must("PATCH", schedulePath, map[string]any{"connectionId": second, "workspaceId": secondWorkspace, "executionConfig": config}, 200, &schedule)
+	if schedule.ConnectionID != second || schedule.WorkspaceID != secondWorkspace || schedule.BindingID != nil {
+		t.Fatalf("schedule did not save the exact pair: %+v", schedule)
 	}
 }
 
@@ -170,44 +264,40 @@ func (scopedWorkspaceAdapter) FeaturesForWorkspace(_ context.Context, external, 
 func TestCapabilitiesAndConfigFollowWorkspaceChoice(t *testing.T) {
 	e, local, connection, otherConnection, projectID := imagesEnv(t)
 	local.Install(connection, connection, scopedWorkspaceAdapter{})
-	var p db.Project
-	e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", projectID),
-		map[string]any{"connectionId": connection, "externalProjectId": "alternate", "workspace": alternateWorkspace}, 200, &p)
-	bindingAt := func(path string, connection int64) int64 {
-		t.Helper()
-		idx := slices.IndexFunc(p.Bindings, func(b db.ProjectBinding) bool { return b.Workspace == path && b.ConnectionID == connection })
-		if idx < 0 {
-			t.Fatalf("binding for %s on %d missing: %+v", path, connection, p.Bindings)
-		}
-		return p.Bindings[idx].ID
-	}
-	alternate := bindingAt(alternateWorkspace, connection)
-	other := bindingAt(hostedWorkspace, otherConnection)
+	e.must("GET", fmt.Sprintf("/api/connections/%d/workspaces", connection), nil, 200, nil)
+	repo := db.WorkspaceID(connection, "repo", hostedWorkspace)
+	alternate := db.WorkspaceID(connection, "alternate", alternateWorkspace)
+	other := db.WorkspaceID(otherConnection, "repo", hostedWorkspace)
 
-	var alias db.Project
-	e.must("POST", "/api/projects", map[string]any{"title": "Old project link"}, 201, &alias)
-	mergePath := fmt.Sprintf("/api/projects/%d/merge", p.ID)
-	var preview db.MergeResult
-	e.must("POST", mergePath, map[string]any{"from": alias.ID}, 200, &preview)
-	e.must("POST", mergePath, map[string]any{"from": alias.ID, "confirm": true, "previewToken": preview.PreviewToken}, 200, nil)
+	alias, err := e.store.InsertProject(t.Context(), db.Project{Title: "Old project link"})
+	alias = mustValue(t, alias, err)
+	_, err = e.store.MergeProjects(t.Context(), projectID, alias.ID, true)
+	mustValue(t, struct{}{}, err)
 
-	capsPath := fmt.Sprintf("/api/connections/%d/capabilities?projectId=%d", connection, alias.ID)
-	assertModel := func(url, model string) {
+	capsPath := fmt.Sprintf("/api/connections/%d/capabilities", connection)
+	assertModel := func(selector, model string) {
 		t.Helper()
 		var caps execution.Capabilities
-		e.must("GET", url, nil, 200, &caps)
+		e.must("GET", capsPath+"?workspaceId="+selector, nil, 200, &caps)
 		if len(caps.Models) != 1 || caps.Models[0].ID != model {
-			t.Fatalf("models on %s: %+v", url, caps.Models)
+			t.Fatalf("models for %s: %+v", selector, caps.Models)
 		}
 	}
-	assertModel(capsPath, "repo")
-	assertModel(fmt.Sprintf("%s&bindingId=%d", capsPath, alternate), "alternate")
-	const invalid = "bindingId must be an active workspace of this project on the chosen connection"
-	if msg := e.refused("GET", fmt.Sprintf("%s&bindingId=%d", capsPath, other), nil, 400); msg != invalid {
-		t.Fatalf("foreign connection binding: %q", msg)
+	assertModel(repo, "repo")
+	assertModel(alternate, "alternate")
+	var unavailable errOut
+	e.must("GET", capsPath+"?workspaceId="+other, nil, 409, &unavailable)
+	if unavailable.Code != "destination_unavailable" {
+		t.Fatalf("foreign capability selector: %+v", unavailable)
+	}
+	for _, query := range []string{fmt.Sprintf("projectId=%d", alias.ID), "bindingId=1"} {
+		msg := e.refused("GET", capsPath+"?workspaceId="+repo+"&"+query, nil, 400)
+		if !strings.Contains(msg, "workspaceId") {
+			t.Fatalf("retired capability selector %s: %q", query, msg)
+		}
 	}
 
-	create := map[string]any{"projectId": alias.ID, "connectionId": connection, "bindingId": alternate, "title": "Look", "prompt": "p"}
+	create := map[string]any{"projectId": alias.ID, "connectionId": connection, "workspaceId": alternate, "title": "Look", "prompt": "p"}
 	img := e.mustUpload("workspace.png")
 	create["attachmentIds"] = []int64{img.ID}
 	if msg := e.refused("POST", "/api/tasks", create, 400); msg != "Images are unavailable on this connection: This workspace does not read images. Remove them or choose another connection." {
@@ -219,20 +309,20 @@ func TestCapabilitiesAndConfigFollowWorkspaceChoice(t *testing.T) {
 	create["executionConfig"] = map[string]any{"model": "alternate"}
 	var task db.Task
 	e.must("POST", "/api/tasks", create, 201, &task)
-	if task.ProjectID != p.ID || task.BindingID == nil || *task.BindingID != alternate || task.Workspace == nil || task.Workspace.Source != "chosen" {
-		t.Fatalf("created task %+v, workspace %+v", task, task.Workspace)
+	if task.ProjectID != projectID || task.BindingID != nil || task.WorkspaceID != alternate {
+		t.Fatalf("created task lost the exact workspace: %+v", task)
 	}
 	taskPath := fmt.Sprintf("/api/tasks/%d", task.ID)
 	e.must("PATCH", taskPath, map[string]any{"projectId": alias.ID}, 200, &task)
-	if task.BindingID == nil || *task.BindingID != alternate {
-		t.Fatalf("same project alias cleared binding: %+v", task)
+	if task.ProjectID != projectID || task.WorkspaceID != alternate {
+		t.Fatalf("same project alias changed workspace: %+v", task)
 	}
-	e.must("PATCH", taskPath, map[string]any{"bindingId": nil, "executionConfig": map[string]any{"model": "repo"}}, 200, &task)
-	if task.BindingID != nil || task.Workspace == nil || task.Workspace.Source != "primary" {
-		t.Fatalf("cleared task choice %+v, workspace %+v", task, task.Workspace)
+	e.must("PATCH", taskPath, map[string]any{"workspaceId": repo, "executionConfig": map[string]any{"model": "repo"}}, 200, &task)
+	if task.BindingID != nil || task.WorkspaceID != repo {
+		t.Fatalf("reselected task lost the exact workspace: %+v", task)
 	}
 	e.must("PATCH", taskPath, map[string]any{"attachmentIds": []int64{img.ID}}, 200, nil)
-	e.must("PATCH", taskPath, map[string]any{"bindingId": alternate}, 400, nil)
+	e.must("PATCH", taskPath, map[string]any{"workspaceId": alternate, "attachmentIds": []int64{img.ID}}, 400, nil)
 
 	create["cron"], create["tz"] = "0 2 * * *", "UTC"
 	var schedule db.Schedule
@@ -240,12 +330,39 @@ func TestCapabilitiesAndConfigFollowWorkspaceChoice(t *testing.T) {
 	var schedules struct{ Schedules []db.Schedule }
 	e.must("GET", fmt.Sprintf("/api/schedules?project=%d", alias.ID), nil, 200, &schedules)
 	if len(schedules.Schedules) != 1 || schedules.Schedules[0].ID != schedule.ID ||
-		schedule.ProjectID != p.ID || schedule.BindingID == nil || *schedule.BindingID != alternate {
+		schedule.ProjectID != projectID || schedule.BindingID != nil || schedule.WorkspaceID != alternate {
 		t.Fatalf("schedule %+v, list %+v", schedule, schedules.Schedules)
 	}
 	var tasks struct{ Tasks []db.Task }
 	e.must("GET", fmt.Sprintf("/api/tasks?project=%d", alias.ID), nil, 200, &tasks)
 	if len(tasks.Tasks) != 1 || tasks.Tasks[0].ID != task.ID {
 		t.Fatalf("tasks listed by alias: %+v", tasks.Tasks)
+	}
+}
+
+func TestBindingIDRejectedForTaskAndScheduleWrites(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/retired")
+	draft := e.task(p.ID, "Draft", nil)
+	create := e.taskBody(p.ID, "Other work", nil)
+	scheduleBody := e.taskBody(p.ID, "Schedule", map[string]any{"cron": "0 2 * * *", "tz": "UTC"})
+	var schedule db.Schedule
+	e.must("POST", "/api/schedules", scheduleBody, 201, &schedule)
+	for _, req := range []struct {
+		method, path string
+		body         map[string]any
+	}{
+		{"POST", "/api/tasks", create},
+		{"PATCH", taskPath(draft.ID, ""), map[string]any{}},
+		{"POST", "/api/schedules", scheduleBody},
+		{"PATCH", fmt.Sprintf("/api/schedules/%d", schedule.ID), map[string]any{}},
+	} {
+		for _, value := range []any{p.Bindings[0].ID, nil} {
+			req.body["bindingId"] = value
+			msg := e.refused(req.method, req.path, req.body, 400)
+			if !strings.Contains(msg, "bindingId") || !strings.Contains(msg, "workspaceId") {
+				t.Fatalf("%s %s with bindingId %v: %q", req.method, req.path, value, msg)
+			}
+		}
 	}
 }

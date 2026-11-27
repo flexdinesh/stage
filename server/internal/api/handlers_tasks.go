@@ -73,7 +73,6 @@ type createTaskReq struct {
 
 type taskConfigReq struct {
 	ConnectionID    *int64              `json:"connectionId"`
-	BindingID       *int64              `json:"bindingId"`
 	WorkspaceID     db.Optional[string] `json:"workspaceId"`
 	NeedsSession    *db.SessionRef      `json:"needsSession"`
 	ExecutionConfig *execution.Config   `json:"executionConfig"`
@@ -91,64 +90,20 @@ type taskConfigReq struct {
 	Start           bool                `json:"start"`
 }
 
-// chooseConnection resolves the project alias and uses an explicit binding's
-// connection when the caller leaves connectionId unset.
+// chooseConnection validates the explicit connection and resolves historical project context.
 func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 	ctx := r.Context()
-	if req.WorkspaceID.Set {
-		if (!req.WorkspaceID.Null && req.WorkspaceID.V == "") || req.ConnectionID == nil {
-			return db.DestinationRequired()
-		}
-		if req.BindingID != nil {
-			return db.Invalid("Choose workspaceId or the legacy bindingId.")
-		}
+	if req.ConnectionID == nil || *req.ConnectionID <= 0 || req.WorkspaceID.Set && !req.WorkspaceID.Null && req.WorkspaceID.V == "" {
+		return db.DestinationRequired()
 	}
-	if req.ConnectionID != nil {
-		if req.ProjectID != nil {
-			id, err := s.projectID(ctx, *req.ProjectID)
-			if err != nil {
-				return err
-			}
-			req.ProjectID = &id
+	if req.ProjectID != nil {
+		id, err := s.projectID(ctx, *req.ProjectID)
+		if err != nil {
+			return err
 		}
-		return s.plannedConnection(ctx, *req.ConnectionID)
+		req.ProjectID = &id
 	}
-	if req.ProjectID == nil {
-		return nil
-	}
-	project, err := s.Store.GetProject(ctx, *req.ProjectID)
-	if err != nil {
-		return err
-	}
-	req.ProjectID = &project.ID
-	if req.BindingID != nil {
-		for _, b := range project.Bindings {
-			if b.ID == *req.BindingID {
-				req.ConnectionID = &b.ConnectionID
-				return s.plannedConnection(ctx, b.ConnectionID)
-			}
-		}
-		return db.ErrInvalidBinding
-	}
-	var id int64
-	available := 0
-	for _, b := range project.Bindings {
-		if !b.ConnectionActive {
-			continue
-		}
-		if id != 0 && id != b.ConnectionID {
-			return db.DestinationRequired()
-		}
-		id = b.ConnectionID
-		if b.Status == "available" {
-			available++
-		}
-	}
-	if id != 0 && available <= 1 {
-		req.ConnectionID = &id
-		return s.plannedConnection(ctx, id)
-	}
-	return db.DestinationRequired()
+	return s.plannedConnection(ctx, *req.ConnectionID)
 }
 
 func (req createTaskReq) validate() (db.NewTask, error) {
@@ -161,7 +116,6 @@ func (req createTaskReq) validate() (db.NewTask, error) {
 // on the harness defaults (its adapter validates it: validateSelection).
 func (req taskConfigReq) validate() (db.NewTask, error) {
 	in := db.NewTask{
-		BindingID:       req.BindingID,
 		NeedsSession:    req.NeedsSession,
 		ExecutionConfig: req.ExecutionConfig,
 		OriginSession:   req.OriginSession,
@@ -194,7 +148,7 @@ func (req taskConfigReq) validate() (db.NewTask, error) {
 		return in, err
 	}
 	in.WorkspaceID = req.WorkspaceID.V
-	in.UnresolvedWorkspace = req.WorkspaceID.Null
+	in.UnresolvedWorkspace = in.WorkspaceID == ""
 	if in.UnresolvedWorkspace && (req.Start || req.StartLocal != nil || req.StartTz != nil) {
 		return in, db.DestinationRequired()
 	}
@@ -366,8 +320,8 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 	}); err != nil {
 		return err
 	}
-	original := taskDestination{current.ConnectionID, current.ProjectID, current.BindingID, current.WorkspaceID}
-	if err := s.validateDestinationPatch(r.Context(), original, p.ConnectionID, &p.ProjectID, p.BindingID, p.WorkspaceID,
+	original := taskDestination{current.ConnectionID, current.WorkspaceID}
+	if err := s.validateDestinationPatch(r.Context(), original, p.ConnectionID, &p.ProjectID, p.WorkspaceID,
 		current.ExecutionConfig, p.ExecutionConfig, current.Attachments, p.AttachmentIDs); err != nil {
 		return err
 	}
@@ -387,8 +341,14 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 		}
 		p.StartAt = db.Optional[time.Time]{Set: true, Null: at == nil}
 		if at != nil {
+			if p.WorkspaceID.Null || !p.WorkspaceID.Set && current.WorkspaceID == "" {
+				return db.DestinationRequired()
+			}
 			p.StartAt.V = *at
 		}
+	}
+	if p.WorkspaceID.Null && current.StartAt != nil && !p.StartAt.Null {
+		return db.DestinationRequired()
 	}
 	task, err := s.Store.UpdateTask(r.Context(), id, p)
 	if err != nil {

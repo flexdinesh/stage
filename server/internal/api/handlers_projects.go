@@ -2,10 +2,9 @@ package api
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -37,14 +36,6 @@ func (s *server) projectPath(r *http.Request) (int64, error) {
 	return s.projectID(r.Context(), id)
 }
 
-func bindingPath(r *http.Request) (int64, error) {
-	id, err := strconv.ParseInt(r.PathValue("bindingId"), 10, 64)
-	if err != nil || id <= 0 {
-		return 0, db.Invalid("A positive bindingId is required.")
-	}
-	return id, nil
-}
-
 func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
 	archived := r.URL.Query().Get("archived")
 	if archived != "" {
@@ -61,10 +52,9 @@ func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
 		if err != nil {
 			return err
 		}
-		available := availableDestinations(destinations)
 		summaries := make([]db.ProjectSummary, 0, len(ps))
 		for _, p := range ps {
-			summaries = append(summaries, projectSummary(p, available))
+			summaries = append(summaries, projectSummary(p))
 		}
 		groups, err := s.Store.ListProjectGroupSummaries(r.Context(), archived)
 		if err != nil {
@@ -84,47 +74,10 @@ func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-type workspaceBindingInput struct {
-	ConnectionID      int64   `json:"connectionId"`
-	ExternalProjectID string  `json:"externalProjectId"`
-	Workspace         *string `json:"workspace"`
-}
-
-func (in workspaceBindingInput) binding() (db.ProjectBinding, error) {
-	if in.ConnectionID <= 0 || in.ExternalProjectID == "" || in.Workspace == nil {
-		return db.ProjectBinding{}, db.Invalid("connectionId, externalProjectId and workspace are required")
-	}
-	return db.ProjectBinding{ConnectionID: in.ConnectionID, ExternalProjectID: in.ExternalProjectID, Workspace: *in.Workspace}, nil
-}
-
-// verifyProjectBindings checks the selected workspace against a complete live
-// inventory on each connection. The store checks the refreshed rows on write.
-func (s *server) verifyProjectBindings(ctx context.Context, bindings []db.ProjectBinding) error {
-	inventories := make(map[int64][]execution.WorkspaceInfo)
-	for _, b := range bindings {
-		ws, ok := inventories[b.ConnectionID]
-		if !ok {
-			var err error
-			ws, err = s.refreshWorkspaces(ctx, b.ConnectionID)
-			if err != nil {
-				return err
-			}
-			inventories[b.ConnectionID] = ws
-		}
-		if !slices.ContainsFunc(ws, func(w execution.WorkspaceInfo) bool {
-			return w.ID == b.ExternalProjectID && w.WorkspaceRoot == b.Workspace &&
-				w.DeletedAt == nil && (w.Evidence == nil || !w.Evidence.Gone)
-		}) {
-			return db.Conflict("workspace changed or is unavailable; refresh the project list and select it again")
-		}
-	}
-	return nil
-}
-
 func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
-		Title    string                  `json:"title"`
-		Bindings []workspaceBindingInput `json:"bindings"`
+		Title    string          `json:"title"`
+		Bindings json.RawMessage `json:"bindings"`
 	}
 	if err := decodeStrict(r, &in); err != nil {
 		return err
@@ -133,19 +86,10 @@ func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 	if in.Title == "" {
 		return db.Invalid("title is required")
 	}
-	project := db.Project{Title: in.Title}
-	for _, input := range in.Bindings {
-		b, err := input.binding()
-		if err != nil {
-			return err
-		}
-		project.Bindings = append(project.Bindings, b)
+	if in.Bindings != nil {
+		return db.Invalid("Project bindings were retired. Use POST /api/project-groups/membership to group an exact workspace.")
 	}
-	ctx := r.Context()
-	if err := s.verifyProjectBindings(ctx, project.Bindings); err != nil {
-		return err
-	}
-	p, err := s.Store.InsertProject(ctx, project)
+	p, err := s.Store.InsertProject(r.Context(), db.Project{Title: in.Title})
 	if err != nil {
 		return err
 	}
@@ -163,11 +107,7 @@ func (s *server) getProject(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if projectSummaryRequest(r) {
-		destinations, err := s.destinations(r.Context())
-		if err != nil {
-			return err
-		}
-		writeJSON(w, http.StatusOK, projectSummary(p, availableDestinations(destinations)))
+		writeJSON(w, http.StatusOK, projectSummary(p))
 		return nil
 	}
 	writeJSON(w, http.StatusOK, s.projectView(p))
@@ -353,7 +293,7 @@ func (s *server) setNewTaskConfig(w http.ResponseWriter, r *http.Request) error 
 		}
 		if c.Model == "" && len(c.Options) == 0 {
 			in.Config = nil
-		} else if err := s.validateSelection(r.Context(), id, 0, c); err != nil {
+		} else if err := s.validateSelection(r.Context(), id, c); err != nil {
 			return err
 		}
 	}
@@ -362,166 +302,6 @@ func (s *server) setNewTaskConfig(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"connection": s.configured(r.Context(), c)})
-	return nil
-}
-
-func (s *server) bindProject(w http.ResponseWriter, r *http.Request) error {
-	id, err := s.projectPath(r)
-	if err != nil {
-		return err
-	}
-	var in struct {
-		workspaceBindingInput
-		Primary  bool   `json:"primary"`
-		Replaces *int64 `json:"replaces"`
-	}
-	if err := decodeStrict(r, &in); err != nil {
-		return err
-	}
-	b, err := in.binding()
-	if err != nil {
-		return err
-	}
-	b.ProjectID, b.Primary = id, in.Primary
-	if in.Replaces != nil {
-		if *in.Replaces <= 0 {
-			return db.Invalid("replaces must be a positive bindingId")
-		}
-		b.Replaces = *in.Replaces
-	}
-	ctx := r.Context()
-	if err := s.verifyProjectBindings(ctx, []db.ProjectBinding{b}); err != nil {
-		return err
-	}
-	p, err := s.Store.BindProject(ctx, b)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, s.projectView(p))
-	return nil
-}
-
-func (s *server) unbindProject(w http.ResponseWriter, r *http.Request) error {
-	id, err := s.projectPath(r)
-	if err != nil {
-		return err
-	}
-	binding, err := bindingPath(r)
-	if err != nil {
-		return err
-	}
-	p, err := s.Store.UnbindProject(r.Context(), id, binding)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, s.projectView(p))
-	return nil
-}
-
-func (s *server) setPrimaryBinding(w http.ResponseWriter, r *http.Request) error {
-	id, err := s.projectPath(r)
-	if err != nil {
-		return err
-	}
-	binding, err := bindingPath(r)
-	if err != nil {
-		return err
-	}
-	p, err := s.Store.SetPrimaryBinding(r.Context(), id, binding)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, s.projectView(p))
-	return nil
-}
-
-func (s *server) mergeProjects(w http.ResponseWriter, r *http.Request) error {
-	id, err := s.projectPath(r)
-	if err != nil {
-		return err
-	}
-	var in struct {
-		From         int64  `json:"from"`
-		Confirm      bool   `json:"confirm"`
-		PreviewToken string `json:"previewToken"`
-	}
-	if err := decodeStrict(r, &in); err != nil {
-		return err
-	}
-	if in.From <= 0 {
-		return db.Invalid("from must be a positive project id")
-	}
-	if in.Confirm && in.PreviewToken == "" {
-		return db.Invalid("previewToken is required to confirm a merge")
-	}
-	ctx := r.Context()
-	from, err := s.projectID(ctx, in.From)
-	if err != nil {
-		return err
-	}
-	result, err := s.Store.MergeProjects(ctx, id, from, in.Confirm, in.PreviewToken)
-	if err != nil {
-		var changed *db.PreviewChangedError
-		if errors.As(err, &changed) {
-			if fresh, ok := changed.Fresh.(db.MergeResult); ok {
-				fresh.Project = s.projectView(fresh.Project)
-				changed.Fresh = fresh
-			}
-		}
-		return err
-	}
-	result.Project = s.projectView(result.Project)
-	writeJSON(w, http.StatusOK, result)
-	return nil
-}
-
-func (s *server) dismissProjectMerge(w http.ResponseWriter, r *http.Request) error {
-	id, err := s.projectPath(r)
-	if err != nil {
-		return err
-	}
-	var in struct {
-		OtherID int64 `json:"otherId"`
-	}
-	if err := decodeStrict(r, &in); err != nil {
-		return err
-	}
-	if in.OtherID <= 0 {
-		return db.Invalid("otherId must be a positive project id")
-	}
-	ctx := r.Context()
-	other, err := s.projectID(ctx, in.OtherID)
-	if err != nil {
-		return err
-	}
-	if err := s.Store.DismissProjectMerge(ctx, id, other); err != nil {
-		return err
-	}
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
-func (s *server) splitProject(w http.ResponseWriter, r *http.Request) error {
-	id, err := s.projectPath(r)
-	if err != nil {
-		return err
-	}
-	var in struct {
-		BindingID int64  `json:"bindingId"`
-		Title     string `json:"title"`
-	}
-	if err := decodeStrict(r, &in); err != nil {
-		return err
-	}
-	if in.BindingID <= 0 {
-		return db.Invalid("A positive bindingId is required.")
-	}
-	result, err := s.Store.SplitProject(r.Context(), id, in.BindingID, in.Title)
-	if err != nil {
-		return err
-	}
-	result.Project, result.Source = s.projectView(result.Project), s.projectView(result.Source)
-	writeJSON(w, http.StatusCreated, result)
 	return nil
 }
 

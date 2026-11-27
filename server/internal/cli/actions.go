@@ -15,12 +15,14 @@ import (
 func runAction(ctx context.Context, env Env, args []string) error {
 	v, rest := verb(args, "ls")
 	c := newCmd(env, "action "+v)
-	var connection, task, project, onConnection, binding int64
+	var connection, task, project, onConnection int64
+	var workspace string
 	c.fs.Int64Var(&connection, "connection", 0, "target connection ID")
 	c.fs.Int64Var(&task, "task", 0, "target task ID")
 	c.fs.Int64Var(&project, "project", 0, "target project ID")
 	c.fs.Int64Var(&onConnection, "on-connection", 0, "connection ID for a project action")
-	c.fs.Int64Var(&binding, "binding", 0, "workspace binding ID for a project action")
+	c.fs.StringVar(&workspace, "workspace-id", "", "exact workspace from projects ls for a project action")
+	retireDestinationFlag(c, "binding")
 	var input string
 	var confirm bool
 	switch v {
@@ -39,7 +41,7 @@ func runAction(ctx context.Context, env Env, args []string) error {
 		TaskID:         int64Flag(c, "task", task),
 		ProjectID:      int64Flag(c, "project", project),
 		OnConnectionID: int64Flag(c, "on-connection", onConnection),
-		BindingID:      int64Flag(c, "binding", binding),
+		WorkspaceID:    workspace,
 	}
 	if err := scope.Validate(); err != nil {
 		return usagef("action %s: %v", v, err)

@@ -28,11 +28,11 @@ If Stage cannot find `claude`, set **Claude command** in the card (or `stage har
 
 Claude runs only in folders it trusts. Run `claude` once in each project folder and accept the prompt. A task in a folder Claude does not trust returns to backlog saying so.
 
-Stage's projects come from the folders Claude knows (`~/.claude.json`); a Git checkout among them is imported as a Stage project.
+Stage discovers workspaces from folders Claude knows and groups them using repository and directory evidence. [Projects](/docs/concepts/projects)
 
 ### Start a task
 
-Create a task on the Claude Code connection. Choose:
+Select the Claude Code connection and the exact workspace for your task. Choose its launch options:
 
 - **Claude Code worktree**: off runs in the project folder; on, Claude makes and names a new worktree from origin's default branch.
 - **Model**: Claude's default, or opus, sonnet, haiku or fable.

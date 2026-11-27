@@ -75,30 +75,6 @@ func (s *server) destinations(ctx context.Context) ([]db.Destination, error) {
 	return out, nil
 }
 
-func projectSummary(p db.Project, available map[string]bool) db.ProjectSummary {
-	out := db.ProjectSummary{ID: p.ID, Title: p.Title, ArchivedAt: p.ArchivedAt, Aliases: p.Aliases,
-		Bindings: make([]db.BindingSummary, 0, len(p.Bindings))}
-	for _, b := range p.Bindings {
-		id := db.WorkspaceID(b.ConnectionID, b.ExternalProjectID, b.Workspace)
-		status := b.Status
-		switch {
-		case !b.ConnectionActive:
-			status = "connection_retired"
-		case status == "available" && !available[id]:
-			status = "workspace_unavailable"
-		}
-		out.Bindings = append(out.Bindings, db.BindingSummary{
-			ID: b.ID, ConnectionID: b.ConnectionID, WorkspaceID: id, Title: db.WorkspaceTitle(b.Title, b.Workspace),
-			ConnectionActive: b.ConnectionActive, Primary: b.Primary, Status: status,
-		})
-	}
-	return out
-}
-
-func availableDestinations(ds []db.Destination) map[string]bool {
-	out := make(map[string]bool, len(ds))
-	for _, d := range ds {
-		out[d.WorkspaceID] = d.Available
-	}
-	return out
+func projectSummary(p db.Project) db.ProjectSummary {
+	return db.ProjectSummary{ID: p.ID, Title: p.Title, ArchivedAt: p.ArchivedAt, Aliases: p.Aliases}
 }

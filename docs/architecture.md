@@ -16,7 +16,7 @@ declared capabilities, project identity):
 [ADR 0007](adr/0007-harness-boundary.md).
 The harness foundation target and its delivery layers:
 [ADR 0008](adr/0008-harness-foundation.md),
-[shipped workspace discovery and bindings](discovery.md),
+[workspace inventory and grouping](discovery.md),
 [harness authoring](harnesses.md).
 
 ## Ownership
@@ -24,7 +24,7 @@ The harness foundation target and its delivery layers:
 Stage owns logical projects, grouping decisions and durable work history.
 Each harness connection owns its workspace catalog and sessions.
 [ADR 0010](adr/0010-harness-workspaces-and-logical-projects.md) defines exact
-destinations and the transition from project bindings.
+destinations and logical project membership.
 
 | Path | Owns | Must not |
 | --- | --- | --- |
@@ -55,7 +55,7 @@ Two homes, no shared or generated content between them:
 | Contract | Website page |
 | --- | --- |
 | [features.md](features.md), [api.md](api.md) (tree, journal, handoff, base rules), [runtime.md](runtime.md) (machines) | `/docs`, `/docs/concepts/*` |
-| [discovery.md](discovery.md) (workspace binding, review, project identity) | `/docs/concepts/projects` |
+| [discovery.md](discovery.md) (inventory, membership, and exact workspace selection) | `/docs/concepts/projects` |
 | [execution.md](execution.md) (session lifecycle, capabilities and placement), [api.md](api.md) (connection operations) | `/docs/concepts/sessions`, `/docs/concepts/connections`, `/docs/concepts/machines` |
 | [desktop.md](desktop.md) | `/docs/usage/desktop` |
 | [service.md](service.md), [runtime.md](runtime.md) (listeners, origin policy) | `/docs/usage/server`, `/docs/guides/phone` |
@@ -200,19 +200,25 @@ accepted snapshot JSON and T3 credentials survive. The legacy columns were
 migration data only; migration 0028 dropped them per
 [storage.md](storage.md#legacy-columns-and-compatibility-triggers).
 
-A harness connection is one harness instance: a T3 environment (identity: its environment id), an OpenCode service (identity: its verified address, plus continuity proof that it serves the connection's stored workspaces and sessions) or a Codex home (identity: the home directory its daemon serves; Codex is hosted, [ADR 0006](adr/0006-codex-app-server-harness.md)). Migration 0012 stamps existing connections in place, so single-instance data keeps its IDs. Migration 0015 adds machines: every connection belongs to one (`machine_id`; the local machine, or a remote machine served by a thin worker, per [ADR 0002](adr/0002-machines-and-workers.md)), harness kinds are free text validated by the server's harness registry ([execution.md](execution.md#modules-and-the-registry)), and the active and identity indexes are per machine. At most one connection per harness kind is active on a machine, and every "active connection of a kind" lookup names its machine (`db.Store.ActiveID(machine, kind)`, `SwitchInstance(ctx, machine, ...)`; a retired connection revives only on its own machine). Harness setup is per machine too: migration 0018 keys `t3_connection` (T3 token, URL, sync bookkeeping) and `opencode_settings` by `machine_id`, moving the former single rows to machine 1 in place; setup code uses `db.Store.OnMachine(id)` and `harness.Connectors` holds one connector per machine and kind. A remote machine's setup runs on its worker and its harness credentials stay in the worker's `credentials.json`; its `t3_connection` and `opencode_settings` rows hold only the non-secret record ([execution.md](execution.md#remote-machines)). Each machine hosts one adapter per active connection (`machine.Local.Install` moves it when the instance changes; a remote machine's adapters are proxies over its worker channel that the worker answers with its own adapters, [execution.md](execution.md#remote-machines); [execution.md](execution.md#the-machine-seam)) and runs one release and one schedule runner per active connection. Replacing an instance retires its connection: tasks, sessions and bindings stay on it as history, never polled, linked or launched on, and Stage refuses new work there (409 `connection_retired`). Backlog tasks and schedules keep their saved destination. Edit them to select an exact workspace on a replacement connection. Bindings organize workspaces and can change through import or user action. The same instance again revives its connection; Remove connection clears a retired connection's identity (or deletes it when unreferenced). `db/connections.go` owns these rules (`SwitchInstance`, `ForgetConnection`). Migration 0020 adds remote machines: a one-time pairing code (10 minutes, single use) is redeemed for a new machine and its machine token, the worker's credential on `/api/worker/*` only; both are stored as SHA-256 and compared in constant time (`db/machineauth.go`; [api.md](api.md#machines), [runtime.md](runtime.md#worker-routes)). Removing a remote machine revokes its token, retires its active connections under the replaced-instance rules (deleting unreferenced ones) and hides its row, which history keeps for its label; machine 1 cannot be removed.
+A harness connection is one harness instance: a T3 environment (identity: its environment id), an OpenCode service (identity: its verified address, plus continuity proof that it serves the connection's stored workspaces and sessions) or a Codex home (identity: the home directory its daemon serves; Codex is hosted, [ADR 0006](adr/0006-codex-app-server-harness.md)). Migration 0012 stamps existing connections in place, so single-instance data keeps its IDs. Migration 0015 adds machines: every connection belongs to one (`machine_id`; the local machine, or a remote machine served by a thin worker, per [ADR 0002](adr/0002-machines-and-workers.md)), harness kinds are free text validated by the server's harness registry ([execution.md](execution.md#modules-and-the-registry)), and the active and identity indexes are per machine. At most one connection per harness kind is active on a machine, and every "active connection of a kind" lookup names its machine (`db.Store.ActiveID(machine, kind)`, `SwitchInstance(ctx, machine, ...)`; a retired connection revives only on its own machine). Harness setup is per machine too: migration 0018 keys `t3_connection` (T3 token, URL, sync bookkeeping) and `opencode_settings` by `machine_id`, moving the former single rows to machine 1 in place; setup code uses `db.Store.OnMachine(id)` and `harness.Connectors` holds one connector per machine and kind. A remote machine's setup runs on its worker and its harness credentials stay in the worker's `credentials.json`; its `t3_connection` and `opencode_settings` rows hold only the non-secret record ([execution.md](execution.md#remote-machines)). Each machine hosts one adapter per active connection (`machine.Local.Install` moves it when the instance changes; a remote machine's adapters are proxies over its worker channel that the worker answers with its own adapters, [execution.md](execution.md#remote-machines); [execution.md](execution.md#the-machine-seam)) and runs one release and one schedule runner per active connection. Replacing an instance retires its connection: tasks, sessions and bindings stay on it as history, never polled, linked or launched on, and Stage refuses new work there (409 `connection_retired`). Backlog tasks and schedules keep their saved destination. Edit them to select an exact workspace on a replacement connection. Project groups organize workspaces through evidence and explicit membership edits. The same instance again revives its connection; Remove connection clears a retired connection's identity (or deletes it when unreferenced). `db/connections.go` owns these rules (`SwitchInstance`, `ForgetConnection`). Migration 0020 adds remote machines: a one-time pairing code (10 minutes, single use) is redeemed for a new machine and its machine token, the worker's credential on `/api/worker/*` only; both are stored as SHA-256 and compared in constant time (`db/machineauth.go`; [api.md](api.md#machines), [runtime.md](runtime.md#worker-routes)). Removing a remote machine revokes its token, retires its active connections under the replaced-instance rules (deleting unreferenced ones) and hides its row, which history keeps for its label; machine 1 cannot be removed.
 
-### Project import
+### Workspace inventory and project groups
 
-Each active connection refreshes inventory on startup, every five minutes and on Sync now. Failed inventories keep the last good snapshot and task polling continues. After a successful refresh, discovery applies the same stored-evidence resolver used by Resolve now and workspace review. The adapter declares import eligibility. For Claude Code and Codex, machine inventory checks the checkout conditions on the file host.
+Each active connection refreshes inventory on startup, every five minutes
+and on Sync now. Failed inventories keep the last good snapshot and task
+polling continues. `machine.Ops.Inventory` reads Git metadata on the
+attested file host, in process or on its worker. Network services may
+supply repository origin and subpath themselves.
 
-`machine.Ops.Inventory` reads Git metadata directly on the attested file host, in process or on its worker. Network services may supply remote and subpath information themselves. The resolver uses the most specific eligible key. A normalized origin plus known subpath works across machines and harnesses. Local checkout or directory evidence stays on its file host. A pathless workspace uses its connection and external ID, even if it reports repository metadata. See the [resolver rules and examples](discovery.md#identity-keys-and-resolution-07).
+Discovery organizes new catalog rows by strong evidence. Stage keeps
+explicit membership edits, old project IDs and aliases. Identity writes
+serialize across connections on both storage engines. Membership only
+organizes the catalog and existing history. [Workspace discovery and grouping](discovery.md)
 
-Project identity writes serialize across connections. Existing bindings stay attached, unique moves can transfer a binding, and ambiguous rows go to review. A project can have several active bindings on a connection with one primary. A merge makes the old project ID an alias. Stage owns the project archive state. See [storage](storage.md#project-identity) for the migration and transaction rules and [workspace discovery](discovery.md) for binding behavior.
-
-Tasks pin connection/project/workspace/binding revision atomically with an attempt.
-Unknown outcomes keep the same destination and request ID on retry. A binding
-change applies only to a future unclaimed attempt. Connection-scoped session IDs
-own task lookup, provenance, notification groups and accepted evidence.
+Tasks and schedules store an exact connection and workspace for future
+launches. Launch claims freeze the verified destination and intent
+atomically with the attempt. Unknown outcomes keep the same destination
+and request ID on retry. Connection-scoped session IDs own task lookup,
+provenance, notification groups and accepted evidence.
 
 There is no default harness ([ADR 0007](adr/0007-harness-boundary.md) decision 12): no connection is seeded (migration 0032 removes the never-configured seed), nothing outside a harness's adapter and setup branches on its kind (`harness/boundary_test.go`), and a bare session id names no connection (migration 0027 backfilled stored bare IDs onto the then-active T3 connection, and 0028 dropped the legacy-id triggers). The engine runs independent observation loops for each configured connection. Release and scheduling workers also isolate their launches by connection.

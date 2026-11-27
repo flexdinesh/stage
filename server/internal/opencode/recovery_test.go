@@ -193,7 +193,8 @@ func TestLiveCoordinatorRecovery(t *testing.T) {
 		t.Fatalf("adoption %+v %v", adopted, e)
 	}
 	read := httptest.NewRecorder()
-	router.ServeHTTP(read, httptest.NewRequest("GET", fmt.Sprintf("/api/connections/2/capabilities?projectId=%d", p.ID), nil))
+	workspaceID := db.WorkspaceID(2, f.project, f.dir)
+	router.ServeHTTP(read, httptest.NewRequest("GET", "/api/connections/2/capabilities?workspaceId="+url.QueryEscape(workspaceID), nil))
 	var catalog execution.Capabilities
 	if read.Code != 200 || json.NewDecoder(read.Body).Decode(&catalog) != nil || len(catalog.Models) == 0 || len(catalog.Modes) == 0 {
 		t.Fatalf("scoped API catalog: %d %s", read.Code, read.Body.String())

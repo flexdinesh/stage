@@ -1,12 +1,13 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { keys, useInvalidateProjects, useProject } from "../api/queries.ts";
-import type { ProjectBinding, ProjectGroup } from "../api/types.ts";
+import { keys, useDestinations, useInvalidateProjects, useProject } from "../api/queries.ts";
+import type { GroupWorkspace, ProjectGroup } from "../api/types.ts";
+import { canRunProjectActions } from "../lib/projectGroups.ts";
 import { useApi } from "../platform/context.tsx";
 import { DeclaredActions } from "./DeclaredActions.tsx";
 import { GroupMembershipDrawer, type MembershipAction } from "./GroupMembershipDrawer.tsx";
 import { GroupWorkspaceState, groupWorkspaceLabel, groupWorkspaceLocation } from "./GroupWorkspaceDisplay.tsx";
-import { WorkspaceDisplay, type WorkspaceConnections } from "./WorkspaceDisplay.tsx";
+import { RecordedWorkspaceDisplay, type WorkspaceConnections } from "./WorkspaceDisplay.tsx";
 import {
   Button, ConfirmInline, CopyButton, EmptyState, ErrorText, Field, Input, Menu, MenuItem,
   Meta, Panel, QueryState, Row, RowList, TextLink, useMenu,
@@ -18,6 +19,7 @@ export function ProjectGroupWorkspaces({ group, connections }: {
 }) {
   const api = useApi();
   const refresh = useInvalidateProjects();
+  const destinations = useDestinations();
   const [editing, setEditing] = useState<"title" | "archive" | null>(null);
   const [title, setTitle] = useState(group.title);
   const [action, setAction] = useState<MembershipAction | null>(null);
@@ -93,6 +95,8 @@ export function ProjectGroupWorkspaces({ group, connections }: {
                       <code className="min-w-0 wrap-anywhere text-meta">{path}</code>
                       <CopyButton text={path} label="Copy" accessibleLabel={`Copy ${path} on ${site}`} variant="ghost" />
                     </div>
+                    {canRunProjectActions(group.id, workspace, destinations.data?.destinations)
+                      ? <ProjectHarnessActions projectId={group.id} workspace={workspace} /> : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button small aria-label={`Move workspace ${path} on ${site} to another project`}
@@ -123,21 +127,19 @@ function RecordedWorkspaces({ projectId, connections }: {
   return (
     <details className="border-t border-line">
       <summary className="cursor-pointer px-3 py-2 text-small text-muted">Recorded workspace bindings</summary>
-      <WorkspaceDisplay bindings={bindings} connections={connections} renderActions={(binding, site) =>
-        site.live && binding.status === "available" ? <ProjectHarnessActions binding={binding} /> : null
-      } />
+      <RecordedWorkspaceDisplay bindings={bindings} connections={connections} />
     </details>
   );
 }
 
-function ProjectHarnessActions({ binding }: { binding: ProjectBinding }) {
+function ProjectHarnessActions({ projectId, workspace }: { projectId: number; workspace: GroupWorkspace }) {
   const api = useApi();
   const refresh = useInvalidateProjects();
   const [open, setOpen] = useState(false);
-  const scope = { connectionId: binding.connectionId, bindingId: binding.id };
+  const scope = { connectionId: workspace.connectionId, workspaceId: workspace.workspaceId };
   const query = useQuery({
-    queryKey: [...keys.projectActions, binding.projectId, scope.connectionId, scope.bindingId, binding.revision],
-    queryFn: () => api.projectActions(binding.projectId, scope),
+    queryKey: [...keys.projectActions, projectId, scope.connectionId, scope.workspaceId],
+    queryFn: ({ signal }) => api.projectActions(projectId, scope, signal),
     enabled: open,
     retry: false,
   });
@@ -148,7 +150,7 @@ function ProjectHarnessActions({ binding }: { binding: ProjectBinding }) {
       {open ? <QueryState isPending={query.isPending} error={query.error} hasData={query.data !== undefined}
         empty={actions.length === 0} emptyText="This workspace has no declared project actions.">
         <DeclaredActions actions={actions} run={async (id, input, confirmed) => {
-          const result = await api.runProjectAction(binding.projectId, scope, id, input, confirmed);
+          const result = await api.runProjectAction(projectId, scope, id, input, confirmed);
           await refresh();
           return result;
         }} />

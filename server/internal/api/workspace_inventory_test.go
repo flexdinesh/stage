@@ -146,7 +146,7 @@ func TestConnectionInventoryAccessAndProjection(t *testing.T) {
 			t.Fatalf("%s %s: %d %s", method, path, rec.Code, rec.Body)
 		}
 		body := rec.Body.String()
-		for _, hidden := range []string{privateRoot, "native-private-id", "canonicalPath", "lastError", "resolution", "evidenceAt", "imports"} {
+		for _, hidden := range []string{privateRoot, "native-private-id", "canonicalPath", "lastError", "resolution", "evidenceAt", "imports", `"bindings"`} {
 			if strings.Contains(body, hidden) {
 				t.Fatalf("%s exposes %q: %s", path, hidden, body)
 			}
@@ -155,7 +155,9 @@ func TestConnectionInventoryAccessAndProjection(t *testing.T) {
 	}
 	request("GET", inventory, 403)
 	request("POST", "/api/sync", 403)
-	request("POST", "/api/connections/1/resolve", 403)
+	for _, route := range retiredProjectRoutes {
+		request(route.method, route.path, 403)
+	}
 	request("POST", "/api/project-groups/membership", 403)
 	body := request("GET", "/api/projects", 200)
 	var projection client.ProjectSummaries
@@ -185,8 +187,8 @@ func TestConnectionInventoryAccessAndProjection(t *testing.T) {
 	if err := json.Unmarshal([]byte(request("GET", fmt.Sprintf("/api/projects/%d", p.ID), 200)), &detail); err != nil {
 		t.Fatal(err)
 	}
-	if len(detail.Bindings) != 1 || detail.Bindings[0].WorkspaceID != byRoot[privateRoot+"one"] {
-		t.Fatalf("bound selector %+v", detail)
+	if detail.ID != p.ID || detail.Title != p.Title {
+		t.Fatalf("agent project identity: %+v", detail)
 	}
 	if a.calls.Load() != calls {
 		t.Fatal("agent or denied request refreshed the harness")

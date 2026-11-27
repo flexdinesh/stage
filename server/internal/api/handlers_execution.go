@@ -14,8 +14,6 @@ import (
 
 type taskDestination struct {
 	connectionID int64
-	projectID    int64
-	bindingID    *int64
 	workspaceID  string
 }
 
@@ -32,13 +30,7 @@ func (s *server) projectFilter(r *http.Request, key string) (*int64, error) {
 }
 
 func (s *server) validateTaskDestination(ctx context.Context, in db.NewTask) error {
-	d := taskDestination{in.ConnectionID, in.ProjectID, in.BindingID, in.WorkspaceID}
-	if in.UnresolvedWorkspace {
-		d.projectID = 0
-	}
-	if err := s.Store.ValidateBinding(ctx, d.projectID, d.connectionID, d.bindingID); err != nil {
-		return err
-	}
+	d := taskDestination{in.ConnectionID, in.WorkspaceID}
 	if d.workspaceID != "" {
 		if _, err := s.Store.ResolveDestination(ctx, d.connectionID, d.workspaceID); err != nil {
 			return err
@@ -54,7 +46,7 @@ func (s *server) validateTaskDestination(ctx context.Context, in db.NewTask) err
 }
 
 func (s *server) validateDestinationPatch(ctx context.Context, original taskDestination,
-	connection db.Optional[int64], project *db.Optional[int64], binding db.Optional[int64], workspace db.Optional[string],
+	connection db.Optional[int64], project *db.Optional[int64], workspace db.Optional[string],
 	config *execution.Config, configPatch db.Optional[execution.Config], images []db.Attachment, imagePatch db.Optional[[]int64],
 ) error {
 	next := original
@@ -69,37 +61,24 @@ func (s *server) validateDestinationPatch(ctx context.Context, original taskDest
 		if err != nil {
 			return err
 		}
-		next.projectID, project.V = id, id
+		project.V = id
 	}
 	moved := next.connectionID != original.connectionID
-	if moved || binding.Set {
-		next.bindingID = binding.Ptr()
-		next.workspaceID = ""
+	if moved && !workspace.Set {
+		return db.DestinationRequired()
 	}
 	if workspace.Set {
-		if binding.Set && !binding.Null {
-			return db.Invalid("Choose workspaceId or the legacy bindingId.")
-		}
-		next.bindingID, next.workspaceID = nil, workspace.V
+		next.workspaceID = workspace.V
 		if !workspace.Null {
 			if _, err := s.Store.ResolveDestination(ctx, next.connectionID, workspace.V); err != nil {
 				return err
 			}
-		} else {
-			next.projectID = 0
-			if !configPatch.Set {
-				// Clearing a saved pin leaves its options as planning data.
-				config = nil
-			}
+		} else if !configPatch.Set {
+			// Clearing a saved pin leaves its options as planning data.
+			config = nil
 		}
-	} else if binding.Set {
-		if err := s.Store.ValidateBinding(ctx, next.projectID, next.connectionID, next.bindingID); err != nil {
-			return err
-		}
-	} else if !moved && next.workspaceID == "" {
-		next.projectID = 0 // Saved planning work has no workspace scope.
 	}
-	changed := moved || !sameBindingChoice(next.bindingID, original.bindingID) || next.workspaceID != original.workspaceID
+	changed := moved || next.workspaceID != original.workspaceID
 	if err := s.requirePatchImages(ctx, next, changed, images, imagePatch); err != nil {
 		return err
 	}
@@ -108,14 +87,10 @@ func (s *server) validateDestinationPatch(ctx context.Context, original taskDest
 		if changed || !sameSelection(config, selection) {
 			return s.validateWorkspaceSelection(ctx, next, selection)
 		}
-	} else if !moved && changed {
+	} else if changed {
 		return s.validateWorkspaceSelection(ctx, next, config)
 	}
 	return nil
-}
-
-func sameBindingChoice(a, b *int64) bool {
-	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
 func (s *server) executionCapabilities(w http.ResponseWriter, r *http.Request) error {
@@ -126,33 +101,13 @@ func (s *server) executionCapabilities(w http.ResponseWriter, r *http.Request) e
 	ctx := r.Context()
 	d := taskDestination{connectionID: id}
 	q := r.URL.Query()
+	if q.Has("projectId") || q.Has("bindingId") {
+		return db.Invalid("Project and binding capability selectors were retired. Send workspaceId on the selected connection.")
+	}
 	if q.Has("workspaceId") {
 		d.workspaceID = q.Get("workspaceId")
 		if d.workspaceID == "" {
 			return db.DestinationRequired()
-		}
-		if q.Has("bindingId") {
-			return db.Invalid("Choose workspaceId or the legacy bindingId.")
-		}
-	}
-	if raw := q.Get("projectId"); raw != "" {
-		project, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || project < 1 {
-			return db.Invalid("invalid Stage project")
-		}
-		d.projectID, err = s.projectID(ctx, project)
-		if err != nil {
-			return err
-		}
-	}
-	if q.Has("bindingId") {
-		binding, err := queryInt64(q, "bindingId")
-		if err != nil || binding == nil || d.projectID == 0 {
-			return db.ErrInvalidBinding
-		}
-		d.bindingID = binding
-		if err := s.Store.ValidateBinding(ctx, d.projectID, d.connectionID, d.bindingID); err != nil {
-			return err
 		}
 	}
 	c, err := s.capabilities(ctx, d)
@@ -189,16 +144,7 @@ func (s *server) capabilities(ctx context.Context, d taskDestination) (execution
 	if err != nil {
 		return empty, err
 	}
-	if scoped, ok := execution.As[execution.WorkspaceFeatures](a); ok && (pin != nil || d.projectID != 0) {
-		if pin == nil {
-			pin, err = s.Store.LegacyDestination(ctx, d.projectID, d.connectionID, d.bindingID)
-			if err != nil {
-				return empty, err
-			}
-		}
-		if pin == nil {
-			return empty, db.DestinationRequired()
-		}
+	if scoped, ok := execution.As[execution.WorkspaceFeatures](a); ok && pin != nil {
 		c, err := scoped.FeaturesForWorkspace(ctx, pin.ExternalID, pin.Root)
 		if err != nil {
 			return empty, &db.HarnessError{Err: err}
@@ -212,8 +158,8 @@ func (s *server) capabilities(ctx context.Context, d taskDestination) (execution
 	return c, nil
 }
 
-func (s *server) validateSelection(ctx context.Context, id, project int64, c *execution.Config) error {
-	return s.validateWorkspaceSelection(ctx, taskDestination{connectionID: id, projectID: project}, c)
+func (s *server) validateSelection(ctx context.Context, id int64, c *execution.Config) error {
+	return s.validateWorkspaceSelection(ctx, taskDestination{connectionID: id}, c)
 }
 
 func (s *server) validateWorkspaceSelection(ctx context.Context, d taskDestination, c *execution.Config) error {

@@ -92,8 +92,8 @@ test("resume command names the remote machine it must run on, never the local on
 test("connection options: one machine reads as today (no tag, no reorder)", () => {
   const opts = connectionOptions([conn(4, "opencode", 1), conn(3, "t3", 1)], [local], kindName);
   assert.deepEqual(opts, [
-    { value: "4", label: "OpenCode", tag: undefined, chip: undefined },
-    { value: "3", label: "T3", tag: undefined, chip: undefined },
+    { value: "4", label: "OpenCode", tag: undefined },
+    { value: "3", label: "T3", tag: undefined },
   ]);
 });
 
@@ -103,28 +103,6 @@ test("connection options: several machines tag each by machine, local first", ()
     ["1", "T3", "This computer"],
     ["5", "OpenCode", "This computer"],
     ["7", "T3", "desk"],
-  ]);
-});
-
-test("connection options: a chosen project's bindings list first; the rest are marked not bound", () => {
-  const opts = connectionOptions([conn(1, "t3", 1), conn(5, "opencode", 1), conn(7, "t3", 2)], [local, desk], kindName, new Set([7]));
-  assert.deepEqual(opts.map((o) => [o.value, o.tag, o.chip]), [
-    ["7", "desk", undefined],
-    ["1", "This computer", "not bound"],
-    ["5", "This computer", "not bound"],
-  ]);
-});
-
-test("connection options: the default connection is marked, with not bound when it is", () => {
-  const opts = connectionOptions([conn(1, "t3", 1), conn(5, "opencode", 1)], [local], kindName, null, 5);
-  assert.deepEqual(opts.map((o) => [o.value, o.chip]), [
-    ["1", undefined],
-    ["5", "default"],
-  ]);
-  const bound = connectionOptions([conn(1, "t3", 1), conn(5, "opencode", 1)], [local], kindName, new Set([5]), 1);
-  assert.deepEqual(bound.map((o) => [o.value, o.chip]), [
-    ["5", undefined],
-    ["1", "default · not bound"],
   ]);
 });
 

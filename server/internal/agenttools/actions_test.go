@@ -22,7 +22,7 @@ func TestActionToolsApplyAgentPolicyAndReturnStructuredResults(t *testing.T) {
 			t.Errorf("headers %v", r.Header)
 		}
 		switch r.Method + " " + r.URL.RequestURI() {
-		case "GET /api/projects/8/actions?bindingId=12&connectionId=4":
+		case "GET /api/projects/8/actions?connectionId=4&workspaceId=ws_exact":
 			if got := r.Header.Get("Stage-Caller-Session"); got != "" {
 				t.Errorf("unexpected provenance %q", got)
 			}
@@ -53,7 +53,7 @@ func TestActionToolsApplyAgentPolicyAndReturnStructuredResults(t *testing.T) {
 	defer srv.Close()
 	cs := connect(t, &agenttools.Ops{Client: client.New(srv.URL)})
 	var listed agenttools.ActionsOut
-	mustCall(t, cs, "list_actions", map[string]any{"projectId": 8, "onConnectionId": 4, "bindingId": 12}, &listed)
+	mustCall(t, cs, "list_actions", map[string]any{"projectId": 8, "onConnectionId": 4, "workspaceId": "ws_exact"}, &listed)
 	if len(listed.Actions) != 1 || listed.Actions[0].ID != "inspect" {
 		t.Fatalf("actions %+v", listed.Actions)
 	}
@@ -74,13 +74,16 @@ func TestActionToolsApplyAgentPolicyAndReturnStructuredResults(t *testing.T) {
 		{"actionId": "inspect", "taskId": 2, "connectionId": 4},
 		{"actionId": "inspect", "projectId": 8},
 		{"actionId": "inspect", "taskId": 2, "onConnectionId": 4},
-		{"actionId": "inspect", "taskId": 2, "bindingId": 12},
+		{"actionId": "inspect", "taskId": 2, "workspaceId": "ws_exact"},
 		{"actionId": "inspect", "taskId": 2, "input": []string{"invalid"}},
 		{"actionId": "inspect", "taskId": 2, "confirmed": true},
 	} {
 		if msg := call(t, cs, "run_action", args, nil); msg == "" {
 			t.Fatalf("accepted invalid arguments %+v", args)
 		}
+	}
+	if msg := call(t, cs, "list_actions", map[string]any{"projectId": 8, "onConnectionId": 4}, nil); !strings.Contains(msg, "workspaceId from list_projects") {
+		t.Fatalf("missing project workspace: %q", msg)
 	}
 	if got := requests.Load(); got != 3 {
 		t.Fatalf("action requests %d", got)

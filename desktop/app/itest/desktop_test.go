@@ -173,7 +173,7 @@ func TestDesktopAgainstRealServer(t *testing.T) {
 		}
 	})
 
-	projectID, _ := bindDemoProject(t, a.json)
+	destination, _ := demoWorkspace(t, a.json)
 
 	var attID int64
 	t.Run("upload and attachment", func(t *testing.T) {
@@ -203,9 +203,9 @@ func TestDesktopAgainstRealServer(t *testing.T) {
 
 	var tk task
 	t.Run("create, start, read task", func(t *testing.T) {
-		a.json("POST", "/api/tasks", map[string]any{
-			"projectId": projectID, "title": "Desktop smoke", "prompt": "reply OK", "attachmentIds": []int64{attID},
-		}, 201, &tk)
+		draft := destination.draft("Desktop smoke", "reply OK")
+		draft["attachmentIds"] = []int64{attID}
+		a.json("POST", "/api/tasks", draft, 201, &tk)
 		if tk.State != "backlog" {
 			t.Fatalf("created %+v", tk)
 		}

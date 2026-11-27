@@ -62,14 +62,6 @@ func resolveDestination(ctx context.Context, tx store.Tx, connection int64, sele
 	return Workspace{}, DestinationUnavailable()
 }
 
-// LegacyDestination snapshots the binding that legacy clients selected.
-// Missing or ambiguous defaults leave planning work unresolved.
-func (s *Store) LegacyDestination(ctx context.Context, project, connection int64, binding *int64) (*WorkspacePin, error) {
-	return read(ctx, s, func(tx store.Tx) (*WorkspacePin, error) {
-		return legacyDestination(ctx, tx, project, connection, binding)
-	})
-}
-
 func legacyDestination(ctx context.Context, tx store.Tx, project, connection int64, binding *int64) (*WorkspacePin, error) {
 	if binding != nil {
 		if err := validateBinding(ctx, tx, project, connection, binding); err != nil {
@@ -101,7 +93,7 @@ func legacyDestination(ctx context.Context, tx store.Tx, project, connection int
 }
 
 // creationDestination runs under the identity lock. When the caller leaves
-// project context open, an unbound workspace uses its historical association.
+// project context open, use the current group or record historical context.
 func creationDestination(ctx context.Context, tx store.Tx, connection, project int64, binding *int64, selector string) (int64, *WorkspacePin, error) {
 	if project != 0 || selector == "" {
 		var err error
@@ -122,9 +114,12 @@ func creationDestination(ctx context.Context, tx store.Tx, connection, project i
 		return 0, nil, err
 	}
 	if project == 0 {
-		if w.ProjectID != nil {
+		switch {
+		case w.GroupProjectID != nil:
+			project = *w.GroupProjectID
+		case w.ProjectID != nil:
 			project = *w.ProjectID
-		} else {
+		default:
 			b := ProjectBinding{ConnectionID: connection, ExternalProjectID: w.ExternalID, Workspace: w.Workspace}
 			project, err = historicalWorkspaceProject(ctx, tx.Projects(), b, WorkspaceTitle(w.Title, w.Workspace))
 			if err != nil {

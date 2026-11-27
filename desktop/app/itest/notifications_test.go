@@ -259,7 +259,7 @@ func (a api) read(groups ...string) {
 
 // project is the Stage project the server's sync imported for the isolated
 // fake's demo workspace.
-func (a api) project() (int64, string) { return bindDemoProject(a.t, a.do) }
+func (a api) project() (demoDestination, string) { return demoWorkspace(a.t, a.do) }
 
 // t3Connection is the server's T3 connection. A fresh install has none: the
 // refreshed T3 status stamps the fake's environment, creating it (and
@@ -285,38 +285,55 @@ func t3Connection(t *testing.T, request func(string, string, any, int, any)) int
 
 // The sync imports and binds the demo workspace; read it over both bridge
 // and socket.
-func bindDemoProject(t *testing.T, request func(string, string, any, int, any)) (int64, string) {
+type demoDestination struct {
+	project, connection int64
+	workspace           string
+}
+
+func (d demoDestination) draft(title, prompt string) map[string]any {
+	return map[string]any{
+		"projectId": d.project, "connectionId": d.connection, "workspaceId": d.workspace,
+		"title": title, "prompt": prompt,
+	}
+}
+
+func demoWorkspace(t *testing.T, request func(string, string, any, int, any)) (demoDestination, string) {
 	t.Helper()
-	discovery := fmt.Sprintf("/api/connections/%d/workspaces", t3Connection(t, request))
+	connection := t3Connection(t, request)
+	discovery := fmt.Sprintf("/api/connections/%d/workspaces", connection)
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		var discovered struct {
 			Workspaces []struct {
-				ProjectID *int64 `json:"projectId"`
+				ProjectID   *int64 `json:"projectId"`
+				WorkspaceID string `json:"workspaceId"`
+				Available   bool   `json:"available"`
 			} `json:"workspaces"`
 		}
 		request("GET", discovery, nil, 200, &discovered)
-		if len(discovered.Workspaces) > 0 && discovered.Workspaces[0].ProjectID != nil {
-			id := *discovered.Workspaces[0].ProjectID
+		for _, row := range discovered.Workspaces {
+			if row.ProjectID == nil || row.WorkspaceID == "" || !row.Available {
+				continue
+			}
 			var project struct {
 				ID    int64  `json:"id"`
 				Title string `json:"title"`
 			}
-			request("GET", fmt.Sprintf("/api/projects/%d", id), nil, 200, &project)
-			return project.ID, project.Title
+			request("GET", fmt.Sprintf("/api/projects/%d", *row.ProjectID), nil, 200, &project)
+			return demoDestination{project.ID, connection, row.WorkspaceID}, project.Title
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("sync did not import the demo workspace")
+			t.Fatal("sync did not discover the demo workspace")
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 }
 
 // launch creates and starts a task; the fake T3 makes it ask a question.
-func (a api) launch(project int64, title string) task {
+func (a api) launch(destination demoDestination, title string) task {
 	a.t.Helper()
 	var tk task
-	a.do("POST", "/api/tasks", map[string]any{"projectId": project, "title": title, "prompt": "reply OK"}, 201, &tk)
+	a.do("POST", "/api/tasks", destination.draft(title, "reply OK"), 201, &tk)
 	a.do("POST", fmt.Sprintf("/api/tasks/%d/start", tk.ID), map[string]any{}, 200, &tk)
 	return tk
 }
@@ -381,7 +398,7 @@ func TestNotificationsAgainstRealServer(t *testing.T) {
 	e := newEnv(t)
 	e.serve(t, bin)
 	a := api{t: t, sock: e.sock}
-	projectID, projectTitle := a.project()
+	destination, projectTitle := a.project()
 	prefs := filepath.Join(t.TempDir(), "userdata", "notifications.json")
 	var fg atomic.Bool
 	outer := t // the first Service outlives its subtest
@@ -414,7 +431,7 @@ func TestNotificationsAgainstRealServer(t *testing.T) {
 	var live task
 	t.Run("2 live needs_input shows", func(t *testing.T) {
 		before, _ := h.sink.badge()
-		tk := a.launch(projectID, "Notify live")
+		tk := a.launch(destination, "Notify live")
 		row, tk := a.needsInput(tk.ID)
 		live = tk
 		want := alerts.Note{ID: noteID(taskTag(tk.ID)), Title: "Needs input", Body: "Notify live · " + projectTitle}
@@ -450,7 +467,7 @@ func TestNotificationsAgainstRealServer(t *testing.T) {
 		fg.Store(true)
 		defer fg.Store(false)
 		shows := len(h.sink.notes())
-		tk := a.launch(projectID, "Notify foreground")
+		tk := a.launch(destination, "Notify foreground")
 		row, _ := a.needsInput(tk.ID)
 		waitUntil(t, "Delivered", notifWait, func() bool { return slices.Contains(h.delivered.all(), row.ID) })
 		waitUntil(t, "cursor advanced", 10*time.Second, func() bool { return cursor(t, prefs) == row.ID })
@@ -466,7 +483,7 @@ func TestNotificationsAgainstRealServer(t *testing.T) {
 		a.setEvents([]string{"done"})
 		defer a.setEvents(allEvents)
 		latest, shows := a.latestID(), len(h.sink.notes())
-		tk := a.launch(projectID, "Notify filtered")
+		tk := a.launch(destination, "Notify filtered")
 		waitUntil(t, "task needs_input", notifWait, func() bool { return a.task(tk.ID).State == "needs_input" })
 		// The notifier handles the transition at once; allow it time.
 		time.Sleep(2 * time.Second)
@@ -491,7 +508,7 @@ func TestNotificationsAgainstRealServer(t *testing.T) {
 		}
 		tasks := make([]task, 5)
 		for i := range tasks {
-			tasks[i] = a.launch(projectID, fmt.Sprintf("Notify offline %d", i+1))
+			tasks[i] = a.launch(destination, fmt.Sprintf("Notify offline %d", i+1))
 		}
 		var batch []inboxRow // oldest first
 		for _, tk := range tasks {
@@ -569,12 +586,12 @@ func TestNotificationsServerRestart(t *testing.T) {
 	e := newEnv(t)
 	srv := e.serve(t, bin)
 	a := api{t: t, sock: e.sock}
-	projectID, projectTitle := a.project()
+	destination, projectTitle := a.project()
 	prefs := filepath.Join(t.TempDir(), "notifications.json")
 
 	h := open(t, prefs, e.sock, 0, nil)
 	h.waitSnapshot(t)
-	tk := a.launch(projectID, "Notify restart")
+	tk := a.launch(destination, "Notify restart")
 	row, _ := a.needsInput(tk.ID)
 	first := alerts.Note{ID: noteID(taskTag(tk.ID)), Title: "Needs input", Body: "Notify restart · " + projectTitle}
 	waitUntil(t, "show before restart", notifWait, func() bool { return slices.Contains(h.sink.notes(), first) })
@@ -591,8 +608,10 @@ func TestNotificationsServerRestart(t *testing.T) {
 	// A missing harness session preserves execution state. A new Stage-only
 	// readiness event proves the notification stream reconnects without replay.
 	var source, dependent task
-	a.do("POST", "/api/tasks", map[string]any{"projectId": projectID, "title": "Review prerequisite", "prompt": "review"}, 201, &source)
-	a.do("POST", "/api/tasks", map[string]any{"projectId": projectID, "title": "Ready after restart", "prompt": "continue", "needs": []int64{source.ID}, "startMode": "manual"}, 201, &dependent)
+	a.do("POST", "/api/tasks", destination.draft("Review prerequisite", "review"), 201, &source)
+	draft := destination.draft("Ready after restart", "continue")
+	draft["needs"], draft["startMode"] = []int64{source.ID}, "manual"
+	a.do("POST", "/api/tasks", draft, 201, &dependent)
 	var preview struct {
 		Revision        int64  `json:"revision"`
 		EvidenceVersion string `json:"evidenceVersion"`

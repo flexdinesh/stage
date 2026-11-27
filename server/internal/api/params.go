@@ -60,6 +60,9 @@ func decodeConfig(r *http.Request, v any, strict bool) error {
 				return db.Invalid("%s was removed in API v8; send executionConfig with connectionId", f)
 			}
 		}
+		if _, ok := fields["bindingId"]; ok {
+			return db.Invalid("bindingId was retired. Send connectionId and workspaceId from GET /api/projects?view=destinations.")
+		}
 		if _, ok := fields[removedWorkspaceField]; ok {
 			return db.Invalid("workspace was removed in API v8; set the harness's launch options in executionConfig.options (worktree, baseRef, branch where the connection declares them; see its capabilities)")
 		}

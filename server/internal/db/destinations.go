@@ -36,23 +36,12 @@ type Destination struct {
 	Available       bool   `json:"available"`
 }
 
-// ProjectSummary keeps the legacy binding selectors available to agents.
+// ProjectSummary exposes project identity and aliases without catalog details.
 type ProjectSummary struct {
-	ID         int64            `json:"id"`
-	Title      string           `json:"title"`
-	ArchivedAt *time.Time       `json:"archivedAt"`
-	Aliases    []ProjectAlias   `json:"aliases"`
-	Bindings   []BindingSummary `json:"bindings"`
-}
-
-type BindingSummary struct {
-	ID               int64  `json:"id"`
-	ConnectionID     int64  `json:"connectionId"`
-	WorkspaceID      string `json:"workspaceId"`
-	Title            string `json:"title"`
-	ConnectionActive bool   `json:"connectionActive"`
-	Primary          bool   `json:"primary"`
-	Status           string `json:"status"`
+	ID         int64          `json:"id"`
+	Title      string         `json:"title"`
+	ArchivedAt *time.Time     `json:"archivedAt"`
+	Aliases    []ProjectAlias `json:"aliases"`
 }
 
 type ConnectionSummary struct {

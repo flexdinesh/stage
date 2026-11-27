@@ -30,8 +30,8 @@ Coding agents with a shell use the CLI by default: it costs no context until use
 | Flag | Meaning |
 |---|---|
 | `--project P` | project id or title |
-| `--connection ID` | the execution harness connection (required unless the project's bindings or the default connection choose one) |
-| `--binding ID` | select a workspace binding for a task or schedule. Defaults to the project's primary on the chosen connection |
+| `--connection ID` | the connection that owns the selected workspace |
+| `--workspace-id ID` | exact workspace on that connection, from `stage projects ls`. An empty value clears the pin on an untimed backlog task edit |
 | `--execution-config JSON` | harness options advertised by `stage models ls`, launch options included (a worktree, and on T3 its `baseRef` and `branch`). `--workspace`, `--base-ref`, `--branch`, `--base` and `--base-task` were removed |
 | `--prompt-file PATH`, `--prompt -` | read the prompt from a file or stdin |
 | `--image PATH...` | attach local images (PNG, JPEG, GIF, WebP, up to 8) |
@@ -44,6 +44,14 @@ Coding agents with a shell use the CLI by default: it costs no context until use
 | `--start-at YYYY-MM-DDTHH:mm --tz ZONE` | one-shot start at a wall time (`task edit --start-at ""` clears it) |
 | `--initial-note TEXT` | first journal note |
 | `--origin-connection ID --origin-session ID` | on `task ls`: tasks a session created |
+
+Use `stage projects ls --json` to select a matching connection and
+workspace. Pass both flags for immediate or one-shot starts and schedule
+creation. An untimed backlog task can use `--connection ID --project P`
+and omit the workspace. When upgrading scripts, replace `--binding` with
+`--workspace-id` and pass the workspace's connection. Use Projects in the
+app to move or separate workspaces previously managed by `projects merge`
+or `projects split`.
 
 ## Trees
 
@@ -88,12 +96,9 @@ Categories are optional: `finding`, `decision`, `blocker`, `outcome`. The CLI ge
 | `stage sessions adopt [--target-connection ID --target-session ID] [--title T] [--initial-note TEXT] [--tree ID] [--project ID \| --new-project TITLE]` | track a session as a task (default: your own session) |
 | `stage show REF` | what a Stage link, a harness session link, `#ID` or a scoped session path names; `--target-connection ID --target-session ID` names a session by id |
 | `stage context` | your session, cwd, resolved project, owning task and tree |
-| `stage projects ls` | projects with their bindings and connections |
-| `stage projects workspaces [PROJECT] [--review]` | list workspaces and primary bindings, or list workspaces awaiting review |
-| `stage projects merge FROM INTO [--yes]` | preview a merge into the surviving project. Add `--yes` to confirm |
-| `stage projects split PROJECT --binding ID [--title T] --yes` | move a workspace to a new project |
-| `stage models ls --connection ID [--project ID [--binding ID]]` | a connection's models, agents and options |
-| `stage guide` | the agent workflow guide |
+| `stage projects ls [--json]` | logical projects, connections and exact workspace selectors |
+| `stage models ls --connection ID [--workspace-id ID]` | models, agents and options for a connection or an exact workspace |
+| `stage action ls\|run` | declared harness actions. For a project workspace, pass `--project ID --on-connection ID --workspace-id ID` |
 
 ## Tools
 
@@ -252,17 +257,20 @@ Commands that create tasks, write notes, adopt sessions or show context know the
 
 ## Examples
 
+Set `WORKSPACE_ID` to a workspace selector listed on connection 2.
+
 ```sh
-stage task add --title "Fix flaky test" --prompt "..." --connection 2 --execution-config '{"model":"m","options":[{"id":"effort","value":"high"}]}'  # backlog
-stage task add --title "Deploy" --prompt-file deploy.md --after-me             # eligible after user completion of this session's task
-echo "..." | stage task add --title "Refactor" --prompt - --connection 1 --execution-config '{"options":[{"id":"worktree","value":true},{"id":"baseRef","value":"origin/main"}]}' --start
+stage projects ls --json
+stage task add --title "Fix flaky test" --prompt "..." --connection 2 --workspace-id "$WORKSPACE_ID" --execution-config '{"model":"m","options":[{"id":"effort","value":"high"}]}'  # backlog
+stage task add --title "Deploy" --prompt-file deploy.md --connection 2 --workspace-id "$WORKSPACE_ID" --after-me             # eligible after user completion of this session's task
+echo "..." | stage task add --title "Refactor" --prompt - --connection 2 --workspace-id "$WORKSPACE_ID" --execution-config '{"options":[{"id":"worktree","value":true},{"id":"baseRef","value":"origin/main"}]}' --start
 stage task ls --state backlog --json
 stage task wait 42 --until done --timeout 30m                          # exit 3 on timeout
 stage tree new --title "Auth" 41 43:41 42:43                                   # 43 needs 41, 42 needs 43
-stage task add --title "Docs" --prompt "..." --needs 42 --start-mode manual    # ready (not launched) once the user completes 42
+stage task add --title "Docs" --prompt "..." --connection 2 --workspace-id "$WORKSPACE_ID" --needs 42 --start-mode manual    # ready (not launched) once the user completes 42
 stage tree start 7                                                             # start every ready member
 stage task notes 42 add --text "Chose cookie sessions" --category decision
 stage task ls --origin-connection 1 --origin-session "$T3CODE_THREAD_ID"        # tasks a T3 session created (connection 1)
 stage show "http://127.0.0.1:7380/tasks/12"                                     # what a pasted link names
-stage schedule add --title "Nightly deps" --prompt "..." --cron "0 2 * * *" --tz Europe/Berlin
+stage schedule add --title "Nightly deps" --prompt "..." --connection 2 --workspace-id "$WORKSPACE_ID" --cron "0 2 * * *" --tz Europe/Berlin
 ```

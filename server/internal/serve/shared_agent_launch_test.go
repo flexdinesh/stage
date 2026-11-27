@@ -189,11 +189,13 @@ func TestSharedLocalHarnessLaunchAndReportBack(t *testing.T) {
 			if status.ConnectionID <= 0 || !status.Connected {
 				t.Fatalf("harness connection: %+v", status)
 			}
-			project := reportBackProject(t, owner, proxy.URL, tc.kind, status.ConnectionID, tc.external, tc.workspace)
+			workspace := fixtureWorkspace(t, owner, proxy.URL, status.ConnectionID, tc.external, tc.workspace)
+			var project db.Project
+			browserPost(t, owner, proxy.URL, "/api/projects", fmt.Sprintf(`{"title":%q}`, tc.kind+" project"), http.StatusCreated, &project)
 			const prompt = "Run the integration test and record its outcome."
 			var task client.Task
 			browserPost(t, owner, proxy.URL, "/api/tasks",
-				fmt.Sprintf(`{"projectId":%d,"connectionId":%d,"title":"Report back","prompt":%q,"start":true}`, project, status.ConnectionID, prompt), 201, &task)
+				fmt.Sprintf(`{"projectId":%d,"connectionId":%d,"workspaceId":%q,"title":"Report back","prompt":%q,"start":true}`, project.ID, status.ConnectionID, workspace.WorkspaceID, prompt), 201, &task)
 			if task.ExternalSessionID == nil || task.ConnectionID != status.ConnectionID || task.State != "running" {
 				if task.LastError != nil {
 					t.Logf("launch error: %s", *task.LastError)
@@ -230,53 +232,6 @@ func TestSharedLocalHarnessLaunchAndReportBack(t *testing.T) {
 		t.Fatal(err)
 	}
 	gone(t, agentPath)
-}
-
-func reportBackProject(t *testing.T, owner *http.Client, base, kind string, connection int64, external, workspace string) int64 {
-	t.Helper()
-	c := client.New(base)
-	c.HTTP = owner
-	find := func() int64 {
-		t.Helper()
-		projects, err := c.Projects(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, project := range projects {
-			for _, binding := range project.Bindings {
-				if binding.ConnectionID == connection && binding.ExternalProjectID == external && binding.Workspace == workspace {
-					return project.ID
-				}
-			}
-		}
-		return 0
-	}
-	if id := find(); id != 0 {
-		return id
-	}
-	body := fmt.Sprintf(`{"title":%q,"bindings":[{"connectionId":%d,"externalProjectId":%q,"workspace":%q}]}`, kind+" project", connection, external, workspace)
-	req, err := http.NewRequestWithContext(t.Context(), "POST", base+"/api/projects", strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Origin", base)
-	resp, err := owner.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == 409 {
-		// Discovery imported the project concurrently.
-		if id := find(); id != 0 {
-			return id
-		}
-	}
-	var project db.Project
-	if err := json.NewDecoder(resp.Body).Decode(&project); err != nil || resp.StatusCode != 201 || project.ID == 0 {
-		t.Fatalf("create %s project: status %d, response %+v, decode %v", kind, resp.StatusCode, project, err)
-	}
-	return project.ID
 }
 
 func assertLaunchReportBack(t *testing.T, owner *http.Client, base string, agent *client.Client, flags []string, task client.Task, ref db.SessionRef, callerEnv string) {

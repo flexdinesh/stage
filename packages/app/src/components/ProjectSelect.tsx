@@ -1,7 +1,9 @@
 import { useCallback, useMemo, type ReactNode } from "react";
+import { useProjectGroups } from "../api/queries.ts";
 import type { Project } from "../api/types.ts";
 import { matchProjects, type ProjectMatch } from "../lib/projects.ts";
-import { WorkspaceDisplay, useWorkspaceConnections } from "./WorkspaceDisplay.tsx";
+import { GroupSummary } from "./GroupWorkspaceDisplay.tsx";
+import { useWorkspaceConnections } from "./WorkspaceDisplay.tsx";
 import { Combobox, type ComboboxOption } from "./ui.tsx";
 
 function toOption(m: ProjectMatch): ComboboxOption {
@@ -26,7 +28,6 @@ export function ProjectCombobox({
   size,
   autoFocus,
   emptyText = "No matching projects",
-  connectionId,
 }: {
   projects: readonly Project[];
   id?: string | undefined;
@@ -41,9 +42,10 @@ export function ProjectCombobox({
   autoFocus?: boolean | undefined;
   /** Shown when no project matches. */
   emptyText?: ReactNode;
-  connectionId?: number | undefined;
 }) {
-  const options = useCallback((query: string) => matchProjects(projects, query).map(toOption), [projects]);
+  const { data } = useProjectGroups();
+  const groups = useMemo(() => new Map(data?.groups.map((group) => [group.id, group])), [data]);
+  const options = useCallback((query: string) => matchProjects(projects, groups, query).map(toOption), [projects, groups]);
   const connections = useWorkspaceConnections();
   const pinnedOptions = useMemo(() => (pinned === undefined ? [] : [{ value: "", label: pinned }]), [pinned]);
   return (
@@ -53,8 +55,8 @@ export function ProjectCombobox({
       onChange={onChange}
       options={options}
       renderDetail={(option) => {
-        const project = projects.find((p) => String(p.id) === option.value);
-        return project === undefined ? null : <WorkspaceDisplay bindings={project.bindings} connectionId={connectionId} connections={connections} />;
+        const group = groups.get(Number(option.value));
+        return group === undefined ? null : <GroupSummary group={group} connections={connections} />;
       }}
       pinned={pinnedOptions}
       // Projects match on paths and repos too, so filtering helps even in a short list.

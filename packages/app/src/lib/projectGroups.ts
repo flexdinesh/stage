@@ -1,10 +1,24 @@
 import type { Api } from "../api/client.ts";
-import type { GroupEditInput, ProjectGroup } from "../api/types.ts";
+import type { Destination, GroupEditInput, GroupWorkspace, ProjectGroup } from "../api/types.ts";
 import type { HostConnection } from "../platform/index.ts";
 import { hostAccessScope } from "./host.ts";
 
 export const isCurrentGroup = (group: ProjectGroup): boolean =>
   group.archivedAt === null && group.state === "current";
+
+export function groupWorkspaceSummary(group: ProjectGroup): string {
+  const [only] = group.members;
+  if (only === undefined) return "No workspaces";
+  if (group.members.length === 1) return only.path || only.title;
+  return `${group.members.length} workspaces`;
+}
+
+export function canRunProjectActions(projectId: number, workspace: GroupWorkspace, destinations: readonly Destination[] | undefined): boolean {
+  return workspace.catalogState === "listed" && destinations?.some((row) =>
+    row.available && row.connectionId === workspace.connectionId && row.workspaceId === workspace.workspaceId &&
+    row.groupProjectId === projectId,
+  ) === true;
+}
 
 export function duplicateGroupTitles(groups: readonly ProjectGroup[]): Set<string> {
   const seen = new Set<string>();

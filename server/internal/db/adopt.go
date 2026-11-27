@@ -200,15 +200,18 @@ func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput,
 	}
 	if found {
 		if in.ProjectID != nil && *in.ProjectID != id || in.NewProjectTitle != "" {
-			return 0, Conflict("session already has a bound Stage project")
+			return 0, Conflict("session already has a Stage project")
 		}
 		return id, nil
 	}
 	if in.Workspace != nil && in.TrackUnbound && in.ProjectID == nil && strings.TrimSpace(in.NewProjectTitle) == "" {
 		return historicalWorkspaceProject(ctx, tx.Projects(), in.Workspace.Binding, "")
 	}
-	if in.Workspace == nil || in.ProjectID == nil && strings.TrimSpace(in.NewProjectTitle) == "" {
-		return 0, Conflict("choose a bound Stage project or explicitly bind this session workspace before adoption")
+	if in.Workspace == nil {
+		return 0, Conflict("Stage could not verify the session workspace. Refresh the connection's workspaces before tracking it.")
+	}
+	if in.ProjectID == nil && strings.TrimSpace(in.NewProjectTitle) == "" {
+		return 0, Conflict("Choose a Stage project or supply newProjectTitle to track this session.")
 	}
 	if in.ProjectID != nil {
 		id = *in.ProjectID

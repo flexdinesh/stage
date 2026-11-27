@@ -5,8 +5,8 @@ delivers this decision. This ADR supersedes the project ownership and
 routing rules of [ADR 0007](0007-harness-boundary.md) and
 [ADR 0008 D9](0008-harness-foundation.md#d9) and [D10](0008-harness-foundation.md#d10).
 It extends [ADR 0009](0009-shared-access.md) using the shared-access router
-merged through `09609a6c`. The delivery table distinguishes the target
-contract from the binding behavior still shipped when this ADR lands.
+merged through `09609a6c`. The delivery table records the transition.
+[Current API contract for retired routes and caller repair](../api.md#retired-workspace-routes)
 
 ## Ownership and exact destinations
 
@@ -149,10 +149,10 @@ membership. The table uses the names in the
 
 | Route or operation | Claimed human | Claimed scoped agent |
 | --- | --- | --- |
-| `GET /api/projects`, `GET /api/projects/{id}`, and the minimal destination selection summary | Active member or admin | Allowed under `agentRoute` and existing transport scope |
-| `GET /api/connections/{connectionId}/workspaces` and inventory refresh/resolve | Active member or admin through `humanRoute` (including existing `POST /api/sync` and `POST /api/connections/{connectionId}/resolve`) | Denied |
-| `POST /api/projects`, `PATCH /api/projects/{id}` (including archive), and group/separate (legacy `POST /api/projects/{id}/merge` and `/split`) | Active member or admin through `humanRoute` | Denied |
-| Session collection browse/search on a selected connection (new) | Active member or admin through `humanRoute` | Denied, including from MCP and worker agent gateways |
+| `GET /api/projects`, `GET /api/projects/{id}`, `GET /api/project-groups`, `GET /api/project-groups/{id}`, and the destination selection summary | Active member or admin | Allowed under `agentRoute` and existing transport scope |
+| `GET /api/connections/{connectionId}/workspaces` and inventory refresh | Active member or admin through `humanRoute` (including `POST /api/sync`) | Denied |
+| `POST /api/projects`, `PATCH /api/projects/{id}` (including archive), and group/separate through `POST /api/project-groups/membership` | Active member or admin through `humanRoute` | Denied |
+| Session collection browse/search on a selected connection | Active member or admin through `humanRoute` | Denied, including from MCP and worker agent gateways |
 | `GET /api/refs/resolve`, `GET /api/connections/{connectionId}/sessions/{id}/context`, `POST /api/connections/{connectionId}/sessions/{id}/adopt` | Active member or admin | Existing `agentRoute` scope and eligibility retained for a named reference |
 
 The destination summary returns exact selectors for selectable rows,

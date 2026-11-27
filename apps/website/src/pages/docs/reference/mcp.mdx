@@ -70,7 +70,7 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 - A shared MCP process uses per-call identity; stdio MCP never reads `STAGE_CALLER_SESSION` (the CLI does).
 - A header or `callerSession` that conflicts with the OpenCode claim returns an error.
 - Without session context, supply a project or journal owner explicitly; Stage leaves the author session empty.
-- Launch instructions name the connection id.
+- Launch instructions name the caller's connection. Supply the selected pair when launching new work.
 - Caller context attributes the work. Keep credentials in the integration's secret settings.
 
 ## Tools
@@ -78,6 +78,7 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 | Area | Tools |
 |---|---|
 | Context | `get_context`, `list_projects`, `list_models` |
+| Harness actions | `list_actions`, `run_action` |
 | Journals | `read_journal`, `get_journal_entry`, `append_note` |
 | Tasks | `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `archive_task`, `start_task`, `stop_task`, `duplicate_task`, `wait_task` |
 | Trees | `list_trees`, `get_tree`, `create_tree`, `update_tree`, `delete_tree`, `add_to_tree`, `remove_from_tree`, `set_needs`, `start_tree` |
@@ -99,9 +100,12 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 
 ## Context and destination
 
-- `get_context` returns your session, cwd, resolved Stage project, owning task and current tree. The owner remains available offline. An unowned session resolves through its verified project binding. An external session can legitimately have no Stage task.
-- `list_projects` includes workspace binding IDs, primaries and configured connections. Use `connectionId` to choose the execution harness and `bindingId` to select a workspace for a task or schedule. `list_models` accepts `projectId` and optional `bindingId` for workspace-specific options. Omitting the binding uses the primary on that connection. A project with bindings on a single connection can use that connection by default. For an unbound project, use the caller's connection or the sole configured connection.
-- `list_models` with `connectionId` (required; and `projectId` for workspace-specific choices) lists a harness's models, agents and options. Pass the advertised values in `executionConfig` on tasks and schedules; the old T3 `provider`, `model` and `effort` parameters were removed.
+- `get_context` returns your session, cwd, resolved Stage project, owning task and current tree. It includes `workspaceId` when the task has a pin or saved workspace. A named external session may have no tracked task.
+- `list_projects` returns logical project summaries and available destinations. Choose a destination and pass its `connectionId` and `workspaceId` when creating an immediate or timed task or a schedule. An untimed backlog task can use a project for planning and omit the workspace. Caller context can supply the planning project or connection.
+- `list_models` takes `connectionId` and optional `workspaceId`. Use the same pair to load workspace-specific options and send the advertised values in `executionConfig`.
+- `list_actions` and `run_action` target one connection, task or project. A project target also requires `onConnectionId` and `workspaceId`. The action must allow the caller.
+- Older clients should refresh the tool schemas and replace binding selectors with exact workspace selectors from `list_projects`. Select the replacement explicitly if a saved pin needs repair.
+- With shared access, MCP uses scoped agent access. Project membership edits, raw inventory and roster search are human operations. Named session lookup and adoption remain available under their eligibility rules.
 - Launch options go in `executionConfig.options` like any other option: a worktree (`{"id":"worktree","value":true}`), and on T3 its `baseRef` and `branch`. `list_models` lists them with their `kind` (`choice`, `boolean` or `text`) and `dependsOn` (T3's `baseRef` and `branch` apply only with `worktree` true). Claude Code and OpenCode pick the worktree's base and branch; Codex has none. The old `workspaceType`, `baseRef`, `branch`, `base` and `baseTaskId` arguments were removed.
 - `startLocal` with `startTz` schedules a one-shot start.
 
@@ -159,7 +163,7 @@ A dependent's worktree starts where its own launch options say, never from a nee
 
 `afterMe` on `create_task` (CLI `--after-me`) adopts the calling session as a task (Stage never starts it) and makes it the new task's first need, so the task starts after the user completes the adopted task in Stage. It errors without a calling session.
 
-`adopt_session` tracks your own session, or pass `session` to select a target (CLI `stage sessions adopt --target-connection ID --target-session ID`). It returns the existing task when one owns the session. For an unbound workspace, choose an existing Stage project (`projectId`, CLI `--project ID`) or create one (`newProjectTitle`, CLI `--new-project TITLE`). An initial note records the caller who wrote it.
+`adopt_session` tracks your own session, or pass `session` to select a target (CLI `stage sessions adopt --target-connection ID --target-session ID`). It returns the existing task when one owns the session. If verified workspace evidence needs a project assignment, choose one (`projectId`, CLI `--project ID`) or enter a new title (`newProjectTitle`, CLI `--new-project TITLE`). An initial note records the caller who wrote it.
 
 ## References
 

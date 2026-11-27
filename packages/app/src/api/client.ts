@@ -21,7 +21,6 @@ import type {
   Attachment,
   SessionRef, SessionPreview, SessionSearchPage,
   Badge,
-  BindWorkspaceRequest,
   CreateProjectRequest,
   CreateTaskRequest,
   DuplicateTaskRequest,
@@ -46,7 +45,6 @@ import type {
   GroupEdit,
   GroupEditInput,
   ProjectList,
-  ProjectMergeResult,
   PushConfig,
   PushEndpointBody,
   PushSubscriptionBody,
@@ -67,9 +65,6 @@ import type {
   UpdateSnippetRequest,
   User,
   WorkspaceInventory,
-  WorkspaceRef,
-  WorkspaceResolveResult,
-  WorkspaceReview,
 } from "./types.ts";
 import type { Transport } from "../platform/index.ts";
 
@@ -236,7 +231,7 @@ export function createApi(transport: Transport) {
     connectionFacts: (id: number) => apiFetch<{ facts: HarnessFact[] }>(`/connections/${id}/facts`),
     runConnectionAction: (id: number, action: string, input: Record<string, unknown>, confirmed: boolean) =>
       apiFetch<ActionResult>(`/connections/${id}/actions/${encodeURIComponent(action)}`, actionPost(input, confirmed)),
-    capabilities: (id: number, scope?: { projectId: number; bindingId?: number } | { workspaceId: string }, signal?: AbortSignal) =>
+    capabilities: (id: number, scope?: { workspaceId: string }, signal?: AbortSignal) =>
       apiFetch<Capabilities>(`/connections/${id}/capabilities${toQuery({ ...scope })}`, signal === undefined ? undefined : { signal }),
     sync: () => apiFetch<SyncResult>("/sync", post()),
 
@@ -253,28 +248,10 @@ export function createApi(transport: Transport) {
     updateProject: (id: number, body: {title: string; archived: boolean}) => apiFetch<Project>(`/projects/${id}`, patch(body)),
     workspaces: (connectionId: number, refresh = true, signal?: AbortSignal) =>
       apiFetch<WorkspaceInventory>(`/connections/${connectionId}/workspaces${refresh ? "" : "?refresh=false"}`, { signal }),
-    resolveWorkspaces: (connectionId: number, body: { apply: boolean; previewToken?: string }) =>
-      apiFetch<WorkspaceResolveResult>(`/connections/${connectionId}/resolve`, post(body)),
-    workspaceReview: () => apiFetch<WorkspaceReview>("/workspaces/review"),
-    bindProject: (id: number, body: BindWorkspaceRequest) =>
-      apiFetch<Project>(`/projects/${id}/binding`, put(body)),
-    unbindProject: (id: number, bindingId: number) =>
-      apiFetch<Project>(`/projects/${id}/bindings/${bindingId}`, del),
-    setPrimaryBinding: (id: number, bindingId: number) =>
-      apiFetch<Project>(`/projects/${id}/bindings/${bindingId}/primary`, { method: "PUT" }),
-    declineWorkspace: (connectionId: number, body: WorkspaceRef) =>
-      apiSend(`/connections/${connectionId}/workspaces/decline`, post(body)),
-    undeclineWorkspace: (connectionId: number, body: WorkspaceRef) =>
-      apiSend(`/connections/${connectionId}/workspaces/undecline`, post(body)),
-    mergeProject: (id: number, body: { from: number; confirm?: boolean; previewToken?: string }) =>
-      apiFetch<ProjectMergeResult>(`/projects/${id}/merge`, post(body)),
-    dismissProjectMerge: (id: number, otherId: number) => apiSend(`/projects/${id}/merge-dismissals`, post({ otherId })),
-    splitProject: (id: number, body: { bindingId: number; title?: string }) =>
-      apiFetch<{ project: Project; source: Project }>(`/projects/${id}/split`, post(body)),
     projectEvents: (id: number) => apiFetch<{ events: ProjectEvent[] }>(`/projects/${id}/events`),
-    projectActions: (id: number, scope: { connectionId: number; bindingId?: number }) =>
-      apiFetch<HarnessAction[]>(`/projects/${id}/actions${toQuery(scope)}`),
-    runProjectAction: (id: number, scope: { connectionId: number; bindingId?: number }, action: string, input: Record<string, unknown>, confirmed: boolean) =>
+    projectActions: (id: number, scope: { connectionId: number; workspaceId: string }, signal?: AbortSignal) =>
+      apiFetch<HarnessAction[]>(`/projects/${id}/actions${toQuery(scope)}`, { signal }),
+    runProjectAction: (id: number, scope: { connectionId: number; workspaceId: string }, action: string, input: Record<string, unknown>, confirmed: boolean) =>
       apiFetch<ActionResult>(`/projects/${id}/actions/${encodeURIComponent(action)}${toQuery(scope)}`, actionPost(input, confirmed)),
 
     tasks: (q: TaskListQuery = {}) =>

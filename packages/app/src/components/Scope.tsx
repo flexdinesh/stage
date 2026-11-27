@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
-import { useProjects } from "../api/queries.ts";
-import type { Project } from "../api/types.ts";
+import { useProjectGroups } from "../api/queries.ts";
+import type { ProjectGroup } from "../api/types.ts";
 import { parsePinned, parseScope, togglePin } from "../lib/scope.ts";
 import { usePlatform } from "../platform/context.tsx";
 
@@ -15,7 +15,7 @@ export interface Scope {
   /** The scoped project id; null for All projects. */
   projectId: number | null;
   /** The scoped project once projects load. */
-  project: Project | null;
+  project: ProjectGroup | null;
   setProjectId: (id: number | null) => void;
   pinned: readonly number[];
   togglePinned: (id: number) => void;
@@ -37,7 +37,7 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   const [stored, setStored] = useState(() => parseScope(storage.get(SCOPE_KEY)));
   const [pinned, setPinned] = useState(() => parsePinned(storage.get(PINNED_KEY)));
   const [params, setParams] = useSearchParams();
-  const projects = useProjects();
+  const projects = useProjectGroups();
 
   const setProjectId = useCallback(
     (id: number | null) => {
@@ -79,8 +79,8 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   );
 
   // A scope whose project is gone (deleted, archived) reads as All projects once the list loads.
-  const list = projects.data?.projects;
-  const project = stored === null ? null : (list?.find((p) => p.id === stored) ?? null);
+  const list = projects.data?.groups;
+  const project = stored === null ? null : (list?.find((p) => p.id === stored && p.archivedAt === null) ?? null);
   const projectId = list === undefined || project !== null ? stored : null;
 
   const value = useMemo<Scope>(

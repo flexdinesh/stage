@@ -55,6 +55,13 @@ func TestPostgresSharedDataNeverStartsPersonalRuntime(t *testing.T) {
 	sharedDataNeverStartsPersonalRuntime(t, c)
 }
 
+func TestPostgresSharedWorkflowAcrossPairedWorkers(t *testing.T) {
+	rawURL := pgtest.DatabaseURL(t, pgtest.CreateDatabase(t, pgtest.Locale))
+	sharedWorkflowAcrossPairedWorkers(t, func(t *testing.T, dataDir string, listens ...string) config.Config {
+		return pgConfig(t, dataDir, rawURL, listens...)
+	})
+}
+
 // TestPostgresEngine: STAGE_DATABASE_URL selects Postgres. The server
 // migrates a fresh database, reports the engine (never the URL), keeps only
 // its lock and sockets in the data dir, and is the database's single owner

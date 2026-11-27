@@ -16,7 +16,7 @@ Harness settings are never environment variables. `T3_URL`, `T3_PUBLIC_URL`, `T3
 
 A new install has no connections. You can create projects and plan tasks before connecting a harness. While nothing is connected, the Dashboard shows a **Connect a harness** alert that links to Settings > Connections, which offers **Connect T3** and **Connect OpenCode**.
 
-After connecting, Stage discovers eligible workspaces and imports them into projects. You can also bind existing workspaces yourself. On a connection with several workspaces for a project, Stage uses the primary unless the task specifies a binding. Stage owns project titles and archive state. Missing workspaces preserve their projects and history. See [Projects](/docs/concepts/projects).
+After connecting, Stage discovers the harness's reported workspaces and organizes them into logical groups. Select the connection and exact workspace for a task or schedule. Missing workspaces preserve their projects and history. [Projects](/docs/concepts/projects)
 
 ## CLI
 
@@ -79,9 +79,9 @@ Paste it as **Admin token** in Settings > Connections > T3 (Manage), or run `sta
 
 ### Disconnect and switch
 
-- **Disconnect** forgets the token, the T3 URL, the Browser URL and the admin token and stops syncing. Tasks and bindings stay; pairing the same T3 again resumes it.
-- A disconnected connection stays in Settings as a **Disconnected** row with what remains on it, **Reconnect** (opens its setup) and **Remove connection**. Removing it clears its workspace bindings and keeps its task history read-only. Pairing again creates a new connection. Retired connections appear under **Previous connections**, with their machine name and usage. Their bindings are hidden from project pickers and workspace lists even before removal.
-- **Switch to another T3**: Disconnect, set the T3 URL, and pair the other T3. Tasks from the first T3 stay as read-only history, and discovery resolves the new T3's workspaces from available evidence. Pairing the first T3 again restores its tasks and bindings.
+- **Disconnect** forgets the token, the T3 URL, the Browser URL and the admin token and stops syncing. Tasks and saved destinations remain on record. Pairing the same T3 again resumes that connection.
+- A disconnected connection stays in Settings as a **Disconnected** row with what remains on it, **Reconnect** (opens its setup) and **Remove connection**. Removing it preserves recorded work. Pairing again creates a new connection. Retired connections appear under **Previous connections**. Their workspaces remain in project history and are excluded from launch pickers.
+- **Switch to another T3**: Disconnect, set the T3 URL, and pair the other T3. Tasks from the first T3 stay as read-only history, and discovery resolves the new T3's workspaces from available evidence. Select an exact workspace on the new connection for future launches. Pairing the first T3 again can restore the original connection and its workspace availability.
 - A disconnected T3 whose environment is paired again on another machine moves onto that connection automatically at the next sync.
 
 ### Status and troubleshooting

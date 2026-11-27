@@ -43,12 +43,8 @@ func (e *env) isT3Session(ref *sessionRef, id string) bool {
 
 func (e *env) agentTask(projectID int64, title string, extra map[string]any, want int) agentTask {
 	e.t.Helper()
-	body := map[string]any{"projectId": projectID, "title": title, "prompt": "reply OK"}
-	for k, v := range extra {
-		body[k] = v
-	}
 	var out agentTask
-	e.must("POST", "/api/tasks", body, want, &out)
+	e.must("POST", "/api/tasks", e.taskBody(projectID, title, extra), want, &out)
 	return out
 }
 
@@ -307,7 +303,7 @@ func TestScopedAgentNamedSessionAdoption(t *testing.T) {
 		t.Fatalf("named lookup: %d %s", w.Code, w.Body)
 	}
 	w = raw(t, shared, http.MethodPost, path+"/adopt", headers, map[string]string{}, nil)
-	if w.Code != 409 || !strings.Contains(w.Body.String(), "explicitly bind") {
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "Choose a Stage project or supply newProjectTitle") {
 		t.Fatalf("scoped agent without a bound project: %d %s", w.Code, w.Body)
 	}
 	var adopted db.Task
@@ -619,13 +615,13 @@ func TestScheduleOriginInherited(t *testing.T) {
 		"projectId": p.ID, "title": "nightly", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC", "originThreadId": s,
 	}, 400, nil)
 	e.must("POST", "/api/schedules", map[string]any{
-		"projectId": p.ID, "title": "nightly", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC", "originSession": e.t3Session(s),
+		"projectId": p.ID, "connectionId": 1, "workspaceId": p.workspaceID(), "title": "nightly", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC", "originSession": e.t3Session(s),
 	}, 201, &sc)
 	if !e.isT3Session(sc.OriginSession, s) {
 		t.Fatalf("schedule %+v", sc)
 	}
 	e.must("POST", "/api/schedules", map[string]any{
-		"projectId": p.ID, "title": "n", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC", "needsSession": e.t3Session(s), "startMode": "auto",
+		"projectId": p.ID, "connectionId": 1, "workspaceId": p.workspaceID(), "title": "n", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC", "needsSession": e.t3Session(s), "startMode": "auto",
 	}, 400, nil)
 	var spawned agentTask
 	e.must("POST", fmt.Sprintf("/api/schedules/%d/run", sc.ID), nil, 201, &spawned)

@@ -1,8 +1,6 @@
 package agenttools_test
 
 import (
-	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -11,113 +9,51 @@ import (
 	"github.com/flexdinesh/stage/server/internal/client"
 )
 
-func TestMCPWorkspaceChoice(t *testing.T) {
-	const project = `{"id":1,"title":"Current","aliases":[{"id":2,"title":"Former"}],"bindings":[
-		{"id":40,"connectionId":7,"connectionActive":true,"status":"available","primary":true},
-		{"id":41,"connectionId":8,"connectionActive":true,"status":"available","primary":false},
-		{"id":42,"connectionId":8,"connectionActive":true,"status":"available","primary":true}
-	]}`
+func TestMCPRejectsRetiredDestinationSelectors(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method + " " + r.URL.Path {
-		case "GET /api/projects":
-			io.WriteString(w, `{"projects":[`+project+`]}`)
-		case "GET /api/connections":
-			io.WriteString(w, `{"connections":[{"id":7,"active":true},{"id":8,"active":true}]}`)
-		case "GET /api/connections/8/capabilities":
-			if r.URL.Query().Get("projectId") != "1" {
-				t.Errorf("capabilities query: %s", r.URL.RawQuery)
-			}
-			switch r.URL.Query().Get("bindingId") {
-			case "41":
-				io.WriteString(w, `{"models":[{"id":"workspace-model","label":"Workspace model","available":true}]}`)
-			case "":
-				io.WriteString(w, `{"models":[{"id":"primary-model","label":"Primary model","available":true}]}`)
-			default:
-				t.Errorf("capabilities query: %s", r.URL.RawQuery)
-			}
-		case "GET /api/tasks/13", "GET /api/schedules/13":
-			io.WriteString(w, `{"id":13,"projectId":1,"connectionId":8,"bindingId":41}`)
-		case "GET /api/connections/8/sessions/chosen/context":
-			io.WriteString(w, `{"project":`+project+`,"task":{"id":13,"bindingId":41}}`)
-		case "GET /api/connections/8/sessions/primary/context":
-			io.WriteString(w, `{"project":`+project+`,"task":{"id":13,"bindingId":null,"workspace":{"bindingId":42,"source":"primary"}}}`)
-		case "GET /api/connections/8/sessions/pinned/context":
-			io.WriteString(w, `{"project":`+project+`,"task":{"id":13,"bindingId":41,"workspace":{"bindingId":42,"source":"pinned"}}}`)
-		case "POST /api/tasks", "POST /api/schedules", "PATCH /api/tasks/13", "PATCH /api/schedules/13":
-			var in struct {
-				Title        string          `json:"title"`
-				ProjectID    int64           `json:"projectId"`
-				ConnectionID int64           `json:"connectionId"`
-				BindingID    json.RawMessage `json:"bindingId"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-				t.Errorf("decode request: %v", err)
-			}
-			want := map[string]string{"chosen": "41", "primary": "null", "unchanged": ""}[in.Title]
-			if string(in.BindingID) != want {
-				t.Errorf("%s %s bindingId = %q, want %q", r.Method, r.URL.Path, in.BindingID, want)
-			}
-			if r.Method == "POST" {
-				connectionID := int64(8)
-				if in.Title == "explicit connection" {
-					connectionID = 7
-				}
-				if in.ProjectID != 1 || in.ConnectionID != connectionID {
-					t.Errorf("create destination = %d/%d, want 1/%d", in.ProjectID, in.ConnectionID, connectionID)
-				}
-			}
-			io.WriteString(w, `{"id":13}`)
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
-			http.NotFound(w, r)
-		}
+		t.Errorf("retired selector reached API: %s %s", r.Method, r.URL)
+		http.NotFound(w, r)
 	})
 	cs := connect(t, &agenttools.Ops{Client: client.NewInProcess(handler, "https://stage.test")})
 
-	var projects agenttools.ProjectsOut
-	if msg := call(t, cs, "list_projects", nil, &projects); msg != "" || len(projects.Projects) != 1 ||
-		len(projects.Projects[0].Aliases) != 1 || projects.Projects[0].Aliases[0].ID != 2 {
-		t.Fatalf("list_projects = %+v, %s", projects, msg)
-	}
-	for session, want := range map[string]string{"chosen": "41", "primary": "null", "pinned": "42"} {
-		var ctx struct {
-			BindingID json.RawMessage `json:"bindingId"`
-		}
-		msg := call(t, cs, "get_context", map[string]any{
-			"callerSession": map[string]any{"connectionId": 8, "externalSessionId": session},
-		}, &ctx)
-		if msg != "" || string(ctx.BindingID) != want {
-			t.Errorf("get_context(%s) bindingId = %q, %s, want %s", session, ctx.BindingID, msg, want)
-		}
-	}
-	for _, tool := range []string{"create_task", "create_schedule"} {
-		args := map[string]any{"title": "chosen", "project": "Former", "prompt": "Build it", "bindingId": 41,
-			"executionConfig": map[string]any{"model": "workspace-model"}}
-		if tool == "create_schedule" {
-			args["cron"], args["tz"] = "@daily", "UTC"
-		}
-		if msg := call(t, cs, tool, args, nil); msg != "" {
-			t.Errorf("%s: %s", tool, msg)
-		}
-		args["title"], args["bindingId"] = "explicit connection", nil
-		delete(args, "executionConfig")
-		if msg := call(t, cs, tool, args, nil); !strings.Contains(msg, "select connectionId and workspaceId from list_projects") {
-			t.Errorf("%s with ambiguous project: %s", tool, msg)
-		}
-		args["connectionId"] = 7
-		if msg := call(t, cs, tool, args, nil); msg != "" {
-			t.Errorf("%s using an explicit connection: %s", tool, msg)
-		}
-	}
-	for _, tool := range []string{"update_task", "update_schedule"} {
-		for _, args := range []map[string]any{
-			{"id": 13, "title": "chosen", "bindingId": 41, "executionConfig": map[string]any{"model": "workspace-model"}},
-			{"id": 13, "title": "primary", "bindingId": nil, "executionConfig": map[string]any{"model": "primary-model"}},
-			{"id": 13, "title": "unchanged", "executionConfig": map[string]any{"model": "workspace-model"}},
-		} {
-			if msg := call(t, cs, tool, args, nil); msg != "" {
-				t.Errorf("%s %v: %s", tool, args, msg)
+	for _, tc := range []struct {
+		tool, selector string
+		args           map[string]any
+	}{
+		{"list_models", "projectId", map[string]any{"connectionId": 7, "projectId": 1}},
+		{"list_models", "bindingId", map[string]any{"connectionId": 7, "bindingId": 41}},
+		{"create_task", "bindingId", map[string]any{"connectionId": 7, "project": "1", "title": "Task", "prompt": "Work", "bindingId": 41}},
+		{"create_schedule", "bindingId", map[string]any{"connectionId": 7, "title": "Schedule", "prompt": "Work", "cron": "@daily", "tz": "UTC", "bindingId": 41}},
+		{"update_task", "bindingId", map[string]any{"id": 13, "bindingId": nil}},
+		{"update_schedule", "bindingId", map[string]any{"id": 13, "bindingId": nil}},
+		{"list_actions", "bindingId", map[string]any{"projectId": 1, "onConnectionId": 7, "bindingId": 41}},
+		{"run_action", "bindingId", map[string]any{"actionId": "inspect", "projectId": 1, "onConnectionId": 7, "bindingId": 41}},
+	} {
+		t.Run(tc.tool+"/"+tc.selector, func(t *testing.T) {
+			if msg := call(t, cs, tc.tool, tc.args, nil); !strings.Contains(msg, "were retired") || !strings.Contains(msg, "select connectionId and workspaceId from list_projects") {
+				t.Fatalf("expected retirement and repair guidance for %s, got %q", tc.selector, msg)
 			}
+		})
+	}
+}
+
+func TestMCPLaunchRequiresExactDestination(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("incomplete launch destination reached API: %s %s", r.Method, r.URL)
+		http.NotFound(w, r)
+	})
+	cs := connect(t, &agenttools.Ops{Client: client.NewInProcess(handler, "https://stage.test")})
+	for _, tc := range []struct {
+		tool string
+		args map[string]any
+	}{
+		{"create_task", map[string]any{"start": true}},
+		{"create_task", map[string]any{"startLocal": "2027-01-01T09:00", "startTz": "UTC"}},
+		{"create_schedule", map[string]any{"cron": "@daily", "tz": "UTC"}},
+	} {
+		tc.args["project"], tc.args["connectionId"], tc.args["title"], tc.args["prompt"] = "1", 7, "Work", "Do it"
+		if msg := call(t, cs, tc.tool, tc.args, nil); !strings.Contains(msg, "select connectionId and workspaceId from list_projects") {
+			t.Errorf("%s %v: expected destination repair guidance, got %q", tc.tool, tc.args, msg)
 		}
 	}
 }

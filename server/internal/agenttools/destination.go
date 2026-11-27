@@ -3,9 +3,7 @@ package agenttools
 import (
 	"errors"
 	"fmt"
-	"slices"
 
-	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
@@ -43,37 +41,3 @@ func (in ConfigInput) config() (execution.Config, error) {
 }
 
 const destinationHelp = "select connectionId and workspaceId from list_projects, or use projects ls to find values for --connection and --workspace-id"
-
-func legacyConnection(a ConfigArgs, p db.Project) (int64, error) {
-	id := a.ConnectionID
-	if a.BindingID != nil {
-		i := slices.IndexFunc(p.Bindings, func(b db.ProjectBinding) bool { return b.ConnectionActive && b.ID == *a.BindingID })
-		if i < 0 || (id != 0 && id != p.Bindings[i].ConnectionID) {
-			return 0, fmt.Errorf("%w, %s", db.ErrInvalidBinding, destinationHelp)
-		}
-		return p.Bindings[i].ConnectionID, nil
-	}
-	if id != 0 {
-		return id, nil
-	}
-	available := 0
-	for _, b := range p.Bindings {
-		if !b.ConnectionActive {
-			continue
-		}
-		if id != 0 && id != b.ConnectionID {
-			return 0, fmt.Errorf("this project has bindings on multiple connections, %s", destinationHelp)
-		}
-		id = b.ConnectionID
-		if b.Status == "available" {
-			available++
-		}
-	}
-	if id == 0 {
-		return 0, fmt.Errorf("this project has no active binding, %s", destinationHelp)
-	}
-	if available > 1 {
-		return 0, fmt.Errorf("this project has multiple available workspaces, %s", destinationHelp)
-	}
-	return id, nil
-}

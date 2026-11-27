@@ -234,22 +234,15 @@ with tempfile.TemporaryDirectory(prefix="stage-workflow-") as root, contextlib.E
     inventory = request(stage, f"/api/connections/{cid}/workspaces")["workspaces"]
     workspace = next(w for w in inventory if w["workspace"] == str(repo))
     pid = workspace["projectId"]
-    if pid is None:
-        project = request(stage, "/api/projects", {"title": "Integration fixture"})
-        pid = project["id"]
-        request(
-            stage,
-            f"/api/projects/{pid}/binding",
-            {"connectionId": cid, "externalProjectId": workspace["externalId"], "workspace": str(repo)},
-            "PUT",
-        )
+    wid = workspace["workspaceId"]
+    assert pid and wid and workspace["available"], workspace
 
     def cli(*args):
         return json.loads(
             subprocess.check_output([binary, *args, "--url", stage, "--json"], env=env, cwd=repo)
         )
 
-    assert "fixture/test" in str(cli("models", "ls", "--connection", str(cid), "--project", str(pid)))
+    assert "fixture/test" in str(cli("models", "ls", "--connection", str(cid), "--workspace-id", wid))
     try:
         request(
             stage,
@@ -257,6 +250,7 @@ with tempfile.TemporaryDirectory(prefix="stage-workflow-") as root, contextlib.E
             {
                 "projectId": pid,
                 "connectionId": cid,
+                "workspaceId": wid,
                 "title": "Unsupported selection",
                 "prompt": "Exercise validation",
                 "executionConfig": {"model": "fixture/missing"},
@@ -273,6 +267,10 @@ with tempfile.TemporaryDirectory(prefix="stage-workflow-") as root, contextlib.E
         str(pid),
         "--title",
         "Native parent",
+        "--connection",
+        str(cid),
+        "--workspace-id",
+        wid,
         "--prompt",
         "exercise native context",
         "--start",
@@ -317,6 +315,8 @@ with tempfile.TemporaryDirectory(prefix="stage-workflow-") as root, contextlib.E
         str(cid),
         "--title",
         "Recurring fixture",
+        "--workspace-id",
+        wid,
         "--prompt",
         "Scheduled isolated work",
         "--cron",

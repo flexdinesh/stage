@@ -11,7 +11,7 @@ A task is one unit of agent work: a prompt, plus where and how to run it. Stage 
 ## What a task holds
 
 - **Prompt**, and optional images (PNG, JPEG, GIF or WebP, up to 8 of 10 MB each). Images go with the prompt on every launch, to T3 Code, Claude Code and Codex.
-- **Project, connection and workspace.** Follow the primary workspace or pin a specific checkout on the chosen connection. Task detail shows the workspace that the launch used.
+- **Project, connection and workspace.** Select a connection and an exact workspace before launching or setting a start time. Backlog planning can save with project context and no workspace. Task detail shows the workspace that the launch used.
 - **Options** the harness declares: model and its options, and launch options such as a new worktree (with a base ref and branch on T3). Stage passes them on; the harness makes the worktree.
 - An optional **initial note** for its [journal](/docs/concepts/journals).
 

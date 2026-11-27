@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createApi } from "../src/api/client.ts";
 import { hostAccessScope } from "../src/lib/host.ts";
-import { duplicateGroupTitles, isCurrentGroup, requestGroupEdit } from "../src/lib/projectGroups.ts";
+import { canRunProjectActions, duplicateGroupTitles, groupWorkspaceSummary, isCurrentGroup, requestGroupEdit } from "../src/lib/projectGroups.ts";
 import { createSharedSession } from "../src/lib/sharedSession.ts";
 
 test("same-title current groups remain distinct from each other and from project history", () => {
@@ -14,6 +14,26 @@ test("same-title current groups remain distinct from each other and from project
   const current = [first, second, emptied, retired, archived].filter(isCurrentGroup);
   assert.deepEqual(current.map(({ id }) => id), [1, 2]);
   assert.deepEqual([...duplicateGroupTitles(current)], ["build"]);
+});
+
+test("project actions require a current, available workspace in that exact group", () => {
+  const workspace = { workspaceId: "ws_lab", connectionId: 5, catalogState: "listed", path: "/lab", title: "Lab" };
+  const row = { ...workspace, available: true, projectId: 7, groupProjectId: 8 };
+  assert.equal(canRunProjectActions(8, workspace, [row]), true);
+  assert.equal(canRunProjectActions(7, workspace, [row]), false);
+  assert.equal(canRunProjectActions(8, workspace, [{ ...row, connectionId: 9 }]), false);
+  assert.equal(canRunProjectActions(8, workspace, [{ ...row, workspaceId: "ws_other" }]), false);
+  assert.equal(canRunProjectActions(8, workspace, [{ ...row, available: false }]), false);
+  assert.equal(canRunProjectActions(8, { ...workspace, catalogState: "archived" }, [row]), false);
+  assert.equal(canRunProjectActions(8, workspace, undefined), false);
+});
+
+test("project summaries describe the group workspace count when there are several", () => {
+  const member = { path: "/lab", title: "Lab" };
+  assert.equal(groupWorkspaceSummary({ members: [] }), "No workspaces");
+  assert.equal(groupWorkspaceSummary({ members: [member] }), "/lab");
+  assert.equal(groupWorkspaceSummary({ members: [{ ...member, path: "" }] }), "Lab");
+  assert.equal(groupWorkspaceSummary({ members: [member, { ...member, path: "/other" }] }), "2 workspaces");
 });
 
 test("preview and confirmation use the exact workspace on its connection", async () => {

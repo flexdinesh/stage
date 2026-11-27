@@ -143,6 +143,18 @@ func caseProjectGroupsKeepChoices(t *testing.T, open Factory) {
 	groups := refreshGroupWorkspaces(t, s, ctx, connection, root, clone)
 	original := groups[root.ID]
 	selector := db.WorkspaceID(connection, clone.ID, clone.WorkspaceRoot)
+	create := func(title string) db.Task {
+		t.Helper()
+		task, err := s.CreateTask(ctx, db.NewTask{ConnectionID: connection, WorkspaceID: selector, Title: title, Prompt: "Plan"})
+		if err != nil || task.WorkspaceID != selector {
+			t.Fatalf("create exact destination: %+v, %v", task, err)
+		}
+		return task
+	}
+	recorded := create("Before separation")
+	if recorded.ProjectID != original {
+		t.Fatalf("recorded project %d, want %d", recorded.ProjectID, original)
+	}
 	edit := db.GroupEditInput{ConnectionID: connection, WorkspaceID: selector}
 	preview, err := s.EditProjectGroup(ctx, edit)
 	if err != nil || preview.Source.ID != original {
@@ -152,6 +164,12 @@ func caseProjectGroupsKeepChoices(t *testing.T, open Factory) {
 	separated, err := s.EditProjectGroup(ctx, edit)
 	if err != nil || !separated.Applied || separated.Target == nil || separated.Target.ID == original {
 		t.Fatalf("separate %+v: %v", separated, err)
+	}
+	if task := create("After separation"); task.ProjectID != separated.Target.ID {
+		t.Fatalf("new project %d, want %d", task.ProjectID, separated.Target.ID)
+	}
+	if task, err := s.GetTask(ctx, recorded.ID); err != nil || task.ProjectID != original || task.WorkspaceID != selector {
+		t.Fatalf("separation moved recorded work: %+v, %v", task, err)
 	}
 	if _, err := s.EditProjectGroup(ctx, edit); !errors.As(err, new(*db.PreviewChangedError)) {
 		t.Fatalf("replayed confirmation: %v", err)

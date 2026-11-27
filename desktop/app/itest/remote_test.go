@@ -164,10 +164,8 @@ func TestDesktopRemote(t *testing.T) {
 		if status, body := rec.result(); status != 200 {
 			t.Fatalf("POST /api/sync to the remote: %d %s", status, body)
 		}
-		projectID, _ := bindDemoProject(t, a.json)
-		a.json("POST", "/api/tasks", map[string]any{
-			"projectId": projectID, "title": "Remote task", "prompt": "reply OK",
-		}, 201, nil)
+		destination, _ := demoWorkspace(t, a.json)
+		a.json("POST", "/api/tasks", destination.draft("Remote task", "reply OK"), 201, nil)
 	})
 
 	t.Run("event stream over TCP ends on switch", func(t *testing.T) {

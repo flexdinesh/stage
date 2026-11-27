@@ -16,20 +16,16 @@ export interface TaskTemplate {
 
 type SelectableWorkspace = Workspace & { workspaceId: string };
 
-export function workspaceGroupId(row: Workspace) {
-  return row.groupProjectId ?? row.projectId;
-}
-
 export function availableTaskWorkspaces(inventory: WorkspaceInventory | undefined, connectionId: number, projectId: number | undefined) {
   if (inventory?.inventory?.state !== "ready") return [];
-  const inProject = (row: Workspace) => Number(workspaceGroupId(row) === projectId);
+  const inProject = (row: Workspace) => Number(row.groupProjectId === projectId);
   return inventory.workspaces.filter((row): row is SelectableWorkspace => (
     row.connectionId === connectionId && row.available && !row.harnessArchived && !!row.workspaceId
   )).toSorted((a, b) => inProject(b) - inProject(a) || a.title.localeCompare(b.title) || a.workspace.localeCompare(b.workspace));
 }
 
 export function suggestedTaskWorkspace(rows: readonly SelectableWorkspace[], projectId: number | undefined) {
-  const candidates = projectId === undefined ? rows : rows.filter((row) => workspaceGroupId(row) === projectId);
+  const candidates = projectId === undefined ? rows : rows.filter((row) => row.groupProjectId === projectId);
   return candidates.length === 1 ? candidates[0] : undefined;
 }
 
@@ -53,7 +49,6 @@ export function scheduleBody(template: TaskTemplate, s: { notes: string; attachm
 export function scheduleUpdateBody(before: Schedule, next: CreateScheduleRequest): UpdateScheduleRequest {
   const body = changedFields<UpdateScheduleRequest>({
     ...taskEditBaseline(before),
-    bindingId: before.bindingId,
     notes: before.notes,
     cron: buildCron(parseCron(before.cron)),
     tz: before.tz,
@@ -106,7 +101,7 @@ export function taskUpdateBody(s: {
   timed: TimedStart;
 }): UpdateTaskRequest {
   if (!s.full) return { title: s.template.title };
-  const baseline = { ...taskEditBaseline(s.before), bindingId: s.before.bindingId ?? null };
+  const baseline = taskEditBaseline(s.before);
   const body = taskEditChanges(baseline, { ...s.template, attachmentIds: s.attachmentIds });
   if (s.handoff !== null && s.handoff !== s.before.handoff) body.handoff = s.handoff;
   if (s.treeStart !== null && s.treeStart !== (s.before.startMode ?? "inherit")) body.startMode = s.treeStart === "inherit" ? null : s.treeStart;

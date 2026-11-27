@@ -197,13 +197,10 @@ Usage:
   stage show REF                      the task, tree or session a stage link, harness session
                                       link or #TASK_ID names (with its session/task)
   stage projects ls
-  stage projects workspaces [PROJECT] [--review]
-  stage projects merge FROM INTO [--yes]
-  stage projects split PROJECT --binding ID [--title T] --yes
-  stage models ls --connection ID [--workspace-id ID | --project ID [--binding ID]]
+  stage models ls --connection ID [--workspace-id ID]
   stage action ls TARGET
   stage action run ACTION_ID TARGET [--input JSON|-] [--confirm]
-                                      TARGET is --connection ID, --task ID, or --project ID --on-connection ID [--binding ID]
+                                      TARGET is --connection ID, --task ID, or --project ID --on-connection ID --workspace-id ID
   stage task ls [--project P] [--state S,..] [-q TEXT] [--closed true|all] [--limit N]
   stage task show ID
   stage task add --title T --prompt TEXT|- [config] [--needs ID,..] [--after-me] [--tree ID]
@@ -240,8 +237,8 @@ Usage:
 ` + setupUsage + `  stage guide                         agent workflow guide
 
 Config: --connection ID --workspace-id ID from projects ls (optional --project P)
-        --workspace-id "" clears an exact workspace on edit.
-        Legacy selection: --project P [--connection ID] [--binding ID]
+        --workspace-id "" clears the workspace on a backlog task.
+        Planning backlog: --connection ID --project P
         --execution-config JSON (models ls shows the choices,
         including launch options such as a worktree, its base ref or branch)
         --prompt-file PATH --image PATH...
@@ -474,15 +471,13 @@ func runModels(ctx context.Context, env Env, args []string) error {
 	c := newCmd(env, "models ls")
 	var a agenttools.ModelsArgs
 	var workspace string
-	var binding int64
-	c.fs.Int64Var(&a.ProjectID, "project", 0, "legacy Stage project ID for workspace-specific capabilities")
+	retireDestinationFlag(c, "project")
 	c.fs.Int64Var(&a.ConnectionID, "connection", 0, "show this connection’s capabilities")
 	c.fs.StringVar(&workspace, "workspace-id", "", "exact workspace ID from projects ls")
-	c.fs.Int64Var(&binding, "binding", 0, "legacy workspace binding ID")
+	retireDestinationFlag(c, "binding")
 	if err := c.parse(rest); err != nil {
 		return err
 	}
-	a.BindingID = int64Flag(c, "binding", binding)
 	a.WorkspaceID = strFlag(c, "workspace-id", workspace)
 	res, err := c.ops().ListModels(ctx, a)
 	if err != nil {
