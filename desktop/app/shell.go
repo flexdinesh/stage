@@ -44,10 +44,13 @@ type host struct {
 	win      atomic.Pointer[mygo.Window]
 	quitting atomic.Bool
 
-	mu         sync.Mutex
-	pending    string // deep link path the UI has not taken yet
-	childURL   string // URL of the attachment window being opened
-	noticeOnce sync.Once
+	mu              sync.Mutex
+	pending         string // deep link path the UI has not taken yet
+	childURL        string // URL of the attachment window being opened
+	childEpoch      uint64
+	attachmentEpoch uint64
+	attachments     map[*mygo.Window]struct{}
+	noticeOnce      sync.Once
 }
 
 // paths keeps the app's data, cache and logs in identifier-named dirs:
@@ -253,6 +256,7 @@ func (h *host) openWindow(req mygo.WindowOpenRequest) *mygo.WindowOptions {
 	}
 	h.mu.Lock()
 	h.childURL = req.URL
+	h.childEpoch = h.attachmentEpoch
 	h.mu.Unlock()
 	return &mygo.WindowOptions{
 		Title: appName, URL: req.URL, Width: 900, Height: 700, MinWidth: 320, MinHeight: 240,
@@ -268,10 +272,25 @@ func (h *host) windowCreated(w *mygo.Window) {
 	h.mu.Lock()
 	cur := h.childURL
 	h.childURL = ""
-	h.mu.Unlock()
 	if cur == "" {
+		h.mu.Unlock()
 		return
 	}
+	if h.childEpoch != h.attachmentEpoch {
+		h.mu.Unlock()
+		go w.Close()
+		return
+	}
+	if h.attachments == nil {
+		h.attachments = make(map[*mygo.Window]struct{})
+	}
+	h.attachments[w] = struct{}{}
+	h.mu.Unlock()
+	w.OnClosed(func() {
+		h.mu.Lock()
+		delete(h.attachments, w)
+		h.mu.Unlock()
+	})
 	w.Page().OnWillNavigate(func(e *mygo.NavigateEvent) {
 		d := h.policy().ChildNavigate(cur, e.URL)
 		if d.Action == nav.Allow {
@@ -284,6 +303,21 @@ func (h *host) windowCreated(w *mygo.Window) {
 		h.act(h.policy().ChildNavigate(cur, req.URL))
 		return nil
 	})
+}
+
+func (h *host) closeAttachments() {
+	h.mu.Lock()
+	h.attachmentEpoch++
+	windows := h.attachments
+	h.attachments = nil
+	h.mu.Unlock()
+	if len(windows) > 0 {
+		go func() {
+			for w := range windows {
+				w.Close()
+			}
+		}()
+	}
 }
 
 // act carries out a decision that is not a plain load.

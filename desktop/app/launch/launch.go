@@ -93,7 +93,11 @@ type Config struct {
 	Servers *target.Store
 	// OnTarget receives the target to proxy to: the active server each
 	// time it becomes ready, a zero Target when a switch leaves none.
-	OnTarget func(target.Target)
+	OnTarget func(target.Target, Health)
+	// CheckSession passively verifies the active shared session during health monitoring.
+	CheckSession func(context.Context, target.Target) error
+	// GetShared is for human product requests made by the native shell.
+	GetShared Getter
 	// OnServer receives a server whose address is known or which became
 	// ready again (the active one, or this machine's while a remote is
 	// active), to reconnect its notification stream.
@@ -315,7 +319,7 @@ func (l *Launcher) Switch(id string) error {
 	l.st.Target, l.st.ServerEpoch = t, 0
 	l.mu.Unlock()
 	if l.cfg.OnTarget != nil {
-		l.cfg.OnTarget(target.Target{})
+		l.cfg.OnTarget(target.Target{}, Health{})
 	}
 	l.cbMu.Unlock()
 	l.poke()
@@ -788,6 +792,18 @@ func (l *Launcher) health(ctx context.Context, t target.Target, bound time.Durat
 	if h.Service != "stage" {
 		return h, fmt.Errorf("%s is not a Stage server (service %q)", where(t), h.Service)
 	}
+	if h.SharedAccess {
+		var status struct {
+			CanonicalURL   string `json:"canonicalUrl"`
+			InstallationID string `json:"installationId"`
+		}
+		if l.cfg.Get(ctx, t, "/api/auth/status", &status) == nil {
+			h.installation = status.InstallationID
+			if canonical, err := target.NormalizeURL(status.CanonicalURL); err == nil && canonical == status.CanonicalURL && (!t.Remote() || canonical == t.URL) {
+				h.PublicURL = &canonical
+			}
+		}
+	}
 	return h, nil
 }
 
@@ -815,7 +831,7 @@ func (l *Launcher) ready(info buildInfo, t target.Target, h Health, managed bool
 		managed, pid, foreground = false, nil, false
 	}
 	srv := &Server{ID: t.ID, Version: h.Version, APIVersion: h.APIVersion, Identity: h.Identity,
-		PublicURL: h.PublicURL, Socket: t.Socket, Managed: managed, PID: pid}
+		PublicURL: h.PublicURL, Socket: t.Socket, Managed: managed, PID: pid, SharedAccess: h.SharedAccess}
 	if info.APIVersion != 0 && h.APIVersion != info.APIVersion {
 		if !l.apply(gen, func(s *State) { s.Server = srv }) {
 			return
@@ -832,6 +848,12 @@ func (l *Launcher) ready(info buildInfo, t target.Target, h Health, managed bool
 		return
 	}
 	l.cbMu.Lock()
+	l.mu.Lock()
+	current := gen == l.gen
+	l.mu.Unlock()
+	if current && l.cfg.OnTarget != nil {
+		l.cfg.OnTarget(t, h)
+	}
 	ok := l.apply(gen, func(s *State) {
 		s.Phase, s.Step, s.Title = PhaseReady, nil, "Connected"
 		s.Message, s.Fix, s.Command = "", "", ""
@@ -847,9 +869,6 @@ func (l *Launcher) ready(info buildInfo, t target.Target, h Health, managed bool
 			l.local = t.Socket
 		}
 	})
-	if ok && l.cfg.OnTarget != nil {
-		l.cfg.OnTarget(t)
-	}
 	l.cbMu.Unlock()
 	if !ok {
 		return
@@ -874,7 +893,20 @@ func (l *Launcher) startMonitor(gen uint64, t target.Target, info buildInfo, h H
 	}
 	l.monStop = cancel
 	l.mu.Unlock()
-	go l.monitor(ctx, monitorState{gen: gen, t: t, info: info, instance: h.InstanceID, managed: managed, pid: pid, foreground: foreground})
+	go l.monitor(ctx, monitorState{gen: gen, t: t, info: info, identity: healthIdentity(h), shared: h.SharedAccess, managed: managed, pid: pid, foreground: foreground})
+}
+
+// AccountChanged invalidates only the page showing this exact target.
+func (l *Launcher) AccountChanged(t target.Target) {
+	l.mu.Lock()
+	active := l.connected.Same(t)
+	if active {
+		l.st.AccountEpoch++
+	}
+	l.mu.Unlock()
+	if active {
+		l.poke()
+	}
 }
 
 // logTail is the last 50 server log lines (`service logs -n 50`), or nil.
@@ -917,6 +949,10 @@ func (l *Launcher) Identity() string {
 func (l *Launcher) T3PublicURL(ctx context.Context) (string, error) {
 	l.mu.Lock()
 	t := l.connected
+	get := l.cfg.Get
+	if l.st.Server != nil && l.st.Server.SharedAccess && l.cfg.GetShared != nil {
+		get = l.cfg.GetShared
+	}
 	l.mu.Unlock()
 	if t.IsZero() {
 		return "", errors.New("the Stage server is not connected")
@@ -926,7 +962,7 @@ func (l *Launcher) T3PublicURL(ctx context.Context) (string, error) {
 			PublicURL *string `json:"publicUrl"`
 		} `json:"details"`
 	}
-	if err := l.cfg.Get(ctx, t, "/api/harnesses/t3/status", &reply); err != nil {
+	if err := get(ctx, t, "/api/harnesses/t3/status", &reply); err != nil {
 		return "", err
 	}
 	st := reply.Details

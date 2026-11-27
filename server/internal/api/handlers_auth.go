@@ -89,14 +89,17 @@ func (s *server) registerAuth(mux *http.ServeMux) {
 func (s *server) authStatus(w http.ResponseWriter, _ *http.Request) {
 	var mode = store.AccessPersonal
 	id := s.InstallationID
+	status := map[string]string{}
 	if s.Access != nil {
 		mode, id = store.AccessClaimed, s.Access.id
+		status["canonicalUrl"] = s.Access.origin
 		if s.Access.Pending() {
 			mode = store.AccessPending
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]string{"mode": string(mode), "installationId": id})
+	status["mode"], status["installationId"] = string(mode), id
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (a *Access) setCookie(w http.ResponseWriter, token string, expiry time.Time, maxAge int) {

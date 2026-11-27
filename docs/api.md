@@ -113,7 +113,7 @@ defines the staged rollout. Public mode opt-in is reserved for #460.
 
 | Request | Credential and result |
 | --- | --- |
-| `GET /api/auth/status` | Public `{mode, installationId}`. Mode is `personal`, `setup_pending` or `claimed`. The ID identifies the installation across process restarts. |
+| `GET /api/auth/status` | Public `{mode, installationId}`. Mode is `personal`, `setup_pending` or `claimed`. The ID identifies the installation across process restarts. Shared responses also include `canonicalUrl`, the configured browser origin. Desktop verifies it before sending a password or session, including when dialing the local product socket. |
 | `POST /api/auth/login` | Browser JSON `{email,password}`. Exact canonical origin. Returns the account and sets the browser session cookie. |
 | `POST /api/auth/cli/login` | Native JSON `{email,password}` without browser origin, cookie or fetch headers, at the canonical target or its product Unix socket. Returns `{token, expiresAt, installationId}` with CLI audience. |
 | `POST /api/auth/{setup\|invite\|reset}/inspect` | Exact browser origin and purpose-bound `{token}`. Returns `{email,expiresAt}` without consuming the grant. |
@@ -144,12 +144,12 @@ A signed-in browser with the canonical origin can invoke MCP with agent
 authority. MCP reuses the same policy on each tool's in-process REST
 requests. Shared mode requires authentication on direct Unix and TCP.
 Clients must bind stored credentials to both the installation ID and exact
-configured target. Credential storage and client login commands land in
-later slices. Unauthenticated product clients receive
+configured target. [Desktop](desktop.md#shared-access) captures the browser
+session in Go. Unauthenticated product clients receive
 `401 authentication_required`. Valid credentials with an incompatible
 scope receive `403 principal_forbidden`. Pending setup returns
-`403 setup_pending`. Legacy inbox, push and their SSE remain closed with
-`403 shared_client_unavailable` until per-account delivery is available.
+`403 setup_pending`. Shared inbox, push and SSE use the authenticated
+account's [notification state](#notifications-inbox).
 
 ## Machines
 

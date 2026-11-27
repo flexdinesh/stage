@@ -190,7 +190,7 @@ func newLauncher(t *testing.T, cli *fakeCLI, mutate func(*Config)) *harness {
 		CLI: cli.exe, AppName: "Stage Test", AppVersion: "1.2.0",
 		TempDirs: []string{"/nonexistent-temp"},
 		Timing:   fastTiming(),
-		OnTarget: func(t target.Target) { h.sockets <- t.Socket },
+		OnTarget: func(t target.Target, _ Health) { h.sockets <- t.Socket },
 		Logf:     t.Logf,
 	}
 	if mutate != nil {
@@ -288,7 +288,7 @@ func TestStateJSON(t *testing.T) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"phase", "step", "title", "message", "fix", "command", "problems", "logTail", "app", "server", "foreground", "versionSkew", "target", "epoch", "serverEpoch", "busy", "dev", "worker"}
+	want := []string{"phase", "step", "title", "message", "fix", "command", "problems", "logTail", "app", "server", "foreground", "versionSkew", "target", "epoch", "serverEpoch", "accountEpoch", "busy", "dev", "worker"}
 	if len(m) != len(want) {
 		t.Fatalf("fields %v, want %v", m, want)
 	}
@@ -301,7 +301,7 @@ func TestStateJSON(t *testing.T) {
 		t.Fatalf("initial %s", b)
 	}
 	srv, _ := json.Marshal(Server{})
-	if string(srv) != `{"id":"","version":"","apiVersion":0,"identity":"","publicUrl":null,"socket":"","managed":false,"pid":null}` {
+	if string(srv) != `{"id":"","version":"","apiVersion":0,"identity":"","sharedAccess":false,"publicUrl":null,"socket":"","managed":false,"pid":null}` {
 		t.Fatalf("server JSON %s", srv)
 	}
 	tg, _ := json.Marshal(m["target"])

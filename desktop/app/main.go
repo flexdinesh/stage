@@ -14,6 +14,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"io/fs"
 	"log"
@@ -25,6 +26,7 @@ import (
 	"github.com/flexdinesh/stage/desktop/app/alerts"
 	"github.com/flexdinesh/stage/desktop/app/bridge"
 	"github.com/flexdinesh/stage/desktop/app/launch"
+	"github.com/flexdinesh/stage/desktop/app/session"
 	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
@@ -121,9 +123,29 @@ func setup(h *host) bool {
 		log.Printf("stage desktop: servers: %v", err)
 	}
 	h.servers = servers
+	sessions, err := session.Open(filepath.Join(h.userData, "sessions"), h.accountChanged)
+	if err != nil {
+		log.Printf("stage desktop: session storage: %v", err)
+	}
+	h.api.Sessions = sessions
 	h.alerts = alerts.New(alerts.Config{
 		PrefsPath: filepath.Join(h.userData, "notifications.json"),
 		Sink:      mygoSink{},
+		RestoreSession: func(t target.Target) alerts.Session {
+			if sessions == nil {
+				return alerts.Session{}
+			}
+			return sessions.AlertSession(t)
+		},
+		AccessEnded: func(t target.Target, id string) {
+			if sessions != nil {
+				go func() {
+					if err := sessions.AlertAccessEnded(t, id); err != nil {
+						log.Printf("stage desktop: clear session: %v", err)
+					}
+				}()
+			}
+		},
 		// The page's toasts cover the server it shows, not the others.
 		Foreground: func(id string) bool { return h.foreground() && h.activeID() == id },
 		Delivered: func(id string, n int64) {
@@ -142,7 +164,13 @@ func setup(h *host) bool {
 		DevSocket:  devSocket,
 		Servers:    servers,
 		OnChange:   func(s launch.State) { _ = StateChanged.Broadcast(s) },
-		OnTarget:   h.api.SetTarget,
+		OnTarget: func(t target.Target, health launch.Health) {
+			previous := h.l.State().Server
+			if !h.api.Target().Same(t) || (previous != nil && previous.SharedAccess != health.SharedAccess) {
+				h.closeAttachments()
+			}
+			h.api.SetServer(t, health.SharedAccess)
+		},
 		// Every ready (first start, recovery, a new server) reconnects
 		// that server's notification stream too.
 		OnServer: func(t target.Target) {
@@ -152,11 +180,24 @@ func setup(h *host) bool {
 		},
 		// Joining or leaving as a worker drops or restores this machine's
 		// own notification stream.
-		OnWorker:       func(bool) { h.listChanged() },
+		OnWorker: func(bool) { h.listChanged() },
+		CheckSession: func(ctx context.Context, t target.Target) error {
+			if sessions == nil {
+				return nil
+			}
+			return sessions.Check(ctx, t)
+		},
+		GetShared: func(ctx context.Context, t target.Target, path string, v any) error {
+			if sessions == nil {
+				return errNotRunning
+			}
+			return launch.Get(ctx, t, path, v, sessions.RoundTrip)
+		},
 		OpenAtLogin:    mygo.App.OpenAtLogin,
 		SetOpenAtLogin: mygo.App.SetOpenAtLogin,
 		Logf:           log.Printf,
 	})
+	h.api.AccountEpoch = func() int { return h.l.State().AccountEpoch }
 	h.alerts.SetServers(h.serverTargets())
 	h.wire()
 	return true

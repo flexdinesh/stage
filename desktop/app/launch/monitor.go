@@ -14,7 +14,8 @@ type monitorState struct {
 	gen        uint64 // the switch generation it belongs to
 	t          target.Target
 	info       buildInfo
-	instance   string
+	identity   string
+	shared     bool
 	managed    bool
 	pid        *int
 	foreground bool
@@ -45,8 +46,13 @@ func (l *Launcher) monitor(ctx context.Context, m monitorState) {
 			return
 		}
 		if err == nil {
-			if !downSince.IsZero() || h.InstanceID != m.instance {
-				m.instance = h.InstanceID
+			if h.SharedAccess && l.cfg.CheckSession != nil {
+				_ = l.cfg.CheckSession(ctx, m.t)
+			}
+			identity := healthIdentity(h)
+			if !downSince.IsZero() || (identity != "" && identity != m.identity) || h.SharedAccess != m.shared {
+				m.identity = identity
+				m.shared = h.SharedAccess
 				downSince, settled, backoff = time.Time{}, false, l.t.BackoffMin
 				if !l.recovered(m, h) {
 					return // a new monitor took over
@@ -105,6 +111,13 @@ func (l *Launcher) monitor(ctx context.Context, m monitorState) {
 			l.settleGen(m.gen, o)
 		}
 	}
+}
+
+func healthIdentity(h Health) string {
+	if h.SharedAccess {
+		return h.installation
+	}
+	return h.InstanceID
 }
 
 // recovered settles ready (epoch++) or incompatible after the server

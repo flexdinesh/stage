@@ -105,7 +105,7 @@ func TestDesktopRemote(t *testing.T) {
 		CLI: bin, AppName: "Stage Test", AppVersion: "itest",
 		Dev: true, DevSocket: le.sock, TempDirs: []string{},
 		Servers:  store,
-		OnTarget: proxy.SetTarget,
+		OnTarget: func(t target.Target, h launch.Health) { proxy.SetServer(t, h.SharedAccess) },
 		OnServer: func(t target.Target) { servers <- t },
 		Logf:     t.Logf,
 	})

@@ -182,6 +182,9 @@ export function createApi(transport: Transport) {
 
   return {
     health: () => apiFetch<Health>("/health"),
+    desktopAccess: () => apiFetch<{mode: "personal" | "setup_pending" | "claimed"; canonicalUrl?: string}>("/auth/status"),
+    desktopSignIn: (email: string, password: string) => apiSend("/auth/login", post({email, password})),
+    desktopSignOut: () => apiSend("/auth/logout", post()),
     ...harnessCalls(apiFetch, ""),
     /** A remote machine's harness setup, driven through its worker. */
     forMachine: (id: number): HarnessApi => harnessCalls(apiFetch, `/machines/${id}`),

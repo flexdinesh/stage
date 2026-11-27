@@ -13,13 +13,15 @@ import (
 
 // Health is the part of GET /api/health the app reads.
 type Health struct {
-	Status     string  `json:"status"`
-	Service    string  `json:"service"`
-	Identity   string  `json:"identity"`
-	Version    string  `json:"version"`
-	APIVersion int     `json:"apiVersion"`
-	InstanceID string  `json:"instanceId"`
-	PublicURL  *string `json:"publicUrl"`
+	Status       string  `json:"status"`
+	Service      string  `json:"service"`
+	Identity     string  `json:"identity"`
+	Version      string  `json:"version"`
+	APIVersion   int     `json:"apiVersion"`
+	InstanceID   string  `json:"instanceId"`
+	PublicURL    *string `json:"publicUrl"`
+	SharedAccess bool    `json:"sharedAccess"`
+	installation string
 }
 
 // Getter GETs a Stage API path on a target and decodes the JSON answer
@@ -46,6 +48,12 @@ func (e *HTTPError) Error() string {
 // through an HTTP proxy, without Origin (a non-browser client to the
 // server's origin policy).
 func TargetGetter(ctx context.Context, t target.Target, path string, v any) error {
+	return Get(ctx, t, path, v, nil)
+}
+
+// Get uses t's transport with optional product authentication. Health and
+// version probes use TargetGetter and never require a session.
+func Get(ctx context.Context, t target.Target, path string, v any, roundTrip func(target.Target, http.RoundTripper, *http.Request) (*http.Response, error)) error {
 	tr := t.Transport()
 	tr.DisableKeepAlives = true
 	defer tr.CloseIdleConnections()
@@ -54,9 +62,15 @@ func TargetGetter(ctx context.Context, t target.Target, path string, v any) erro
 		return err
 	}
 	req.Host = t.Host()
-	client := &http.Client{Transport: tr, Timeout: 30 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	res, err := client.Do(req)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
+	var res *http.Response
+	if roundTrip == nil {
+		res, err = tr.RoundTrip(req)
+	} else {
+		res, err = roundTrip(t, tr, req)
+	}
 	if err != nil {
 		return err
 	}

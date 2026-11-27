@@ -97,7 +97,7 @@ export function gateView(state: HostState | null, startingLate: boolean): "app" 
  * it. The first state from the host (replacing the placeholder) is not one, so a launch deep link survives.
  */
 export function isServerSwitch(prev: HostState, next: HostState): boolean {
-  return prev.target.id !== next.target.id && prev.serverEpoch > 0;
+  return (prev.target.id !== next.target.id || prev.target.url !== next.target.url) && prev.serverEpoch > 0;
 }
 
 export type ServerTone = "ok" | "run" | "bad" | "idle";

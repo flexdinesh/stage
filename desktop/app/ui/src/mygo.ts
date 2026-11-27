@@ -38,6 +38,7 @@ export interface Server {
   version: string;
   apiVersion: number;
   identity: string;
+  sharedAccess: boolean;
   /** PublicURL is the server's STAGE_PUBLIC_URL, null when unset. */
   publicUrl: string | null;
   /** Socket is the Unix socket path the app talks to, "" for a remote. */
@@ -141,6 +142,8 @@ export interface State {
    * it to 0 (the app was never ready on the new server yet).
    */
   serverEpoch: number;
+  /** AccountEpoch changes when the active server's session changes. */
+  accountEpoch: number;
   /** Busy: a retry, start or restart is running. */
   busy: boolean;
   /** Dev: development run against a foreground dev server. */

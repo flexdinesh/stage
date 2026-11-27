@@ -1,4 +1,4 @@
-import type { StreamHandlers, Subscription, Transport } from "@stage/app/platform";
+import type { HostState, StreamHandlers, Subscription, Transport } from "@stage/app/platform";
 
 /** Minimal EventSource surface the transport uses (the webview's, or a test fake). */
 export interface EventSourceLike {
@@ -27,10 +27,16 @@ export function desktopTransport(
     fetch: (input, init) => fetch(input, init),
     eventSource: (url) => new EventSource(url),
   },
+  current?: () => HostState,
 ): Transport {
   return {
     request: (path, init) => deps.fetch(apiUrl(path), init),
-    assetUrl: apiUrl,
+    assetUrl(path) {
+      const state = current?.();
+      if (state === undefined) return apiUrl(path);
+      const query = new URLSearchParams({ "stage-target": `${state.target.id}|${state.target.url}|${state.accountEpoch ?? 0}` });
+      return `${apiUrl(path)}?${query.toString()}`;
+    },
     subscribe(path: string, handlers: StreamHandlers): Subscription {
       const es = deps.eventSource(apiUrl(path));
       let closed = false;
