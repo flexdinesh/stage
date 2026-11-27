@@ -93,6 +93,10 @@ func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if projectSummaryRequest(r) {
+		writeJSON(w, http.StatusCreated, projectSummary(p))
+		return nil
+	}
 	writeJSON(w, http.StatusCreated, s.projectView(p))
 	return nil
 }
@@ -138,9 +142,10 @@ func (s *server) updateProject(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	// An omitted field keeps its current value.
 	var in struct {
-		Title    string `json:"title"`
-		Archived bool   `json:"archived"`
+		Title    *string `json:"title"`
+		Archived *bool   `json:"archived"`
 	}
 	if err = decodeStrict(r, &in); err != nil {
 		return err
@@ -148,6 +153,10 @@ func (s *server) updateProject(w http.ResponseWriter, r *http.Request) error {
 	p, err := s.Store.UpdateProject(r.Context(), id, in.Title, in.Archived)
 	if err != nil {
 		return err
+	}
+	if projectSummaryRequest(r) {
+		writeJSON(w, http.StatusOK, projectSummary(p))
+		return nil
 	}
 	writeJSON(w, http.StatusOK, s.projectView(p))
 	return nil

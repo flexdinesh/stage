@@ -436,8 +436,9 @@ for a designated option. A question group takes answers keyed by question
 ID, using option labels or custom text when allowed. An input takes free
 text. A preview can describe the command, path, URL or input the request
 acts on. A request that is no longer pending returns `ErrNotFound` (404).
-A successful follow-up records a task timeline entry. Only users can send
-and respond. Claude Code supplies both operations, with responses requiring
+A successful follow-up records a task timeline entry. Users and agents can
+send and respond, never from the task's own session
+(`self_action_forbidden`, [ADR 0011](adr/0011-agent-operation-parity.md)). Claude Code supplies both operations, with responses requiring
 its hook receiver. [Interaction API](api.md#session-interaction-api-v6)
 
 ### Actions and facts

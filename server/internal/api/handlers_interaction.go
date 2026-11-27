@@ -1,12 +1,12 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
-	"github.com/flexdinesh/stage/server/internal/principal"
 )
 
 // Interaction with a task's running session (docs/api.md "Session
@@ -26,30 +26,43 @@ func (s *server) taskRequests(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// agentCaller refuses (403 agent_forbidden, true) a request naming an
-// agent's session (the Stage-Caller-Session header the CLI and MCP send)
-// or forwarded by a worker's agent gateway, so only the user answers or
-// drives a session (best effort: a bare request carries neither).
-func agentCaller(w http.ResponseWriter, r *http.Request, msg string) bool {
-	if a, ok := principal.From(r.Context()); ok && a.Kind != principal.Personal {
-		if a.IsHuman() {
-			return false
-		}
-	} else if r.Header.Get(agentctx.CallerHeader) == "" && db.ActingMachine(r.Context()) == nil {
-		return false
+// selfAction refuses (403 self_action_forbidden, true) a request whose
+// caller session (agentctx.CallerHeader, which the CLI and MCP tools send)
+// belongs to task id: an agent may complete, reopen, answer or message other
+// work, never its own task or session. It applies to any principal naming a
+// caller. Best effort: a request naming no caller session passes. It returns
+// the named caller session for attribution.
+func (s *server) selfAction(w http.ResponseWriter, r *http.Request, id int64, msg string) (*db.SessionRef, bool, error) {
+	v := r.Header.Get(agentctx.CallerHeader)
+	if v == "" {
+		return nil, false, nil
 	}
-	writeJSON(w, http.StatusForbidden, map[string]string{"error": msg, "code": "agent_forbidden"})
-	return true
+	ref, err := agentctx.ParseSession(v)
+	if err != nil {
+		return nil, false, db.Invalid("%s: %v", agentctx.CallerHeader, err)
+	}
+	owner, err := s.Store.TaskBySession(r.Context(), ref)
+	if errors.Is(err, db.ErrNotFound) {
+		return &ref, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if owner.ID == id {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": msg, "code": "self_action_forbidden"})
+		return &ref, true, nil
+	}
+	return &ref, false, nil
 }
 
-// respondRequest answers for the user only (agentCaller), so an agent
-// cannot approve a session's prompt.
+// respondRequest answers a pending request of task id's session; never
+// from that session itself (selfAction).
 func (s *server) respondRequest(w http.ResponseWriter, r *http.Request) error {
-	if agentCaller(w, r, "Approvals and answers come from you, in Stage or in the harness, not from an agent.") {
-		return nil
-	}
 	id, err := pathID(r)
 	if err != nil {
+		return err
+	}
+	if _, refused, err := s.selfAction(w, r, id, "An agent cannot answer its own session's request. The user answers it in Stage or in the harness."); err != nil || refused {
 		return err
 	}
 	var in execution.Response
@@ -64,13 +77,14 @@ func (s *server) respondRequest(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-// sendMessage sends for the user only (agentCaller).
+// sendMessage sends task id's session a message; never from that session
+// itself (selfAction).
 func (s *server) sendMessage(w http.ResponseWriter, r *http.Request) error {
-	if agentCaller(w, r, "Follow-ups come from you, in Stage or in the harness, not from an agent.") {
-		return nil
-	}
 	id, err := pathID(r)
 	if err != nil {
+		return err
+	}
+	if _, refused, err := s.selfAction(w, r, id, "An agent cannot message its own session."); err != nil || refused {
 		return err
 	}
 	var in execution.Message

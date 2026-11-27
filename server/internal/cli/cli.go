@@ -197,6 +197,8 @@ Usage:
   stage show REF                      the task, tree, schedule, project, journal entry or session
                                       a stage link, harness session link or #TASK_ID names
   stage projects ls
+  stage projects add --title T
+  stage projects edit ID [--title T] [--archived true|false]
   stage models ls --connection ID [--workspace-id ID]
   stage action ls TARGET
   stage action run ACTION_ID TARGET [--input JSON|-] [--confirm]
@@ -213,6 +215,14 @@ Usage:
                                       rm only for a task that never started
   stage task archive ID [--undo]      archive a standalone task (--undo unarchives)
   stage task wait ID [--until S,..] [--timeout 10m]      exit 3 on timeout
+  stage task preview ID               completion preview: revision, evidence version, dependents
+  stage task complete ID --revision N --evidence-version V [--note TEXT] [--request-id KEY]
+  stage task reopen ID --revision N [--request-id KEY]
+  stage task requests ID              what the task's session waits on
+  stage task respond ID RID [--option O] [--text T] [--answers JSON]
+  stage task send ID --text TEXT      message the task's session
+  stage task opening-prompt ID [--full]
+                                      complete, reopen, respond and send: never your own task or session
   stage tree ls [--status active|done|archived|all] [--all] [--project P]
   stage tree show ID                  levels, states, needs, readiness
   stage tree new --title T [--start-mode auto|manual] ID[:NEED,..]...

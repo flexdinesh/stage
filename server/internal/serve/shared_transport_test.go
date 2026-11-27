@@ -304,7 +304,8 @@ func TestSharedAccountsThroughHTTPSProxyAndUnix(t *testing.T) {
 	(transportRequest{method: "GET", path: "/api/me", headers: agentHeaders}).send(t, anon, origin, 403, nil)
 	(transportRequest{method: "GET", path: "/api/notifications/stream", headers: agentHeaders}).send(t, anon, origin, 403, nil)
 	(transportRequest{method: "GET", path: "/api/push/config", headers: cliHeaders}).send(t, anon, origin, 403, nil)
-	(transportRequest{method: "POST", path: "/api/tasks/1/requests/1", headers: agentHeaders}).send(t, anon, origin, 403, nil)
+	// Agents answer other sessions' requests (an empty answer is invalid).
+	(transportRequest{method: "POST", path: "/api/tasks/1/requests/1", headers: agentHeaders, body: "{}"}).send(t, anon, origin, 400, nil)
 	(transportRequest{method: "PUT", path: "/api/harnesses/t3/settings", headers: agentHeaders}).send(t, anon, origin, 403, nil)
 	(transportRequest{method: "PUT", path: "/api/machines/1/harnesses/t3/settings", headers: agentHeaders}).send(t, anon, origin, 403, nil)
 	claims := http.Header{agentctx.CallerHeader: {"1:guessed"}, "Stage-Action-Agent": {"1"}}
@@ -543,12 +544,12 @@ func TestSharedWorkerReadinessAndPrivateGateway(t *testing.T) {
 		{method: "POST", path: "/api/machines/pairings", body: "{}"},
 		{method: "PUT", path: "/api/harnesses/t3/settings", body: "{}"},
 		{method: "PUT", path: "/api/machines/1/harnesses/t3/settings", body: "{}"},
-		{method: "POST", path: "/api/tasks/1/requests/1", body: "{}"},
 		{method: "POST", path: "/api/auth/cli/login", body: "{}"},
 		{method: "POST", path: fmt.Sprintf("/api/connections/%d/observations", task.ConnectionID), body: `{"observations":[]}`},
 	} {
 		restricted.send(t, gw.HTTP, "http://stage", 403, nil)
 	}
+	(transportRequest{method: "POST", path: "/api/tasks/1/requests/1", body: "{}"}).send(t, gw.HTTP, "http://stage", 400, nil)
 	(transportRequest{method: "GET", path: api.GatewayPrefix + "/api/projects"}).send(t, gw.HTTP, "http://stage", 404, nil)
 	(transportRequest{method: "GET", path: "/api/me"}).send(t, gw.HTTP, "http://stage", 403, nil)
 	(transportRequest{method: "GET", path: "/api/machines"}).send(t, gw.HTTP, "http://stage", 200, nil)

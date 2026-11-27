@@ -199,7 +199,7 @@ type waitFlags struct {
 }
 
 func (w *waitFlags) register(c *cmd) {
-	c.fs.StringVar(&w.needs, "needs", "", "task ids this task runs after (comma-separated; joins their tree): eligible once the user completes all needs in Stage")
+	c.fs.StringVar(&w.needs, "needs", "", "task ids this task runs after (comma-separated; joins their tree): eligible once all needs are completed in Stage")
 	c.fs.Int64Var(&w.tree, "tree", 0, "join this tree (a parallel root unless --needs)")
 	c.fs.StringVar(&w.startMode, "start-mode", "", "inherit (default)|auto|manual; set shared policy on the tree, override only for a task exception")
 	removeWorkspaceFlags(c, "base-task")
@@ -452,6 +452,8 @@ func runTask(ctx context.Context, env Env, args []string) error {
 			return errTimeout
 		}
 		return nil
+	case "preview", "complete", "reopen", "requests", "respond", "send", "opening-prompt":
+		return runTaskWork(ctx, c, v, rest)
 	}
 	return usagef("task %s: unknown", v)
 }

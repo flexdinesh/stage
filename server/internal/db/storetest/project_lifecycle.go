@@ -26,7 +26,7 @@ func caseProjectMerge(t *testing.T, open Factory) {
 	from := mustProject(t, s, ctx, "source")
 	final := mustProject(t, s, ctx, "final")
 	separate := mustProject(t, s, ctx, "separate")
-	archived, err := s.UpdateProject(ctx, into.ID, into.Title, true)
+	archived, err := s.UpdateProject(ctx, into.ID, nil, new(true))
 	if err != nil {
 		t.Fatal(err)
 	}

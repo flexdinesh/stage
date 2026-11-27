@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
+	"github.com/flexdinesh/stage/server/internal/api"
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
@@ -51,30 +52,50 @@ func TestInteractionRoutesUnavailable(t *testing.T) {
 	}
 }
 
-// Only the user answers or sends: a request naming an agent's session, or
-// forwarded by a worker's agent gateway, is refused before anything else;
-// listing stays open.
-func TestRespondRefusesAgents(t *testing.T) {
+// Agents answer and message other tasks' sessions, never their own: a
+// request whose caller session (header, directly or through a worker's
+// agent gateway) owns the task is refused before anything else; another
+// caller reaches the harness (T3: operation_unavailable).
+func TestRespondRefusesOwnSession(t *testing.T) {
 	e := gatewayEnv(t)
 	j := e.join("laptop")
 	p := e.project("/w/agents")
 	a := e.task(p.ID, "running", map[string]any{"start": true})
-	var out struct {
-		Code string `json:"code"`
-	}
-	headers := map[string]string{buildinfo.APIVersionHeader: apiVersion, agentctx.CallerHeader: "1:agent-1"}
-	for _, c := range []struct {
-		path string
-		body map[string]any
-	}{
-		{fmt.Sprintf("/api/tasks/%d/requests/q1", a.ID), map[string]any{"option": "allow"}},
-		{fmt.Sprintf("/api/tasks/%d/messages", a.ID), map[string]any{"text": "hello"}},
-	} {
-		if rec := raw(t, e.h, "POST", c.path, headers, c.body, &out); rec.Code != 403 || out.Code != "agent_forbidden" {
-			t.Fatalf("caller session %s: %d %s", c.path, rec.Code, rec.Body)
+	other := e.task(p.ID, "other", map[string]any{"start": true})
+	sessionHeader := func(id int64) string {
+		st, err := e.store.GetTask(t.Context(), id)
+		if err != nil || st.Session == nil {
+			t.Fatalf("task %d session: %v", id, err)
 		}
-		if rec := e.gw(j.Token, "POST", c.path, c.body, &out); rec.Code != 403 || out.Code != "agent_forbidden" {
-			t.Fatalf("gateway %s: %d %s", c.path, rec.Code, rec.Body)
+		return fmt.Sprintf("%d:%s", st.Session.ConnectionID, st.Session.ExternalSessionID)
+	}
+	own, foreign := sessionHeader(a.ID), sessionHeader(other.ID)
+	var out struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	for _, c := range []struct {
+		path, msg string
+		body      map[string]any
+	}{
+		{fmt.Sprintf("/api/tasks/%d/requests/q1", a.ID), "answer its own session's request", map[string]any{"option": "allow"}},
+		{fmt.Sprintf("/api/tasks/%d/messages", a.ID), "message its own session", map[string]any{"text": "hello"}},
+	} {
+		direct := map[string]string{buildinfo.APIVersionHeader: apiVersion, agentctx.CallerHeader: own}
+		if rec := raw(t, e.h, "POST", c.path, direct, c.body, &out); rec.Code != 403 || out.Code != "self_action_forbidden" || !strings.Contains(out.Error, c.msg) {
+			t.Fatalf("own session %s: %d %s", c.path, rec.Code, rec.Body)
+		}
+		gateway := workerHeaders(j.Token)
+		gateway[agentctx.CallerHeader] = own
+		if rec := raw(t, e.h, "POST", api.GatewayPrefix+c.path, gateway, c.body, &out); rec.Code != 403 || out.Code != "self_action_forbidden" {
+			t.Fatalf("gateway own session %s: %d %s", c.path, rec.Code, rec.Body)
+		}
+		gateway[agentctx.CallerHeader] = foreign
+		if rec := raw(t, e.h, "POST", api.GatewayPrefix+c.path, gateway, c.body, &out); rec.Code != 409 || out.Code != "operation_unavailable" {
+			t.Fatalf("gateway other session %s: %d %s", c.path, rec.Code, rec.Body)
+		}
+		if rec := e.gw(j.Token, "POST", c.path, c.body, &out); rec.Code != 409 || out.Code != "operation_unavailable" {
+			t.Fatalf("gateway without caller %s: %d %s", c.path, rec.Code, rec.Body)
 		}
 	}
 	if rec := e.gw(j.Token, "GET", fmt.Sprintf("/api/tasks/%d/requests", a.ID), nil, &out); rec.Code != 409 || out.Code != "operation_unavailable" {

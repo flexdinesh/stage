@@ -885,6 +885,27 @@ func TestProjects(t *testing.T) {
 	e.must("GET", "/api/projects?archived=maybe", nil, 400, nil)
 }
 
+func TestUpdateProjectKeepsOmittedFields(t *testing.T) {
+	e := newEnv(t)
+	var p db.Project
+	e.must("POST", "/api/projects", map[string]any{"title": "Before"}, 201, &p)
+	path := fmt.Sprintf("/api/projects/%d", p.ID)
+	e.must("PATCH", path, map[string]any{"archived": true}, 200, &p)
+	if p.Title != "Before" || p.ArchivedAt == nil {
+		t.Fatalf("archive without title: %+v", p)
+	}
+	archivedAt := *p.ArchivedAt
+	e.must("PATCH", path, map[string]any{"title": "After"}, 200, &p)
+	if p.Title != "After" || p.ArchivedAt == nil || !p.ArchivedAt.Equal(archivedAt) {
+		t.Fatalf("rename without archived unarchived or moved archivedAt: %+v", p)
+	}
+	e.must("PATCH", path, map[string]any{"archived": false}, 200, &p)
+	if p.Title != "After" || p.ArchivedAt != nil {
+		t.Fatalf("unarchive: %+v", p)
+	}
+	e.must("PATCH", path, map[string]any{"title": " "}, 400, nil)
+}
+
 func TestReleaseRunLoopProcessesKicks(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/one")

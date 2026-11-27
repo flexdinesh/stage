@@ -31,10 +31,19 @@ func (s *server) changeAcceptance(w http.ResponseWriter, r *http.Request, reopen
 	if err != nil {
 		return err
 	}
+	msg := "An agent cannot complete its own task. Report the outcome with a journal note; the user or another agent completes it."
+	if reopen {
+		msg = "An agent cannot reopen its own task."
+	}
+	caller, refused, err := s.selfAction(w, r, id, msg)
+	if err != nil || refused {
+		return err
+	}
 	var in db.AcceptanceRequest
 	if err = decodeStrict(r, &in); err != nil {
 		return err
 	}
+	in.CallerSession = caller
 	result, err := s.Store.ChangeAcceptance(r.Context(), id, in, reopen)
 	if err != nil {
 		return err

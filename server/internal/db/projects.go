@@ -81,10 +81,15 @@ func (s *Store) InsertProject(ctx context.Context, p Project) (Project, error) {
 	})
 }
 
-func (s *Store) UpdateProject(ctx context.Context, id int64, title string, archived bool) (Project, error) {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return Project{}, Invalid("title is required")
+// UpdateProject renames and/or archives a project; a nil field keeps its
+// current value.
+func (s *Store) UpdateProject(ctx context.Context, id int64, title *string, archived *bool) (Project, error) {
+	if title != nil {
+		trimmed := strings.TrimSpace(*title)
+		if trimmed == "" {
+			return Project{}, Invalid("title is required")
+		}
+		title = &trimmed
 	}
 	return write(ctx, s, func(tx store.Tx) (Project, error) {
 		if err := tx.Projects().LockIdentity(ctx); err != nil {
@@ -94,7 +99,18 @@ func (s *Store) UpdateProject(ctx context.Context, id int64, title string, archi
 		if err != nil {
 			return Project{}, err
 		}
-		if err := tx.Projects().Update(ctx, canonical, title, archived); err != nil {
+		current, err := tx.Projects().Get(ctx, canonical)
+		if err != nil {
+			return Project{}, err
+		}
+		next, archive := current.Title, current.ArchivedAt != nil
+		if title != nil {
+			next = *title
+		}
+		if archived != nil {
+			archive = *archived
+		}
+		if err := tx.Projects().Update(ctx, canonical, next, archive); err != nil {
 			return Project{}, err
 		}
 		return tx.Projects().Get(ctx, canonical)

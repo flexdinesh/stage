@@ -42,7 +42,7 @@ Execution finishing is not the same as the work being accepted. You complete a t
 - Active work must stop first. Any stopped task can be completed, including a failed one.
 - Moving a completed task back (State picker, **Change state**) keeps its accepted-result history and blocks dependents that have not started yet.
 - Later harness activity never revokes your acceptance.
-- Agents report outcomes in notes but have no tool to complete or reopen a task.
+- Agents report their own outcome in notes. When asked, an agent can complete or reopen another task after the same review, never its own.
 
 A connection with auto-complete on can also complete a successful run for you ([Connections](/docs/concepts/connections)). In a [tree](/docs/concepts/trees), completion is what releases the next tasks.
 
