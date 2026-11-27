@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -81,6 +83,69 @@ func (hostedAdapter) Attention(context.Context) ([]execution.SessionRef, error) 
 }
 func (hostedAdapter) Opening(context.Context, execution.SessionRef, bool) (*execution.Reply, error) {
 	return nil, execution.ErrUnavailable
+}
+
+// workspaceKit is the hosted harness with ADR 0012 workspace add: an
+// existing folder, a folder it trusts after confirmation, and a source that
+// is not available yet. It lists what it added unless unlisted is set;
+// uncertain makes it report an unknown outcome.
+type workspaceKit struct {
+	hostedAdapter
+	mu        sync.Mutex
+	rows      []execution.WorkspaceInfo
+	requests  []execution.WorkspaceAddRequest
+	unlisted  atomic.Bool
+	uncertain atomic.Bool
+}
+
+const kitTrustConfirm = "Hosted kit will trust this folder for every session."
+
+var kitSources = []execution.WorkspaceSource{
+	{ID: "folder", Label: "Existing folder", Availability: execution.Availability{Available: true},
+		Input: []execution.Field{{ID: "path", Label: "Folder", Kind: execution.FieldPath, Required: true}}},
+	{ID: "trusted", Label: "Trust folder", Confirm: kitTrustConfirm, Availability: execution.Availability{Available: true},
+		Input: []execution.Field{{ID: "path", Label: "Folder", Kind: execution.FieldPath, Required: true}}},
+	{ID: "clone", Label: "Clone", Availability: execution.Availability{Reason: "Sign in to clone."},
+		Input: []execution.Field{{ID: "url", Label: "Repository", Kind: execution.FieldURL, Required: true}}},
+}
+
+func (k *workspaceKit) Features(ctx context.Context) (execution.Capabilities, error) {
+	c, err := k.hostedAdapter.Features(ctx)
+	c.Operations[execution.OpWorkspaceAdd] = execution.Availability{Available: true}
+	c.WorkspaceSources = slices.Clone(kitSources)
+	return c, err
+}
+
+func (k *workspaceKit) Workspaces(context.Context) ([]execution.WorkspaceInfo, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return append([]execution.WorkspaceInfo{{ID: "repo", Title: "repo", WorkspaceRoot: hostedWorkspace}}, k.rows...), nil
+}
+
+func (k *workspaceKit) AddWorkspace(_ context.Context, r execution.WorkspaceAddRequest) (execution.WorkspaceAdded, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.requests = append(k.requests, r)
+	if k.uncertain.Load() {
+		return execution.WorkspaceAdded{}, &execution.OutcomeUncertain{Cause: fmt.Errorf("kit lost the reply")}
+	}
+	var in struct{ Path string }
+	if err := json.Unmarshal(r.Input, &in); err != nil || !filepath.IsAbs(in.Path) {
+		return execution.WorkspaceAdded{}, &execution.Invalid{Reason: "Hosted kit needs an absolute folder path."}
+	}
+	info := execution.WorkspaceInfo{ID: "kit:" + in.Path, Title: filepath.Base(in.Path), WorkspaceRoot: in.Path}
+	existing := slices.ContainsFunc(k.rows, func(w execution.WorkspaceInfo) bool { return w.ID == info.ID })
+	if !existing && !k.unlisted.Load() {
+		k.rows = append(k.rows, info)
+	}
+	return execution.WorkspaceAdded{Workspace: info, Existing: existing, Message: "Hosted kit added " + in.Path,
+		Facts: []execution.Fact{{ID: "root", Label: "Folder", Value: in.Path}}}, nil
+}
+
+func (k *workspaceKit) addRequests() []execution.WorkspaceAddRequest {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return slices.Clone(k.requests)
 }
 
 // hostedConnector is the fake hosted harness's setup: connect records the

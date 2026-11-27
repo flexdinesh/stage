@@ -158,6 +158,7 @@ func operations() map[execution.Op]execution.Availability {
 		execution.OpRespond:       answer,
 		execution.OpSend:          answer,
 		execution.OpSessionRename: {Reason: sessionRenameUnavailable},
+		execution.OpWorkspaceAdd:  execution.WorkspaceAddNotSupported(Descriptor.Name),
 	}
 }
 

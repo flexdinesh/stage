@@ -415,7 +415,8 @@ declared capabilities.
 
 Use a typed operation when Stage branches on availability.
 `execution.Op` covers `launch`, `stop`, `adopt`, `reply`, `opening`,
-`attention`, `sessionSearch`, `images`, `respond`, `send` and `sessionRename`.
+`attention`, `sessionSearch`, `images`, `respond`, `send`, `sessionRename`
+and `workspaceAdd`.
 Every adapter declares each operation and a reason when unavailable.
 For example, `images` gates image fields and image delivery in the API
 and MCP. The remote proxy passes the declarations through.
@@ -476,6 +477,31 @@ On workers the operation requires both the `sessionNamer` trait on the
 connection and the `adapter.sessionRename` request kind. An older worker
 declares it unavailable ("Update Stage on the worker machine...") and
 keeps its other operations. [Task update](api.md#patch-apitasksid)
+
+### Workspace add
+
+`execution.WorkspaceAdder` is the optional role behind the `workspaceAdd`
+operation ([ADR 0012](adr/0012-harness-workspace-add.md)). The adapter
+declares `Capabilities.WorkspaceSources`; each source has typed input
+fields (`text`, `choice`, `boolean`, `path`), optional confirmation text
+and availability. `ValidateWorkspaceSources` rejects duplicate or unstable
+IDs, missing labels, unavailable sources without a reason and an available
+operation without an available source. Stage then drops the sources and
+reports the operation unavailable.
+
+`AddWorkspace` receives the source ID, input already validated against the
+source fields, the caller's `requestId` and the confirmation. It returns
+the added workspace's native ID and root, `Existing`, a message and facts.
+`*execution.Invalid` is a 400. `*execution.OutcomeUncertain`, a lost worker
+reply or the 5-minute deadline is a 504 `outcome_uncertain`; the caller
+retries with the same `requestId`. After success Stage refreshes the
+connection's inventory, resolves the row by native ID and root, and records
+a `workspace_added` project event.
+
+On workers the operation requires the `workspaceAdder` trait and the
+`adapter.workspaceAdd` request kind, negotiated on the existing channel.
+Every shipped harness declares the operation unavailable for now.
+[Workspace add API](api.md#add-a-workspace)
 
 ### Interaction
 

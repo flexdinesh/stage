@@ -59,6 +59,10 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 	evidence := execution.WorkspaceEvidence{
 		CanonicalPath: "/w", CheckoutKey: "/w/.git", Subpath: ".", Remote: "github.com/o/r", InodeHint: "64769:1234", Gone: true,
 	}
+	source := execution.WorkspaceSource{
+		ID: "folder", Label: "Folder", Help: "Add a folder.", Confirm: "Trust this folder.", Availability: avail,
+		Input: []execution.Field{{ID: "path", Label: "Path", Kind: execution.FieldPath, Required: true}},
+	}
 	samples := map[string]any{
 		// Adapter contract (execution.Adapter and its optional interfaces).
 		"SessionRef":   ref,
@@ -72,9 +76,17 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		"Capabilities": execution.Capabilities{
 			Permissions: []execution.Choice{choice}, Options: []execution.Option{option}, ModeLabel: "Agent",
 			Operations: map[execution.Op]execution.Availability{execution.OpLaunch: avail}, Models: []execution.Model{{Choice: choice, Group: "g", Options: []execution.Option{option}, Permissions: []execution.Choice{choice}}},
-			Modes: []execution.Choice{choice}, Actions: []execution.Action{action},
+			Modes: []execution.Choice{choice}, Actions: []execution.Action{action}, WorkspaceSources: []execution.WorkspaceSource{source},
 		},
-		"Action": action,
+		"Action":          action,
+		"WorkspaceSource": source,
+		"WorkspaceAddRequest": execution.WorkspaceAddRequest{
+			Source: "folder", Input: json.RawMessage(`{"path":"/w"}`), RequestID: "req-1", Confirmed: true,
+		},
+		"WorkspaceAdded": execution.WorkspaceAdded{
+			Workspace: execution.WorkspaceInfo{ID: "p", WorkspaceRoot: "/w"}, Existing: true, Message: "Added /w",
+			Facts: []execution.Fact{{ID: "root", Label: "Folder", Value: "/w"}},
+		},
 		"ActionRequest": execution.ActionRequest{
 			ID: "clear", Target: execution.TargetSession, Session: &ref, Project: &execution.ActionWorkspace{ExternalProjectID: "p", Directory: "/w"},
 			Input: json.RawMessage(`{"scope":"c"}`),

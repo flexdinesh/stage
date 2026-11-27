@@ -56,6 +56,7 @@ var (
 	_ execution.Actor             = (*Adapter)(nil)
 	_ execution.SessionSearcher   = (*Adapter)(nil)
 	_ execution.SessionNamer      = (*Adapter)(nil)
+	_ execution.WorkspaceAdder    = (*Adapter)(nil)
 )
 
 // Implements reads the current peer's declaration, never the Go proxy's methods.
@@ -131,6 +132,7 @@ var operationKinds = map[execution.Op][]string{
 	execution.OpOpening: {KindOpening}, execution.OpAttention: {KindAttention},
 	execution.OpRespond: {KindRequests, KindRespond}, execution.OpSend: {KindSend},
 	execution.OpSessionRename: {KindSessionRename},
+	execution.OpWorkspaceAdd:  {KindWorkspaceAdd, KindWorkspaces},
 }
 
 func (a *Adapter) limitOperations(c *execution.Capabilities) {
@@ -170,6 +172,9 @@ func (a *Adapter) limitOperations(c *execution.Capabilities) {
 		c.Operations[execution.OpSessionRename] = execution.Availability{Reason: "Update Stage on the worker machine to rename sessions."}
 	} else if c.Operations[execution.OpSessionRename].Available && !a.Implements(execution.TraitOf[execution.SessionNamer]()) {
 		c.Operations[execution.OpSessionRename] = execution.Availability{Reason: "This worker connection does not offer session rename."}
+	}
+	if c.Operations[execution.OpWorkspaceAdd].Available && !a.Implements(execution.TraitOf[execution.WorkspaceAdder]()) {
+		c.Operations[execution.OpWorkspaceAdd] = execution.Availability{Reason: "This worker connection does not offer adding workspaces."}
 	}
 }
 

@@ -12,6 +12,8 @@ type ProjectAlias struct {
 }
 
 type ProjectEvent struct {
+	// Attribution is the admitted actor and cause; historical when NULL.
+	Attribution
 	ID        int64     `json:"id"`
 	ProjectID int64     `json:"-"`
 	Type      string    `json:"type"`
@@ -66,6 +68,6 @@ type ProjectLifecycle interface {
 	ApplySplit(ctx context.Context, from, into, binding int64) error
 	DismissMerge(ctx context.Context, project, other int64) error
 	MergeDismissals(ctx context.Context) ([][2]int64, error)
-	AddProjectEvent(ctx context.Context, project int64, kind, text string, by int64) error
+	AddProjectEvent(ctx context.Context, project int64, kind, text string, by int64, attribution Attribution) error
 	ProjectEvents(ctx context.Context, project int64) ([]ProjectEvent, error)
 }

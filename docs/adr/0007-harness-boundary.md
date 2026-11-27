@@ -47,6 +47,10 @@ connection owns its catalog and supplies exact workspace destinations.
    options mean, permission policy, and its own client. Core code (outside
    an adapter and its setup) never does harness work: no git for sessions,
    no worktree naming, no creating, renaming or archiving harness projects.
+
+   [ADR 0012](0012-harness-workspace-add.md) supersedes "no creating" for
+   an explicit add-workspace request that the adapter performs with the
+   harness's own API. Core still creates nothing itself.
 3. **The Stage-level contract every harness meets.** Launch (with
    durable checkpoints), observe (poll, push, or a worker beside the
    harness), stop, the final reply, workspace discovery for project
@@ -117,7 +121,9 @@ connection owns its catalog and supplies exact workspace destinations.
     remote when the harness itself knows one). Git evidence is computed by
     `machine.Ops` on the machine where the files live, never in adapters.
     Stage never asks a harness to create a project (`registerWorkspace` is
-    removed).
+    removed). *Superseded by [ADR 0012](0012-harness-workspace-add.md):
+    Stage may relay an explicit request through the declared
+    `workspaceAdd` operation; nothing is automatic.*
 
     [ADR 0008 D9](0008-harness-foundation.md#d9) and
     [D10](0008-harness-foundation.md#d10) supersede this identity ladder

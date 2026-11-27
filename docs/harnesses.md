@@ -107,8 +107,8 @@ the role on the connection's machine.
 | `Launcher` | `Launch` applies the frozen intent and saves durable checkpoints. `Stop` interrupts a scoped session when available. The coordinator owns dispatch and reconciliation. |
 
 Use [`execution.As[T]`](../server/internal/execution/optional.go) for
-`LinkResolver`, `SessionSearcher`, `SessionNamer`, `WorkspaceFeatures`, `Correlator`, `EventSource`,
-`Interactive` and `Actor`. The adapter implements the Go interface.
+`LinkResolver`, `SessionSearcher`, `SessionNamer`, `WorkspaceFeatures`, `WorkspaceAdder`,
+`Correlator`, `EventSource`, `Interactive` and `Actor`. The adapter implements the Go interface.
 A partial adapter such as a worker proxy must also advertise the trait in
 its ready snapshot. The trait says whether the interface is callable.
 Check the corresponding operation, policy or action availability for the
@@ -151,6 +151,35 @@ named lookup and adoption. Keep provider pagination and query rules in
 the adapter. Preserve a continuation when filtering leaves a short or
 empty native page. [Session search API](api.md#session-search) ·
 [Current harness scope](execution.md#session-search)
+
+### Adding workspaces
+
+[ADR 0012](adr/0012-harness-workspace-add.md) lets a person or agent ask a
+connection to add a workspace. Declare `OpWorkspaceAdd` and
+`Capabilities.WorkspaceSources`. Each source is one way your harness adds a
+project, in its own words: a stable ID, label, optional help, typed input
+fields (`path` for a folder on the harness's machine), optional
+confirmation text and availability. Implement `execution.WorkspaceAdder`
+with the harness's own API inside the adapter or setup package:
+
+- Validate what the harness needs beyond the declared fields (for example an
+  absolute path) and return `*execution.Invalid` with a reason.
+- Be idempotent per target. Return `Existing: true` when the workspace is
+  already there.
+- Return the native ID and root the next `Workspaces` call will list. Stage
+  refreshes inventory and refuses a row the harness does not list.
+- Return `*execution.OutcomeUncertain` when the harness may have acted but
+  did not confirm. Use `requestId` to reconcile a retry.
+- Put irreversible or trust-granting effects behind `Confirm`. Stage requires
+  `confirmed: true` per request.
+
+Never create directories, run git or edit harness files from Stage core.
+Claude Code's documented trust key is the only file write ADR 0012
+allows, and only in its adapter. Until a harness supports it, declare
+`execution.WorkspaceAddNotSupported(name)`. Workers relay the call as
+`adapter.workspaceAdd` behind the `workspaceAdder` trait.
+[Workspace add API](api.md#add-a-workspace) ·
+[Execution contract](execution.md#workspace-add)
 
 ## Choose an extension
 

@@ -240,6 +240,9 @@ type Capabilities struct {
 	Models     []Model             `json:"models"`
 	Modes      []Choice            `json:"modes"`
 	Actions    []Action            `json:"actions,omitempty"`
+	// WorkspaceSources are the ways OpWorkspaceAdd adds a workspace
+	// (ValidateWorkspaceSources).
+	WorkspaceSources []WorkspaceSource `json:"workspaceSources,omitempty"`
 }
 type Config struct {
 	Model      string        `json:"model"`

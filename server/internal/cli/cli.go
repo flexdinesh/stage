@@ -200,6 +200,9 @@ Usage:
   stage projects add --title T
   stage projects edit ID [--title T] [--archived true|false]
   stage models ls --connection ID [--workspace-id ID]
+  stage workspaces sources --connection ID       how the harness adds workspaces
+  stage workspaces add --connection ID --source S [--input JSON|-] [--project P]
+                   [--request-id KEY] [--confirm]   ask the harness to add one
   stage action ls TARGET
   stage action run ACTION_ID TARGET [--input JSON|-] [--confirm]
                                       TARGET is --connection ID, --task ID, or --project ID --on-connection ID --workspace-id ID
@@ -400,6 +403,8 @@ func run(ctx context.Context, args []string, env Env) error {
 		return runProjects(ctx, env, sub)
 	case "models":
 		return runModels(ctx, env, sub)
+	case "workspaces", "workspace":
+		return runWorkspaces(ctx, env, sub)
 	case "action":
 		return runAction(ctx, env, sub)
 	case "task", "tasks":

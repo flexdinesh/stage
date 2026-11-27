@@ -55,6 +55,7 @@ function SetupInput({ field, value, savedSecret, disabled, onChange }: {
           ]} />
       ) : (
         <Input id={id} disabled={disabled} required={field.required && !savedSecret} aria-describedby={description}
+          className={field.kind === "path" ? "font-mono text-input-mono" : undefined}
           type={field.kind === "secret" ? "password" : field.kind === "url" ? "url" : "text"}
           value={text} placeholder={field.kind === "secret" && savedSecret ? "Saved" : undefined}
           autoComplete={field.kind === "secret" ? "new-password" : "off"} spellCheck={false}

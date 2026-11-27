@@ -46,7 +46,7 @@ func caseProjectMerge(t *testing.T, open Factory) {
 		if err := pr.DeactivateBinding(ctx, inactive); err != nil {
 			return err
 		}
-		return pr.AddProjectEvent(ctx, from.ID, "workspace_moved", "Previously moved.", db.DefaultUser)
+		return pr.AddProjectEvent(ctx, from.ID, "workspace_moved", "Previously moved.", db.DefaultUser, store.Attribution{Actor: store.Actor{Kind: "system"}})
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -23,6 +23,7 @@ export const OPERATION_LABELS: Record<OperationId, string> = {
   respond: "Answer approvals and questions in Stage",
   send: "Send follow-ups",
   sessionRename: "Rename sessions with the task title",
+  workspaceAdd: "Add workspaces from Stage",
 };
 
 const OPERATIONS: readonly OperationId[] = ["launch", "stop", "adopt", "images", "respond", "send", "sessionRename"];

@@ -288,9 +288,9 @@ export interface WorkspaceInventory {
   };
 }
 
-export interface ProjectEvent {
+export interface ProjectEvent extends WorkAttribution {
   id: number;
-  type: "workspace_moved" | "project_merged" | "project_split";
+  type: "workspace_moved" | "project_merged" | "project_split" | "workspace_added";
   text: string;
   createdAt: string;
   createdBy: number;
@@ -325,7 +325,8 @@ export interface HarnessClosure { signal: string; provenance: Provenance; settin
 export interface SetupField {
   id: string;
   label: string;
-  kind: "text" | "url" | "secret" | "bool" | "choice";
+  /** `path`: a filesystem path on the harness's machine (rendered monospace; the harness checks it). */
+  kind: "text" | "url" | "secret" | "bool" | "choice" | "path";
   help?: string;
   required?: boolean;
   choices?: { id: string; label: string }[];
@@ -535,7 +536,8 @@ export type OperationId =
   | "images"
   | "respond"
   | "send"
-  | "sessionRename";
+  | "sessionRename"
+  | "workspaceAdd";
 export interface Capabilities {
   permissions?: HarnessChoice[];
   /** Harness-wide options, beside the selected model's own (ids never collide). */
@@ -546,6 +548,35 @@ export interface Capabilities {
   models: HarnessModel[] | null;
   modes: HarnessChoice[] | null;
   actions?: HarnessAction[];
+  /** How `workspaceAdd` adds a workspace, in the harness's words (ADR 0012). */
+  workspaceSources?: WorkspaceSource[];
+}
+/** One harness-declared way to add a workspace: its input fields and, when set, the confirmation it needs. */
+export interface WorkspaceSource {
+  id: string;
+  label: string;
+  help?: string;
+  input?: SetupField[];
+  /** The harness's confirmation text: send `confirmed: true` only after the person agreed. */
+  confirm?: string;
+  availability: { available: boolean; reason?: string };
+}
+/** POST /api/connections/:id/workspaces. Retry an uncertain outcome (504 `outcome_uncertain`) with the same requestId. */
+export interface AddWorkspaceRequest {
+  sourceId: string;
+  input: Record<string, unknown>;
+  requestId: string;
+  /** Put the workspace in this project group; omitted lets Stage group it. */
+  projectId?: number;
+  confirmed?: boolean;
+}
+/** 201 body: the destination the harness now lists, its group, and whether the harness already had it. */
+export interface AddedWorkspace {
+  workspace: Destination & { path?: string };
+  group: { id: number; title: string };
+  existing: boolean;
+  message?: string;
+  facts?: HarnessFact[];
 }
 export interface ExecutionConfig {
   model: string;
