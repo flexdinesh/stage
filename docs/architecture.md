@@ -94,6 +94,7 @@ compares a harness display name, or imports a harness's files past `src/harnesse
 | `notifications?` | System notification delivery: `channel` (`web-push` when absent, `native`), state, enable/disable/test, close shown, cross-device sync, `onDelivered`, `openSystemSettings?`. Absent: Settings shows only the global event filter | `webPush.ts`: service worker + Web Push | `notifications.ts`: `channel: "native"` over the generated MyGo client; the Go process shows OS notifications from the server's notification stream ([desktop.md](desktop.md#notifications)) |
 | `attention.setNeedsInput` | Needs-input signal outside the page | `attention.ts`: tab favicon + Badging API | no-op: the Go process owns the Dock/launcher badge |
 | `storage` | Per-device preferences (theme, projects sort). Never throws | `storage.ts`: `localStorage` | `storage.ts`: the webview's `localStorage` |
+| `sessionLifecycle?` | Signals shared-session changes across views and suspension or resumption. Clears host-owned private state when the app discards a view | `sessionLifecycle.ts`: same-origin tab signals, page lifecycle events and push session cleanup | Absent in the personal desktop host |
 | `hostHistoryControls?` | The host shows its own back and forward, so the laptop sidebar hides its arrows. Absent or false: the arrows show | `historyControls.ts`: true in a tab or a `minimal-ui` window (`display-mode`), false in the installed standalone window | absent: the webview has no browser chrome |
 | `host?` | Native shell services: the host-managed server connection (`HostState`, retry/start/restart, diagnostics), login startup, navigation requests (deep links). Drives `HostGate`, `HostBanner` and the desktop lines of Settings, General, Info (`components/Host.tsx`) | absent | `host.ts` over the generated MyGo client |
 
@@ -104,6 +105,11 @@ Not part of the contract: plain DOM and layout (`document` visibility,
 
 - Browser: page and `/api` on the same origin over TCP; `apps/web/vite.config.ts`
   proxies `/api` in dev (to TCP or a `unix:` socket).
+- App access gate: public mode discovery and human session verification run
+  before protected work. A shared session owns the query client, open API
+  streams and private device preferences. Losing or switching identity
+  disposes that scope. Theme remains a device preference.
+  See [shared access transport](api.md#shared-access-transport).
 - Desktop: the shell serves the desktop host build on `mygo://localhost` and
   forwards `/api` to the server's Unix socket (ADR 0001, bridge B), so the
   transport is the browser's. It ensures the per-user service first

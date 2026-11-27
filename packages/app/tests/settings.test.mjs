@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SETTINGS_PATH, SETTINGS_TABS, runningAs, settingsTab, settingsTabLabel, versionLine } from "../src/lib/settings.ts";
+import { SETTINGS_PATH, runningAs, settingsTab, settingsTabLabel, settingsTabs, versionLine } from "../src/lib/settings.ts";
 
-test("three tabs in order; General is the index route", () => {
+test("personal settings has the original tabs and shared settings adds Account", () => {
   assert.deepEqual(
-    SETTINGS_TABS.map((t) => [t.tab, t.label, t.to]),
+    settingsTabs(false).map((t) => [t.tab, t.label, t.to]),
     [
       ["general", "General", "/settings"],
       ["connections", "Connections", "/settings/connections"],
       ["notifications", "Notifications", "/settings/notifications"],
     ],
   );
+  assert.deepEqual(settingsTabs(true).at(-1), { tab: "account", label: "Account", to: "/settings/account" });
   assert.equal(SETTINGS_PATH.general, "/settings");
 });
 
@@ -20,6 +21,7 @@ test("a path picks its tab; unknown subpaths and the old machine pages fall back
   assert.equal(settingsTab("/settings/connections"), "connections");
   assert.equal(settingsTab("/settings/connections/"), "connections");
   assert.equal(settingsTab("/settings/notifications"), "notifications");
+  assert.equal(settingsTab("/settings/account"), "account");
   assert.equal(settingsTab("/settings/connectionsx"), "general");
   assert.equal(settingsTab("/settings/machines/2"), "general");
   assert.equal(settingsTabLabel("connections"), "Connections");

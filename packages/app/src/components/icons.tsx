@@ -25,6 +25,7 @@ import {
   SearchIcon,
   SlidersHorizontalIcon,
   SunIcon,
+  UsersIcon,
   TriangleAlertIcon,
   XIcon,
   type LucideIcon,
@@ -63,6 +64,7 @@ export const IconTasks = sharp(ListChecksIcon);
 export const IconSchedules = sharp(CalendarClockIcon);
 export const IconSnippets = sharp(FileCodeIcon);
 export const IconSettings = sharp(SlidersHorizontalIcon);
+export const IconAdmin = sharp(UsersIcon);
 export const IconMore = sharp(EllipsisIcon);
 export const IconSearch = sharp(SearchIcon);
 export const IconPlus = sharp(PlusIcon);

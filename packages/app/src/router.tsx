@@ -1,8 +1,9 @@
 import type { ComponentType } from "react";
-import { Navigate, createBrowserRouter } from "react-router";
+import { Navigate, createBrowserRouter, type RouteObject } from "react-router";
 import { SETTINGS_PATH } from "./lib/settings.ts";
 import { SkeletonRows } from "./components/ui.tsx";
 import { Layout } from "./components/Layout.tsx";
+import { AccessGate } from "./components/access/AccessGate.tsx";
 import { RouteError } from "./components/ErrorBoundary.tsx";
 import { DashboardPage } from "./pages/DashboardPage.tsx";
 import { MorePage } from "./pages/MorePage.tsx";
@@ -21,7 +22,7 @@ function lazyPage(load: () => Promise<ComponentType>) {
   return { lazy: async () => ({ Component: await load() }), hydrateFallbackElement: <SkeletonRows /> };
 }
 
-export const router = createBrowserRouter([
+const workRoutes: RouteObject[] = [
   {
     path: "/",
     element: <Layout />,
@@ -46,6 +47,10 @@ export const router = createBrowserRouter([
           { path: "settings", ...lazyPage(async () => (await import("./pages/SettingsPage.tsx")).SettingsGeneralPage) },
           { path: "settings/connections", ...lazyPage(async () => (await import("./pages/SettingsPage.tsx")).SettingsConnectionsPage) },
           { path: "settings/notifications", ...lazyPage(async () => (await import("./pages/SettingsPage.tsx")).SettingsNotificationsPage) },
+          { path: "settings/account", ...lazyPage(async () => (await import("./pages/SettingsPage.tsx")).SettingsAccountPage) },
+          { path: "admin", element: <Navigate to="/admin/people" replace /> },
+          { path: "admin/people", ...lazyPage(async () => (await import("./pages/AdminPage.tsx")).AdminPeoplePage) },
+          { path: "admin/invitations", ...lazyPage(async () => (await import("./pages/AdminPage.tsx")).AdminInvitationsPage) },
           // Machine pages became rows of Connections.
           { path: "settings/machines/:id", element: <Navigate to={SETTINGS_PATH.connections} replace /> },
           // Primitives gallery: unlinked.
@@ -55,4 +60,6 @@ export const router = createBrowserRouter([
       },
     ],
   },
-]);
+];
+
+export const router = createBrowserRouter([{ element: <AccessGate />, children: workRoutes }]);

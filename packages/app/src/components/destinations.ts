@@ -6,3 +6,9 @@ export const MORE_DESTINATIONS = [
   { to: "/snippets", label: "Snippets" },
   { to: "/settings", label: "Settings" },
 ] as const;
+
+export const ADMIN_DESTINATION = { to: "/admin", label: "Admin" };
+
+export function moreDestinations(admin: boolean): readonly { to: string; label: string }[] {
+  return admin ? [...MORE_DESTINATIONS, ADMIN_DESTINATION] : MORE_DESTINATIONS;
+}

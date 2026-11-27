@@ -1,18 +1,24 @@
 // Settings sub-navigation: one tab per area, each its own route. General is the index (/settings).
 
-export type SettingsTab = "general" | "connections" | "notifications";
+export type SettingsTab = "general" | "connections" | "notifications" | "account";
 
 export const SETTINGS_PATH: Record<SettingsTab, string> = {
   general: "/settings",
   connections: "/settings/connections",
   notifications: "/settings/notifications",
+  account: "/settings/account",
 };
 
 export const SETTINGS_TABS: readonly { tab: SettingsTab; label: string; to: string }[] = [
   { tab: "general", label: "General", to: SETTINGS_PATH.general },
   { tab: "connections", label: "Connections", to: SETTINGS_PATH.connections },
   { tab: "notifications", label: "Notifications", to: SETTINGS_PATH.notifications },
+  { tab: "account", label: "Account", to: SETTINGS_PATH.account },
 ];
+
+export function settingsTabs(shared: boolean): typeof SETTINGS_TABS {
+  return shared ? SETTINGS_TABS : SETTINGS_TABS.filter((t) => t.tab !== "account");
+}
 
 /** The tab a Settings path shows; unknown subpaths fall back to General. */
 export function settingsTab(pathname: string): SettingsTab {

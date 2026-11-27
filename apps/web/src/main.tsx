@@ -7,6 +7,7 @@ import { browserAttention } from "./platform/attention.ts";
 import { browserClipboard } from "./platform/clipboard.ts";
 import { browserHistoryControls } from "./platform/historyControls.ts";
 import { browserLinks } from "./platform/links.ts";
+import { browserSessionLifecycle } from "./platform/sessionLifecycle.ts";
 import { browserStorage } from "./platform/storage.ts";
 import { browserTransport } from "./platform/transport.ts";
 import { clearPushSession, webPushNotifications } from "./platform/webPush.ts";
@@ -32,6 +33,7 @@ const platform: Platform = {
   notifications: webPushNotifications(createApi(transport)),
   attention,
   storage: browserStorage(),
+  sessionLifecycle: browserSessionLifecycle(() => void clearPushSession()),
   hostHistoryControls: browserHistoryControls(),
 };
 

@@ -161,6 +161,22 @@ These endpoints and protected shared responses use a no-store policy.
 Cookie requests that write, including login and logout, must include the
 exact configured browser `Origin`.
 
+The browser checks access status before mounting protected routes. In claimed
+mode, `GET /api/me` supplies the current human account and role. The account
+screens use `/auth/setup`, `/auth/invite`, and `/auth/reset`. They remove the
+fragment from the current history entry, inspect without consuming the grant,
+and submit only when the user confirms the form. Successful setup and invite
+acceptance enter the dashboard. Reset returns to sign-in. Ordinary sign-in
+restores the requested same-server route.
+
+Settings → Account manages the signed-in account and its scoped agent
+credential. Admin → People and Invitations manages access for the whole
+installation. Grant URLs and agent credentials are held by the issuing screen
+until a successful copy, dismissal, or navigation. Tabs signal session changes
+without sharing credentials. A session change discards its work cache, streams,
+private view state, and form values before work can mount under another account.
+Personal mode uses the default user and opens the dashboard or requested route.
+
 CLI bearer credentials authorize human REST. Agent bearer credentials
 authorize scoped REST and HTTP MCP, independent of any caller-session hint.
 A signed-in browser with the canonical origin can invoke MCP with agent

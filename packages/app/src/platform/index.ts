@@ -100,6 +100,15 @@ export interface PreferenceStorage {
   set(key: string, value: string | null): void;
 }
 
+/** Shared-session lifecycle signals from the host. Signals carry no credential or account data. */
+export interface SessionLifecycle {
+  /** Announces a change to the session held by other views of this server. */
+  changed(): void;
+  /** Drops host-owned state for the protected view being discarded. */
+  clearPrivateState(): void;
+  subscribe(listener: (event: "changed" | "resume" | "suspend") => void): () => void;
+}
+
 /**
  * Where a host-managed connection to the Stage server stands. Only hosts that
  * start and supervise the connection themselves (desktop) provide one.
@@ -345,6 +354,7 @@ export interface Platform {
   notifications?: NotificationDelivery;
   attention: Attention;
   storage: PreferenceStorage;
+  sessionLifecycle?: SessionLifecycle;
   /**
    * The host shows its own back and forward (a browser tab), so the app hides its arrows. Absent or false: the app
    * shows them (desktop shell, installed web app window).

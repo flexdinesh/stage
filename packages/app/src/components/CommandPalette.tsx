@@ -9,6 +9,7 @@ import { THEMES, useTheme } from "../lib/theme.ts";
 import { paletteHits } from "../lib/palette.ts";
 import { taskClosedLabel, treeMeta } from "../lib/trees.ts";
 import { IconSearch } from "./icons.tsx";
+import { useSharedAccount } from "./access/SessionContext.ts";
 import { subjectLinks, type LinkSubject } from "./StageLinks.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
 import { Button, Chip, EmptyState, Highlight, KeyHints, ModalLayer, activeRowClass, cx, rovingIndex, useCopy } from "./ui.tsx";
@@ -63,6 +64,7 @@ function matchOf(text: string, q: string): { start: number; end: number } | null
 }
 
 export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; onNewTask: () => void }) {
+  const account = useSharedAccount()?.account;
   const api = useApi();
   const { links } = usePlatform();
   const destination = useSessionDestination();
@@ -125,11 +127,13 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
         },
       },
       ...PAGES.map(([label, to]): Item => ({ key: `go-${to}`, group: "Go to", label, run: go(to) })),
+      ...(account === undefined ? [] : [{ key: "go-account", group: "Go to", label: "Account", run: go("/settings/account") }]),
+      ...(account?.role === "admin" ? [{ key: "go-admin", group: "Go to", label: "Admin", run: go("/admin") }] : []),
       ...THEMES.map((t): Item => ({ key: `theme-${t}`, group: "Theme", label: `Theme: ${t}`, run: () => setTheme(t) })),
     ];
     out.push(...(q === "" ? actions : actions.filter((a) => has(a.label, q))));
     return out;
-  }, [q, tasks.data, trees.data, projects.data, navigate, onClose, onNewTask, setTheme, sync, destination]);
+  }, [q, tasks.data, trees.data, projects.data, navigate, onClose, onNewTask, setTheme, sync, destination, account]);
 
   const found = items.findIndex((item) => item.key === activeKey);
   const active = found < 0 ? 0 : found;

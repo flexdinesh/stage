@@ -1,4 +1,5 @@
 import type {
+  AccessStatus, Account, AccountRole, AgentCredential, GrantInfo, GrantKind, Invitation, IssuedLink,
   HarnessAction,
   Machine, MachinePairing, PairingStatus,
   ActionResult, Harness, HarnessFact, HarnessConnection, HarnessesReply, HarnessStatus, Capabilities, ExecutionConfig, ExecutionLinks, TaskState,
@@ -182,9 +183,30 @@ export function createApi(transport: Transport) {
 
   return {
     health: () => apiFetch<Health>("/health"),
-    desktopAccess: () => apiFetch<{mode: "personal" | "setup_pending" | "claimed"; canonicalUrl?: string}>("/auth/status"),
-    desktopSignIn: (email: string, password: string) => apiSend("/auth/login", post({email, password})),
-    desktopSignOut: () => apiSend("/auth/logout", post()),
+    accessStatus: () => apiFetch<AccessStatus>("/auth/status"),
+    account: () => apiFetch<Account>("/me"),
+    login: (email: string, password: string) => apiFetch<Account>("/auth/login", post({ email, password })),
+    desktopSignIn: (email: string, password: string) => apiSend("/auth/login", post({ email, password })),
+    logout: () => apiSend("/auth/logout", post()),
+    inspectGrant: (kind: GrantKind, token: string) => apiFetch<GrantInfo>(`/auth/${kind}/inspect`, post({ token })),
+    setupAccount: (token: string, email: string, name: string, password: string) =>
+      apiFetch<Account>("/auth/setup", post({ token, email, name, password })),
+    acceptInvite: (token: string, name: string, password: string) =>
+      apiFetch<Account>("/auth/invite", post({ token, name, password })),
+    resetPassword: (token: string, password: string) => apiSend("/auth/reset", post({ token, password })),
+    updateName: (name: string) => apiFetch<Account>("/account", patch({ name })),
+    changePassword: (currentPassword: string, password: string) =>
+      apiSend("/account/password", post({ currentPassword, password })),
+    issueAgentCredential: () => apiFetch<AgentCredential>("/account/agent-credential", post()),
+    revokeAgentCredential: () => apiSend("/account/agent-credential", del),
+    accounts: (limit: number, beforeId?: number) => apiFetch<Account[]>(`/admin/accounts${toQuery({ limit, beforeId })}`),
+    invitations: (limit: number, beforeId?: number) => apiFetch<Invitation[]>(`/admin/invitations${toQuery({ limit, beforeId })}`),
+    setAccountRole: (id: number, role: AccountRole) => apiSend(`/admin/accounts/${id}/role`, patch({ role })),
+    disableAccount: (id: number) => apiSend(`/admin/accounts/${id}/disable`, post()),
+    issueResetLink: (id: number) => apiFetch<IssuedLink>(`/admin/accounts/${id}/reset`, post()),
+    invite: (email: string) => apiFetch<IssuedLink>("/admin/invitations", post({ email })),
+    replaceInvite: (id: number) => apiFetch<IssuedLink>(`/admin/invitations/${id}/replace`, post()),
+    revokeInvite: (id: number) => apiSend(`/admin/invitations/${id}`, del),
     ...harnessCalls(apiFetch, ""),
     /** A remote machine's harness setup, driven through its worker. */
     forMachine: (id: number): HarnessApi => harnessCalls(apiFetch, `/machines/${id}`),

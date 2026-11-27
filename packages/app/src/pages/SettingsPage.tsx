@@ -9,8 +9,6 @@ import { invalidateWork, keys, useHarnesses, useMachines, useMe, usePreferences 
 import { type NotificationEvent, type Preferences } from "../api/types.ts";
 import { harnessStatusKeys } from "../harnesses/index.ts";
 import { InfoPanel } from "../components/InfoPanel.tsx";
-import { DesktopSignOut } from "../components/DesktopAccess.tsx";
-import { useHostState } from "../lib/hostState.ts";
 import { AddMachineDrawer, MachinesPanel } from "../components/Machines.tsx";
 import { notificationEventTone } from "../components/StateBadge.tsx";
 import { useStatusAlert } from "../components/StatusRow.tsx";
@@ -39,30 +37,31 @@ import {
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
 import type { NotificationDelivery } from "../platform/index.ts";
 import { connectedRows, connectionRows } from "../lib/connectionRows.ts";
-import { SETTINGS_TABS, settingsTabLabel, type SettingsTab } from "../lib/settings.ts";
+import { settingsTabs, settingsTabLabel, type SettingsTab } from "../lib/settings.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { dateTime, shortDate } from "../lib/format.ts";
+import { AccountSettings } from "../components/access/AccountSettings.tsx";
+import { useSharedAccount } from "../components/access/SessionContext.ts";
+import { NotFoundPage } from "./NotFoundPage.tsx";
 
-/** The acting user (GET /api/me). */
+/** The acting user for a personal server. */
 function UserCard() {
   const me = useMe();
-  const shared = useHostState()?.server?.sharedAccess === true;
   return (
-    <Panel title="User" meta={shared ? undefined : "no sign-in"}>
+    <Panel title="User" meta="no sign-in">
       <QueryState isPending={me.isPending} error={me.error} hasData={me.data !== undefined}>
         {me.data === undefined ? null : (
           <div className="flex flex-col gap-3">
             <div className="min-w-0">
               <p className="truncate text-small font-medium text-fg">{me.data.displayName}</p>
               <MetaLine>
-                {shared && me.data.email !== undefined ? <span>{me.data.email}</span> : null}
                 <span>
                   user #<span className="tabular">{me.data.id}</span>
                 </span>
                 <span>since {shortDate(me.data.createdAt)}</span>
               </MetaLine>
             </div>
-            {shared ? <DesktopSignOut /> : <Muted>Stage has no sign-in. Everything created here is attributed to this user.</Muted>}
+            <Muted>Stage has no sign-in. Everything created here is attributed to this user.</Muted>
           </div>
         )}
       </QueryState>
@@ -294,7 +293,8 @@ function ThemeCard() {
 /** Settings' title, meta and tabs; each tab is its own route. */
 function SettingsHeader({ tab, meta, actions }: { tab: SettingsTab; meta: string; actions?: ReactNode }) {
   const alert = useStatusAlert();
-  const items = SETTINGS_TABS.map((t) => ({
+  const shared = useSharedAccount();
+  const items = settingsTabs(shared !== null).map((t) => ({
     to: t.to,
     label: t.label,
     end: t.tab === "general",
@@ -310,14 +310,25 @@ function SettingsHeader({ tab, meta, actions }: { tab: SettingsTab; meta: string
 
 /** /settings: the user, appearance and Info. New-task defaults live with each connection (Connections). */
 export function SettingsGeneralPage() {
+  const shared = useSharedAccount();
   return (
     <>
       <SettingsHeader tab="general" meta={settingsTabLabel("general")} />
       <div className="flex max-w-[720px] flex-col gap-3.5">
-        <UserCard />
+        {shared === null ? <UserCard /> : null}
         <ThemeCard />
         <InfoPanel />
       </div>
+    </>
+  );
+}
+
+export function SettingsAccountPage() {
+  if (useSharedAccount() === null) return <NotFoundPage />;
+  return (
+    <>
+      <SettingsHeader tab="account" meta={settingsTabLabel("account")} />
+      <AccountSettings />
     </>
   );
 }

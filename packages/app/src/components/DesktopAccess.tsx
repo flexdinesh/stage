@@ -8,7 +8,7 @@ import { Button, ErrorText, ExternalButton, Field, Input, Muted, PageHeader, Pan
 export function DesktopAccessGate({ state, brand, children }: { state: HostState; brand: ReactNode; children: ReactNode }) {
   const api = useApi();
   const key = ["desktop-access", state.target.id, state.target.url, state.accountEpoch];
-  const access = useQuery({ queryKey: [...key, "status"], queryFn: api.desktopAccess, retry: false });
+  const access = useQuery({ queryKey: [...key, "status"], queryFn: api.accessStatus, retry: false });
   const me = useQuery({
     queryKey: [...key, "me"],
     queryFn: api.me,
@@ -78,21 +78,5 @@ function DesktopSignIn() {
         <div><Button type="submit" variant="primary" busy={busy}>Sign in</Button></div>
       </form>
     </Panel>
-  );
-}
-
-export function DesktopSignOut() {
-  const api = useApi();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  return (
-    <div>
-      <Button busy={busy} onClick={() => {
-        setBusy(true);
-        setError(null);
-        void api.desktopSignOut().catch(setError).finally(() => setBusy(false));
-      }}>Sign out</Button>
-      <ErrorText error={error} />
-    </div>
   );
 }

@@ -55,6 +55,8 @@ export interface Health {
   /** /api contract version; clients refuse a server on another one. */
   apiVersion: number;
   instanceId: string;
+  /** Present on a server running in shared mode. */
+  sharedAccess?: boolean;
   startedAt: string | null;
   harnesses: { kind: Harness; connectionId: number; configured: boolean; connected: boolean; lastError: string | null }[];
 }
@@ -73,7 +75,49 @@ export interface User {
   id: number;
   displayName: string;
   createdAt: string;
-  email?: string;
+  email?: string | null;
+}
+
+export interface AccessStatus {
+  mode: "personal" | "setup_pending" | "claimed";
+  installationId: string;
+  canonicalUrl?: string;
+}
+
+export type AccountRole = "admin" | "member";
+export interface Account extends User {
+  email: string | null;
+  role: AccountRole;
+  status: "active" | "disabled";
+}
+
+export type GrantKind = "setup" | "invite" | "reset";
+export interface GrantInfo {
+  email: string | null;
+  expiresAt: string;
+}
+
+export interface IssuedLink {
+  id: number;
+  url: string;
+  expiresAt: string;
+}
+
+export interface AgentCredential {
+  token: string;
+  expiresAt: string;
+  installationId: string;
+}
+
+export interface Invitation {
+  id: number;
+  email: string | null;
+  issuerUserId: number | null;
+  status: "pending" | "used" | "revoked" | "expired";
+  createdAt: string;
+  expiresAt: string;
+  consumedAt: string | null;
+  revokedAt: string | null;
 }
 
 // ---- Projects ----
