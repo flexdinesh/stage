@@ -44,7 +44,8 @@ trees.
 
 A request whose caller session (`Stage-Caller-Session`, which the CLI and
 MCP tools send) owns the target task gets 403 `self_action_forbidden` on
-complete, reopen, respond and send. An agent reports its own outcome with a
+complete, reopen, respond, send and declared session actions (closing a
+session in its harness can infer completion). An agent reports its own outcome with a
 journal note; the user or another agent completes it. The guard applies to
 any principal that names a caller. It is best effort: a request naming no
 caller session passes, and a caller session no task owns passes.

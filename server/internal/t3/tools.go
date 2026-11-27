@@ -461,6 +461,13 @@ func (c *MCPClient) RenameThread(ctx context.Context, threadID, title string) er
 	return c.call(ctx, "t3_thread_update", args, nil)
 }
 
+func (c *MCPClient) OrganizeThread(ctx context.Context, threadID, action string) error {
+	if threadID == "" {
+		return ErrNotFound
+	}
+	return c.call(ctx, "t3_thread_organize", map[string]any{"threadId": threadID, "action": action}, nil)
+}
+
 func (c *MCPClient) Capabilities(ctx context.Context) (Catalog, error) {
 	var out wireCapabilities
 	if err := c.call(ctx, "orchestrator_capabilities", map[string]any{}, &out); err != nil {

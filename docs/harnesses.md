@@ -195,8 +195,13 @@ degrades through declared availability.
 | Launch option | Pass a choice, boolean or text value at launch, such as a harness worktree option. | Declare the field in capabilities and validate and translate it from `execution.Config`. |
 | Descriptor policy | Apply a Stage invariant such as launch recovery, attribution, identity or completion from a closure signal. | Declare it in the descriptor. Stage interprets the policy for every kind that uses it. A harness whose `respond` lists only some request kinds declares `unlistedRequests` with where to answer the rest (T3: permission requests). |
 
-An agent can invoke an action only when the declaration allows agents.
+An agent can invoke an action only when the declaration allows agents,
+and never a session action on its own task's session.
 Project actions use an exact workspace scoped to its owning connection.
+A session action unavailable for one session (already archived, still
+running) is reported on that session's observation as `actions` states in
+the harness's own words, never by a Stage rule
+([execution](execution.md#actions-and-facts)).
 See the [action and facts API](api.md#declared-actions-and-facts).
 
 ### Connect local OpenCode

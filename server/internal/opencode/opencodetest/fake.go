@@ -1,5 +1,6 @@
 // Package opencodetest is a fake OpenCode V2 service for tests: health and
-// contract, HTTP Basic auth, pairing codes and session tokens.
+// contract, HTTP Basic auth, pairing codes and session tokens, and session
+// update (title and archive, session.update).
 package opencodetest
 
 import (
@@ -31,12 +32,16 @@ type Server struct {
 	mcp      []map[string]any
 	mcpDelay time.Duration
 	mcpFail  int
+	// noUpdate drops session.update from the contract (an older service).
+	noUpdate bool
+	// archived: known session IDs and whether each is archived.
+	archived map[string]bool
 }
 
 // New starts a fake service; password "" requires no auth.
 func New(t testing.TB, password string) *Server {
 	s := &Server{password: password, codes: map[string]bool{}, tokens: map[string]bool{}, version: "2.3.0",
-		mcp: []map[string]any{MCP("stage", "connected", "")}}
+		mcp: []map[string]any{MCP("stage", "connected", "")}, archived: map[string]bool{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.Close)
 	return s
@@ -76,6 +81,28 @@ func (s *Server) SetMCP(servers ...map[string]any) {
 // code (0: succeed).
 func (s *Server) DelayMCP(d time.Duration) { s.mu.Lock(); s.mcpDelay = d; s.mu.Unlock() }
 func (s *Server) FailMCP(code int)         { s.mu.Lock(); s.mcpFail = code; s.mu.Unlock() }
+
+// WithoutSessionUpdate serves a contract without session.update (an older
+// service): no rename, no archive.
+func (s *Server) WithoutSessionUpdate() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noUpdate = true
+}
+
+// AddSession registers a session PATCH /api/session/{id} can archive.
+func (s *Server) AddSession(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.archived[id] = false
+}
+
+// Archived reports whether PATCH archived the session.
+func (s *Server) Archived(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.archived[id]
+}
 
 // Revoke rejects every issued token.
 func (s *Server) Revoke() {
@@ -161,7 +188,12 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": version, "hostname": "fake", "pid": 42})
 	case r.URL.Path == "/openapi.json":
-		_ = json.NewEncoder(w).Encode(spec())
+		s.mu.Lock()
+		update := !s.noUpdate
+		s.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(spec(update))
+	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/session/"):
+		s.patchSession(w, r, strings.TrimPrefix(r.URL.Path, "/api/session/"))
 	case r.URL.Path == "/api/project":
 		fmt.Fprint(w, `[]`)
 	case r.Method == http.MethodGet && r.URL.Path == "/api/mcp":
@@ -186,8 +218,43 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// spec is the contract the adapter's health check requires.
-func spec() map[string]any {
+// patchSession is session.update for title and archived: repeating the
+// current state is a no-op; any other field is rejected.
+func (s *Server) patchSession(w http.ResponseWriter, r *http.Request, id string) {
+	var body map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"_tag":"InvalidRequestError"}`, http.StatusBadRequest)
+		return
+	}
+	var archived *bool
+	for k, v := range body {
+		if k == "title" {
+			continue
+		}
+		if k != "archived" || json.Unmarshal(v, &archived) != nil {
+			http.Error(w, `{"_tag":"InvalidRequestError"}`, http.StatusBadRequest)
+			return
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.noUpdate {
+		http.NotFound(w, r)
+		return
+	}
+	if _, ok := s.archived[id]; !ok {
+		http.Error(w, `{"_tag":"SessionNotFoundError"}`, http.StatusNotFound)
+		return
+	}
+	if archived != nil {
+		s.archived[id] = *archived
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// spec is the contract the adapter's health check requires, with
+// session.update unless update is false.
+func spec(update bool) map[string]any {
 	bodies := map[string][]string{
 		"/api/worktree":                   {"projectID", "from", "name"},
 		"/api/session":                    {"id", "location", "metadata"},
@@ -223,6 +290,14 @@ func spec() map[string]any {
 			operation["requestBody"] = map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"properties": props}}}}
 		}
 		paths[op.path][op.method] = operation
+	}
+	if update {
+		paths["/api/session/{sessionID}"]["patch"] = map[string]any{
+			"operationId": "session.update",
+			"requestBody": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"properties": map[string]any{
+				"title": map[string]any{}, "metadata": map[string]any{}, "permissions": map[string]any{}, "archived": map[string]any{},
+			}}}}},
+		}
 	}
 	return map[string]any{"paths": paths}
 }

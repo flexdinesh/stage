@@ -299,6 +299,64 @@ func TestArchivedThreadReportsClosure(t *testing.T) {
 	}
 }
 
+func TestArchiveActionArchivesTheThread(t *testing.T) {
+	r := newRig(t)
+	ctx := t.Context()
+	c, err := r.adapter.Features(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := execution.ValidateActions(c.Actions, execution.TargetSession); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Actions) != 1 || c.Actions[0].ID != codex.ActionArchive || c.Actions[0].Label != "Archive in Codex" || c.Actions[0].Destructive ||
+		!c.Actions[0].Allows(execution.CallerAgent) || !c.Actions[0].Availability.Available || c.Actions[0].Confirm == "" {
+		t.Fatalf("actions %+v", c.Actions)
+	}
+	var cps checkpoints
+	o, err := r.adapter.Launch(ctx, intent("/w/app"), execution.Checkpoint{}, cps.save)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.srv.Finish(o.Session.ExternalSessionID, "completed", "done")
+	if o, err = r.adapter.Observe(ctx, o.Session); err != nil || o.Closed != nil || len(o.Actions) != 0 {
+		t.Fatalf("before archive %+v %v", o, err)
+	}
+	session := o.Session
+	req := execution.ActionRequest{ID: codex.ActionArchive, Target: execution.TargetSession, Session: &session, Input: json.RawMessage(`{}`)}
+	res, err := r.adapter.Act(ctx, req)
+	if err != nil || res.Message != "Archived in Codex." {
+		t.Fatal(res, err)
+	}
+	if th := r.srv.Thread(session.ExternalSessionID); th == nil || !th.Archived {
+		t.Fatalf("thread %+v not archived", th)
+	}
+	o, err = r.adapter.Observe(ctx, session)
+	if err != nil || o.Closed == nil || o.Closed.Signal != execution.ClosedArchived {
+		t.Fatalf("after archive %+v %v", o, err)
+	}
+	actions := execution.ApplyActionStates(c.Actions, o.Actions)
+	if actions[0].Availability.Available || actions[0].Availability.Reason != "Already archived in Codex." {
+		t.Fatalf("archived availability %+v", actions[0].Availability)
+	}
+	var busy *execution.Busy
+	if _, err := r.adapter.Act(ctx, req); !errors.As(err, &busy) || !strings.Contains(busy.Reason, "already archived") {
+		t.Fatalf("repeat archive error = %v", err)
+	}
+	var invalid *execution.Invalid
+	unknown := req
+	unknown.ID = "settle"
+	if _, err := r.adapter.Act(ctx, unknown); !errors.As(err, &invalid) {
+		t.Fatalf("unknown action error = %v", err)
+	}
+	other := execution.SessionRef{ConnectionID: conn + 1, ExternalSessionID: session.ExternalSessionID}
+	foreign := req
+	foreign.Session = &other
+	if _, err := r.adapter.Act(ctx, foreign); !errors.Is(err, execution.ErrNotFound) {
+		t.Fatalf("foreign session error = %v", err)
+	}
+}
+
 func TestResolveLinkAdoptsOnlyFollowableThreads(t *testing.T) {
 	r := newRig(t)
 	ctx := t.Context()

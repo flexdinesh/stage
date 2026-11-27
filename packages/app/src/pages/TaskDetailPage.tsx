@@ -18,6 +18,8 @@ import { AcceptedResult } from "../components/Completion.tsx";
 import { ActorCause, ActorLabel } from "../components/ActorLabel.tsx";
 import { BlockedReason, LaunchBlockAlert, useStartTask, useStopTask } from "../components/LaunchGate.tsx";
 import { DeclaredActions } from "../components/DeclaredActions.tsx";
+import { SessionToolbarActions } from "../components/SessionToolbarActions.tsx";
+import { splitToolbarActions } from "../lib/connectionSetup.ts";
 import { HarnessFacts } from "../components/HarnessPresentation.tsx";
 import { taskWorkspaceLocation } from "../lib/taskForm.ts";
 import { StateControl } from "../components/StateControl.tsx";
@@ -208,6 +210,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
   // Open in the harness, or (a harness without a destination to open) copy the command that resumes it in its own client.
   const action = useSessionAction()(task);
   const { actions, run } = useTaskActions(task, !retired && task.session !== null);
+  const sessionActions = splitToolbarActions(actions);
   const phoneBar = action !== null || stoppable || actions.length > 0;
   const phoneBarRef = useRef<HTMLDivElement>(null);
   const [phoneBarHeight, setPhoneBarHeight] = useState(0);
@@ -341,7 +344,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
                   </Button>
                 </BlockedReason>
               ) : null}
-              <DeclaredActions key={`${task.launchAttempt}:${task.externalSessionId}`} actions={actions} run={run} className="max-md:basis-full" />
+              <SessionToolbarActions key={`buttons:${task.launchAttempt}:${task.externalSessionId}`} actions={sessionActions.buttons} run={run} />
+              <DeclaredActions key={`forms:${task.launchAttempt}:${task.externalSessionId}`} actions={sessionActions.forms} run={run} className="max-md:basis-full" />
             </div>
           ) : null}
           {task.adopted ? null : (

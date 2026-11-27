@@ -58,3 +58,18 @@ export function availableSetupActions(actions: readonly HarnessAction[], states:
     return { ...action, availability: { available: false, reason: state.reason || "This action is unavailable." } };
   });
 }
+
+/**
+ * Task toolbar split: a user action without input runs from a toolbar
+ * button (confirmed inline when it declares a confirmation); one with input
+ * keeps its form.
+ */
+export function splitToolbarActions<A extends Pick<HarnessAction, "callers" | "input">>(actions: readonly A[]): { buttons: A[]; forms: A[] } {
+  const buttons: A[] = [];
+  const forms: A[] = [];
+  for (const action of actions) {
+    if (!action.callers.includes("user")) continue;
+    (action.input === undefined || action.input.length === 0 ? buttons : forms).push(action);
+  }
+  return { buttons, forms };
+}

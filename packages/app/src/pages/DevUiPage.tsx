@@ -5,9 +5,10 @@ import { IconBell, IconClose, IconPlus, IconRefresh, IconSearch } from "../compo
 import { RequestCard, RowRequestControls, RowRequestLine } from "../components/Requests.tsx";
 import { FollowUpPanel } from "../components/FollowUp.tsx";
 import { ApiError } from "../api/client.ts";
-import type { Capabilities, ExecutionConfig, SessionRequest } from "../api/types.ts";
+import type { ActionResult, Capabilities, ExecutionConfig, HarnessAction, SessionRequest } from "../api/types.ts";
 import { CapabilityList } from "../components/ConnectionCapabilities.tsx";
 import { HarnessFields } from "../components/HarnessFields.tsx";
+import { SessionToolbarActions } from "../components/SessionToolbarActions.tsx";
 import { LaunchMeta } from "../components/LaunchMeta.tsx";
 import { launchParts } from "../lib/capabilities.ts";
 import { rowRequestAction } from "../lib/requests.ts";
@@ -148,6 +149,30 @@ const BUSY_ERROR = new ApiError(409, "Claude Code is working. Send once it finis
 function FollowUpDemo({ view, initial = "", ...rest }: { view: FollowUpView; initial?: string; sentAt?: string; error?: unknown }) {
   const [draft, setDraft] = useState(initial);
   return <FollowUpPanel view={view} harness="Claude Code" draft={draft} onDraft={setDraft} onSend={noop} {...rest} />;
+}
+
+const SAMPLE_SESSION_ACTIONS: HarnessAction[] = [
+  { id: "settle", label: "Settle in T3", target: "session", destructive: false, callers: ["user", "agent"], availability: { available: true },
+    confirm: "T3 settles this session. If this connection infers acceptance from harness closure, Stage completes the task." },
+  { id: "archive", label: "Archive in T3", target: "session", destructive: false, callers: ["user", "agent"], availability: { available: true },
+    confirm: "T3 archives this session. Stage completes the task only when T3 settles it." },
+];
+
+const runSampleAction = (id: string): Promise<ActionResult> => new Promise((resolve) => {
+  setTimeout(() => resolve({ message: id === "settle" ? "Settled in T3." : "Archived in T3." }), 600);
+});
+
+function SessionActionsDemo({ actions }: { actions: HarnessAction[] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button>Open in T3</Button>
+      <Button>Stop</Button>
+      <SessionToolbarActions actions={actions} run={runSampleAction} />
+      <Button>Duplicate</Button>
+      <Button>Edit</Button>
+      <Button className="ml-auto">Archive</Button>
+    </div>
+  );
 }
 
 function Section({ title, meta, children }: { title: string; meta?: string; children: ReactNode }) {
@@ -490,6 +515,12 @@ export function DevUiPage() {
         <FollowUpDemo view={{ placement: "after-reply", title: "Follow up", busy: false }} initial="Also add a test for the empty case." />
         <FollowUpDemo view={{ placement: "after-reply", title: "Follow up", busy: true }} initial="Then open a PR." sentAt="2026-11-25T07:00:00Z" />
         <FollowUpDemo view={{ placement: "after-reply", title: "Follow up", busy: false }} initial="Run the live test again." error={BUSY_ERROR} />
+      </Section>
+
+      <Section title="Session actions" meta="components/SessionToolbarActions.tsx · declared, beside Open and Stop">
+        <SessionActionsDemo actions={SAMPLE_SESSION_ACTIONS} />
+        <SessionActionsDemo actions={SAMPLE_SESSION_ACTIONS.map((a) => a.id === "settle"
+          ? { ...a, availability: { available: false, reason: "Already settled in T3." } } : a)} />
       </Section>
 
       <Section title="Harness" meta="read from capabilities · never by harness">

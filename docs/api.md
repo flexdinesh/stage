@@ -1011,6 +1011,18 @@ A fact carries `{id, label, value, tone?, link?, copyable?}`. Tone is
 Links may use HTTP, HTTPS or a native scheme the harness registers.
 Observations can carry `facts`, which are also available on task detail.
 
+An observation can also carry `actions`: `[{id, available, reason?}]`, the
+session's own availability of its declared session actions (for example
+`archive` once the session is archived). `GET /api/tasks/{id}/actions`
+applies them from the last stored observation; `POST` applies them from
+the fresh observation it reads before dispatch and returns 409
+`operation_unavailable` with the harness's reason. A state never makes an
+unavailable declaration available. A session action whose caller session
+(`Stage-Caller-Session`) owns the task returns 403
+`{"code": "self_action_forbidden"}` ([ADR 0011](adr/0011-agent-operation-parity.md#never-on-its-own-work)).
+The session archive actions per harness are in
+[execution.md](execution.md#actions-and-facts).
+
 ### `POST /api/tasks/:id/stop`
 Interrupt the task's scoped session through its adapter. State updates via the
 poller. A task without an execution session returns 409. A connection that
@@ -1630,7 +1642,7 @@ Reply budget per need: `min(4000, max(1000, 8000 / sources))` Unicode characters
 - Read-only lookups by id (no names; run any with `stage call TOOL`): `get_project {id}` (`{id, title, archivedAt, aliases}`, the agent summary of `GET /api/projects/:id`), `list_project_groups {archived?}` (`false` default, `true`, `all`; `{groups: [{id, title, archivedAt, aliases}]}`), `get_project_group {id}` (one group summary), `list_connections` (`{connections}` as `GET /api/connections`), `list_machines` (`{machines: [Machine]}`), `get_machine {id}` (`Machine`), `list_harnesses {machineId?}` (`GET /api/harnesses`, or `/api/machines/:id/harnesses`), `get_harness_status {kind, machineId?}` (`HarnessStatus`, likewise per machine), `get_preferences` (`{defaultConnectionId, notifyEvents}`).
 - Acceptance: `get_completion_preview {taskId}` (`revision`, `evidenceVersion`, `evidence`, `blockedReason`, `dependents`), `complete_task {taskId, revision, evidenceVersion, requestId, note?, callerSession?}` and `reopen_task {taskId, revision, requestId, callerSession?}` (`{revision, acceptanceId}`; a 409 tells the agent to preview again). CLI `task preview ID`, `task complete ID --revision N --evidence-version V [--note TEXT] [--request-id KEY]` and `task reopen ID --revision N [--request-id KEY]`; the CLI derives the request ID from the task and revision when omitted.
 - Session interaction: `list_requests {taskId}` (`{requests}`), `respond_request {taskId, requestId, option?, text?, answers?, callerSession?}` and `send_message {taskId, text, callerSession?}` (both return `Task`). CLI `task requests ID`, `task respond ID RID [--option O] [--text T] [--answers JSON]` and `task send ID --text TEXT`. `get_opening_prompt {taskId, full?}` (CLI `task opening-prompt ID [--full]`).
-- Complete, reopen, respond and send refuse the caller's own task or session (403 `self_action_forbidden`). Each sends the caller session; a call naming none passes.
+- Complete, reopen, respond, send and session actions (`run_action` with `taskId`) refuse the caller's own task or session (403 `self_action_forbidden`). Each sends the caller session; a call naming none passes.
 - Projects: `create_project {title}` and `update_project {id, title?, archived?}` (omitted keeps its value; at least one) return the project summary; `get_project_events {id}` returns `{events}`. CLI `projects add --title T` and `projects edit ID [--title T] [--archived true|false]`. `preview_membership {connectionId, workspaceId, targetProjectId?}` (omitted: a new group titled after the workspace) returns the preview with `previewToken`, changing nothing; `set_membership` takes the same inputs plus `previewToken` and fails on a changed preview: preview again. Responses omit raw paths.
 - Workspaces ([ADR 0012](adr/0012-harness-workspace-add.md)): `list_workspace_sources {connectionId}` returns `{availability, sources}`. `add_workspace {connectionId, sourceId, input?, requestId, projectId?, confirmed?}` returns the [add result](#add-a-workspace) without paths. CLI `stage workspaces sources --connection ID` and `stage workspaces add --connection ID --source S [--input JSON|-] [--project P] [--request-id KEY] [--confirm]`; without `--request-id` the CLI derives a stable key from the connection, source, input and project, so rerunning the same command retries safely. A 504 `outcome_uncertain` means retry with the same key.
 - Snippets and images: `list_snippets` (`{snippets}`), `get_snippet {id}`, `create_snippet {name, body, projectId?}` (omitted: global), `update_snippet {id, name?, body?, projectId?}` (omitted keeps; `projectId: null` makes it global), `delete_snippet {id}` and `delete_attachment {id}` (a staged upload or a backlog task's image; both `{deleted, id}`). The CLI runs them with `stage call`.

@@ -27,6 +27,9 @@ const sessionUpdate = `{
 func renameFixture(t *testing.T, patch, components string, handle http.HandlerFunc) *Adapter {
 	t.Helper()
 	fake := opencodetest.New(t, "")
+	if patch == "" {
+		fake.WithoutSessionUpdate()
+	}
 	base := fake.Config.Handler
 	rec := httptest.NewRecorder()
 	base.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))

@@ -540,6 +540,35 @@ that scope, checks caller policy and schema, and reaches the owner through
 Workers advertise the `actor` trait and receive `adapter.act`.
 A lost reply leaves the outcome uncertain. Stage does not replay the action.
 
+A session's observation can carry `actions`: `{id, available, reason}` per
+declared session action, in the harness's vocabulary (already archived,
+still running). Stage applies them (`execution.ApplyActionStates`): the task's
+action list reads the last stored observation, and dispatch reads the fresh
+observation it takes before `Act`, refusing with 409
+`operation_unavailable` and the harness's reason. A state only makes an
+action unavailable; an older worker that omits states leaves the
+declarations as they are, and the harness still refuses an invalid request.
+A session action from the task's own session is 403
+`self_action_forbidden` ([ADR 0011](adr/0011-agent-operation-parity.md#never-on-its-own-work)):
+closing a session can infer completion.
+
+Each session action is user-triggered, by a person or an agent, never
+automatic. Archiving or settling a session in its harness flows through
+observation and [inferred completion](#closures-and-inferred-completion)
+unchanged: the action itself never completes a task.
+
+| Harness | Session actions | Harness call | Unavailable when |
+| --- | --- | --- | --- |
+| T3 | `settle` "Settle in T3", `archive` "Archive in T3" | `t3_thread_organize {threadId, action}` | settle: settled, archived, running or waiting for an answer; archive: archived |
+| Codex | `archive` "Archive in Codex" | `thread/archive {threadId}` | archived |
+| OpenCode | `archive` "Archive in OpenCode" | `PATCH /api/session/{id} {archived: true}` (`session.update`) | archived; the service's spec lacks `session.update` with `archived` |
+| Claude Code | none | | |
+
+Each confirms first. T3's archive does not settle a thread, so only Settle
+in T3 can infer completion; its confirmation says so. The harness's own
+refusals (T3 orchestration errors, Codex RPC errors) return 409
+`action_busy` with its message.
+
 A successful session action records a redacted journal event. Dispatch runs
 outside the journal transaction, so a storage retry cannot repeat the action.
 `execution.Fact` carries display data in status, observations or action
@@ -661,7 +690,9 @@ work takes precedence. A thread that has never run stays `idle` and adopts
 as Backlog. The newest run supplies the observed state and end time, skipping
 cancelled or rolled-back runs that never started, such as queued follow-ups.
 Settlement reports a `settled` closure and grants acceptance only through
-inferred completion.
+inferred completion. Settle in T3 and Archive in T3 relay
+`t3_thread_organize` ([Actions and facts](#actions-and-facts)); the
+observation's action states mirror T3's own refusals.
 
 ### T3 interaction
 
@@ -706,7 +737,10 @@ capabilities endpoint on that connection. Its launch option `worktree`
 (boolean, default off) asks OpenCode to create the worktree using its
 default base. Stage verifies the resulting inventory entry, project and
 directory. Permission overrides and image delivery report a reason when
-unavailable.
+unavailable. Archive in OpenCode relays `PATCH /api/session/{id}`
+(`session.update` with `archived`, checked softly in `/openapi.json`: a
+service without it keeps connecting and declares the action unavailable;
+[Actions and facts](#actions-and-facts)).
 
 Every location-scoped OpenCode request (`/api/location`, `/api/model`,
 `/api/agent` with `location[directory]`) builds that location on first load,
@@ -1050,6 +1084,8 @@ server's `harness_settings` row for that machine
   an in-progress turn on a thread the daemon unloaded, or a system error,
   has no terminal evidence and is an error. Archive closes the session
   (`archived` closure). The reply is the final answer, 4,000 characters.
+- **Archive.** Archive in Codex relays `thread/archive`
+  ([Actions and facts](#actions-and-facts)); unavailable once archived.
 - **Push.** `execution.EventSource`: the daemon broadcasts thread status,
   archive and turn completion for every thread. Stage reads each thread and
   passes the observation to the local runner. `Attention` lists loaded

@@ -86,6 +86,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 		out.Modes = append(out.Modes, execution.Choice{ID: mode, Label: mode, Availability: yes})
 	}
 	out.Options = launchOptions()
+	out.Actions = sessionActions()
 	for _, p := range c.Providers {
 		av := yes
 		if len(p.Constraints) > 0 {
@@ -254,6 +255,7 @@ func (d ThreadDetail) Observation() execution.Observation {
 	if d.Settled {
 		o.Closed = &execution.Closure{Signal: execution.ClosedSettled}
 	}
+	o.Actions = d.actionStates(o.State)
 	if len(d.RecentRuns) > 0 {
 		o.EndedAt = d.RecentRuns[last].CompletedAt
 		old := d.RecentRuns[len(d.RecentRuns)-1]

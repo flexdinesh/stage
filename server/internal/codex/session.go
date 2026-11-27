@@ -117,6 +117,7 @@ func (a *Adapter) observation(t thread, last *turn, archived bool) (execution.Ob
 	}
 	if archived {
 		o.Closed = &execution.Closure{Signal: execution.ClosedArchived}
+		o.Actions = []execution.ActionState{{ID: ActionArchive, Availability: execution.Availability{Reason: "Already archived in Codex."}}}
 	}
 	if o.Project == "" {
 		return o, errors.New("codex thread has no working directory")
@@ -233,6 +234,30 @@ func (a *Adapter) Opening(ctx context.Context, ref execution.SessionRef, full bo
 		}
 	}
 	return nil, execution.ErrNoReply
+}
+
+// Act runs a declared session action: archive archives the thread in Codex.
+func (a *Adapter) Act(ctx context.Context, r execution.ActionRequest) (execution.ActionResult, error) {
+	if r.Target != execution.TargetSession || r.Session == nil {
+		return execution.ActionResult{}, &execution.Invalid{Reason: "Codex actions target a session."}
+	}
+	if r.ID != ActionArchive {
+		return execution.ActionResult{}, &execution.Invalid{Reason: "Unknown Codex action."}
+	}
+	if !a.valid(*r.Session) {
+		return execution.ActionResult{}, execution.ErrNotFound
+	}
+	err := a.client.call(ctx, "thread/archive", map[string]any{"threadId": r.Session.ExternalSessionID}, nil)
+	var re *RPCError
+	switch {
+	case err == nil:
+		return execution.ActionResult{Message: "Archived in Codex."}, nil
+	case notLoaded(err):
+		return execution.ActionResult{}, execution.ErrNotFound
+	case errors.As(err, &re):
+		return execution.ActionResult{}, &execution.Busy{Reason: "Codex: " + re.Message}
+	}
+	return execution.ActionResult{}, err
 }
 
 // Stop interrupts the thread's running turn. Nothing running: done.

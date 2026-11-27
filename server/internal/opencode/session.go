@@ -226,6 +226,7 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 	if s.Time.Archived > 0 {
 		o.Closed = &execution.Closure{Signal: execution.ClosedArchived}
 	}
+	o.Actions = sessionActionStates(s.Time.Archived > 0)
 	if s.Model != nil {
 		o.Config.Model = s.Model.ProviderID + "/" + s.Model.ID
 		if s.Model.Variant != "" {

@@ -141,6 +141,17 @@ var available = execution.Availability{Available: true}
 
 const answerInCodex = "Answer in Codex: copy the resume command and run it in a terminal."
 
+// ActionArchive archives a tracked thread in Codex (thread/archive). It is
+// user-triggered; the closure reaches Stage through observation.
+const ActionArchive = "archive"
+
+var archiveAction = execution.Action{
+	ID: ActionArchive, Label: "Archive in Codex", Target: execution.TargetSession,
+	Confirm:      "Codex archives this session. If this connection infers acceptance from harness closure, Stage completes the task.",
+	Callers:      []execution.Caller{execution.CallerUser, execution.CallerAgent},
+	Availability: available,
+}
+
 // Features reads Codex's model catalog (cached a minute).
 func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) {
 	ms, err := a.catalog(ctx)
@@ -157,6 +168,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 			execution.OpSessionRename: available,
 			execution.OpWorkspaceAdd:  execution.WorkspaceAddNotSupported(Descriptor.Name),
 		},
+		Actions: []execution.Action{archiveAction},
 	}
 	for _, p := range permissions {
 		c.Permissions = append(c.Permissions, execution.Choice{ID: p.ID, Label: p.Label, Availability: available})
