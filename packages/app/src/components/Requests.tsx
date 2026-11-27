@@ -2,7 +2,7 @@
 // quick answer (one approval inline, else a link to the panel). The harness stays authoritative: its own client (Open
 // in / Copy resume command) keeps answering, and an answer given there first makes Stage's a 404 ("already answered").
 // Logic: lib/requests.ts; queries: api/queries.ts useSessionRequests, useRespondRequest.
-import { useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useRespondRequest } from "../api/queries.ts";
 import type { HarnessChoice, RequestQuestion, RequestResponse, SessionRequest } from "../api/types.ts";
@@ -125,10 +125,18 @@ function QuestionField({ q, d, disabled, onChange }: { q: RequestQuestion; d: Qu
       </legend>
       <div className="flex flex-col">
         {(q.options ?? []).map((o) => (
-          <ChoiceRow key={o.label} control={<Control name={name} checked={d.picked.includes(o.label)} onChange={() => onChange(pick(q, d, o.label))} />}>
-            <span className="block">{o.label}</span>
-            {optionNote(o) === null ? null : <span className="block text-meta text-muted">{optionNote(o)}</span>}
-          </ChoiceRow>
+          <Fragment key={o.label}>
+            <ChoiceRow control={<Control name={name} checked={d.picked.includes(o.label)} onChange={() => onChange(pick(q, d, o.label))} />}>
+              <span className="block">{o.label}</span>
+              {optionNote(o) === null ? null : <span className="block text-meta text-muted">{optionNote(o)}</span>}
+            </ChoiceRow>
+            {o.preview === undefined || o.preview.trim() === "" ? null : (
+              // Outside the label (its fold toggle is a button), indented to the option labels like Other's input.
+              <div className="mt-1 mb-1.5 pl-[26px]">
+                <Preview text={o.preview} />
+              </div>
+            )}
+          </Fragment>
         ))}
         {q.custom === true ? (
           <>

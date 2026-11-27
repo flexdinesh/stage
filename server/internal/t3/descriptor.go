@@ -30,6 +30,8 @@ var Descriptor = harness.Descriptor{
 	MovedRetire:   func(old, next harness.Summary) bool { return !old.Configured && next.Configured },
 	LinkSchemes:   []string{"t3code"},
 	DiscoveryHint: "Add the workspace as a project in T3, then refresh discovery.",
+	// T3's MCP lists and answers questions only (interaction.go).
+	UnlistedRequests: "Approve permission requests in T3.",
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedSettled, Provenance: "harness_settled",
 		Setting:   "Complete tasks when settled in T3",

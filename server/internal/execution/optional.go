@@ -74,6 +74,8 @@ type Question struct {
 type QuestionOption struct {
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
+	// Preview is preformatted text the option shows (shown monospaced).
+	Preview string `json:"preview,omitempty"`
 }
 
 // Response answers a Request: an option id, text, or both; a question

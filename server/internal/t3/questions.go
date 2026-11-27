@@ -11,7 +11,7 @@ import (
 
 // Pending user questions (t3_pending_request; t3code apps/server/src/mcp/
 // toolkits/thread/tools.ts + handlers.ts). Approvals are never listed and
-// cannot be answered here. Answer rules mirror t3code packages/client-runtime/
+// cannot be answered here (interaction.go: answered in T3). Answer rules mirror t3code packages/client-runtime/
 // src/state/pendingUserInput.ts.
 
 var (
@@ -38,6 +38,7 @@ type QuestionOption struct {
 	Label       string  `json:"label"`
 	Description string  `json:"description"`
 	Value       *string `json:"value"`
+	Preview     string  `json:"preview"`
 }
 
 // PendingQuestion is a t3_pending_request read result.

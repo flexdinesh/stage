@@ -58,7 +58,7 @@ func TestWorkToolsActOnOtherTasksOnly(t *testing.T) {
 				t.Fatalf("%s: %s on own task: %q", name, c.tool, msg)
 			}
 		}
-		// Another task's session reaches the harness (T3 offers no interaction).
+		// Another task passes the self check and reaches the coordinator (a has no session yet).
 		if msg := call(t, cs, "send_message", map[string]any{"taskId": a.ID, "text": "hello"}, nil); !strings.Contains(msg, "no execution session") {
 			t.Fatalf("%s: send_message to another task: %q", name, msg)
 		}

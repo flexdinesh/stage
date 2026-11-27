@@ -67,6 +67,16 @@ type Client interface {
 	// RenameThread calls t3_thread_update {action: "rename"} with a fresh
 	// clientRequestId (reused when the call is retried).
 	RenameThread(ctx context.Context, threadID, title string) error
+	// SendMessage calls t3_thread_send. ErrNotFound if the thread is unknown.
+	SendMessage(ctx context.Context, threadID, message string, mode SendMode) error
+	// ListPendingQuestions calls t3_pending_request list: the thread's
+	// pending user-input request ids (approvals are not listed).
+	ListPendingQuestions(ctx context.Context, threadID string) ([]string, error)
+	// ReadPendingQuestion calls t3_pending_request read. ErrRequestAnswered
+	// or ErrRequestStale once it is no longer pending.
+	ReadPendingQuestion(ctx context.Context, threadID, requestID string) (PendingQuestion, error)
+	// RespondPendingQuestion calls t3_pending_request respond.
+	RespondPendingQuestion(ctx context.Context, threadID, requestID string, answers map[string]Answer) error
 	// Capabilities calls orchestrator_capabilities. Returns all providers
 	// unfiltered; callers drop providers with non-empty Constraints.
 	Capabilities(ctx context.Context) (Catalog, error)

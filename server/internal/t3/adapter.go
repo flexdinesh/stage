@@ -75,11 +75,8 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	}
 	yes := execution.Availability{Available: true}
 	out := execution.Capabilities{Operations: map[execution.Op]execution.Availability{}, Models: []execution.Model{}}
-	for _, op := range []execution.Op{execution.OpLaunch, execution.OpStop, execution.OpAdopt, execution.OpOpening, execution.OpReply, execution.OpAttention, execution.OpImages, execution.OpSessionSearch, execution.OpSessionRename} {
+	for _, op := range []execution.Op{execution.OpLaunch, execution.OpStop, execution.OpAdopt, execution.OpOpening, execution.OpReply, execution.OpAttention, execution.OpImages, execution.OpSessionSearch, execution.OpSessionRename, execution.OpRespond, execution.OpSend} {
 		out.Operations[op] = yes
-	}
-	for _, op := range []execution.Op{execution.OpRespond, execution.OpSend} {
-		out.Operations[op] = execution.Availability{Reason: "Answer in T3: open the thread there."}
 	}
 	for _, mode := range []string{"approval-required", "auto-accept-edits", "auto", "full-access"} {
 		out.Permissions = append(out.Permissions, execution.Choice{ID: mode, Label: mode, Availability: yes})

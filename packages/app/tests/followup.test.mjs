@@ -18,6 +18,11 @@ test("open requests, or requests not read yet, leave needs input to the Requests
   assert.equal(followUpView(task("needs_input"), { ...offered, requestsReady: false }), null);
 });
 
+test("a harness with unlisted requests waits on one of those, not on a reply", () => {
+  assert.equal(followUpView(task("needs_input"), { ...offered, unlisted: true }), null);
+  assert.deepEqual(followUpView(task("done"), { ...offered, unlisted: true }), { placement: "after-reply", title: "Follow up", busy: false });
+});
+
 test("a working session shows the composer with Send waiting", () => {
   for (const state of ["running", "launching"]) {
     assert.deepEqual(followUpView(task(state), offered), { placement: "after-reply", title: "Follow up", busy: true }, state);
