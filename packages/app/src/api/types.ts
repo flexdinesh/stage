@@ -156,6 +156,37 @@ export interface ProjectList {
   imports: ImportSummary[];
 }
 
+export interface GroupWorkspace {
+  connectionId: number;
+  workspaceId: string;
+  machineId: number;
+  title: string;
+  path: string;
+  catalogState: "listed" | "retired" | "missing" | "archived";
+}
+
+export interface ProjectGroup extends Pick<Project, "id" | "title" | "archivedAt" | "aliases" | "lastActivityAt"> {
+  state: "current" | "empty" | "retired";
+  members: GroupWorkspace[];
+  relatedProjectIds: number[];
+}
+
+export interface GroupEditInput {
+  connectionId: number;
+  workspaceId: string;
+  targetProjectId: number | null;
+}
+
+export interface GroupEdit {
+  applied: boolean;
+  workspace: GroupWorkspace;
+  source: Pick<Project, "id" | "title">;
+  target: Pick<Project, "id" | "title"> | null;
+  newTitle?: string;
+  blocked: { code: string; reason: string } | null;
+  previewToken: string;
+}
+
 /** An exact workspace offered for selection on one connection. */
 export interface Destination {
   connectionId: number;

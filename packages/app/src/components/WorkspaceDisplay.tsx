@@ -12,7 +12,7 @@ export function useWorkspaceConnections() {
   return {
     harnesses,
     machines,
-    placement(connectionId: number, binding?: ProjectBinding) {
+    placement(connectionId: number, binding?: Partial<Pick<ProjectBinding, "machineId" | "harness" | "connectionLabel" | "connectionActive">>) {
       const connection = harnesses.connection(connectionId);
       const machineId = binding?.machineId ?? connection?.machineId;
       const machine = machines.machines.find((m) => m.id === machineId);
