@@ -47,6 +47,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{name: "unconfigured defaults retained", check: checkV0036HarnessSetupDefaults},
 	},
 	37: {{name: "existing connection and task evidence retained", seed: seedV0037ConnectionFacts, check: checkV0037ConnectionFacts}},
+	39: {{name: "observation producer history", check: checkV0039ObservationProducers}},
 	38: {{name: "identity history and workspace bindings", seed: seedV0038ProjectIdentity, check: checkV0038ProjectIdentity}},
 }
 
@@ -572,4 +573,34 @@ func checkV0038ProjectIdentity(t *testing.T, pool *sql.DB) {
 
 	seedV0032(`DELETE FROM project_bindings WHERE id=6`)(t, pool)
 	wantPGRows(t, pool, bindingsUnset, "schedule", "task")
+}
+
+func checkV0039ObservationProducers(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	wantPGRows(t, pool, `SELECT CAST(count(*) AS TEXT) FROM observation_producers`, "0")
+	wantPGRows(t, pool, `SELECT CAST(count(*) AS TEXT) FROM observation_dispositions`, "0")
+	for _, q := range []string{
+		`INSERT INTO machines (id, label) VALUES (2, 'Worker')`,
+		`INSERT INTO observation_producers (machine_id, producer, active, cursor) VALUES (2, 'old', false, 1)`,
+		`INSERT INTO observation_producers (machine_id, producer) VALUES (2, 'current')`,
+		`INSERT INTO observation_dispositions (machine_id, producer, cursor, code, lost) VALUES (2, 'old', 1, 'invalid_record', '0')`,
+	} {
+		if _, err := pool.ExecContext(context.Background(), q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	for _, q := range []string{
+		`INSERT INTO observation_producers (machine_id, producer) VALUES (2, 'second-current')`,
+		`INSERT INTO observation_dispositions (machine_id, producer, cursor, code, lost) VALUES (1, 'old', 1, 'invalid_record', '0')`,
+	} {
+		if _, err := pool.ExecContext(context.Background(), q); err == nil {
+			t.Fatalf("expected constraint failure: %s", q)
+		}
+	}
+	q := `DELETE FROM machines WHERE id=2`
+	if _, err := pool.ExecContext(context.Background(), q); err != nil {
+		t.Fatal(err)
+	}
+	wantPGRows(t, pool, `SELECT CAST(count(*) AS TEXT) FROM observation_producers`, "0")
+	wantPGRows(t, pool, `SELECT CAST(count(*) AS TEXT) FROM observation_dispositions`, "0")
 }

@@ -1,7 +1,18 @@
 // Package workevent defines events consumed by Stage notification delivery.
 package workevent
 
-import "github.com/flexdinesh/stage/server/internal/db"
+import (
+	"time"
+
+	"github.com/flexdinesh/stage/server/internal/db"
+)
+
+// ObservationChange describes a notification derived from a committed sample.
+type ObservationChange struct {
+	Task    *TaskChange
+	Session *SessionChange
+	At      time.Time
+}
 
 type TaskChange struct {
 	TaskID int64

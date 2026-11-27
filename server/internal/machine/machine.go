@@ -59,6 +59,7 @@ type Local struct {
 	adapters   map[int64]execution.Adapter
 	connectors map[string]harness.Connector
 	onChange   func(old, next int64)
+	listeners  []func(old, next int64)
 }
 
 // NewLocal is an empty in-process machine with ops (nil: LocalOps).
@@ -115,6 +116,13 @@ func (l *Local) OnChange(fn func(old, next int64)) {
 	l.mu.Unlock()
 }
 
+// AddChange subscribes another observer to adapter installs for this Local's lifetime.
+func (l *Local) AddChange(fn func(old, next int64)) {
+	l.mu.Lock()
+	l.listeners = append(l.listeners, fn)
+	l.mu.Unlock()
+}
+
 // Install moves a harness's adapter from connection old to next (equal
 // unless its instance was replaced): old is no longer reached; a nil
 // adapter uninstalls next (disconnected).
@@ -129,9 +137,13 @@ func (l *Local) Install(old, next int64, a execution.Adapter) {
 		l.adapters[next] = a
 	}
 	fn := l.onChange
+	listeners := l.listeners
 	l.mu.Unlock()
 	if fn != nil {
 		fn(old, next)
+	}
+	for _, listen := range listeners {
+		listen(old, next)
 	}
 }
 
@@ -140,10 +152,14 @@ func (l *Local) Install(old, next int64, a execution.Adapter) {
 // The machine's change hook runs as for an install.
 func (l *Local) Retired(id int64) { l.Install(id, id, nil) }
 
-// SetConnector registers the machine's connector for kind.
+// SetConnector registers the machine's connector for kind, or removes it if nil.
 func (l *Local) SetConnector(kind string, c harness.Connector) {
 	l.mu.Lock()
-	l.connectors[kind] = c
+	if c == nil {
+		delete(l.connectors, kind)
+	} else {
+		l.connectors[kind] = c
+	}
 	l.mu.Unlock()
 }
 

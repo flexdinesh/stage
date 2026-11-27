@@ -47,10 +47,13 @@ type event struct {
 	task    *workevent.TaskChange
 	session *workevent.SessionChange
 	ready   *int64 // a manual tree member whose needs are completed
+	saved   *db.NewNotification
 }
 
 func (e event) to() db.TaskState {
 	switch {
+	case e.saved != nil:
+		return e.saved.Event
 	case e.task != nil:
 		return e.task.To
 	case e.ready != nil:
@@ -151,6 +154,15 @@ func (n *Notifier) Run(ctx context.Context) {
 }
 
 func (n *Notifier) handle(ctx context.Context, e event) {
+	if e.saved != nil {
+		badge, err := n.store.NeedsInputCount(ctx)
+		if err != nil {
+			n.log.Warn("build notification", "err", err)
+			return
+		}
+		n.sendAll(ctx, e.to(), PayloadFor(notificationFrom(*e.saved), badge))
+		return
+	}
 	if !n.enabled(ctx, e.to()) {
 		return
 	}
@@ -167,16 +179,45 @@ func (n *Notifier) handle(ctx context.Context, e event) {
 	} else {
 		n.Inbox.Signal()
 	}
+	n.sendAll(ctx, e.to(), p)
+}
+
+func (n *Notifier) sendAll(ctx context.Context, to db.TaskState, p Payload) {
 	subs, err := n.store.ListPushSubscriptions(ctx)
 	if err != nil {
 		n.log.Warn("list push subscriptions", "err", err)
 		return
 	}
 	for _, sub := range subs {
-		if err := n.send(ctx, sub, p, urgencyFor(e.to())); err != nil && ctx.Err() == nil {
+		if err := n.send(ctx, sub, p, urgencyFor(to)); err != nil && ctx.Err() == nil {
 			n.log.Warn("push failed", "endpoint", sub.Endpoint, "err", err)
 		}
 	}
+}
+
+// RecordObservation saves an inbox entry inside the observation transaction.
+// The returned callback signals the inbox and queues Web Push after commit.
+func (n *Notifier) RecordObservation(ctx context.Context, tx *db.Store, change workevent.ObservationChange) (func(), error) {
+	e := event{task: change.Task, session: change.Session}
+	if !workevent.Notifiable(e.to()) {
+		return nil, nil
+	}
+	prefs, err := tx.GetPreferences(ctx)
+	if err != nil || !slices.Contains(prefs.NotifyEvents, e.to()) {
+		return nil, err
+	}
+	rec, err := notificationRecord(ctx, tx, e)
+	if err != nil {
+		return nil, err
+	}
+	rec.ObservedAt = &change.At
+	if _, err := tx.InsertNotification(ctx, rec); err != nil {
+		return nil, err
+	}
+	return func() {
+		n.Inbox.Signal()
+		n.enqueue(event{saved: &rec})
+	}, nil
 }
 
 // enabled: the global filter (preferences.notifyEvents) allows the event.
@@ -228,12 +269,24 @@ func notificationFrom(rec db.NewNotification) db.Notification {
 
 // payload builds the push payload and its inbox record (lookups at send time).
 func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotification, error) {
+	rec, err := notificationRecord(ctx, n.store, e)
+	if err != nil {
+		return Payload{}, rec, err
+	}
+	badge, err := n.store.NeedsInputCount(ctx)
+	if err != nil {
+		return Payload{}, rec, err
+	}
+	return PayloadFor(notificationFrom(rec), badge), rec, nil
+}
+
+func notificationRecord(ctx context.Context, store *db.Store, e event) (db.NewNotification, error) {
 	var rec db.NewNotification
 	switch {
 	case e.task != nil:
-		t, err := n.store.GetTask(ctx, e.task.TaskID)
+		t, err := store.GetTask(ctx, e.task.TaskID)
 		if err != nil {
-			return Payload{}, rec, fmt.Errorf("task %d: %w", e.task.TaskID, err)
+			return rec, fmt.Errorf("task %d: %w", e.task.TaskID, err)
 		}
 		id := strconv.FormatInt(t.ID, 10)
 		project := t.ProjectTitle
@@ -242,9 +295,9 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 		rec = db.NewNotification{Event: e.task.To, TaskID: &t.ID, Session: t.Session,
 			Title: t.Title, ProjectTitle: &project, URL: "/tasks/" + id}
 	case e.ready != nil:
-		t, err := n.store.GetTask(ctx, *e.ready)
+		t, err := store.GetTask(ctx, *e.ready)
 		if err != nil {
-			return Payload{}, rec, fmt.Errorf("task %d: %w", *e.ready, err)
+			return rec, fmt.Errorf("task %d: %w", *e.ready, err)
 		}
 		// A backlog task (no session yet): the payload opens the task.
 		project := t.ProjectTitle
@@ -256,9 +309,9 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 		c := e.session
 		project := c.ProjectID
 		if c.Session != nil {
-			title, ok, err := n.store.BoundProjectTitle(ctx, c.Session.ConnectionID, c.ProjectID)
+			title, ok, err := store.BoundProjectTitle(ctx, c.Session.ConnectionID, c.ProjectID)
 			if err != nil {
-				return Payload{}, rec, fmt.Errorf("session %s: %w", c.Session.ExternalSessionID, err)
+				return rec, fmt.Errorf("session %s: %w", c.Session.ExternalSessionID, err)
 			}
 			if ok {
 				project = title
@@ -266,13 +319,9 @@ func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotific
 		}
 		rec = db.NewNotification{Event: c.To, Session: c.Session, Title: c.Title, ProjectTitle: &project, URL: "/?inbox"}
 	default:
-		return Payload{}, rec, errors.New("empty event")
+		return rec, errors.New("empty event")
 	}
-	badge, err := n.store.NeedsInputCount(ctx)
-	if err != nil {
-		return Payload{}, rec, err
-	}
-	return PayloadFor(notificationFrom(rec), badge), rec, nil
+	return rec, nil
 }
 
 // PublicKey is the VAPID public key (generated on first use).

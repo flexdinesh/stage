@@ -350,6 +350,11 @@ The unit adds `[X-Stage] Role=worker`. Golden copies:
   `worker.lock` names its pid (the worker locked its dir and loaded its
   config, then sent `READY=1`). The channel being offline does not fail
   `start`: it is a note, and `status` shows `worker_offline`.
+- **Offline observation.** A restart with valid saved settings and a watch
+  resumes local observation while the main server is unreachable. The
+  worker keeps samples in its bounded outbox until the main acknowledges
+  them. The next successful attachment refreshes setup and the full watch.
+  [Worker observation files](runtime.md#worker-observation-files)
 - **Managed vs foreground:** both take `worker.lock`. `start` refuses
   (exit 5) when a foreground `stage worker run` holds it; a foreground
   worker against the service exits 75 and says `stage worker service stop`.
@@ -363,7 +368,8 @@ The unit adds `[X-Stage] Role=worker`. Golden copies:
 - `stage update` restarts a running worker service it owns and rolls back
   when the new worker does not become ready; `stage uninstall` removes it
   ([install.md](install.md#update)). `uninstall` keeps the worker config and
-  `worker.env`; `stage worker leave` removes the machine.
+  `worker.env`. `stage worker leave` removes the machine and clears the
+  worker's saved setup and observation state.
 
 ## Logs
 

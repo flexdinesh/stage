@@ -43,6 +43,15 @@ func (c *Connections) All() map[int64]execution.Adapter {
 	return c.set.Adapters()
 }
 
+func (c *Connections) InProcess(machineID int64) bool {
+	if machineID == c.set.DefaultID() {
+		return true
+	}
+	m, _ := c.set.Get(machineID)
+	_, local := m.(*Local)
+	return local
+}
+
 func (c *Connections) Adapter(id int64) (execution.Adapter, error) {
 	a, ok := c.set.Adapter(id)
 	kind := c.store.Harness(id)

@@ -33,9 +33,9 @@ translate their native protocols, options and session state.
 
 The main server composes `coordinator`, `observe` and `discovery` in
 `internal/engine`. The coordinator owns launch, link repair, handoff and
-`PollTask` and its apply path. Observation owns event ingestion, streaming
-and attention. Discovery reads workspace inventory and filesystem evidence,
-and owns full sync, which calls the coordinator to poll tracked tasks.
+`PollTask` and its apply path. Observation selects the watch set, runs beside
+the adapters and ingests samples on the main server. Discovery reads workspace
+inventory and filesystem evidence and owns full sync.
 
 ## Modules and the registry
 
@@ -289,18 +289,28 @@ does not estimate cost. Task detail shows the current session's usage.
 
 ### Polling, streams and attention
 
-Per-connection polling, streams, attention and full-sync loops run on the
-main server, for both local and worker connections. A slow connection does
-not delay another's tick. Polling reconciles missed events and keeps
-unaccepted done tasks on a throttled poll to see late closure. Full sync
-refreshes inventory and calls the coordinator's `PollTask` for tracked
-sessions. Layer 10 moves observation beside the adapter.
+The main server builds the desired watch set per machine. It lists each
+connection's attention eligibility and the external session IDs to read with
+their cadence. It sends the whole set at attachment and whenever the set
+changes. The latest generation in a server epoch replaces the previous set.
+A server restart starts a new epoch. Removing a watch cancels its work and
+discards late results from that watch.
+
+The same runner serves the local machine in process and runs inside each
+worker. Each connection has independent observation work. Fast polling
+and attention discovery use a five-second interval. Stale sessions,
+including unaccepted done tasks awaiting a late closure, are read every
+minute. Polling reconciles missed events. Full sync still refreshes
+inventory. Launch reconciliation and explicit fresh reads keep their
+request/response paths.
 [ADR 0008 D11](adr/0008-harness-foundation.md#d11)
 
-An `EventSource` streams observations through the connection's event loop.
-The stream restarts after failure, with the last error exposed in status
-until recovery. The attention loop reads sessions from the adapter and
-refreshes previously watched ones. For unowned sessions, the default
+An `EventSource` streams observations to the connection's local runner.
+The stream retries after five seconds, with the last error exposed in
+status until recovery. The attention loop reads sessions from the adapter
+and refreshes previously watched ones. It also follows discovered active
+sessions after they leave the feed, including active attention samples in
+the outbox when the worker restarts. For unowned sessions, the default
 `notify` policy (T3 and OpenCode) surfaces waiting rows, and after startup
 can send an inbox event and push for transitions into `needs_input`, `done`
 or `failed`. Claude Code's `silent` policy surfaces waiting rows and the
@@ -308,13 +318,22 @@ needs-input count. Adoption creates the tracked task.
 
 ### Ingest and transitions
 
-Adapter events and external pushes converge on `observe.Service.Ingest`.
-It looks up the task by scoped session and delegates to the coordinator's
-apply path, also used by `PollTask`. Unowned sessions are left to attention
-and launches reconcile their own sessions. Apply verifies the session and
-descriptor policy, stores the observation and applies the transition.
-Older `updatedAt` values cannot replace newer snapshots. An idle
-observation leaves a known task state in place.
+Local samples, worker batches and external pushes converge on the main
+server's observation ingest rules. Ingest looks up the task by scoped session
+and delegates to the coordinator's apply path, also used by `PollTask`.
+Unowned sessions follow attention policy, and launches reconcile their own
+sessions. Apply verifies the session and descriptor policy, stores the
+observation and applies the transition. Older `updatedAt` values cannot
+replace newer snapshots. An idle observation leaves a known task state in
+place.
+
+The worker seals records with contiguous cursors and sends one batch at a
+time. The server commits each record with its durable effects or permanent
+disposition and acknowledges the committed prefix. Replay after a lost
+acknowledgement leaves task transitions, journals and durable notifications
+recorded once. Replay keeps the sample times, and transient notifications
+follow commit. A reported gap asks for a fresh sample of the watch set.
+[Worker channel](runtime.md#worker-channel) · [Worker observation files](runtime.md#worker-observation-files)
 
 ### Closures and inferred completion
 
@@ -348,12 +367,13 @@ precedence condition owns the session.
 
 A bridge or hook may push snapshots for an existing connection to
 `POST /api/connections/{id}/observations`. The handler checks the
-connection and validates each observation against the same descriptor policy
-used by adapter events before calling `observe.Service.Ingest`. Each result
+connection and sends each observation to `observe.Service.Ingest` for the
+same validation and descriptor policy as adapter events. Each result
 is `ingested`, `ignored` or `invalid` with a reason where applicable.
 A pushed snapshot needs `updatedAt`. Timestamps more than five minutes
-ahead of the server are invalid. An offline or incompatible worker
-connection returns 409 `connection_unavailable`. Polling continues to reconcile lost events.
+ahead of the server are invalid. A bridge can push for any active
+connection while its worker is offline or incompatible. Polling continues
+to reconcile lost events.
 [Observation API](api.md#harness-connections-api-v6)
 
 ## Extension kinds
@@ -447,28 +467,33 @@ server keeps the store, task state and acceptance.
   `ops.inventory` with `{workspaces}`, and caches health for five seconds
   within a ready snapshot. The launch intent travels without image bytes.
   The worker calls back for images and checkpoint saves.
-- **Events.** `adapter.events` runs in a ten-minute window, renewed until
-  cancellation. Each `events.observation` callback is ingested before the
-  worker continues. Stream errors are visible in status and logs.
+- **Observation.** A worker with both negotiated observation kinds accepts
+  `observe.watch` and sends `observe.batch` independently of command calls.
+  Its runner polls and subscribes beside the adapters. Stream errors are
+  visible in status and logs.
 - **Setup.** `remote.Connector` proxies `connector.*` status and mutations.
   The worker composes only kinds the server advertises that its profile
-  allows. `setup.settings.get` (`{kind}`), `setup.settings.save`
-  (`{kind, patch}`), `setup.identity.*` and `setup.status.error` use the
-  authenticated machine. Active identity reads use
+  allows. `setup.snapshot` supplies public settings and active connection
+  identity for the selected kinds. `setup.settings.get` (`{kind}`),
+  `setup.settings.save` (`{kind, patch}`), `setup.identity.*` and
+  `setup.status.error` use the authenticated machine. Active identity reads use
   `setup.identity.activeIdentity` and connection checks use
   `setup.identity.exists`. The main server stores public settings,
   identity and sync status. Credentials stay in the worker's
-  `credentials.json` (mode `0600`, deleted on join and leave), outside
-  settings replies, negotiation and status. A secret entered during setup
-  can reach the worker through the intended configure or run call.
+  `credentials.json` (mode `0600`, deleted on join and leave). A secret
+  entered during setup can reach the worker through the intended configure
+  or run call. The worker restores adapters from its local public settings
+  cache and reconciles with the main server on reconnect.
   Pair and connect use the same retirement and revival rules as local
   setup and wake sync and scheduling when ready.
 
 ### Offline
 
 Offline, negotiating and incompatible workers report availability reasons
-immediately. Offline health pauses polls and streams without moving task
-state or acceptance. A new launch is refused with `connection_unavailable`.
+immediately. A worker with a valid cache and watch set keeps observing across
+a channel outage and worker restart. The main server keeps the last applied
+state until it ingests new evidence. A new launch is refused with
+`connection_unavailable`.
 A dispatched attempt stays unconfirmed and retries through its saved
 checkpoint or correlation policy when the worker returns. Only a worker
 adapter's certified rejection can return a dispatched task to Backlog.
@@ -706,7 +731,7 @@ to run on that machine.
   SessionEnd: not running; PermissionRequest, a `permission_prompt`
   Notification: needs input; UserPromptSubmit: running), and pushes the
   last observation (one session at a time, four at once, the newest hook
-  wins). The event loop ingests it through `observe.Service.Ingest`.
+  wins). The local runner receives it for Stage ingest.
   Polling covers adopted sessions, copies, sessions that wake after the
   listener moves, and sessions whose hooks are blocked by policy
   (`allowedHttpHookUrls`, `disableAllHooks`, `allowManagedHooksOnly`). Replacing or removing the
@@ -844,7 +869,8 @@ server's `harness_settings` row for that machine
   (`archived` closure). The reply is the final answer, 4,000 characters.
 - **Push.** `execution.EventSource`: the daemon broadcasts thread status,
   archive and turn completion for every thread. Stage reads each thread and
-  ingests the observation through `observe.Service.Ingest`. `Attention` lists loaded threads waiting on input.
+  passes the observation to the local runner. `Attention` lists loaded
+  threads waiting on input.
 - **Interaction.** Respond and send are unavailable: the user answers in
   Codex. Links carry `command` (`cd <dir> && codex resume <id>`), which the
   task list offers as Copy resume command.

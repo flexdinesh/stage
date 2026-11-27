@@ -21,7 +21,7 @@ func ServeSetup(hub *workerchan.Hub, ports func(machineID int64) machine.StorePo
 		validators[mod.Descriptor.Kind] = mod.ValidateSettings
 	}
 	initializing := []string{
-		KindSettingsGet, KindStatusError, KindIdentityActive, KindIdentityActiveIdentity,
+		KindSetupSnapshot, KindSettingsGet, KindStatusError, KindIdentityActive, KindIdentityActiveIdentity,
 		KindIdentitySet, KindIdentitySwitch,
 	}
 	handle := func(kind string, fn func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error)) {
@@ -37,23 +37,48 @@ func ServeSetup(hub *workerchan.Hub, ports func(machineID int64) machine.StorePo
 			return out, nil
 		})
 	}
+	settings := func(ctx context.Context, p machine.StorePorts, kind string) (json.RawMessage, error) {
+		validate := validators[kind]
+		if validate == nil {
+			return nil, db.Invalid("unregistered harness %q", kind)
+		}
+		public, err := p.Settings().Get(ctx, kind)
+		if err != nil {
+			return nil, err
+		}
+		if err := validate(public); err != nil {
+			return nil, db.Invalid("saved settings for %s are invalid; update them in Settings > Connections", kind)
+		}
+		return public, nil
+	}
+	handle(KindSetupSnapshot, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
+		var r SetupSnapshotRequest
+		if err := decodeBody(body, &r); err != nil {
+			return nil, err
+		}
+		out := make(SetupSnapshot, len(validators))
+		for _, kind := range r.Kinds {
+			if _, visited := out[kind]; visited {
+				continue
+			}
+			public, err := settings(ctx, p, kind)
+			if err != nil {
+				return nil, err
+			}
+			id, identity, err := p.ActiveIdentity(ctx, kind)
+			if err != nil {
+				return nil, err
+			}
+			out[kind] = SetupInputs{Settings: public, Connection: ActiveIdentityResult{ID: id, Identity: identity}}
+		}
+		return out, nil
+	})
 	handle(KindSettingsGet, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
 		var r KindRequest
 		if err := decodeBody(body, &r); err != nil {
 			return nil, err
 		}
-		validate := validators[r.Kind]
-		if validate == nil {
-			return nil, db.Invalid("unregistered harness %q", r.Kind)
-		}
-		public, err := p.Settings().Get(ctx, r.Kind)
-		if err != nil {
-			return nil, err
-		}
-		if err := validate(public); err != nil {
-			return nil, db.Invalid("saved settings for %s are invalid; update them in Settings > Connections", r.Kind)
-		}
-		return public, nil
+		return settings(ctx, p, r.Kind)
 	})
 	handle(KindSettingsSave, func(ctx context.Context, p machine.StorePorts, body json.RawMessage) (any, error) {
 		var r SettingsRequest

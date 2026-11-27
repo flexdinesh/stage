@@ -158,18 +158,25 @@ func workerServiceInstalled(ctx context.Context, env Env) bool {
 // process work (machine.LocalOps), over the worker channel. harnessEnv is
 // the machine's harness environment; credentials stay in the worker dir
 // of configPath.
-func workerHost(profile harness.Profile, harnessEnv func(string) string, configPath string, logger *slog.Logger) func(int64, workerchan.Upcall) worker.Host {
-	return func(machineID int64, call workerchan.Upcall) worker.Host {
+func workerHost(profile harness.Profile, harnessEnv func(string) string, configPath string, logger *slog.Logger) func(int64, string, workerchan.Upcall) (worker.Host, func(context.Context) (bool, error)) {
+	return func(machineID int64, identity string, call workerchan.Upcall) (worker.Host, func(context.Context) (bool, error)) {
 		h := remote.NewHost(machine.NewLocal(machineID, profile, machine.LocalOps{}))
-		workersetup.Attach(workersetup.Options{
+		setup := workersetup.Attach(workersetup.Options{
 			Host:   h,
 			Ports:  workersetup.Ports{Call: call, Creds: worker.NewCredentialStore(configPath, harnesses.LegacySecrets()...)},
 			Getenv: harnessEnv,
 			// The worker dir of configPath (beside its credentials).
-			StateDir: worker.Dir(configPath),
-			Logger:   logger,
+			StateDir:      worker.Dir(configPath),
+			Logger:        logger,
+			CacheIdentity: identity,
 		})
-		return h
+		return h, func(ctx context.Context) (bool, error) {
+			err := setup.Restore(ctx)
+			if errors.Is(err, workersetup.ErrNoCache) {
+				return false, nil
+			}
+			return err == nil, err
+		}
 	}
 }
 
@@ -234,7 +241,7 @@ func runWorkerRun(ctx context.Context, env Env, cfgFlag string, managed, localHa
 			onOff = "on"
 		}
 		opts.Logger.Info("machine profile", "profile", profile.Kind, "localHarnesses", onOff)
-		opts.Host = workerHost(profile, harnessEnv, opts.ConfigPath, opts.Logger)
+		opts.ScopedHost = workerHost(profile, harnessEnv, opts.ConfigPath, opts.Logger)
 		err = worker.Run(ctx, opts)
 	}
 	if err == nil {
@@ -341,6 +348,15 @@ func printWorkerStatus(w io.Writer, st worker.Status, cli string) {
 		}
 		if p.LastError != "" {
 			kv(w, "last error", "%s", toneBad.paint(p.LastError))
+		}
+		if p.Observation != "" {
+			kv(w, "observation", "%s", strings.ReplaceAll(p.Observation, "_", " "))
+		}
+		if p.ObservationLost > 0 {
+			kv(w, "observations lost", "%d", p.ObservationLost)
+		}
+		if p.ObservationError != "" {
+			kv(w, "observation error", "%s", toneBad.paint(p.ObservationError))
 		}
 	} else if c.Joined {
 		kv(w, "process", "%s %s", toneWarn.paint("not running"), dim("("+cli+" worker service start, or "+cli+" worker run)"))

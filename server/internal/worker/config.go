@@ -10,6 +10,7 @@
 package worker
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +46,11 @@ type Config struct {
 	Label     string    `json:"label"`
 	Token     string    `json:"token"`
 	JoinedAt  time.Time `json:"joinedAt"`
+}
+
+func (c Config) cacheIdentity() string {
+	input := fmt.Sprintf("%q %d %s %q", c.URL, c.MachineID, c.JoinedAt.UTC().Format(time.RFC3339Nano), c.Token)
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(input)))
 }
 
 // ErrNotJoined: no worker.json at the config path.

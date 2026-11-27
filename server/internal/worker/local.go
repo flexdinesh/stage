@@ -112,14 +112,21 @@ const StateSchema = 1
 // reported. Only meaningful with the lock held, except a final revoked or
 // stopped.
 type State struct {
-	Schema    int       `json:"schema"`
-	PID       int       `json:"pid"`
-	Managed   bool      `json:"managed"`
-	State     string    `json:"state"`
-	Since     time.Time `json:"since"`
-	LastError string    `json:"lastError,omitempty"`
-	URL       string    `json:"url"`
-	MachineID int64     `json:"machineId"`
+	Schema           int       `json:"schema"`
+	PID              int       `json:"pid"`
+	Managed          bool      `json:"managed"`
+	State            string    `json:"state"`
+	Since            time.Time `json:"since"`
+	LastError        string    `json:"lastError,omitempty"`
+	Observation      string    `json:"observation,omitempty"`
+	ObservationError string    `json:"observationError,omitempty"`
+	ObservationLost  uint64    `json:"observationLost,omitempty"`
+	// ObservationRecovered counts losses covered by a resample watch for
+	// ObservationProducer. ObservationLost stays cumulative.
+	ObservationRecovered uint64 `json:"observationRecovered,omitempty"`
+	ObservationProducer  string `json:"observationProducer,omitempty"`
+	URL                  string `json:"url"`
+	MachineID            int64  `json:"machineId"`
 	// Session is the live channel session (online only).
 	Session string `json:"session,omitempty"`
 	// ServerVersion is the main server's build, when known.

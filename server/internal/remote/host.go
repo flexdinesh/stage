@@ -45,6 +45,7 @@ func (h *Host) OnAttached(fn func(ctx context.Context, kinds []string) error) {
 
 // Attached composes the host before the session can publish ready.
 func (h *Host) Attached(ctx context.Context, kinds []string) error {
+	h.ready.Store(false)
 	h.mu.Lock()
 	fn := h.onAttached
 	h.mu.Unlock()

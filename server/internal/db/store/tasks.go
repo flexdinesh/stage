@@ -239,6 +239,7 @@ type Transition struct {
 	BeginAttempt  bool        // launch start: attempt+1 and a new launch_request_id, clear session/error/finished/start/ready_at
 	Session       *SessionRef // set the session (+ launched_at)
 	ObservedStart *time.Time  // first native execution of an adopted backlog session
+	ObservedAt    *time.Time  // observation time for the event and first finish
 	LastError     *string     // set last_error
 }
 
@@ -337,7 +338,7 @@ type Tasks interface {
 	SessionOccupied(ctx context.Context, sessionID, taskID int64) (bool, error)
 	Events(ctx context.Context, taskID int64) ([]TaskEvent, error)
 	// AddEvent appends a task event (from nil: none) and returns its time.
-	AddEvent(ctx context.Context, taskID int64, from *TaskState, to TaskState, detail string) (time.Time, error)
+	AddEvent(ctx context.Context, taskID int64, from *TaskState, to TaskState, detail string, observedAt *time.Time) (time.Time, error)
 	// JournalState is what the task's derived journal events read
 	// (ErrNotFound).
 	JournalState(ctx context.Context, id int64) (TaskJournalState, error)

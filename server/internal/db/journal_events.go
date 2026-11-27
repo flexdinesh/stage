@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -59,7 +60,11 @@ var workStates = []TaskState{StateLaunching, StateRunning, StateNeedsInput, Stat
 // tree at the event's time, under the task's session and attempt; work
 // recorded by the task protects it and its tree.
 func addTaskEvent(ctx context.Context, tx store.Tx, taskID int64, from *TaskState, to TaskState, detail string) error {
-	at, err := tx.Tasks().AddEvent(ctx, taskID, from, to, detail)
+	return addTaskEventAt(ctx, tx, taskID, from, to, detail, nil)
+}
+
+func addTaskEventAt(ctx context.Context, tx store.Tx, taskID int64, from *TaskState, to TaskState, detail string, observedAt *time.Time) error {
+	at, err := tx.Tasks().AddEvent(ctx, taskID, from, to, detail, observedAt)
 	if err != nil {
 		return err
 	}

@@ -123,7 +123,7 @@ func (s *Service) Run(ctx context.Context) {
 			refresh := make(chan struct{}, 1)
 			workers[id] = refresh
 			wg.Add(1)
-			go loop(s.FullSyncEvery, refresh, func(ctx context.Context) error { _, err := s.syncConnection(ctx, id); return err })
+			go loop(s.FullSyncEvery, refresh, func(ctx context.Context) error { _, err := s.syncConnection(ctx, id, false); return err })
 		}
 	}
 	ensure()
@@ -154,7 +154,7 @@ func (s *Service) FullSync(ctx context.Context, skip ...int64) (Result, error) {
 	}
 	results := make(chan response, len(connections))
 	for id := range connections {
-		go func() { r, e := s.syncConnection(ctx, id); results <- response{id, r, e} }()
+		go func() { r, e := s.syncConnection(ctx, id, true); results <- response{id, r, e} }()
 	}
 	var out Result
 	var errs []error
@@ -178,7 +178,7 @@ func (s *Service) FullSync(ctx context.Context, skip ...int64) (Result, error) {
 	return out, errors.Join(errs...)
 }
 
-func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) {
+func (s *Service) syncConnection(ctx context.Context, id int64, freshSessions bool) (Result, error) {
 	now := time.Now().UTC()
 	st := s.syncState(id)
 	if !st.running.CompareAndSwap(false, true) {
@@ -206,18 +206,22 @@ func (s *Service) syncConnection(ctx context.Context, id int64) (Result, error) 
 			s.log.Info("project import", "connection", id, "created", imported.Created, "bound", imported.Bound, "moved", imported.Moved)
 		}
 	}
-	tasks, err := s.store.ListTasks(ctx, db.TaskFilter{Closed: "all"})
-	if err != nil {
-		return r, errors.Join(append(errs, err)...)
-	}
-	for _, t := range tasks {
-		if t.ConnectionID != id || t.Session == nil {
-			continue
+	// Sync now can request a fresh session read in addition to inventory.
+	// Background discovery leaves session sampling to the watch runner.
+	if freshSessions {
+		tasks, err := s.store.ListTasks(ctx, db.TaskFilter{Closed: "all"})
+		if err != nil {
+			return r, errors.Join(append(errs, err)...)
 		}
-		if err := s.poller.PollTask(ctx, t); err != nil {
-			errs = append(errs, err)
-		} else {
-			r.Sessions++
+		for _, t := range tasks {
+			if t.ConnectionID != id || t.Session == nil {
+				continue
+			}
+			if err := s.poller.PollTask(ctx, t); err != nil {
+				errs = append(errs, err)
+			} else {
+				r.Sessions++
+			}
 		}
 	}
 	r.FinishedAt = time.Now().UTC()

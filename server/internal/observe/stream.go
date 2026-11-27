@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"sync/atomic"
+	"time"
 
-	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
@@ -78,15 +78,12 @@ const (
 // /api/connections/{id}/observations) to the task that owns its session.
 // An unowned session is left to discovery.
 func (s *Service) Ingest(ctx context.Context, o execution.Observation) (Ingested, error) {
-	t, err := s.store.TaskBySession(ctx, o.Session)
-	if errors.Is(err, db.ErrNotFound) {
-		return Unowned, nil
+	at := o.UpdatedAt
+	if at.IsZero() {
+		at = time.Now().UTC()
 	}
-	if err != nil {
-		return Unowned, err
-	}
-	if t.State == db.StateLaunching {
-		return Launching, nil // the launch reconciles its own session
-	}
-	return Applied, s.coord.Apply(ctx, t, o)
+	return s.ingestLocal(ctx, Record{
+		ConnectionID: o.Session.ConnectionID, ExternalSessionID: o.Session.ExternalSessionID,
+		ObservedAt: at, Observation: &o,
+	})
 }

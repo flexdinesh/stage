@@ -125,7 +125,7 @@ execution observations), `Trees` (trees, membership, needs), `Journal`,
 `Acceptances`, `Schedules` (and runs), `Projects` (bindings, external
 workspaces, identity and imports), `Connections` (harness connections),
 `HarnessSetup` (settings, secrets and sync status), `Machines` (pairing codes,
-machine tokens),
+machine tokens), `ObservationProducers` (producer cursors and dispositions),
 `Notifications`, `Sessions` (session identities), `Attachments`,
 `Users`, `Preferences`, `Push` (VAPID keys, subscriptions) and `Snippets`.
 Repository methods are named queries: they hold no rules, return engine
@@ -209,6 +209,24 @@ settings patch and update or delete one secret atomically. Worker secrets stay
 in the worker credential file. `harness_sync_status` stores nullable last
 error and last successful full sync per machine and kind, independently of a
 connection. Each status write updates only its own field.
+
+## Worker observation receipts
+
+`observation_producers` records the committed cursor per machine and
+producer. One producer is active per machine, and superseded producer IDs
+stay recorded to fence replay. A record's effects and cursor commit in one
+write. A rejected record, such as one for a retired connection, advances
+the cursor with a code in `observation_dispositions`. A gap disposition
+also records the time range and the loss count as decimal text to preserve
+the full unsigned range. Dispositions store metadata only. A failed write
+stops advancement at the last committed record. A retry after a lost reply
+returns the committed cursor and skips applied records. Transient
+notifications run after commit.
+
+The worker's outbox and cached compose inputs live under its own config
+directory. The database copy carries the server's observation receipts
+and task effects, so the server can recognize replay after a cutover.
+[Worker observation files](runtime.md#worker-observation-files)
 
 ## Transactions and locking
 
@@ -473,6 +491,11 @@ and paging. (Thread search was removed with API v3.)
   Paired migration 0038 `project_identity` backfills the new shape before
   dropping the superseded columns and table in the coordinated layer 07
   upgrade. See [Project identity](#project-identity).
+  Paired migration 0039 `observation_producers` adds durable worker observation
+  receipts on SQLite and Postgres. Existing task and observation data is
+  retained. The receipts are included in `db copy`. Update the main server
+  and workers together.
+  See [Worker observation receipts](#worker-observation-receipts).
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.

@@ -33,8 +33,8 @@ LEFT JOIN execution_observations o ON o.session_id=n.session_id`
 
 func (r notifications) Insert(ctx context.Context, n store.NewNotification, sid *int64) (int64, error) {
 	var id int64
-	err := r.QueryRow(ctx, `INSERT INTO notifications(event,task_id,title,project_title,url,session_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
-		string(n.Event), n.TaskID, n.Title, n.ProjectTitle, n.URL, sid).Scan(&id)
+	err := r.QueryRow(ctx, `INSERT INTO notifications(event,task_id,title,project_title,url,session_id,created_at) VALUES($1,$2,$3,$4,$5,$6,COALESCE($7::timestamptz,now())) RETURNING id`,
+		string(n.Event), n.TaskID, n.Title, n.ProjectTitle, n.URL, sid, n.ObservedAt).Scan(&id)
 	return id, err
 }
 

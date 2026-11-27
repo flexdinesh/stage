@@ -3,9 +3,9 @@ package observe
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -17,15 +17,17 @@ import (
 type Coordinator interface {
 	PollTask(context.Context, db.Task) error
 	ReconcileLaunch(context.Context, db.Task) error
-	Apply(context.Context, db.Task, execution.Observation) error
+	CheckObservation(string, execution.Observation) error
+	ApplyObservation(context.Context, *db.Store, db.Task, execution.Observation, time.Time) (*workevent.TaskChange, bool, error)
+	PublishObservation(context.Context, *workevent.TaskChange, bool, bool)
 }
 
 type Adapters interface {
 	Adapter(int64) (execution.Adapter, error)
 	All() map[int64]execution.Adapter
 	Descriptor(string) (harness.Descriptor, bool)
-	Harnesses() *harness.Registry
 	Online(machineID int64) bool
+	InProcess(machineID int64) bool
 }
 
 type Options struct {
@@ -45,10 +47,14 @@ type Service struct {
 	watchSeeded   sync.Map // connection IDs with a successful first observation pass
 	started       time.Time
 	kick          chan struct{}
+	runner        atomic.Pointer[Runner]
+	workers       WatchTransport
+	resamples     sync.Map // machine ID to a resample request counter
 
-	PollEvery       time.Duration
-	StalePollEvery  time.Duration
-	OnSessionChange func(context.Context, workevent.SessionChange)
+	PollEvery          time.Duration
+	StalePollEvery     time.Duration
+	OnSessionChange    func(context.Context, workevent.SessionChange)
+	RecordNotification func(context.Context, *db.Store, workevent.ObservationChange) (func(), error)
 }
 
 func New(o Options) *Service {
@@ -70,6 +76,9 @@ func (s *Service) ConnectionsChanged(old, next int64) {
 	if old != next {
 		s.watchSeeded.Delete(old)
 	}
+	if runner := s.runner.Load(); runner != nil && old == next {
+		runner.Reset(next)
+	}
 	s.Kick()
 }
 func (s *Service) Kick() {
@@ -77,52 +86,4 @@ func (s *Service) Kick() {
 	case s.kick <- struct{}{}:
 	default:
 	}
-}
-
-func (s *Service) Run(ctx context.Context) {
-	var wg sync.WaitGroup
-	loop := func(every time.Duration, kick <-chan struct{}, fn func(context.Context) error) {
-		defer wg.Done()
-		timer := time.NewTicker(every)
-		defer timer.Stop()
-		for {
-			// An uninstalled (disconnected) connection's workers idle quietly.
-			var unavailable *db.ConflictError
-			if err := fn(ctx); err != nil && ctx.Err() == nil && !(errors.As(err, &unavailable) && unavailable.Code == "connection_unavailable") {
-				s.log.Warn("execution sync", "err", err)
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-timer.C:
-			case <-kick:
-			}
-		}
-	}
-	// Each connection owns its observation timers, independent of other connections.
-	workers := map[int64]struct{}{}
-	ensure := func() {
-		for id := range s.adapters.All() {
-			if _, ok := workers[id]; ok {
-				continue
-			}
-			workers[id] = struct{}{}
-			wg.Add(3)
-			go loop(s.PollEvery, nil, func(ctx context.Context) error {
-				_ = s.Stream(ctx, id) // Stream records and logs its own failures.
-				return nil
-			})
-			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.pollConnection(ctx, id) })
-			go loop(s.PollEvery, nil, func(ctx context.Context) error { return s.watchAttention(ctx, id) })
-		}
-	}
-	ensure()
-	for ctx.Err() == nil {
-		select {
-		case <-ctx.Done():
-		case <-s.kick:
-			ensure()
-		}
-	}
-	wg.Wait()
 }

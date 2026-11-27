@@ -436,11 +436,11 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 			}
 		}
 		from := res.From
-		if err := addTaskEvent(ctx, tx, t.TaskID, &from, t.To, t.Detail); err != nil {
+		if err := addTaskEventAt(ctx, tx, t.TaskID, &from, t.To, t.Detail, t.ObservedAt); err != nil {
 			return err
 		}
 		if t.To.Active() {
-			if err := reopenOnActivity(ctx, tx, t.TaskID, t.To); err != nil {
+			if err := reopenOnActivity(ctx, tx, t.TaskID, t.To, t.ObservedAt); err != nil {
 				return err
 			}
 		}
@@ -456,14 +456,14 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 // reopenOnActivity: task id became active (to), so an archived task is
 // unarchived and a done or archived tree reopened, each with a task event
 // (docs/api.md "Done, archive and delete").
-func reopenOnActivity(ctx context.Context, tx store.Tx, id int64, to TaskState) error {
+func reopenOnActivity(ctx context.Context, tx store.Tx, id int64, to TaskState, observedAt *time.Time) error {
 	label := strings.ReplaceAll(string(to), "_", " ")
 	unarchived, err := tx.Tasks().Unarchive(ctx, id)
 	if err != nil {
 		return err
 	}
 	if unarchived {
-		if err := addTaskEvent(ctx, tx, id, &to, to, "unarchived: became "+label); err != nil {
+		if err := addTaskEventAt(ctx, tx, id, &to, to, "unarchived: became "+label, observedAt); err != nil {
 			return err
 		}
 	}

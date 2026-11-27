@@ -189,7 +189,9 @@ SELECT (SELECT count(*) FROM tasks WHERE state = 'needs_input')
 }
 
 func (r observations) Watched(ctx context.Context, connection int64) ([]store.SessionRef, error) {
-	rows, err := r.Query(ctx, `SELECT si.external_id FROM execution_observations o JOIN session_identities si ON si.id=o.session_id WHERE si.connection_id=$1 AND o.observation->'child'='false'::jsonb AND o.observation->>'state' IN ('running','needs_input','done')`, connection)
+	rows, err := r.Query(ctx, `SELECT si.external_id FROM execution_observations o JOIN session_identities si ON si.id=o.session_id
+ WHERE si.connection_id=$1 AND o.observation->'child'='false'::jsonb AND o.observation->>'state' IN ('running','needs_input','done')
+ AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.session_id=o.session_id)`, connection)
 	if err != nil {
 		return nil, err
 	}

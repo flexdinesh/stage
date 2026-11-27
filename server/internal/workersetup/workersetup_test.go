@@ -60,10 +60,11 @@ type rig struct {
 // without local harnesses), Claude Code's machine-local environment,
 // Codex's options (its daemon), and which harness kinds the server omits.
 type rigOptions struct {
-	profile      harness.Profile
-	claude       *claudecodesetup.Options
-	codex        *codexsetup.Options
-	omittedKinds []string
+	profile       harness.Profile
+	claude        *claudecodesetup.Options
+	codex         *codexsetup.Options
+	omittedKinds  []string
+	cacheIdentity string
 }
 
 // registry is the main server's harnesses.
@@ -136,16 +137,28 @@ func newRigWith(t *testing.T, env map[string]string, o rigOptions) *rig {
 }
 
 func (r *rig) startWorker() {
+	r.startWorkerWith(nil)
+}
+
+func (r *rig) startWorkerWith(onHost func(context.Context, *remote.Host, *workersetup.Setup)) {
 	r.t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	r.stop, r.done = cancel, make(chan error, 1)
 	host := func(id int64, call workerchan.Upcall) worker.Host {
 		h := remote.NewHost(machine.NewLocal(id, r.opts.profile, machine.LocalOps{}))
-		workersetup.Attach(workersetup.Options{
+		stateDir := ""
+		if r.opts.cacheIdentity != "" {
+			stateDir = worker.Dir(r.cfgPath)
+		}
+		setup := workersetup.Attach(workersetup.Options{
 			Host: h, Ports: workersetup.Ports{Call: call, Creds: worker.NewCredentialStore(r.cfgPath, harnesses.LegacySecrets()...)},
 			Getenv: func(k string) string { return r.env[k] }, Logger: quiet(),
 			Overrides: map[string]any{t3.Kind: r.fake, claudecode.Kind: r.opts.claude, codex.Kind: r.opts.codex},
+			StateDir:  stateDir, CacheIdentity: r.opts.cacheIdentity,
 		})
+		if onHost != nil {
+			onHost(ctx, h, setup)
+		}
 		return h
 	}
 	done := r.done
@@ -422,6 +435,15 @@ func TestSetupCallsStayOnTheCallersMachine(t *testing.T) {
 	if settings.URL == nil || *settings.URL != "http://laptop:3773" {
 		t.Fatalf("remote T3 URL %+v", settings.URL)
 	}
+	raw, err := p.Call(ctx, remote.KindSetupSnapshot, json.RawMessage(`{"kinds":["t3"],"machineId":1}`))
+	var inputs remote.SetupSnapshot
+	if err != nil || json.Unmarshal(raw, &inputs) != nil {
+		t.Fatalf("setup snapshot: %s %v", raw, err)
+	}
+	t3Input := inputs[t3.Kind]
+	if len(inputs) != 1 || t3Input.Connection.ID != 0 || string(t3Input.Settings) != `{"url":"http://laptop:3773"}` {
+		t.Fatalf("snapshot did not use the caller's settings and connection: %+v", inputs)
+	}
 	for _, test := range []struct {
 		kind, patch string
 	}{
@@ -453,6 +475,13 @@ func TestSetupCallsStayOnTheCallersMachine(t *testing.T) {
 	}
 	if status, err := r.store.HarnessSyncStatus(ctx, r.id, opencode.Kind); err != nil || status.LastError != nil {
 		t.Fatalf("remote status after clearing %+v %v", status, err)
+	}
+	if err := r.store.SaveHarnessSettings(ctx, r.id, t3.Kind, json.RawMessage(`{"adminToken":"invalid-stored-setting"}`)); err != nil {
+		t.Fatal(err)
+	}
+	var rejected *workerchan.RemoteError
+	if raw, err := p.Call(ctx, remote.KindSetupSnapshot, remote.SetupSnapshotRequest{Kinds: []string{t3.Kind}}); len(raw) != 0 || !errors.As(err, &rejected) || rejected.Code != remote.CodeInvalid {
+		t.Fatalf("snapshot accepted invalid stored settings: %v", err)
 	}
 }
 

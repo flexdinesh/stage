@@ -230,10 +230,16 @@ func Run(ctx context.Context, o Options) error {
 	// Hooks only queue work; set before RecoverLaunching emits transitions.
 	eng.Coordinator.OnTransition = func(ctx context.Context, c workevent.TaskChange) {
 		releases.Each(func(r *release.Runner) { r.OnTransition(ctx, c) })
+		eng.Observe.Kick()
 		notifier.OnTransition(ctx, c)
 		inbox.Signal()
 	}
-	eng.Observe.OnSessionChange = notifier.OnSessionChange
+	eng.Coordinator.OnObservedTransition = func(ctx context.Context, c workevent.TaskChange) {
+		releases.Each(func(r *release.Runner) { r.OnTransition(ctx, c) })
+		eng.Observe.Kick()
+		inbox.Signal()
+	}
+	eng.Observe.RecordNotification = notifier.RecordObservation
 	eng.Coordinator.OnAccepted = kickTrees
 	if err := local.compose(ctx, store, cfg, registry, o.HarnessOverrides, eng.Kick, logger); err != nil {
 		return err
@@ -243,6 +249,7 @@ func Run(ctx context.Context, o Options) error {
 	channels := workerchan.NewHub(ctx, workerchan.Options{Version: buildinfo.Version, Seen: api.TouchMachineFunc(store, func(err error) {
 		logger.Warn("machine presence", "err", err)
 	})})
+	eng.ServeWorkers(channels)
 	// Remote machines: each joined machine's connections are proxied over
 	// its worker channel (ADR 0002, docs/execution.md "Remote machines").
 	hosts := remote.NewHosts(machines, channels, func(machineID int64) []int64 {

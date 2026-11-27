@@ -29,6 +29,7 @@ const (
 
 // Setup port calls a worker sends the main server, scoped to the worker's machine.
 const (
+	KindSetupSnapshot          = "setup.snapshot"
 	KindSettingsGet            = "setup.settings.get"
 	KindSettingsSave           = "setup.settings.save"
 	KindStatusError            = "setup.status.error"
@@ -95,6 +96,20 @@ type SettingsRequest struct {
 	Kind  string          `json:"kind"`
 	Patch json.RawMessage `json:"patch"`
 }
+
+// SetupSnapshotRequest selects the modules the worker can compose.
+type SetupSnapshotRequest struct {
+	Kinds []string `json:"kinds"`
+}
+
+// SetupInputs holds the public settings and active connection for one module.
+type SetupInputs struct {
+	Settings   json.RawMessage      `json:"settings"`
+	Connection ActiveIdentityResult `json:"connection"`
+}
+
+// SetupSnapshot is scoped to the authenticated worker's machine.
+type SetupSnapshot map[string]SetupInputs
 
 // StatusErrorRequest records a harness error. An empty message clears it.
 type StatusErrorRequest struct {

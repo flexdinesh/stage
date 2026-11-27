@@ -190,8 +190,8 @@ func (s *Store) RejectAttempt(ctx context.Context, a Attempt, reason string) err
 	})
 }
 
-// WatchedSessions retains normalized active observations after they leave the
-// harness attention feed, so their eventual outcome remains observable.
+// WatchedSessions retains unowned observations after they leave the harness
+// attention feed, so their eventual outcome remains observable.
 func (s *Store) WatchedSessions(ctx context.Context, connection int64) ([]execution.SessionRef, error) {
 	return read(ctx, s, func(tx store.Tx) ([]execution.SessionRef, error) { return tx.Observations().Watched(ctx, connection) })
 }
