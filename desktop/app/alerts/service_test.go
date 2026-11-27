@@ -33,6 +33,7 @@ type fakeServer struct {
 type fakeConn struct {
 	lastEventID string
 	hasCursor   bool
+	session     string
 	out         chan string
 	end         chan struct{}
 	once        sync.Once
@@ -73,6 +74,9 @@ func (fs *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 	c := &fakeConn{out: make(chan string, 64), end: make(chan struct{})}
 	c.lastEventID = r.Header.Get("Last-Event-ID")
 	_, c.hasCursor = r.Header["Last-Event-Id"]
+	if cookie, err := r.Cookie("stage_session"); err == nil {
+		c.session = cookie.Value
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.WriteHeader(http.StatusOK)
 	rc := http.NewResponseController(w)

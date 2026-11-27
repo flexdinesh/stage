@@ -12,16 +12,19 @@ type preferences struct{ *runner }
 
 func (t *tx) Preferences() store.Preferences { return preferences{t.r} }
 
-func (r preferences) Get(ctx context.Context) (store.PreferencesRow, error) {
+func (r preferences) Get(ctx context.Context, userID int64) (store.PreferencesRow, error) {
 	var p store.PreferencesRow
 	// A retired default (its machine removed, or replaced without a successor) reads as none.
-	err := r.QueryRow(ctx, `SELECT (SELECT c.id FROM harness_connections c WHERE c.id=p.default_connection_id AND c.active), notify_events FROM preferences p WHERE id = 1`).
+	err := r.QueryRow(ctx, `SELECT (SELECT c.id FROM harness_connections c WHERE c.id = p.default_connection_id AND c.active),
+  (SELECT notify_events FROM notification_preferences WHERE user_id = $1)
+FROM preferences p WHERE id = 1`, userID).
 		Scan(&p.DefaultConnectionID, &p.NotifyEvents)
 	return p, err
 }
 
-func (r preferences) SetNotifyEvents(ctx context.Context, events []string) error {
-	_, err := r.Exec(ctx, `UPDATE preferences SET notify_events = $1, updated_at = `+nowSQL+` WHERE id = 1`, events)
+func (r preferences) SetNotifyEvents(ctx context.Context, userID int64, events []string) error {
+	_, err := r.Exec(ctx, `INSERT INTO notification_preferences(user_id, notify_events) VALUES($1, $2)
+ON CONFLICT(user_id) DO UPDATE SET notify_events = excluded.notify_events`, userID, jsonArray(events))
 	return err
 }
 

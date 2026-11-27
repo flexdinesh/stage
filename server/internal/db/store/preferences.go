@@ -5,17 +5,17 @@ import (
 	"time"
 )
 
-// PreferencesRow is the stored preferences row: the default connection
-// (nil when unset or no longer active) and the notify events as stored.
+// PreferencesRow holds the active default connection and the user's stored
+// notification filter (nil when the user has never set a filter).
 type PreferencesRow struct {
 	DefaultConnectionID *int64
 	NotifyEvents        []string
 }
 
-// Preferences is the preferences repository (one row).
+// Preferences stores the installation default connection and per-user notification filters.
 type Preferences interface {
-	Get(ctx context.Context) (PreferencesRow, error)
-	SetNotifyEvents(ctx context.Context, events []string) error
+	Get(ctx context.Context, userID int64) (PreferencesRow, error)
+	SetNotifyEvents(ctx context.Context, userID int64, events []string) error
 	SetDefaultConnection(ctx context.Context, id *int64) error
 }
 

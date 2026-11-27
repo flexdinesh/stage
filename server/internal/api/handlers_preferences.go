@@ -6,18 +6,28 @@ import (
 	"net/http"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/principal"
 )
+
+type preferencesJSON struct {
+	db.Preferences
+	SharedNotifications bool `json:"sharedNotifications,omitempty"`
+}
+
+func (s *server) preferencesResponse(w http.ResponseWriter, r *http.Request, p db.Preferences) {
+	actor, _ := principal.From(r.Context())
+	if s.Access != nil && !actor.IsHuman() {
+		p.NotifyEvents = []db.TaskState{}
+	}
+	writeJSON(w, http.StatusOK, preferencesJSON{p, s.Access != nil && actor.IsHuman()})
+}
 
 func (s *server) getPreferences(w http.ResponseWriter, r *http.Request) error {
 	p, err := s.Store.GetPreferences(r.Context())
 	if err != nil {
 		return err
 	}
-	if s.Access != nil {
-		// Notification preferences still belong to the personal inbox.
-		p.NotifyEvents = []db.TaskState{}
-	}
-	writeJSON(w, http.StatusOK, p)
+	s.preferencesResponse(w, r, p)
 	return nil
 }
 
@@ -33,10 +43,7 @@ func (s *server) putDefaultConnection(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return err
 	}
-	if s.Access != nil {
-		p.NotifyEvents = []db.TaskState{}
-	}
-	writeJSON(w, http.StatusOK, p)
+	s.preferencesResponse(w, r, p)
 	return nil
 }
 
@@ -55,6 +62,6 @@ func (s *server) putNotifyEvents(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, p)
+	s.preferencesResponse(w, r, p)
 	return nil
 }

@@ -97,8 +97,8 @@ The worker gateway verifies a machine-token MAC emitted only by the
 owner-private worker socket. Older workers retain status and channel
 negotiation. Their gateway requests are closed in shared mode, as are
 explicit TCP or group socket gateways. Existing harness hooks retain their
-own authentication. Inbox, badge and push access and delivery remain
-closed until #459 supplies recipient scoping.
+own authentication. Inbox, badge and push use the active human credential.
+Web Push subscription management requires a browser session.
 
 The principal is authoritative for access. The existing non-null
 `createdBy` columns still carry legacy attribution for system and machine
@@ -122,7 +122,22 @@ Use Stage's existing design and operating patterns. Setup, sign-in, invite and r
 | Admin | People and Invitations subnav in a peer to Settings, reachable from desktop sidebar and mobile More. People shows roles and status, with confirmed access changes. Members see forbidden on direct Admin navigation. |
 | Session ends or changes | Close streams and clear query caches, private assets, sensitive form values, badges, delivery state and cursors. Handle expiry, revocation, logout, cross-tab change and back navigation. Desktop also isolates background servers and clears the affected credentials on sign-out, target edit or removal. |
 
-Store each workspace event once with per-user read receipts, preferences and device push bindings. New members start with retained history read and can still see open work. Preserve user 1's existing filter and read state on upgrade. Invalidate legacy unclaimed push endpoints on opt-in and rebind after sign-in. Authorize inbox, badge counts, SSE and delivery for the recipient. On session loss, disable or account switch, clear pending delivery to the extent supported by the device.
+Store each workspace event once with per-user read receipts, preferences and
+device push bindings. New members start with retained history read and can
+still see open work. A member's filter determines which new events arrive
+unread and can alert their devices. Muted events remain in shared history.
+Preserve user 1's existing filter and read state on upgrade. Personal
+installations keep their existing filter and needs-input badge.
+
+Opt-in removes legacy unclaimed push endpoints. Each browser binds its
+subscription to its active session after sign-in. Shared pushes contain an
+opaque binding and event reference. The service worker must confirm both
+with the server before showing work details, including after offline
+delivery. Logout revokes that session's device, and disabling an account or
+changing its password revokes all of its devices. An explicit restore
+invalidates session-bound subscriptions along with the sessions. Close
+shown alerts and clear device badges and cursors on session loss or
+replacement where the platform permits.
 
 ## Delivery and migration order
 

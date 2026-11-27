@@ -1183,57 +1183,65 @@ default selection.
 
 ## Preferences
 
-The default connection and the global notification filter. New-task defaults live with each connection: its model pin is `newTaskConfig` on [`GET /api/connections`](#harness-connections-api-v6) (`PUT /api/connections/:connectionId/new-task-config`). A new task starts on the default connection and prefills the model and options pinned there, else the harness default. Permission and mode are never pinned: they start at the harness default.
+The default connection is shared across the installation. In shared access, the notification filter belongs to the authenticated account. New-task defaults live with each connection: its model pin is `newTaskConfig` on [`GET /api/connections`](#harness-connections-api-v6) (`PUT /api/connections/:connectionId/new-task-config`). A new task starts on the default connection and prefills the model and options pinned there, else the harness default. Permission and mode are never pinned: they start at the harness default.
 
 A task or schedule created without `connectionId` starts on the default connection when its project has an available primary there, else on the project's only active bound connection, else (with a default set) on its first bound connection with an available primary (the main machine's first, then by machine and connection ID). With no default and several bound connections it is 400. The web app's new-task form preselects the same connection.
 
 ### `GET /api/preferences`
-200 `{ "defaultConnectionId": number | null, "notifyEvents": NotificationEvent[] }`. `defaultConnectionId` is null when unset or when its connection is no longer active (its machine removed); pairing another instance of its harness moves it to the replacement. `notifyEvents` is the global notification filter. It returns enabled events in display order (`needs_input`, `failed`, `ready`, `done`).
+200 `{ "defaultConnectionId": number | null, "notifyEvents": NotificationEvent[], "sharedNotifications"?: true }`. `defaultConnectionId` is null when unset or when its connection is no longer active (its machine removed). Pairing another instance of its harness moves it to the replacement. `notifyEvents` lists the person's enabled events in display order (`needs_input`, `failed`, `ready`, `done`). Human sessions in shared access receive `sharedNotifications: true`. Shared agent credentials can read the connection default and receive an empty `notifyEvents`.
 
 ### `PUT /api/preferences/default-connection`
 Body: `{ "connectionId": number | null }` (null clears it).
 200 `Preferences`. 400 unknown or replaced connection.
 
 ### `PUT /api/preferences/notifications`
-Body: `{ "events": NotificationEvent[] }` (`needs_input|failed|ready|done`; duplicates dropped; `[]` = all off). Applies to every device.
+Body `{ "events": NotificationEvent[] }` with `needs_input|failed|ready|done`. Duplicates are dropped. An empty array mutes every event. Applies to new events on every device for the signed-in account. Shared history keeps muted events as read. In personal mode, muted events are dropped.
 200 `Preferences`. 400 unknown event or missing `events`.
 
 ## Notifications (Web Push)
 
-The server sends Web Push (VAPID, RFC 8291 aes128gcm) to every subscribed browser. The VAPID key pair is generated on first start and stored in the database; the VAPID subject is `STAGE_PUBLIC_URL` when it is https, else `https://github.com/flexdinesh/stage`.
+The server sends Web Push (VAPID, RFC 8291 aes128gcm) to active subscribed browsers eligible for the event. In shared access, each binding belongs to one browser session and its account. Multiple signed-in devices can receive the same account's events. Signing out invalidates that session's bindings. Disabling an account, completing a password reset, or changing its password invalidates all of its bindings. Idle and absolute expiry also end delivery. Opt-in removes the personal endpoints and requires signing in and enabling push again. The VAPID key pair is generated on demand and stored in the database. The VAPID subject is `STAGE_PUBLIC_URL` when it is HTTPS, otherwise `https://github.com/flexdinesh/stage`.
 
 ### `GET /api/push/config`
 200 `{ "publicKey": string }` (VAPID public key, base64url, uncompressed P-256 point; the browser's `applicationServerKey`).
 
 ### `POST /api/push/subscriptions`
-Body: browser `PushSubscription.toJSON()` subset `{ "endpoint": string, "keys": { "p256dh": string, "auth": string } }`. Upsert by `endpoint` (keys and user agent refreshed). 204. 400 missing field or non-https endpoint.
+Body contains the browser's `PushSubscription.toJSON()` subset `{ "endpoint": string, "keys": { "p256dh": string, "auth": string } }`. Upserts by endpoint for the current browser session. Rebinding across sessions requires matching subscription keys and rotates the delivery binding. 204 on success, 400 for missing fields or an endpoint without HTTPS, and 404 if the endpoint cannot be rebound.
 
 ### `DELETE /api/push/subscriptions`
-Body `{ "endpoint": string }`. 204 (also when unknown). 400 missing endpoint.
+Body `{ "endpoint": string }`. Removes only the current session's subscription in shared access. 204 when removed or absent. 400 missing endpoint.
+
+### `POST /api/push/subscriptions/check`
+
+Body `{ "endpoint": string }`. Returns 200 `{ "bound": boolean }` for the current browser session (personal subscription in personal mode).
 
 ### `POST /api/push/test`
-Body `{ "endpoint": string }`. Sends a test notification to that subscription synchronously. 204. 404 unknown endpoint. 502 push service rejected it (`error` = status and body); a 404/410 from the push service also deletes the subscription.
+Body `{ "endpoint": string }`. Sends a test notification to the current browser session's subscription synchronously. 204 on success, 404 when the session has no matching endpoint, and 502 when the push service rejects it. A 404/410 from the push service deletes that binding.
+
+### `POST /api/push/delivery`
+
+Body `{ "binding": string, "eventId": number }`, where zero represents a test. Resolves a shared push reference using the active browser cookie without extending its idle window. Returns the display payload for an unread event belonging to that account and binding, or 204 when no delivery remains. Signed-out and revoked sessions receive 401. CLI and agent credentials cannot manage or redeem browser push.
 
 ### `GET /api/badge`
-200 `{ "needsInput": number }`: tasks in `needs_input` + external sessions needing input (see below).
+200 `{ "needsInput": number, "unread"?: number }`. `needsInput` counts shared tasks and external sessions needing input. Shared human sessions also receive their own unread event count. Installed app badges use `unread` in shared access and `needsInput` in personal mode.
 
 ### Push payload
-JSON, shown by the service worker. Built from the stored inbox row by one server function, shared with `GET /api/notifications/stream`:
+The display payload is built from the stored inbox row, using the same fields as `GET /api/notifications/stream`. Personal Web Push carries it directly. Shared Web Push carries only `binding` and `eventId`. The worker redeems the reference before displaying or opening an alert. An offline or stale reference cannot display work details.
 ```json
 { "title": "Needs input", "body": "Say OK · stage", "url": "/tasks/7", "tag": "task-7", "badge": 2 }
 ```
 Needs-input payloads open their task or the inbox. Open in T3 continues the conversation.
-`tag` replaces an older notification for the same task (`task-<id>`) or external session (`session-<connectionId>:<externalSessionId>`); the service worker sets `renotify` so a replacement alerts again. iOS ignores tag replacement (WebKit bug 258922), so the service worker also closes shown notifications with the same tag (`tag`, or the copy in `data.tag`) before showing the new one. `badge` = `GET /api/badge` at send time. TTL 24h; urgency `high` for needs input, `normal` otherwise. Header `Topic` = first 32 chars of base64url(sha256(tag)): the push service keeps only the latest undelivered push per task or session.
+`tag` replaces an older notification for the same task (`task-<id>`) or external session (`session-<connectionId>:<externalSessionId>`). The service worker sets `renotify` to alert again and closes shown notifications with the same tag on iOS. TTL is 24 hours. Urgency is `high` for needs input and `normal` otherwise. The push service retains the latest pending message for a topic, derived from the tag and, in shared access, the binding.
 
 Clear on view: opening a task page closes its `task-<id>` system notification and marks group `task:<id>` read; opening session detail closes its `session-<connectionId>:<externalSessionId>` notification and the related task notification when present, and marks those groups read (`POST /api/notifications/read` with `groups`). Clicking a notification opens one of these pages. Opening the notifications inbox closes all of them and marks everything read.
 
-Cross-device clear (lazy): every device closes shown `task-*` / `session-*` notifications whose tag is not in `GET /api/notifications/unread-tags`, i.e. viewed on any device. The service worker does this after showing each push; the app does it on load, when it becomes visible, and on every push; the desktop app does it on every `unread` event of `GET /api/notifications/stream`. No dismiss pushes are sent: iOS revokes subscriptions for pushes that show no notification, and Chromium/Firefox only tolerate a small budget of them. WebKit ignores `close()` on notifications younger than ~30s, so those clear at a later sync. Other tags (e.g. `test`) are never closed by sync.
+Cross-device clear: each device closes shown `task-*` and `session-*` notifications after those groups have been read on the same account. The service worker reconciles after a push, the app reconciles on load and when it becomes visible, and desktop reconciles on each SSE `unread` event. OS dismissal is best effort. WebKit can defer closing recent alerts until a later sync. The account lifecycle also clears device alerts and badges when the host detects logout or session replacement.
 
-Service worker: when a window of the app is focused and visible on a Chromium browser, it skips the system notification (the app shows an in-app toast instead); other browsers (Safari, Firefox) always show it, since a push without a notification there can revoke the subscription. Either way it updates the app badge and posts `{ "type": "push" }` to every open window so the app refetches at once.
+When a window is focused and visible on Chromium, the app shows an in-app toast. Safari and Firefox show the system notification for authorized pushes. The service worker updates the app badge and posts `{ "type": "push" }` to open windows so they refetch.
 
 ## Notifications inbox
 
-Every notification the notifier sends is stored first (also when no browser is subscribed), so the app can show in-app toasts and an inbox. Entries older than 30 days are pruned hourly.
+Shared access records each workspace notification event once, including when no device is subscribed. Each account has its own read state. Newly joined accounts see retained history as read, and live work stays visible. Entries older than 30 days are pruned hourly along with their receipts.
 
 `Notification`:
 ```json
@@ -1257,7 +1265,7 @@ Every notification the notifier sends is stored first (also when no browser is s
 Task notifications retain `/tasks/<id>` for group identity and navigation. External notifications open `/?inbox`, with the harness destination in the inbox when available. Historical stored URLs are preserved; emitted destinations derive from task/session identity.
 
 ### `GET /api/notifications`
-Query: `limit` (default 50, max 200), `before` (id; only older entries), `group` (optional group key from the grouped inbox; restricts history to that task or session). 200 `{ "notifications": Notification[], "unread": number, "nextBefore": number | null }` newest first; `nextBefore` = the `before` for the next (older) page, null when none. `unread` remains the global unread event count. 400 bad `limit` / `before`.
+Query: `limit` (default 50, max 200), `before` (id; only older entries), `group` (optional group key from the grouped inbox; restricts history to that task or session). 200 `{ "notifications": Notification[], "unread": number, "nextBefore": number | null }` newest first; `nextBefore` = the `before` for the next (older) page, null when none. `readAt` and `unread` apply to the authenticated recipient. 400 bad `limit` / `before`.
 
 ### `GET /api/notifications/groups`
 Query: `limit` (default 50, max 200), `cursor` (opaque `nextCursor` from the previous page). 200 `{ "groups": NotificationGroup[], "unread": number, "latestId": number, "nextCursor": string | null }`. 400 bad `limit` / `cursor`.
@@ -1269,13 +1277,13 @@ Groups whose current state is `needs_input` come first, then other groups; each 
 Expandable history uses `GET /api/notifications?group=...`; it contains only recorded `needs_input`, `ready`, `done` and `failed` notifications. Unknown current state displays as unavailable rather than falling back to an old event.
 
 ### `POST /api/notifications/read`
-Body `{ "upTo": number }`: marks every unread entry with `id <= upTo` read. Or `{ "groups": string[] }` (1 to 20 group keys, e.g. `task:12`, `session:<connectionId>:<externalSessionId>`): marks every unread entry in those groups read. 204. 400 when neither or both are sent, `upTo` < 1, or `groups` is empty, too long or has an empty key.
+Body `{ "upTo": number }` marks the recipient's entries through `id <= upTo` read. Alternatively, `{ "groups": string[] }` marks their entries in 1 to 20 groups, such as `task:12` or `session:<connectionId>:<externalSessionId>`. 204 on success. 400 when neither or both are sent, `upTo` < 1, or `groups` is empty, too long or has an empty key.
 
 ### `GET /api/notifications/unread-tags`
 200 `{ "tags": string[] }`: push tags of groups with unread entries (`task:<id>` → `task-<id>`, `session:<connectionId>:<externalSessionId>` → `session-<connectionId>:<externalSessionId>`; identity-less groups have none). Devices close shown notifications whose tag is missing (see "Clear on view").
 
 ### `GET /api/notifications/stream`
-Server-sent events: inbox rows after a cursor, then live rows and unread snapshots (the desktop app's native notifications and badge). Headers `Content-Type: text/event-stream`, `Cache-Control: no-cache, no-transform`, `X-Accel-Buffering: no`; first line `retry: 3000`. 400 when the cursor is not an integer >= 0.
+Server-sent events return inbox rows after a cursor, then live rows and the recipient's unread snapshots. Headers include `Content-Type: text/event-stream` and `X-Accel-Buffering: no`. Shared streams are private and use `Cache-Control: private, no-store, no-transform`. Personal streams use `no-cache, no-transform`. The first line is `retry: 3000`. 400 when the cursor is not an integer >= 0.
 
 Cursor = a notification id: `Last-Event-ID` (reconnect) wins over `?after`. No cursor → cursor = the newest id (no replay). A cursor above the newest id (e.g. a reset database) → cursor = the newest id and `reset: true`.
 
@@ -1283,13 +1291,14 @@ Events, in order:
 - `hello` (`id: <cursor>`): `{ "latestId": number, "reset": boolean }`. `latestId` = newest id at connect (0 when empty).
 - `gap` (no id): `{}`, sent when more than 100 rows follow the cursor; only the newest 100 are replayed.
 - `notification` (`id: <id>`), per row id > cursor, ascending: `{ "id": 12, "event": "needs_input", "createdAt": "2026-11-08T10:00:00Z", "read": false, "tag": "task-7", "title": "Needs input", "body": "Say OK · stage", "url": "/tasks/7" }`. `tag`, `title`, `body` and `url` are the Push payload of that row; `tag` is `""` for identity-less rows. Replay includes rows already read (`read: true`).
-- `unread` (no id): `{ "tags": string[], "badge": number }`: the `GET /api/notifications/unread-tags` tags and `GET /api/badge` `needsInput`. Sent once after the replay, then only when it changes.
+- `unread` (no id) carries `{ "tags": string[], "badge": number }` with the recipient's unread tags and displayed badge count. Sent once after replay, then on changes.
+- `access-ended` (no id) carries `{}` and terminates a shared stream when its session loses access. The host clears that session's badge, alerts, and reconnect cursor. A reconnect without valid credentials returns 401.
 
-Live: every new inbox row, read (`POST /api/notifications/read`), prune and task transition wakes the stream; it sends rows after the last one sent (no cap), then `unread` if changed. `: ping` every 15s, which also recomputes `unread` (external sessions' needs-input changes reach the badge within 15s). The stream ends when the server shuts down; reconnect with `Last-Event-ID`.
+Each new inbox row, read, prune, or task transition wakes the stream. It sends rows after the most recent row it sent and any changed unread snapshot. A ping every 15 seconds also recomputes the snapshot. Shared streams periodically recheck credentials without extending browser idle expiry. Reconnect after network loss or a server restart with the same session and its `Last-Event-ID`.
 
 ## Notification rules
 
-- Filter: an event not in `preferences.notifyEvents` (read when the event is sent) is dropped entirely: no inbox row (so no toast or bell entry) and no push, on any device. If the filter cannot be read, the event notifies.
+- A shared account's filter determines whether each new event arrives unread and can alert that account's devices. All workspace events remain available in shared history. In personal mode, the owner's filter determines which events are recorded and pushed.
 
 - Tasks: a transition into `needs_input` ("Needs input"), `done` ("Done") or `failed` ("Failed") notifies. Stored `url` = `/tasks/<id>` for stable group identity; push destination = the task URL. Other states (incl. `interrupted`) do not.
 - Ready: a manual tree member with at least one need whose needs all have user acceptance (see "Tree rules") notifies once per readiness episode ("Ready", `url` = `/tasks/<id>`, tag `task-<id>`). Roots and auto members never send it.

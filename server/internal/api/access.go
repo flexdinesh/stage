@@ -55,7 +55,7 @@ const (
 	humanRoute routeScope = iota
 	agentRoute
 	adminRoute
-	stagedRoute
+	passiveHumanRoute
 )
 
 type credential struct {
@@ -168,7 +168,7 @@ func (s *server) authorize(scope routeScope, next http.HandlerFunc) http.Handler
 			pending(w)
 			return
 		}
-		ctx, err := s.Access.authRequest(r, true)
+		ctx, err := s.Access.authRequest(r, scope != passiveHumanRoute)
 		if err != nil {
 			writeAccessError(w, err)
 			return
@@ -183,9 +183,6 @@ func (s *server) authorize(scope routeScope, next http.HandlerFunc) http.Handler
 				accessError(w, http.StatusForbidden, "principal_forbidden", "This operation requires a Stage admin.")
 				return
 			}
-		case stagedRoute:
-			accessError(w, http.StatusForbidden, "shared_client_unavailable", "This feature is unavailable in shared access.")
-			return
 		}
 		if !allowed {
 			accessError(w, http.StatusForbidden, "principal_forbidden", "Your credential does not allow this operation.")
@@ -265,7 +262,7 @@ func (a *Access) watchSession(ctx context.Context) (context.Context, func()) {
 	if check == nil {
 		return ctx, func() {}
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancelCause(ctx)
 	go func() {
 		tick := time.NewTicker(time.Second)
 		defer tick.Stop()
@@ -275,13 +272,13 @@ func (a *Access) watchSession(ctx context.Context) (context.Context, func()) {
 				return
 			case <-tick.C:
 				if err := check(ctx); err != nil {
-					cancel()
+					cancel(err)
 					return
 				}
 			}
 		}
 	}()
-	return ctx, cancel
+	return ctx, func() { cancel(context.Canceled) }
 }
 
 func (s *server) accessHealth(w http.ResponseWriter, r *http.Request) {

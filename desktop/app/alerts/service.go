@@ -4,7 +4,7 @@
 // remotes over TCP), decides what to show (catch-up, foreground, toggle,
 // grouping), keeps each server's cursor and the device preferences,
 // reconciles shown notifications with each server's unread snapshot and
-// sets the badge to the sum of their needs-input counts. It is pure Go,
+// sets the badge to the sum of their badge counts. It is pure Go,
 // without MyGo: the OS side is a Sink.
 package alerts
 
@@ -86,9 +86,13 @@ type Config struct {
 	// catch-up batch, with its newest id; once per live row), shown or not.
 	// It must not block. Nil means no-op.
 	Delivered func(serverID string, id int64)
-	// Changed runs when a server's needs-input count (Badges) changed. It
+	// Changed runs when a server's badge count (Badges) changed. It
 	// must not block. Nil means no-op.
 	Changed func()
+	// AccessEnded reports a rejected native sign-in after clearing its alerts.
+	// The credential owner should clear its stored session only if the exact
+	// target and session ID still match. It must not block. Nil means no-op.
+	AccessEnded func(t target.Target, sessionID string)
 	// Now is the clock (default time.Now).
 	Now func() time.Time
 	// Logf logs (default log.Printf).
@@ -116,7 +120,8 @@ type queued struct {
 	id     int64
 	url    string
 	// seq is the server's unread snapshot sequence when it was queued.
-	seq uint64
+	seq      uint64
+	delivery context.Context
 }
 
 // stream is one server's notification stream and its notifications.
@@ -132,6 +137,10 @@ type stream struct {
 	looped bool
 
 	noStreamLogged bool
+	awaitingAccess bool
+	session        Session
+	delivery       context.Context
+	cancelDelivery context.CancelFunc
 	shown          map[string]shownNote // by note ID
 	summaryTags    []string
 	unread         map[string]bool
@@ -139,6 +148,8 @@ type stream struct {
 	badge          int
 	hasBadge       bool
 }
+
+func (st *stream) current(gen uint64) bool { return st.gen == gen && st.ctx.Err() == nil }
 
 // Service consumes the notification streams of every saved server.
 // Create it with New, then Start; SetServers on every list change;
@@ -156,17 +167,18 @@ type Service struct {
 	queueWake chan struct{}
 	saveWake  chan struct{}
 
-	mu       sync.Mutex
-	prefs    Prefs
-	dirty    bool
-	started  bool
-	closed   bool
-	streams  map[string]*stream
-	order    []string // stream ids in list order
-	queue    []queued
-	busy     bool
-	badge    int
-	badgeSet bool
+	mu            sync.Mutex
+	prefs         Prefs
+	dirty         bool
+	started       bool
+	closed        bool
+	streams       map[string]*stream
+	order         []string // stream ids in list order
+	queue         []queued
+	pendingCloses map[string]struct{}
+	busy          bool
+	badge         int
+	badgeSet      bool
 }
 
 // New loads the preferences (a corrupt file is logged and replaced by
@@ -193,11 +205,12 @@ func New(cfg Config) *Service {
 		cfg.Max = 3
 	}
 	s := &Service{
-		cfg:       cfg,
-		queueWake: make(chan struct{}, 1),
-		saveWake:  make(chan struct{}, 1),
-		prefs:     DefaultPrefs(),
-		streams:   map[string]*stream{},
+		cfg:           cfg,
+		queueWake:     make(chan struct{}, 1),
+		saveWake:      make(chan struct{}, 1),
+		prefs:         DefaultPrefs(),
+		streams:       map[string]*stream{},
+		pendingCloses: map[string]struct{}{},
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	if cfg.PrefsPath != "" {
@@ -258,9 +271,9 @@ func (s *Service) startLoopLocked(st *stream) {
 // their cursor is forgotten), and a server at a new address reconnects. A
 // local target without a socket keeps the socket already known.
 func (s *Service) SetServers(ts []target.Target) {
-	var closes []string
 	s.mu.Lock()
 	keep := map[string]bool{}
+	var countChanged, cleared bool
 	s.order = s.order[:0]
 	for _, t := range ts {
 		if t.ID == "" || keep[t.ID] {
@@ -268,42 +281,26 @@ func (s *Service) SetServers(ts []target.Target) {
 		}
 		keep[t.ID] = true
 		s.order = append(s.order, t.ID)
-		s.upsertLocked(t, false)
+		count, dropped := s.upsertLocked(t, false)
+		countChanged, cleared = countChanged || count, cleared || dropped
 	}
 	for id, st := range s.streams {
 		if keep[id] {
 			continue
 		}
+		count, dropped := s.clearAccessLocked(st)
+		countChanged, cleared = countChanged || count, cleared || dropped
 		st.stop()
-		for nid := range st.shown {
-			closes = append(closes, nid)
-		}
-		if sp := s.prefs.Servers[id]; sp != nil {
-			closes = append(closes, sp.Shown...)
-		}
-		s.queue = slices.DeleteFunc(s.queue, func(q queued) bool { return q.server == id })
 		delete(s.streams, id)
-		delete(s.prefs.Servers, id)
-		s.markDirtyLocked()
 	}
-	badge, setBadge := s.badgeLocked()
+	setBadge := s.badgeLocked()
 	s.mu.Unlock()
-	if setBadge {
-		s.cfg.Sink.SetBadge(badge)
-	}
-	slices.Sort(closes)
-	for _, id := range slices.Compact(closes) {
-		s.cfg.Sink.Close(id)
-	}
-	if len(closes) > 0 || setBadge {
-		s.changed()
-	}
+	s.accessChanged(countChanged, cleared, setBadge)
 }
 
-// Connect (re)connects the stream of t now (adding t when it is new):
-// the current connection and any backoff wait end and a new one opens at
-// once. Call it on every ready of a server (a new instance may have
-// replayed nothing to the old connection).
+// Connect (re)connects the stream of t now (adding t when it is new).
+// Call it on every ready of a server. A stream waiting for sign-in
+// resumes through SetSession.
 func (s *Service) Connect(t target.Target) {
 	if t.ID == "" {
 		return
@@ -312,45 +309,51 @@ func (s *Service) Connect(t target.Target) {
 	if _, ok := s.streams[t.ID]; !ok {
 		s.order = append(s.order, t.ID)
 	}
-	s.upsertLocked(t, true)
+	countChanged, cleared := s.upsertLocked(t, true)
+	setBadge := s.badgeLocked()
 	s.mu.Unlock()
+	s.accessChanged(countChanged, cleared, setBadge)
 }
 
 // upsertLocked adds or updates the stream of t; it reconnects when force
 // or the address changed.
-func (s *Service) upsertLocked(t target.Target, force bool) {
+func (s *Service) upsertLocked(t target.Target, force bool) (countChanged, cleared bool) {
 	st, ok := s.streams[t.ID]
 	if !ok {
 		ctx, stop := context.WithCancel(s.ctx)
 		st = &stream{id: t.ID, t: t, ctx: ctx, stop: stop, wake: make(chan struct{}, 1), shown: map[string]shownNote{}}
+		st.delivery, st.cancelDelivery = context.WithCancel(ctx)
 		s.streams[t.ID] = st
 		s.startLoopLocked(st)
-		return
+		return false, false
 	}
 	if t.Kind == target.KindLocal && t.Socket == "" {
 		t.Socket = st.t.Socket
 	}
 	moved := !st.t.Same(t)
+	if moved && (st.t.Remote() || st.t.Socket != "") {
+		countChanged, cleared = s.clearAccessLocked(st)
+		st.awaitingAccess = false
+	}
 	st.t = t
 	if force || moved {
-		st.gen++
-		st.noStreamLogged = false
-		if st.cancel != nil {
-			st.cancel()
-		}
-		signal(st.wake)
+		s.reconnectLocked(st)
 	}
+	return countChanged, cleared
+}
+
+func (s *Service) reconnectLocked(st *stream) {
+	st.gen++
+	st.noStreamLogged = false
+	if st.cancel != nil {
+		st.cancel()
+	}
+	signal(st.wake)
 }
 
 // Flush writes pending preference changes now.
 func (s *Service) Flush() error {
-	s.mu.Lock()
-	dirty := s.dirty
-	s.mu.Unlock()
-	if !dirty {
-		return nil
-	}
-	return s.save()
+	return s.save(false)
 }
 
 // Close stops the streams and the worker and flushes the preferences.
@@ -384,14 +387,23 @@ func (s *Service) State() State {
 	return StateOn
 }
 
-// Badges is each server's needs-input count, for the servers whose
+// Badges is each server's count, for the servers whose
 // stream sent an unread snapshot.
 func (s *Service) Badges() map[string]int {
+	return s.badges(false)
+}
+
+// NeedsInput is the count shown in the server list for personal servers.
+func (s *Service) NeedsInput() map[string]int {
+	return s.badges(true)
+}
+
+func (s *Service) badges(personalOnly bool) map[string]int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := map[string]int{}
 	for id, st := range s.streams {
-		if st.hasBadge {
+		if st.hasBadge && (!personalOnly || st.session.ID == "") {
 			out[id] = st.badge
 		}
 	}
@@ -418,8 +430,8 @@ func (s *Service) Enable(ctx context.Context) error {
 func (s *Service) Disable() {
 	s.mu.Lock()
 	s.prefs.Enabled = false
-	s.queue = nil
 	for _, st := range s.streams {
+		s.resetDeliveryLocked(st)
 		s.clearLocked(st)
 	}
 	for _, sp := range s.prefs.Servers {
@@ -504,6 +516,15 @@ func (s *Service) Target(id string) (server, path string) {
 	if st := s.streams[server]; st != nil {
 		if n, ok := st.shown[id]; ok {
 			known[tag] = n.url
+		} else if st.awaitingAccess || st.session.ID != "" {
+			sp := s.prefs.Servers[server]
+			if sp == nil || sp.SessionScope != st.session.scope(st.t) || !slices.Contains(sp.Shown, id) {
+				s.mu.Unlock()
+				return "", "/"
+			}
+		} else if sp := s.prefs.Servers[server]; sp != nil && sp.SessionScope != "" {
+			s.mu.Unlock()
+			return "", "/"
 		}
 	}
 	s.mu.Unlock()
@@ -531,9 +552,8 @@ func (s *Service) changed() {
 	}
 }
 
-// badgeLocked is the badge (the sum of the servers' needs-input counts)
-// and whether it must be set (first snapshot, or changed).
-func (s *Service) badgeLocked() (int, bool) {
+// badgeLocked updates the sum and reports if the OS badge needs updating.
+func (s *Service) badgeLocked() bool {
 	sum, known := 0, false
 	for _, st := range s.streams {
 		if st.hasBadge {
@@ -542,13 +562,30 @@ func (s *Service) badgeLocked() (int, bool) {
 		}
 	}
 	if !known && !s.badgeSet {
-		return 0, false
+		return false
 	}
 	if s.badgeSet && sum == s.badge {
-		return sum, false
+		return false
 	}
 	s.badge, s.badgeSet = sum, true
-	return sum, true
+	return true
+}
+
+// publishBadge corrects an older write if another stream changed the total
+// while the sink was updating it. The OS call runs outside the state lock.
+func (s *Service) publishBadge() {
+	for {
+		s.mu.Lock()
+		n := s.badge
+		s.mu.Unlock()
+		s.cfg.Sink.SetBadge(n)
+		s.mu.Lock()
+		current := s.badge == n
+		s.mu.Unlock()
+		if current {
+			return
+		}
+	}
 }
 
 // --- persistence ---
@@ -560,10 +597,14 @@ func (s *Service) markDirtyLocked() {
 
 // save writes the current preferences. Holding saveMu while taking the
 // snapshot makes the last write the newest.
-func (s *Service) save() error {
+func (s *Service) save(force bool) error {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
 	s.mu.Lock()
+	if !force && !s.dirty {
+		s.mu.Unlock()
+		return nil
+	}
 	p := s.prefs.clone()
 	s.dirty = false
 	s.mu.Unlock()
@@ -580,7 +621,7 @@ func (s *Service) save() error {
 }
 
 func (s *Service) saveLogged() {
-	if err := s.save(); err != nil {
+	if err := s.save(true); err != nil {
 		s.logf("save preferences: %v", err)
 	}
 }
@@ -640,6 +681,7 @@ func (s *Service) titleLocked(st *stream, title string) string {
 func (s *Service) enqueueLocked(st *stream, q queued) {
 	q.server = st.id
 	q.seq = st.snapSeq
+	q.delivery = st.delivery
 	for i := range s.queue {
 		if s.queue[i].note.ID == q.note.ID {
 			s.queue[i] = q
@@ -656,7 +698,7 @@ func (s *Service) worker() {
 	defer s.wg.Done()
 	for {
 		s.mu.Lock()
-		for len(s.queue) == 0 {
+		for len(s.queue) == 0 && len(s.pendingCloses) == 0 {
 			s.mu.Unlock()
 			select {
 			case <-s.ctx.Done():
@@ -665,15 +707,25 @@ func (s *Service) worker() {
 			}
 			s.mu.Lock()
 		}
+		if len(s.pendingCloses) > 0 {
+			closes := s.pendingCloses
+			s.pendingCloses = map[string]struct{}{}
+			s.mu.Unlock()
+			for id := range closes {
+				s.cfg.Sink.Close(id)
+			}
+			continue
+		}
 		q := s.queue[0]
 		s.queue = s.queue[1:]
 		s.busy = true
 		s.mu.Unlock()
 
-		ctx, cancel := context.WithTimeout(s.ctx, showTimeout)
-		err := s.cfg.Sink.Show(ctx, q.note)
+		ctx, cancel := context.WithTimeout(q.delivery, showTimeout)
+		if ctx.Err() == nil {
+			s.record(q, s.cfg.Sink.Show(ctx, q.note))
+		}
 		cancel()
-		s.record(q, err, true)
 
 		s.mu.Lock()
 		s.busy = false
@@ -686,7 +738,7 @@ func (s *Service) showNow(ctx context.Context, n Note) error {
 	ctx, cancel := context.WithTimeout(ctx, showTimeout)
 	defer cancel()
 	err := s.cfg.Sink.Show(ctx, n)
-	s.record(queued{note: n, url: "/settings"}, err, false)
+	s.record(queued{note: n, url: "/settings"}, err)
 	return err
 }
 
@@ -694,11 +746,13 @@ func (s *Service) showNow(ctx context.Context, n Note) error {
 // success clears it and remembers a server's notification, unless it went
 // stale while showing (its group was read, its server removed, or
 // notifications were turned off).
-func (s *Service) record(q queued, err error, fromQueue bool) {
+func (s *Service) record(q queued, err error) {
 	id := q.note.ID
 	saveNow, closeNow := false, false
 	s.mu.Lock()
 	switch {
+	case q.delivery != nil && q.delivery.Err() != nil:
+		closeNow = err == nil
 	case errors.Is(err, ErrDenied):
 		s.logf("show %s: %v", id, err)
 		if !s.prefs.Denied {
@@ -717,8 +771,8 @@ func (s *Service) record(q queued, err error, fromQueue bool) {
 		}
 		st := s.streams[q.server]
 		tag := strings.TrimPrefix(id, q.server+"/")
-		stale := fromQueue && (st == nil || !s.prefs.Enabled ||
-			(isGroupTag(tag) && st.snapSeq > q.seq && !st.unread[tag]))
+		stale := st == nil || !s.prefs.Enabled ||
+			(isGroupTag(tag) && st.snapSeq > q.seq && !st.unread[tag])
 		if stale {
 			closeNow = true
 			break
@@ -751,12 +805,12 @@ func (s *Service) loop(st *stream) {
 			return
 		}
 		s.mu.Lock()
-		t, gen := st.t, st.gen
+		t, gen, awaiting := st.t, st.gen, st.awaitingAccess
 		s.mu.Unlock()
 		if gen != lastGen {
 			backoff, lastGen = s.cfg.MinBackoff, gen
 		}
-		if !t.Remote() && t.Socket == "" {
+		if awaiting || (!t.Remote() && t.Socket == "") {
 			if !s.wait(st, gen, 0) {
 				return
 			}
@@ -772,7 +826,7 @@ func (s *Service) loop(st *stream) {
 		st.cancel = cancel
 		s.mu.Unlock()
 
-		hello, err := s.run(ctx, st, t)
+		hello, err := s.run(ctx, st, t, gen)
 
 		s.mu.Lock()
 		st.cancel = nil
@@ -787,6 +841,10 @@ func (s *Service) loop(st *stream) {
 		}
 		if hello {
 			backoff = s.cfg.MinBackoff
+		}
+		if errors.Is(err, ErrAccessEnded) {
+			s.endAccess(st, gen)
+			continue
 		}
 		if errors.Is(err, errNoStream) {
 			s.mu.Lock()
@@ -846,6 +904,7 @@ func (s *Service) wait(st *stream, gen uint64, d time.Duration) bool {
 
 // conn is the state of one stream connection.
 type conn struct {
+	gen   uint64
 	hello bool
 	// liveFrom is hello's latestId: rows up to it are catch-up.
 	liveFrom int64
@@ -878,27 +937,41 @@ type wireUnread struct {
 
 // run reads one connection until it ends; hello reports whether it got a
 // hello (the server was reachable and current).
-func (s *Service) run(ctx context.Context, st *stream, t target.Target) (hello bool, err error) {
+func (s *Service) run(ctx context.Context, st *stream, t target.Target, gen uint64) (hello bool, err error) {
 	s.mu.Lock()
+	if !st.current(gen) {
+		s.mu.Unlock()
+		return false, context.Canceled
+	}
+	session := st.session
 	var cursor *int64
-	if sp := s.prefs.Servers[st.id]; sp != nil && sp.Cursor != nil {
-		c := *sp.Cursor
-		cursor = &c
+	var countChanged, cleared, setBadge bool
+	if sp := s.prefs.Servers[st.id]; sp != nil {
+		if sp.SessionScope != session.scope(t) {
+			countChanged, cleared = s.clearAccessLocked(st)
+			setBadge = s.badgeLocked()
+		} else if sp.Cursor != nil {
+			c := *sp.Cursor
+			cursor = &c
+		}
 	}
 	s.mu.Unlock()
-	body, err := openStream(ctx, t, cursor)
+	s.accessChanged(countChanged, cleared, setBadge)
+	body, err := openStream(ctx, t, cursor, session)
 	if err != nil {
 		return false, err
 	}
 	defer body.Close()
 	rd := newSSEReader(body)
-	c := &conn{}
+	c := &conn{gen: gen}
 	for {
 		ev, err := rd.Next()
 		if err != nil {
 			return c.hello, err
 		}
 		switch ev.Event {
+		case "access-ended":
+			return c.hello, ErrAccessEnded
 		case "hello":
 			var h wireHello
 			if err := json.Unmarshal([]byte(ev.Data), &h); err != nil {
@@ -926,7 +999,7 @@ func (s *Service) run(ctx context.Context, st *stream, t target.Target) (hello b
 			if c.hello && !c.caughtUp {
 				s.finishCatchUp(st, c)
 			}
-			s.onUnread(st, u)
+			s.onUnread(st, gen, u)
 		}
 	}
 }
@@ -935,13 +1008,18 @@ func (s *Service) run(ctx context.Context, st *stream, t target.Target) (hello b
 // the server is behind the cursor, the cursor moves to latestId silently.
 func (s *Service) onHello(st *stream, c *conn, h wireHello) {
 	s.mu.Lock()
+	if !st.current(c.gen) {
+		s.mu.Unlock()
+		return
+	}
 	sp := s.prefs.server(st.id)
+	sp.SessionScope = st.session.scope(st.t)
 	moved := sp.Cursor == nil || h.Reset || h.LatestID < *sp.Cursor
 	if moved {
 		v := h.LatestID
 		sp.Cursor = &v
 	}
-	*c = conn{hello: true, liveFrom: h.LatestID, lastSeen: *sp.Cursor}
+	*c = conn{gen: c.gen, hello: true, liveFrom: h.LatestID, lastSeen: *sp.Cursor}
 	s.mu.Unlock()
 	if moved {
 		s.saveLogged()
@@ -959,6 +1037,10 @@ func (s *Service) onNotification(st *stream, c *conn, it Item) {
 	}
 	fg := s.foreground(st.id)
 	s.mu.Lock()
+	if !st.current(c.gen) {
+		s.mu.Unlock()
+		return
+	}
 	sp := s.prefs.server(st.id)
 	if sp.Cursor == nil || it.ID > *sp.Cursor {
 		v := it.ID
@@ -985,6 +1067,10 @@ func (s *Service) finishCatchUp(st *stream, c *conn) {
 	fg := s.foreground(st.id)
 	show, summarized := PlanCatchUp(items, s.cfg.Now(), s.cfg.Window, s.cfg.Max)
 	s.mu.Lock()
+	if !st.current(c.gen) {
+		s.mu.Unlock()
+		return
+	}
 	sp := s.prefs.server(st.id)
 	moved := false
 	if sp.Cursor == nil || c.liveFrom > *sp.Cursor {
@@ -1020,11 +1106,15 @@ func (s *Service) finishCatchUp(st *stream, c *conn) {
 	}
 }
 
-// onUnread applies a server's unread snapshot: its needs-input count (the
+// onUnread applies a server's unread snapshot: its badge count (the
 // badge is the sum over servers, set when it changed), and closes its
 // notifications of groups without unread rows.
-func (s *Service) onUnread(st *stream, u wireUnread) {
+func (s *Service) onUnread(st *stream, gen uint64, u wireUnread) {
 	s.mu.Lock()
+	if !st.current(gen) {
+		s.mu.Unlock()
+		return
+	}
 	set := make(map[string]bool, len(u.Tags))
 	for _, t := range u.Tags {
 		set[t] = true
@@ -1034,10 +1124,10 @@ func (s *Service) onUnread(st *stream, u wireUnread) {
 	st.snapSeq++
 	st.badge, st.hasBadge = u.Badge, true
 	closes := s.reconcileLocked(st)
-	badge, setBadge := s.badgeLocked()
+	setBadge := s.badgeLocked()
 	s.mu.Unlock()
 	if setBadge {
-		s.cfg.Sink.SetBadge(badge)
+		s.publishBadge()
 	}
 	for _, id := range closes {
 		s.cfg.Sink.Close(id)

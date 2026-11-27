@@ -63,7 +63,7 @@ func (h *host) serverEntries() []ServerEntry {
 	active := h.activeID()
 	var badges map[string]int
 	if h.alerts != nil {
-		badges = h.alerts.Badges()
+		badges = h.alerts.NeedsInput()
 	}
 	out := []ServerEntry{}
 	for _, t := range h.servers.List() {

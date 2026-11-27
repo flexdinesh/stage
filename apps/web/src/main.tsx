@@ -9,7 +9,7 @@ import { browserHistoryControls } from "./platform/historyControls.ts";
 import { browserLinks } from "./platform/links.ts";
 import { browserStorage } from "./platform/storage.ts";
 import { browserTransport } from "./platform/transport.ts";
-import { webPushNotifications } from "./platform/webPush.ts";
+import { clearPushSession, webPushNotifications } from "./platform/webPush.ts";
 
 // Service worker (Web Push only, no caching). Built only for production; /sw.js does not exist in dev.
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
@@ -18,13 +18,19 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
   });
 }
 
-const transport = browserTransport();
+const attention = browserAttention();
+const transport = browserTransport({
+  onSessionChanged() {
+    attention.setNeedsInput(0);
+    void clearPushSession();
+  },
+});
 const platform: Platform = {
   transport,
   clipboard: browserClipboard(),
   links: browserLinks(),
   notifications: webPushNotifications(createApi(transport)),
-  attention: browserAttention(),
+  attention,
   storage: browserStorage(),
   hostHistoryControls: browserHistoryControls(),
 };

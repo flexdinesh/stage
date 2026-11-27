@@ -38,6 +38,10 @@ func (r access) InitializeInstallation(ctx context.Context, id string, mode stor
 	if err == nil && res.RowsAffected() != 1 {
 		return store.ErrNotFound
 	}
+	if err != nil || mode != store.AccessPending {
+		return err
+	}
+	_, err = r.Exec(ctx, `DELETE FROM push_subscriptions WHERE auth_session_id IS NULL`)
 	return err
 }
 
@@ -172,6 +176,10 @@ func (r access) ActiveSession(ctx context.Context, digest store.TokenDigest, aud
 
 func (r access) RevokeSession(ctx context.Context, id, userID int64, at time.Time) error {
 	_, err := r.Exec(ctx, `UPDATE auth_sessions SET revoked_at = $1 WHERE id = $2 AND user_id = $3 AND revoked_at IS NULL`, at, id, userID)
+	if err != nil {
+		return err
+	}
+	_, err = r.Exec(ctx, `DELETE FROM push_subscriptions WHERE auth_session_id = $1`, id)
 	return err
 }
 
@@ -184,6 +192,10 @@ func (r access) ExtendSessionIdle(ctx context.Context, id int64, now, deadline t
 
 func (r access) RevokeUserSessions(ctx context.Context, userID int64, at time.Time) error {
 	_, err := r.Exec(ctx, `UPDATE auth_sessions SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL`, at, userID)
+	if err != nil {
+		return err
+	}
+	_, err = r.Exec(ctx, `DELETE FROM push_subscriptions WHERE auth_session_id IN (SELECT id FROM auth_sessions WHERE user_id = $1)`, userID)
 	return err
 }
 

@@ -43,7 +43,7 @@ type multi struct {
 	changes   atomic.Int32
 }
 
-func newMulti(t *testing.T, prefs string) *multi {
+func newMulti(t *testing.T, prefs string, opts ...func(*Config)) *multi {
 	t.Helper()
 	m := &multi{t: t, sink: &fakeSink{supported: true}, local: newFakeServer(t)}
 	var u string
@@ -55,7 +55,7 @@ func newMulti(t *testing.T, prefs string) *multi {
 			t.Fatal(err)
 		}
 	}
-	m.svc = New(Config{
+	cfg := Config{
 		PrefsPath: m.prefsPath,
 		Sink:      m.sink,
 		Foreground: func(id string) bool {
@@ -73,7 +73,11 @@ func newMulti(t *testing.T, prefs string) *multi {
 		Logf:       t.Logf,
 		MinBackoff: 5 * time.Millisecond,
 		MaxBackoff: 20 * time.Millisecond,
-	})
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	m.svc = New(cfg)
 	t.Cleanup(func() { _ = m.svc.Close() })
 	m.svc.SetServers([]target.Target{target.Local(m.local.socket), m.box})
 	m.svc.Start()

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { reconcileToasts } from "../src/lib/notification-toasts.ts";
+import { newToastEvents, reconcileToasts } from "../src/lib/notification-toasts.ts";
 
 const notification = (id, extra = {}) => ({
   id,
@@ -15,6 +15,16 @@ const notification = (id, extra = {}) => ({
   currentState: "needs_input",
   links: { native: "t3://session-a" },
   ...extra,
+});
+
+test("new read events stay in shared history without producing a toast", () => {
+  const read = notification(3, { readAt: "2026-11-17T00:00:00Z" });
+  const first = notification(2);
+  const latest = notification(4);
+  const items = [latest, read, first, notification(1)];
+  assert.deepEqual(newToastEvents(items, 1, false), [first, latest]);
+  assert.deepEqual(newToastEvents(items, 1, true), [first, read, latest]);
+  assert.equal(items.length, 4);
 });
 
 for (const currentState of ["running", "done", "failed", "cancelled"]) {

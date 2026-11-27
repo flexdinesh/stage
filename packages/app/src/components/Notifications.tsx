@@ -1,4 +1,4 @@
-import { hashKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { hashKey, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
@@ -12,10 +12,10 @@ import {
   useSessionRequests,
   useTask,
 } from "../api/queries.ts";
-import type { Notification, NotificationEvent, NotificationGroup, NotificationPage, SessionRef, WaitingSession } from "../api/types.ts";
+import type { Badge, Notification, NotificationEvent, NotificationGroup, NotificationPage, SessionRef, WaitingSession } from "../api/types.ts";
 import { folderName, type SessionAction } from "../lib/harnesses.ts";
 import { pushFooterNote } from "../lib/push.ts";
-import { reconcileToasts } from "../lib/notification-toasts.ts";
+import { newToastEvents, reconcileToasts } from "../lib/notification-toasts.ts";
 import { IconBell, IconClose } from "./icons.tsx";
 import { NotificationEventBadge, TaskStateBadge, notificationEventLabel, notificationEventTone } from "./StateBadge.tsx";
 import {
@@ -122,6 +122,13 @@ export function useSystemNotificationSync() {
   }, [notifications]);
 }
 
+function invalidateNotificationReads(qc: QueryClient) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: keys.notifications }),
+    qc.invalidateQueries({ queryKey: keys.badge }),
+  ]);
+}
+
 /** Marks notification groups read (viewed here); other devices close their system notifications on their next sync. */
 export function useMarkNotificationGroupsRead() {
   const api = useApi();
@@ -130,7 +137,7 @@ export function useMarkNotificationGroupsRead() {
     (groups: string[]) => {
       api
         .markNotificationGroupsRead(groups)
-        .then(() => qc.invalidateQueries({ queryKey: keys.notifications }))
+        .then(() => invalidateNotificationReads(qc))
         .catch(() => undefined);
     },
     [api, qc],
@@ -201,7 +208,8 @@ export function NotificationToasts({ onOpenInbox }: { onOpenInbox: () => void })
         if (visible) skipNext = false;
         return;
       }
-      const fresh = items.filter((n) => n.id > prev).toSorted((a, b) => a.id - b.id);
+      const badge = qc.getQueryData<Badge>(keys.badge);
+      const fresh = newToastEvents(items, prev, badge !== undefined && badge.unread === undefined);
       if (fresh.length > 0) setToasts((t) => [...t, ...reconcileToasts(fresh, items)]);
     });
     return () => {
@@ -379,7 +387,7 @@ export function NotificationsDrawer({ onClose, onTrack }: { onClose: () => void;
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const read = useMutation({
     mutationFn: api.markNotificationsRead,
-    onSettled: () => qc.invalidateQueries({ queryKey: keys.notifications }),
+    onSettled: () => invalidateNotificationReads(qc),
   });
   const readMutate = read.mutate;
 
@@ -417,7 +425,7 @@ export function NotificationsDrawer({ onClose, onTrack }: { onClose: () => void;
       if (newest <= topId) return;
       api
         .markNotificationsRead(newest)
-        .then(() => qc.invalidateQueries({ queryKey: keys.notifications }))
+        .then(() => invalidateNotificationReads(qc))
         .catch(() => undefined);
     },
     [api, qc],
@@ -434,7 +442,7 @@ export function NotificationsDrawer({ onClose, onTrack }: { onClose: () => void;
       return next;
     });
 
-  const note = pushFooterNote(push.data, notifications?.channel);
+  const note = pushFooterNote(push.isError ? undefined : push.data, notifications?.channel);
   const footer =
     note === null ? null : (
       <Hint>

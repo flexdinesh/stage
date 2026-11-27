@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/flexdinesh/stage/server/internal/auth"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/notify"
 )
@@ -69,7 +72,13 @@ func (s *server) streamNotifications(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return err
 	}
-	ctx := r.Context()
+	requestCtx := r.Context()
+	ctx := requestCtx
+	if s.Access != nil {
+		var stop func()
+		ctx, stop = s.Access.watchSession(ctx)
+		defer stop()
+	}
 	// Before any read, so a change racing the replay still wakes the loop.
 	wake, unsubscribe := s.Inbox.Subscribe()
 	defer unsubscribe()
@@ -88,7 +97,11 @@ func (s *server) streamNotifications(w http.ResponseWriter, r *http.Request) err
 	rc := http.NewResponseController(w)
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
-	h.Set("Cache-Control", "no-cache, no-transform")
+	if s.Access == nil {
+		h.Set("Cache-Control", "no-cache, no-transform")
+	} else {
+		h.Set("Cache-Control", "private, no-store, no-transform")
+	}
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	write := func(format string, args ...any) bool {
@@ -97,7 +110,32 @@ func (s *server) streamNotifications(w http.ResponseWriter, r *http.Request) err
 		}
 		return rc.Flush() == nil
 	}
+	accessEnded := false
+	authorized := func() bool {
+		if s.Access == nil {
+			return true
+		}
+		// A hub wake may arrive immediately after revocation, before the
+		// periodic watcher runs. Recheck without touching the idle deadline.
+		if _, err := s.Access.authRequest(r.WithContext(ctx), false); err != nil {
+			accessEnded = errors.Is(err, auth.ErrSession)
+			return false
+		}
+		return true
+	}
+	if s.Access != nil {
+		defer func() {
+			// A transient storage failure also closes the stream, but
+			// leaves the client free to reconnect with the same session.
+			if requestCtx.Err() == nil && (accessEnded || errors.Is(context.Cause(ctx), auth.ErrSession)) {
+				write("event: access-ended\ndata: {}\n\n")
+			}
+		}()
+	}
 	event := func(name string, id int64, v any) bool {
+		if ctx.Err() != nil {
+			return false
+		}
 		b, err := json.Marshal(v)
 		if err != nil {
 			return false
@@ -110,6 +148,9 @@ func (s *server) streamNotifications(w http.ResponseWriter, r *http.Request) err
 
 	lastSent := cursor
 	send := func(rows []db.Notification) bool {
+		if len(rows) > 0 && !authorized() {
+			return false
+		}
 		for _, n := range rows {
 			p := notify.PayloadFor(n, 0)
 			if !event("notification", n.ID, streamNotification{
@@ -137,23 +178,42 @@ func (s *server) streamNotifications(w http.ResponseWriter, r *http.Request) err
 	lastSnapshot := ""
 	// snapshot sends `unread` when it differs from the last one sent.
 	snapshot := func() bool {
-		tags, err := s.Store.UnreadNotificationTags(ctx)
-		if err != nil {
-			return false
+		for {
+			if !authorized() {
+				return false
+			}
+			tags, err := s.Store.UnreadNotificationTags(ctx)
+			if err != nil {
+				return false
+			}
+			latest, badge, err := s.Store.NotificationReadState(ctx)
+			if err != nil {
+				return false
+			}
+			// A commit can race the hub signal or a ping. Send those
+			// rows before a snapshot that already includes them.
+			if latest > lastSent {
+				if !drain() {
+					return false
+				}
+				continue
+			}
+			if s.Access == nil {
+				badge, err = s.Store.NeedsInputCount(ctx)
+				if err != nil {
+					return false
+				}
+			}
+			b, err := json.Marshal(streamUnread{Tags: tags, Badge: badge})
+			if err != nil {
+				return false
+			}
+			if string(b) == lastSnapshot {
+				return true
+			}
+			lastSnapshot = string(b)
+			return write("event: unread\ndata: %s\n\n", b)
 		}
-		badge, err := s.Store.NeedsInputCount(ctx)
-		if err != nil {
-			return false
-		}
-		b, err := json.Marshal(streamUnread{Tags: tags, Badge: badge})
-		if err != nil {
-			return false
-		}
-		if string(b) == lastSnapshot {
-			return true
-		}
-		lastSnapshot = string(b)
-		return write("event: unread\ndata: %s\n\n", b)
 	}
 
 	// Replay: the newest notificationReplayMax rows after the cursor.

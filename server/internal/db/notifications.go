@@ -55,7 +55,7 @@ func TagForKey(key string) string {
 	return ""
 }
 
-// InsertNotification stores n and returns its id.
+// InsertNotification stores n and its unread receipts, and returns the event ID.
 func (s *Store) InsertNotification(ctx context.Context, n NewNotification) (int64, error) {
 	return write(ctx, s, func(tx store.Tx) (int64, error) {
 		var sid *int64
@@ -66,32 +66,53 @@ func (s *Store) InsertNotification(ctx context.Context, n NewNotification) (int6
 			}
 			sid = &value
 		}
-		return tx.Notifications().Insert(ctx, n, sid)
+		notifications := tx.Notifications()
+		id, err := notifications.Insert(ctx, n, sid)
+		if err != nil {
+			return 0, err
+		}
+		if err := notifications.InsertRecipients(ctx, id, DefaultUser); err != nil {
+			return 0, err
+		}
+		return id, nil
+	})
+}
+
+// NotificationForDelivery returns the acting user's unread event, or ErrNotFound.
+func (s *Store) NotificationForDelivery(ctx context.Context, id int64) (Notification, error) {
+	return read(ctx, s, func(tx store.Tx) (Notification, error) {
+		return tx.Notifications().ForDelivery(ctx, ActingUser(ctx), id)
 	})
 }
 
 // ListNotifications returns up to limit entries, newest first, with id <
 // beforeID when beforeID is set.
 func (s *Store) ListNotifications(ctx context.Context, limit int, beforeID *int64) ([]Notification, error) {
-	return read(ctx, s, func(tx store.Tx) ([]Notification, error) { return tx.Notifications().List(ctx, limit, beforeID, nil) })
+	return read(ctx, s, func(tx store.Tx) ([]Notification, error) {
+		return tx.Notifications().List(ctx, ActingUser(ctx), limit, beforeID, nil)
+	})
 }
 
 // ListNotificationHistory pages only events belonging to key.
 func (s *Store) ListNotificationHistory(ctx context.Context, key string, limit int, beforeID *int64) ([]Notification, error) {
-	return read(ctx, s, func(tx store.Tx) ([]Notification, error) { return tx.Notifications().List(ctx, limit, beforeID, &key) })
+	return read(ctx, s, func(tx store.Tx) ([]Notification, error) {
+		return tx.Notifications().List(ctx, ActingUser(ctx), limit, beforeID, &key)
+	})
 }
 
 // NotificationsAfter returns up to limit entries with id > after in ascending
 // order: the oldest ones, or with newest the newest ones.
 func (s *Store) NotificationsAfter(ctx context.Context, after int64, limit int, newest bool) ([]Notification, error) {
-	return read(ctx, s, func(tx store.Tx) ([]Notification, error) { return tx.Notifications().After(ctx, after, limit, newest) })
+	return read(ctx, s, func(tx store.Tx) ([]Notification, error) {
+		return tx.Notifications().After(ctx, ActingUser(ctx), after, limit, newest)
+	})
 }
 
 // NotificationReadState captures the read boundary before listing groups.
 func (s *Store) NotificationReadState(ctx context.Context) (latestID int64, unread int, err error) {
 	err = s.e.Read(ctx, func(tx store.Tx) error {
 		var err error
-		latestID, unread, err = tx.Notifications().ReadState(ctx)
+		latestID, unread, err = tx.Notifications().ReadState(ctx, ActingUser(ctx))
 		return err
 	})
 	return
@@ -101,29 +122,31 @@ func (s *Store) NotificationReadState(ctx context.Context) (latestID int64, unre
 // prevents a racing insert from being included in the initial read boundary.
 func (s *Store) ListNotificationGroups(ctx context.Context, limit int, cursor *NotificationCursor, upToID int64) ([]NotificationGroup, error) {
 	return read(ctx, s, func(tx store.Tx) ([]NotificationGroup, error) {
-		return tx.Notifications().Groups(ctx, limit, cursor, upToID)
+		return tx.Notifications().Groups(ctx, ActingUser(ctx), limit, cursor, upToID)
 	})
 }
 
 // UnreadNotificationCount counts entries never read.
 func (s *Store) UnreadNotificationCount(ctx context.Context) (int, error) {
-	return read(ctx, s, func(tx store.Tx) (int, error) { return tx.Notifications().UnreadCount(ctx) })
+	return read(ctx, s, func(tx store.Tx) (int, error) { return tx.Notifications().UnreadCount(ctx, ActingUser(ctx)) })
 }
 
 // MarkNotificationsRead marks every unread entry with id <= upTo as read.
 func (s *Store) MarkNotificationsRead(ctx context.Context, upTo int64) error {
-	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Notifications().MarkRead(ctx, upTo) })
+	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Notifications().MarkRead(ctx, ActingUser(ctx), upTo) })
 }
 
 // MarkNotificationGroupsRead marks every unread entry in the given groups read.
 func (s *Store) MarkNotificationGroupsRead(ctx context.Context, groupKeys []string) error {
-	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Notifications().MarkGroupsRead(ctx, groupKeys) })
+	return s.e.Write(ctx, func(tx store.Tx) error { return tx.Notifications().MarkGroupsRead(ctx, ActingUser(ctx), groupKeys) })
 }
 
 // UnreadNotificationTags returns the push tags (`task-<id>`, `session-<id>`) of
 // groups with unread entries. Identity-less groups have no tag.
 func (s *Store) UnreadNotificationTags(ctx context.Context) ([]string, error) {
-	keys, err := read(ctx, s, func(tx store.Tx) ([]string, error) { return tx.Notifications().UnreadKeys(ctx) })
+	keys, err := read(ctx, s, func(tx store.Tx) ([]string, error) {
+		return tx.Notifications().UnreadKeys(ctx, ActingUser(ctx))
+	})
 	if err != nil {
 		return nil, err
 	}

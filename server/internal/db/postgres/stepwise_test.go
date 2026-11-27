@@ -51,6 +51,63 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	38: {{name: "identity history and workspace bindings", seed: seedV0038ProjectIdentity, check: checkV0038ProjectIdentity}},
 	40: {{name: "legacy identity and evidence retained", seed: seedV0040SharedAccess, check: checkV0040SharedAccess}},
 	41: {{name: "shared accounts kept and audit starts empty", seed: seedV0041AccessAudit, check: checkV0041AccessAudit}},
+	43: {
+		{name: "personal reads and devices retained", seed: seedV0043NotificationRecipients, check: checkV0043NotificationRecipients},
+		{name: "shared legacy devices removed", seed: seedV0043SharedPush, check: checkV0043SharedPush},
+	},
+}
+
+func seedV0043NotificationRecipients(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`UPDATE preferences SET notify_events='["ready"]' WHERE id=1`,
+		`INSERT INTO users(id, display_name, email, email_key) VALUES (2, 'Member', 'member@example.test', 'member@example.test')`,
+		`INSERT INTO notifications(id, event, title, url, read_at) VALUES
+		 (1, 'done', 'Read', '/', '2026-11-27T00:00:00.123456Z'), (2, 'ready', 'Unread', '/', NULL)`,
+		`INSERT INTO push_subscriptions(endpoint, p256dh, auth) VALUES ('https://push.example/old', 'k', 'a')`,
+	} {
+		if _, err := pool.ExecContext(t.Context(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func checkV0043NotificationRecipients(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`SELECT count(*) = 2 FROM notification_recipients`,
+		`SELECT count(*) = 1 FROM notification_recipients WHERE notification_id=1 AND user_id=1 AND read_at='2026-11-27T00:00:00.123456Z'`,
+		`SELECT count(*) = 1 FROM notification_recipients WHERE notification_id=2 AND user_id=1 AND read_at IS NULL`,
+		`SELECT count(*) = 1 FROM notification_preferences`,
+		`SELECT count(*) = 1 FROM notification_preferences WHERE user_id=1 AND notify_events='["ready"]'`,
+		`SELECT count(*) = 1 FROM push_subscriptions WHERE endpoint='https://push.example/old' AND auth_session_id IS NULL AND binding IS NULL`,
+	} {
+		var ok bool
+		if err := pool.QueryRowContext(t.Context(), q).Scan(&ok); err != nil || !ok {
+			t.Fatalf("%s: %t, %v", q, ok, err)
+		}
+	}
+	if _, err := pool.ExecContext(t.Context(), `DELETE FROM notifications WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	var remaining int64
+	if err := pool.QueryRowContext(t.Context(), `SELECT notification_id FROM notification_recipients`).Scan(&remaining); err != nil || remaining != 2 {
+		t.Fatalf("remaining receipt: %d, %v", remaining, err)
+	}
+}
+
+func seedV0043SharedPush(t *testing.T, pool *sql.DB) {
+	seedV0043NotificationRecipients(t, pool)
+	if _, err := pool.ExecContext(t.Context(), `UPDATE installation_access SET installation_id='shared', mode='setup_pending' WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func checkV0043SharedPush(t *testing.T, pool *sql.DB) {
+	var count int
+	if err := pool.QueryRowContext(t.Context(), `SELECT count(*) FROM push_subscriptions`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("legacy device count %d, %v", count, err)
+	}
 }
 
 func seedV0041AccessAudit(t *testing.T, pool *sql.DB) {

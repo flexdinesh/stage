@@ -124,9 +124,9 @@ func TestNotificationStreamNoCursorThenLive(t *testing.T) {
 		t.Fatalf("unread %+v", u)
 	}
 
-	// Live: an insert plus a signal delivers the row, then the new snapshot.
+	// The heartbeat can observe a commit before its hub signal. The row
+	// still arrives before the unread snapshot that includes it.
 	id := insertDone(t, e, "ext-2")
-	hub.Signal()
 	ev := nextSSE(t, events, true)
 	row := decodeEvent[streamRow](t, ev, "notification")
 	if row.ID != id || ev.id != fmt.Sprint(id) || row.Tag != "session-1:ext-2" || row.Title != "Done" {

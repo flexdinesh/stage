@@ -86,6 +86,38 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	38: {{"identity history and workspace bindings", seedV0038ProjectIdentity, checkV0038ProjectIdentity}},
 	40: {{"legacy identity and evidence retained", seedV0040SharedAccess, checkV0040SharedAccess}},
 	41: {{"shared accounts kept and audit starts empty", seedV0041AccessAudit, checkV0041AccessAudit}},
+	43: {
+		{"personal reads and devices retained", seedV0043NotificationRecipients, checkV0043NotificationRecipients},
+		{"shared legacy devices removed", seedV0043SharedPush, checkV0043SharedPush},
+	},
+}
+
+func seedV0043NotificationRecipients(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	mustExec(t, pool, `UPDATE preferences SET notify_events='["ready"]' WHERE id=1`)
+	mustExec(t, pool, `INSERT INTO users(id, display_name, email, email_key) VALUES (2, 'Member', 'member@example.test', 'member@example.test')`)
+	mustExec(t, pool, `INSERT INTO notifications(id, event, title, url, read_at) VALUES
+	 (1, 'done', 'Read', '/', '2026-11-27T00:00:00.123456Z'), (2, 'ready', 'Unread', '/', NULL)`)
+	mustExec(t, pool, `INSERT INTO push_subscriptions(endpoint, p256dh, auth) VALUES ('https://push.example/old', 'k', 'a')`)
+}
+
+func checkV0043NotificationRecipients(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	wantRows(t, pool, `SELECT notification_id, user_id, read_at FROM notification_recipients ORDER BY notification_id`,
+		"1|1|2026-11-27T00:00:00.123456Z", "2|1|NULL")
+	wantRows(t, pool, `SELECT user_id, notify_events FROM notification_preferences`, `1|["ready"]`)
+	wantRows(t, pool, `SELECT endpoint, auth_session_id, binding FROM push_subscriptions`, "https://push.example/old|NULL|NULL")
+	mustExec(t, pool, `DELETE FROM notifications WHERE id=1`)
+	wantRows(t, pool, `SELECT notification_id FROM notification_recipients`, "2")
+}
+
+func seedV0043SharedPush(t *testing.T, pool *sqlite.DB) {
+	seedV0043NotificationRecipients(t, pool)
+	mustExec(t, pool, `UPDATE installation_access SET installation_id='shared', mode='setup_pending' WHERE id=1`)
+}
+
+func checkV0043SharedPush(t *testing.T, pool *sqlite.DB) {
+	wantRows(t, pool, `SELECT count(*) FROM push_subscriptions`, "0")
 }
 
 func seedV0041AccessAudit(t *testing.T, pool *sqlite.DB) {

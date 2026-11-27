@@ -1101,11 +1101,12 @@ export type UpdateSnippetRequest = Partial<CreateSnippetRequest>;
 /**
  * defaultConnectionId: the connection new tasks start on (null = none: the project's only binding). Each connection
  * pins its own new-task model (HarnessConnection.newTaskConfig).
- * notifyEvents: events that notify (inbox + push) on every device; others are dropped.
+ * notifyEvents: events that notify on every device. Shared mode keeps muted events in history as read.
  */
 export interface Preferences {
   defaultConnectionId: number | null;
   notifyEvents: NotificationEvent[];
+  sharedNotifications?: boolean;
 }
 
 // ---- Notifications (Web Push) ----
@@ -1128,6 +1129,8 @@ export interface PushEndpointBody {
 export interface Badge {
   /** Tasks in needs_input + external sessions needing input. */
   needsInput: number;
+  /** The signed-in user's unread notification count, in shared mode. */
+  unread?: number;
 }
 
 // ---- Notifications inbox ----

@@ -105,7 +105,10 @@ newline and 日本語', 1)`,
 	`INSERT INTO task_attachments (schedule_id, name, mime_type, size_bytes, data) VALUES (1, 'b.gif', 'image/gif', 3, X'00FF00')`,
 	`INSERT INTO schedule_runs (schedule_id, fire_at, outcome, task_id) VALUES (1, '2026-11-07T00:00:00.000000Z', 'started', 1)`,
 	`INSERT INTO notifications (event, task_id, title, project_title, url, session_id) VALUES ('done', 1, 'Done', 'Proj', '/tasks/1', 1)`,
-	`INSERT INTO push_subscriptions (endpoint, p256dh, auth) VALUES ('https://push', 'k', 'a')`,
+	`INSERT INTO notification_recipients (notification_id, user_id, read_at) VALUES (1, 1, '2026-11-06T01:00:00.000000Z')`,
+	`UPDATE notification_preferences SET notify_events = '["done", "failed"]' WHERE user_id = 1`,
+	`INSERT INTO push_subscriptions (endpoint, p256dh, auth, auth_session_id, binding)
+	  SELECT 'https://push', 'k', 'a', id, 'private-binding' FROM auth_sessions WHERE audience = 'browser'`,
 	`INSERT INTO push_vapid (id, public_key, private_key) VALUES (1, 'pub', 'priv')`,
 	`INSERT INTO snippets (id, name, body, project_id) VALUES (1, 's1', 'b', 1), (2, 's2', 'b', NULL), (3, 's3', 'gone', NULL)`,
 	`DELETE FROM snippets WHERE id = 3`,
@@ -247,7 +250,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("source has %d tables, target %d", len(srcTables), len(schema))
 	}
 	for _, tr := range rep.Tables {
-		if tr.Name == "auth_sessions" || tr.Name == "auth_grants" {
+		if tr.Name == "auth_sessions" || tr.Name == "auth_grants" || tr.Name == "push_subscriptions" {
 			if tr.Rows != 0 {
 				t.Errorf("restored %s: got %d rows, want none", tr.Name, tr.Rows)
 			}
@@ -328,6 +331,7 @@ func TestRoundTrip(t *testing.T) {
 		"attachment":  func(s *db.Store) (any, error) { return s.GetAttachment(ctx, 1) },
 		"snippets":    func(s *db.Store) (any, error) { return s.ListSnippets(ctx) },
 		"preferences": func(s *db.Store) (any, error) { return s.GetPreferences(ctx) },
+		"inbox":       func(s *db.Store) (any, error) { return s.ListNotifications(ctx, 10, nil) },
 		"acceptances": func(s *db.Store) (any, error) { return s.Acceptances(ctx, 1) },
 		"schedule":    func(s *db.Store) (any, error) { return s.GetSchedule(ctx, 1) },
 		"notes q": func(s *db.Store) (any, error) {

@@ -330,6 +330,7 @@ export function createApi(transport: Transport) {
 
     pushConfig: () => apiFetch<PushConfig>("/push/config"),
     subscribePush: (body: PushSubscriptionBody) => apiSend("/push/subscriptions", post(body)),
+    checkPushSubscription: (body: PushEndpointBody) => apiFetch<{ bound: boolean }>("/push/subscriptions/check", post(body)),
     unsubscribePush: (body: PushEndpointBody) => apiSend("/push/subscriptions", { method: "DELETE", body }),
     testPush: (body: PushEndpointBody) => apiSend("/push/test", post(body)),
     badge: () => apiFetch<Badge>("/badge"),
