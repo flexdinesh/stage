@@ -559,6 +559,11 @@ and paging. (Thread search was removed with API v3.)
   cause and machine provenance. A null stamp reads as historical. Existing
   creator IDs, journal text and acceptance evidence bytes are preserved.
   Database copies preserve actor stamps and the user IDs they reference.
+  Paired migration 0045 `workspace_refresh` adds nullable last-success
+  and failure fields to each harness connection. A complete snapshot and
+  its success time commit together. An unsuccessful read updates only the
+  failure field. Existing inventory remains available as last-known data
+  until the next successful refresh supplies a timestamp.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.

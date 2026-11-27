@@ -666,7 +666,10 @@ so `stage`, `stage mcp` and HTTP MCP clients there can report work. Code:
   is skipped for it (a proxy on the same host forwards the public Host).
   Machine management and harness setup changes through either
   `/api/harnesses/...` or `/api/machines/{id}/harnesses/...` are 403
-  `gateway_forbidden`, and so is pushing observations
+  `gateway_forbidden`. Raw workspace inventory, discovery review,
+  resolution and sync also require the human surface. An agent can read
+  the scoped destination summary through the gateway.
+  The gateway also forbids pushing observations
   (`POST /api/connections/{id}/observations`) for another machine's
   connection; `/api/worker/*`
   and other paths 404 ([api.md](api.md#apiworkergatewayapi-and-apiworkergatewaymcp)).

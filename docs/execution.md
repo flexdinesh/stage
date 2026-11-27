@@ -775,12 +775,13 @@ to run on that machine.
   included, `<synthetic>` messages skipped; working time sums the main chain's
   `turn_duration` records (finished turns). No cost: Claude records none for
   a background session. None before the first turn or without a transcript.
-- **Inventory** is the `projects` of Claude's state file (`~/.claude.json`,
-  or `.claude.json` in a `CLAUDE_CONFIG_DIR`), local to the machine; a Git
-  checkout's top is importable (the machine's ops decide,
-  `ImportCheckoutTop`), worktrees under `.claude/worktrees` are left out. No file is
-  an empty inventory; an unreadable or malformed one is an error, so
-  discovery keeps the last one. Run Claude in a folder once to list it.
+- **Inventory** uses the state file's project map and the exact folder paths
+  on Claude's current native session roster. On the owning machine, Stage
+  reads `~/.claude.json` by default or `.claude.json` inside an explicit
+  `CLAUDE_CONFIG_DIR`. A fresh state object can omit the project map.
+  Managed worktrees are excluded, and machine evidence still limits
+  automatic import to Git checkout roots. Missing or malformed state and
+  roster failures keep the last successful inventory. See [discovery](discovery.md#shipped-inventory).
 - **Features.** Models: Claude's default, `opus`, `sonnet`, `haiku`,
   `fable` (aliases for the latest). Harness-wide option `effort` (`low` to
   `max`) and launch option `worktree` (boolean, default off; Claude

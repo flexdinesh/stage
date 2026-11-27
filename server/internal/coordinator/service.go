@@ -34,7 +34,7 @@ type Service struct {
 }
 
 type Workspaces interface {
-	Inventory(context.Context, int64) ([]execution.WorkspaceInfo, error)
+	RefreshInventory(context.Context, int64) ([]execution.WorkspaceInfo, int, error)
 }
 
 type Options struct {

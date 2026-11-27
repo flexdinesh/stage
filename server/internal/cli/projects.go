@@ -21,14 +21,31 @@ func runProjects(ctx context.Context, env Env, args []string) error {
 		if err := c.parse(rest); err != nil {
 			return err
 		}
-		res, err := c.ops().ListProjects(ctx, struct{}{})
+		api := c.ops().Client
+		projects, err := api.ListProjects(ctx)
 		if err != nil {
 			return err
 		}
+		connections, err := api.Connections(ctx)
+		if err != nil {
+			return err
+		}
+		res := struct {
+			Projects     []db.Project           `json:"projects"`
+			Connections  []db.HarnessConnection `json:"connections"`
+			Destinations []db.Destination       `json:"destinations,omitempty"`
+		}{projects.Projects, connections, projects.Destinations}
 		return c.out(res, func(w io.Writer) {
 			printProjects(w, res.Projects)
 			for _, conn := range res.Connections {
 				fmt.Fprintf(w, "connection %d  %s\n", conn.ID, conn.Harness)
+			}
+			if len(res.Destinations) != 0 {
+				table(w, "CONNECTION\tWORKSPACE\tTITLE\tMACHINE", func(tw io.Writer) {
+					for _, d := range res.Destinations {
+						fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", d.ConnectionID, d.WorkspaceID, d.Title, d.MachineLabel)
+					}
+				})
 			}
 		})
 	case "workspaces":

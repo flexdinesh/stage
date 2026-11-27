@@ -125,6 +125,14 @@ roots under one ID. Attest locality only when the files live on the
 connection's machine. Report trust, archive, disappearance and
 unavailability through the adapter contract. Stage handles grouping.
 
+A complete empty report is authoritative. Return an error for an absent,
+malformed or partial source so cached rows remain visible with their last
+successful refresh time. Stage emits a stable selector scoped to the
+owning connection. Worker adapters receive `adapter.workspaces` and
+their file hosts receive `ops.inventory` through the negotiated channel.
+Keep trust and exact location checks in the adapter when it launches.
+[API contract](api.md#workspace-discovery-and-project-identity)
+
 Implement roster search with `execution.SessionSearcher` and declare
 `OpSessionSearch` on the owning connection. Return bounded pages of
 harness-listed metadata, including eligible completed sessions still

@@ -34,7 +34,7 @@ func New(o Options) *Engine {
 	reader := discovery.NewReader(o.Store, conns)
 	coord := coordinator.New(coordinator.Options{Store: o.Store, Connections: conns, Workspaces: reader, Log: o.Log})
 	obs := observe.New(observe.Options{Store: o.Store, Adapters: conns, Coordinator: coord, Log: o.Log})
-	disc := discovery.New(discovery.Options{Store: o.Store, Connections: conns, Poller: coord, Log: o.Log})
+	disc := discovery.New(discovery.Options{Store: o.Store, Connections: conns, Reader: reader, Poller: coord, Log: o.Log})
 	return &Engine{Connections: conns, Coordinator: coord, Observe: obs, Discovery: disc}
 }
 

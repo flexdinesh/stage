@@ -69,11 +69,6 @@ type Adapter struct {
 	authMu sync.Mutex
 	auth   authCache
 
-	invMu  sync.Mutex
-	invAt  time.Time // ~/.claude.json mtime of inv
-	invKey string
-	inv    []execution.WorkspaceInfo
-
 	// sendMu serializes Send; wakeMu guards waking, the sessions a Send is
 	// delivering to, each until its deadline (send.go).
 	sendMu sync.Mutex
@@ -116,11 +111,11 @@ func New(o Options) *Adapter {
 	}
 }
 
-// authStatus is the cached auth status (read again after authTTL).
-func (a *Adapter) authStatus(ctx context.Context) (Auth, error) {
+// authStatus reuses the cached status within authTTL unless fresh is set.
+func (a *Adapter) authStatus(ctx context.Context, fresh bool) (Auth, error) {
 	a.authMu.Lock()
 	defer a.authMu.Unlock()
-	if !a.auth.at.IsZero() && a.now().Sub(a.auth.at) < authTTL {
+	if !fresh && !a.auth.at.IsZero() && a.now().Sub(a.auth.at) < authTTL {
 		return a.auth.auth, a.auth.err
 	}
 	call, cancel := context.WithTimeout(ctx, 20*time.Second)
@@ -135,7 +130,7 @@ func (a *Adapter) authStatus(ctx context.Context) (Auth, error) {
 
 // projects is the transcript root ("" when Claude's status is unknown).
 func (a *Adapter) projects(ctx context.Context) string {
-	au, err := a.authStatus(ctx)
+	au, err := a.authStatus(ctx, false)
 	if err != nil {
 		return ""
 	}
@@ -146,18 +141,26 @@ func (a *Adapter) projects(ctx context.Context) string {
 // uses the connection's config directory.
 func (a *Adapter) Health(ctx context.Context) execution.Health {
 	h := execution.Health{Identity: a.identity, CheckedAt: a.now().UTC()}
-	au, err := a.authStatus(ctx)
-	switch {
-	case err != nil:
-		h.Reason = "Stage can't run Claude Code: " + err.Error()
-	case !au.LoggedIn:
-		h.Reason = "Claude Code isn't logged in. Run `claude auth login` in a terminal."
-	case a.identity != "" && au.ConfigDirectory != a.identity:
-		h.Reason = fmt.Sprintf("Claude Code now uses %s instead of %s. Connect Claude Code again in Settings.", au.ConfigDirectory, a.identity)
-	default:
+	if _, err := a.checkedAuth(ctx, false); err != nil {
+		h.Reason = err.Error()
+	} else {
 		h.Available = true
 	}
 	return h
+}
+
+func (a *Adapter) checkedAuth(ctx context.Context, fresh bool) (Auth, error) {
+	au, err := a.authStatus(ctx, fresh)
+	switch {
+	case err != nil:
+		return au, fmt.Errorf("Stage can't run Claude Code: %w", err)
+	case !au.LoggedIn:
+		return au, errors.New("Claude Code isn't logged in. Run `claude auth login` in a terminal.")
+	case a.identity != "" && au.ConfigDirectory != a.identity:
+		return au, fmt.Errorf("Claude Code now uses %s instead of %s. Connect Claude Code again in Settings.", au.ConfigDirectory, a.identity)
+	default:
+		return au, nil
+	}
 }
 
 // Models: Claude's default (an empty model) and its aliases for the latest
@@ -238,11 +241,23 @@ func (a *Adapter) images() execution.Availability {
 	return available
 }
 
-// claudeJSON is the user's Claude state file: ~/.claude.json, or
-// .claude.json in the config directory when it is not ~/.claude
-// (CLAUDE_CONFIG_DIR).
-func claudeJSON(configDir, home string) string {
-	if configDir == "" || (home != "" && filepath.Clean(configDir) == filepath.Join(home, ".claude")) {
+// claudeJSON is the state file. An explicit CLAUDE_CONFIG_DIR puts the file
+// inside that directory even when it points to ~/.claude.
+func (c *CLI) claudeJSON(configDir string) string {
+	home := c.home()
+	var custom bool
+	for _, kv := range c.env() {
+		key, value, _ := strings.Cut(kv, "=")
+		switch key {
+		case "HOME":
+			if value != "" {
+				home = value
+			}
+		case "CLAUDE_CONFIG_DIR":
+			custom = value != ""
+		}
+	}
+	if !custom && home != "" && filepath.Clean(configDir) == filepath.Join(home, ".claude") {
 		return filepath.Join(home, ".claude.json")
 	}
 	return filepath.Join(configDir, ".claude.json")
@@ -251,17 +266,15 @@ func claudeJSON(configDir, home string) string {
 // worktreeMarker is the path segment of a Claude-managed worktree.
 const worktreeMarker = "/.claude/worktrees/"
 
-// Workspaces are the folders Claude Code knows (the projects of its state
-// file), local to the machine; a Git checkout's top is importable, which
-// the machine's ops decide (ImportCheckoutTop). A missing, unreadable or
-// malformed file fails the inventory.
+// Workspaces combines Claude's state projects with cwd evidence from its
+// native session list. Machine ops decide whether a folder is a Git checkout
+// top (ImportCheckoutTop).
 func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, error) {
-	home := a.cli.home()
-	configDir := a.identity
-	if au, err := a.authStatus(ctx); err == nil {
-		configDir = au.ConfigDirectory
+	au, err := a.checkedAuth(ctx, true)
+	if err != nil {
+		return nil, err
 	}
-	path := claudeJSON(configDir, home)
+	path := a.cli.claudeJSON(au.ConfigDirectory)
 	st, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("run claude once to initialize its state: %w", err)
@@ -269,32 +282,60 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 	if err != nil {
 		return nil, err
 	}
-	a.invMu.Lock()
-	defer a.invMu.Unlock()
-	if a.invKey == path && a.invAt.Equal(st.ModTime()) {
-		return slices.Clone(a.inv), nil
-	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var state struct {
-		Projects map[string]json.RawMessage `json:"projects"`
+	var state *struct {
+		Projects json.RawMessage `json:"projects"`
 	}
 	if err := json.Unmarshal(b, &state); err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	out := []execution.WorkspaceInfo{}
-	for dir := range state.Projects {
-		if !filepath.IsAbs(dir) || strings.Contains(dir+"/", worktreeMarker) {
-			continue
+	if state == nil {
+		return nil, fmt.Errorf("read %s: expected a state object", path)
+	}
+
+	// A fresh Claude state object can omit projects before it records a folder.
+	var projects map[string]json.RawMessage
+	if state.Projects != nil {
+		if err := json.Unmarshal(state.Projects, &projects); err != nil {
+			return nil, fmt.Errorf("read %s projects: %w", path, err)
+		}
+		if projects == nil {
+			return nil, fmt.Errorf("read %s: expected a projects object", path)
+		}
+	}
+	entries, err := a.roster.list(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+
+	paths := make(map[string]time.Time, len(projects)+len(entries))
+	add := func(dir string, at time.Time) {
+		if !filepath.IsAbs(dir) {
+			return
 		}
 		dir = filepath.Clean(dir)
-		out = append(out, execution.WorkspaceInfo{ID: dir, Title: filepath.Base(dir), WorkspaceRoot: dir, CreatedAt: st.ModTime().UTC(), UpdatedAt: st.ModTime().UTC(), Local: true, ImportIf: execution.ImportCheckoutTop})
+		if strings.Contains(filepath.ToSlash(dir)+"/", worktreeMarker) {
+			return
+		}
+		if _, ok := paths[dir]; !ok {
+			paths[dir] = at
+		}
+	}
+	for dir := range projects {
+		add(dir, st.ModTime().UTC())
+	}
+	for _, entry := range entries {
+		add(entry.Cwd, time.Time{})
+	}
+	out := make([]execution.WorkspaceInfo, 0, len(paths))
+	for dir, at := range paths {
+		out = append(out, execution.WorkspaceInfo{ID: dir, Title: filepath.Base(dir), WorkspaceRoot: dir, CreatedAt: at, UpdatedAt: at, Local: true, ImportIf: execution.ImportCheckoutTop})
 	}
 	slices.SortFunc(out, func(x, y execution.WorkspaceInfo) int { return strings.Compare(x.ID, y.ID) })
-	a.inv, a.invAt, a.invKey = out, st.ModTime(), path
-	return slices.Clone(out), nil
+	return out, nil
 }
 
 var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

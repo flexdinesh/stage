@@ -219,6 +219,7 @@ export interface WorkspaceResolution {
 
 export interface Workspace extends WorkspaceRef {
   connectionId: number;
+  workspaceId?: string;
   title: string;
   available: boolean;
   importable: boolean;
@@ -236,6 +237,15 @@ export interface Workspace extends WorkspaceRef {
   evidenceSource: string;
   declined: boolean;
   resolution: WorkspaceResolution;
+}
+
+export interface WorkspaceInventory {
+  workspaces: Workspace[];
+  inventory?: {
+    state: "pending" | "refreshing" | "ready" | "stale" | "unavailable" | "retired";
+    refreshedAt: string | null;
+    lastError: string | null;
+  };
 }
 
 export interface WorkspaceResolveResult {

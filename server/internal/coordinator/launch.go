@@ -58,11 +58,11 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	if _, ok := execution.As[execution.Correlator](a); correlated && !ok {
 		return t, db.Conflict("Launch unavailable: this harness cannot reconcile a launch it does not reserve.")
 	}
-	ps, e := s.workspaces.Inventory(ctx, t.ConnectionID)
-	if e != nil {
-		return t, &db.ConflictError{Code: "connection_unavailable", Msg: "Cannot verify the workspace. Check its connection in Settings."}
-	}
-	if _, e = s.store.RefreshWorkspaces(ctx, t.ConnectionID, ps); e != nil {
+	if _, _, e = s.workspaces.RefreshInventory(ctx, t.ConnectionID); e != nil {
+		var failed *db.HarnessError
+		if errors.As(e, &failed) {
+			return t, &db.ConflictError{Code: "connection_unavailable", Msg: "Cannot verify the workspace. Check its connection in Settings."}
+		}
 		return t, e
 	}
 	config := t.ExecutionConfig

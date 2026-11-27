@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -35,14 +36,31 @@ func (s *server) runSync(w http.ResponseWriter, r *http.Request) error {
 
 // refreshWorkspaces persists a complete live inventory without applying the resolver.
 func (s *server) refreshWorkspaces(ctx context.Context, connection int64) ([]execution.WorkspaceInfo, error) {
-	ws, err := s.Engine.Discovery.Inventory(ctx, connection)
-	if err != nil {
-		return nil, &db.HarnessError{Err: err}
+	ws, _, err := s.Engine.Discovery.RefreshInventory(ctx, connection)
+	return ws, err
+}
+
+type workspaceInventoryStatus struct {
+	db.WorkspaceRefresh
+	State string `json:"state"`
+}
+
+func (s *server) inventoryStatus(c db.HarnessConnection, refresh db.WorkspaceRefresh) workspaceInventoryStatus {
+	state := "ready"
+	_, adapterErr := s.Engine.Connections.Adapter(c.ID)
+	switch {
+	case !c.Active:
+		state = "retired"
+	case !s.Engine.Connections.Online(c.MachineID) || adapterErr != nil:
+		state = "unavailable"
+	case s.Engine.Discovery.RefreshingInventory(c.ID):
+		state = "refreshing"
+	case refresh.LastError != nil:
+		state = "stale"
+	case refresh.RefreshedAt == nil:
+		state = "pending"
 	}
-	if _, err := s.Store.RefreshWorkspaces(ctx, connection, ws); err != nil {
-		return nil, err
-	}
-	return ws, nil
+	return workspaceInventoryStatus{WorkspaceRefresh: refresh, State: state}
 }
 
 func (s *server) workspaces(w http.ResponseWriter, r *http.Request) error {
@@ -51,17 +69,30 @@ func (s *server) workspaces(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	ctx := r.Context()
-	if _, err := s.refreshWorkspaces(ctx, id); err != nil {
-		return err
-	}
-	ws, err := s.Store.Workspaces(ctx, id)
+	c, err := s.Store.GetHarnessConnection(ctx, id)
 	if err != nil {
 		return err
 	}
-	if ws == nil {
-		ws = []db.Workspace{}
+	if c.ForgottenAt != nil {
+		return db.ErrNotFound
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"workspaces": ws})
+	if c.Active && r.URL.Query().Get("refresh") != "false" && !s.Engine.Discovery.RefreshingInventory(id) {
+		var failed *db.HarnessError
+		if _, err := s.refreshWorkspaces(ctx, id); err != nil && !errors.As(err, &failed) {
+			return err
+		}
+	}
+	ws, refresh, err := s.Store.WorkspaceCatalog(ctx, id)
+	if err != nil {
+		return err
+	}
+	status := s.inventoryStatus(c, refresh)
+	if status.State != "ready" {
+		for i := range ws {
+			ws[i].Available = false
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"workspaces": ws, "inventory": status})
 	return nil
 }
 
@@ -85,16 +116,14 @@ func (s *server) resolveWorkspaces(w http.ResponseWriter, r *http.Request) error
 	}
 	ctx := r.Context()
 	if *in.Apply {
-		ws, err := s.Engine.Discovery.Inventory(ctx, id)
-		if err != nil {
-			return &db.HarnessError{Err: err}
-		}
-		result, err := s.Store.ConfirmWorkspaceResolution(ctx, id, ws, in.PreviewToken)
-		if err != nil {
-			return err
-		}
-		writeJSON(w, http.StatusOK, result)
-		return nil
+		return s.Engine.Discovery.WithInventory(ctx, id, func(ws []execution.WorkspaceInfo) error {
+			result, err := s.Store.ConfirmWorkspaceResolution(ctx, id, ws, in.PreviewToken)
+			if err != nil {
+				return err
+			}
+			writeJSON(w, http.StatusOK, result)
+			return nil
+		})
 	}
 	if _, err := s.refreshWorkspaces(ctx, id); err != nil {
 		return err

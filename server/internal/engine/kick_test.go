@@ -13,6 +13,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -74,6 +75,27 @@ func TestKickRunsFullSyncNow(t *testing.T) {
 	if n := client.projectLists.Load(); n > 3 {
 		t.Fatalf("kicks ran %d syncs", n)
 	}
+}
+
+func TestConnectionInstallRefreshesWorkspaceCatalog(t *testing.T) {
+	store := db.NewStore(testDB.Reset(t))
+	svc := engine.NewWithAdapters(store, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc.Discovery.FullSyncEvery, svc.Observe.PollEvery = time.Hour, time.Hour
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { svc.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+
+	host, _ := svc.Connections.Machines().Get(db.LocalMachine)
+	local := host.(*machine.Local)
+	fake := t3.NewFake()
+	row := fake.AddProject("Fresh connection", "/worker/folder")
+	local.Install(dbtest.T3Connection, dbtest.T3Connection, t3.NewAdapter(fake))
+	waitFor(t, "connect refresh", func() bool {
+		ws, status, err := store.WorkspaceCatalog(ctx, dbtest.T3Connection)
+		return err == nil && status.RefreshedAt != nil && status.LastError == nil &&
+			len(ws) == 1 && ws[0].ExternalID == row.ID && ws[0].WorkspaceID != ""
+	})
 }
 
 func TestFullSyncDoesNotEnumerateHistory(t *testing.T) {

@@ -3,12 +3,14 @@ import { useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { ApiError } from "../api/client.ts";
 import { keys, useInvalidateProjects, useProjects } from "../api/queries.ts";
-import type { Project, ProjectBinding, Workspace, WorkspaceRef } from "../api/types.ts";
+import type { Project, ProjectBinding, Workspace } from "../api/types.ts";
 import { currentBindings, filterWorkspaceInventory, repoLabel, suggestedWorkspaceFor, workspaceLocation } from "../lib/projects.ts";
+import { POLL } from "../lib/polling.ts";
 import { useApi } from "../platform/context.tsx";
 import { DeclaredActions } from "./DeclaredActions.tsx";
 import { ProjectReference, ResolveWorkspacesDrawer } from "./ProjectPreviews.tsx";
 import { WorkspaceDisplay, useWorkspaceConnections } from "./WorkspaceDisplay.tsx";
+import { WorkspaceInventoryStatus } from "./WorkspaceInventoryStatus.tsx";
 import {
   Alert, Button, Chip, Combobox, ConfirmInline, Drawer, EmptyState, ErrorText, Field, Input, Menu, MenuItem,
   Meta, Muted, Panel, QueryState, Radio, TextLink, useMenu,
@@ -236,16 +238,21 @@ function BindWorkspaceDrawer({ project, target, onTarget, onClose, onSuccess }: 
   );
 }
 
+function workspaceKey(row: Workspace): string {
+  return row.workspaceId ?? JSON.stringify([row.externalId, row.workspace]);
+}
+
 function BindingInventory({ project, target, onSaved }: { project: Project; target: BindTarget; onSaved: () => void }) {
   const api = useApi();
   const refresh = useInvalidateProjects();
   const projects = useProjects("all");
   const [query, setQuery] = useState("");
   const [repository, setRepository] = useState("");
-  const [selection, setSelection] = useState<WorkspaceRef | null>(null);
+  const [selection, setSelection] = useState<string | null>(null);
   const inventory = useQuery({
     queryKey: [...keys.workspaces, target.connectionId],
     queryFn: () => api.workspaces(target.connectionId),
+    refetchInterval: (q) => q.state.data?.inventory?.state === "refreshing" ? POLL.live : false,
     retry: false,
   });
   const candidates = inventory.data?.workspaces ?? [];
@@ -253,7 +260,7 @@ function BindingInventory({ project, target, onSaved }: { project: Project; targ
   const repositories = [...new Set(candidates.map((candidate) => candidate.remote).filter(Boolean))].toSorted();
   const matches = filterWorkspaceInventory(candidates, { projectId: project.id, previousId, repository, query });
   const picked = matches.find((row) => row.projectId === null && row.available &&
-    selection?.externalId === row.externalId && selection.workspace === row.workspace);
+    selection === workspaceKey(row));
   const bind = useMutation({
     mutationFn: (row: Workspace) => api.bindProject(project.id, {
       connectionId: target.connectionId, externalProjectId: row.externalId, workspace: row.workspace,
@@ -274,15 +281,17 @@ function BindingInventory({ project, target, onSaved }: { project: Project; targ
         </Field>}
       </div>
       <QueryState isPending={inventory.isPending} error={inventory.error} hasData={inventory.data !== undefined}>
+        {inventory.data === undefined ? null : <WorkspaceInventoryStatus data={inventory.data} />}
         <Panel title="Workspace inventory" flush>
-          {matches.length === 0 ? <EmptyState inset>{candidates.length === 0 ? "The harness reported no available workspaces." : "No workspaces match the current filters."}</EmptyState> : (
+          {matches.length === 0 ? <EmptyState inset>{candidates.length === 0 ? "No workspaces to show." : "No workspaces match the current filters."}</EmptyState> : (
             <ul className="divide-y divide-line">
               {matches.map((row) => {
                 const title = row.title || row.externalId;
                 const location = row.workspace || row.externalId;
-                return <li key={JSON.stringify([row.externalId, row.workspace])} className="flex min-w-0 gap-2 px-3 py-2">
+                const key = workspaceKey(row);
+                return <li key={key} className="flex min-w-0 gap-2 px-3 py-2">
                   <Radio className="mt-0.5" name="workspace" aria-label={`${title}, ${location}`}
-                    disabled={row.projectId !== null || !row.available || bind.isPending} checked={picked === row} onChange={() => setSelection(row)} />
+                    disabled={row.projectId !== null || !row.available || bind.isPending} checked={selection === key} onChange={() => setSelection(key)} />
                   <div className="flex min-w-0 flex-col items-start gap-1 text-small">
                     <span className="wrap-anywhere font-medium">{title}</span>
                     <Meta className="wrap-anywhere">{location}{row.remote ? ` · ${repoLabel(row.remote)}` : ""}</Meta>

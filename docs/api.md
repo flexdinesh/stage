@@ -534,9 +534,21 @@ when the harness archived the workspace.
 - `GET /api/projects/:id` returns Project or 404.
 - `PATCH /api/projects/:id` takes `{title, archived}` and returns Project.
 
+Scoped agent reads return project summaries with IDs, titles, aliases and
+legacy binding selectors. `GET /api/projects` adds `destinations`, an
+array of `{connectionId, workspaceId, title, connectionLabel, machineLabel,
+discriminator?, projectId?, available}`. It includes unbound workspaces on
+available connections. A short discriminator distinguishes repeated display
+labels. The same summary is available to humans with `?view=destinations`
+and to agent tool callers through `list_projects`. These reads use stored
+inventory and omit paths, native IDs, evidence and discovery diagnostics.
+An unavailable legacy binding retains its IDs and reports a repair status.
+Task and schedule writes continue to take legacy binding selectors in this
+delivery step. See [ADR 0010](adr/0010-harness-workspaces-and-logical-projects.md#delivery-and-compatibility).
+
 ### Workspace discovery and project identity
 
-`Workspace` is `{connectionId, externalId, title, workspace, available, importable, harnessArchived, activeAt, projectId, bindingId, primary, fileHost, canonicalPath, remote, subpath, identityKey, evidenceAt, evidenceSource, declined, resolution}`.
+`Workspace` is `{connectionId, workspaceId, externalId, title, workspace, available, importable, harnessArchived, activeAt, projectId, bindingId, primary, fileHost, canonicalPath, remote, subpath, identityKey, evidenceAt, evidenceSource, declined, resolution}`.
 An empty `workspace` is a valid pathless row. `projectId` and `bindingId`
 are null for unbound rows. `resolution` is `{outcome, reason, rule, candidates}`.
 Outcomes are `bound`, `join`, `new` and `review`. Review reasons are
@@ -545,7 +557,7 @@ See [storage](storage.md#project-identity) for persisted values.
 
 | Route | Request | Result |
 | --- | --- | --- |
-| `GET /api/connections/:connectionId/workspaces` | Live refresh | 200 `{workspaces: Workspace[]}` with available rows. |
+| `GET /api/connections/:connectionId/workspaces` | Live refresh by default, or `?refresh=false` for a cached read | 200 `{workspaces: Workspace[], inventory: {state, refreshedAt, lastError}}`. 404 for unknown or forgotten connections. |
 | `POST /api/connections/:connectionId/resolve` | `{apply: false}` for a preview, `{apply: true, previewToken}` to confirm | 200 `{applied, previewToken, placements, created, joined, moved, review}`. |
 | `GET /api/workspaces/review` | Reads cached rows on active connections | 200 `{workspaces, merges, counts, attention}`. |
 | `PUT /api/projects/:id/binding` | `{connectionId, externalProjectId, workspace, primary?, replaces?}` | 200 Project. Revalidates the exact row. `replaces` identifies a binding of the same project and connection to move. 409 `workspace_bound` for another owner or conflict if the workspace changed. |
@@ -556,6 +568,19 @@ See [storage](storage.md#project-identity) for persisted values.
 | `POST /api/projects/:id/merge-dismissals` | `{otherId}` to keep the pair separate | 204. |
 | `POST /api/projects/:id/split` | `{bindingId, title?}` | 201 `{project, source}`, 404 unknown binding, 409 `split_last_workspace`. |
 | `GET /api/projects/:id/events` | Latest project identity events | 200 `{events: [{id, type, text, createdAt, createdBy}]}`, newest first, up to 100. |
+
+Inventory reads and refreshes follow the human route policy, including the
+personal operator and active members and admins in shared mode. Each
+`workspaceId` names the exact connection, native ID and reported location.
+It stays stable across refreshes and binding changes. A different root or
+connection has its own selector. Archived and deleted rows are excluded.
+`ready` means a complete refresh succeeded, including when it found zero
+workspaces. `pending` means the connection has no refresh result yet.
+`refreshing` means a refresh is running. `stale`, `unavailable` and
+`retired` distinguish refresh failure, loss of access and replacement.
+In these states the response can carry last-known workspaces with
+`available: false`. `refreshedAt` records the most recent complete refresh
+and `lastError` records the most recent failure until a refresh succeeds.
 
 Live refresh can return 409 `connection_retired` or
 `connection_unavailable`, or 502 on a harness inventory failure. It updates
