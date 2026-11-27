@@ -34,7 +34,7 @@ func TestProbe(t *testing.T) {
 	}
 	dead := "http://" + ln.Addr().String()
 	_ = ln.Close()
-	if r := Probe(ctx, TargetGetter, dead, 1); r.Reachable || r.Error == "" || !strings.Contains(r.Hint, "--listen") {
+	if r := Probe(ctx, TargetGetter, dead, 1); r.Reachable || r.Error == "" || !strings.Contains(r.Hint, "HTTPS proxy") || r.Command != "" {
 		t.Fatalf("dead %+v", r)
 	}
 	if r := Probe(ctx, TargetGetter, "box.lan:7380", 1); r.Reachable || !strings.Contains(r.Error, "scheme") {

@@ -55,9 +55,9 @@ func TestSharedDataNeverStartsPersonalRuntime(t *testing.T) {
 func sharedDataNeverStartsPersonalRuntime(t *testing.T, c config.Config) {
 	t.Helper()
 	c.PublicURL = "https://stage.example"
-	on, off := true, false
 	output := &syncBuffer{}
-	opts := serve.Options{Config: c, SharedAccess: &on, BootstrapOutput: output}
+	c.MultiUser = new(true)
+	opts := serve.Options{Config: c, BootstrapOutput: output}
 	first, logs := startSharedOwner(t, opts)
 	link := setupLink(t, output.String(), c.PublicURL, "/auth/setup")
 	assertPrivateOwner(t, c, logs.String(), link)
@@ -74,7 +74,7 @@ func sharedDataNeverStartsPersonalRuntime(t *testing.T, c config.Config) {
 	}
 
 	output = &syncBuffer{}
-	opts.SharedAccess = nil
+	opts.Config.MultiUser = nil
 	opts.BootstrapOutput = output
 	restarted, logs := startSharedOwner(t, opts)
 	if output.String() != "" || !strings.Contains(logs.String(), "owner reissue-setup") {
@@ -93,7 +93,7 @@ func sharedDataNeverStartsPersonalRuntime(t *testing.T, c config.Config) {
 		t.Fatal(err)
 	}
 
-	opts.SharedAccess = &off
+	opts.Config.MultiUser = new(false)
 	opts.Logger = quiet()
 	if err := serve.Run(t.Context(), opts); !errors.Is(err, db.ErrSharedAccessRequired) {
 		t.Fatalf("explicit false: %v", err)
@@ -106,9 +106,8 @@ func TestPrivateBootstrapAndAdminRecoveryAcrossProfiles(t *testing.T) {
 			short := isolate(t)
 			c := cfg(t, filepath.Join(short, "data"), "unix:"+filepath.Join(short, "product.sock"))
 			c.PublicURL = "https://stage.example"
-			on := true
 			output := &syncBuffer{}
-			opts := serve.Options{Config: c, SharedAccess: &on, BootstrapOutput: output}
+			opts := serve.Options{Config: c, BootstrapOutput: output}
 			switch profile {
 			case "managed":
 				opts.Service = &serve.Service{Manager: "systemd", Name: "stage-test"}
@@ -119,6 +118,7 @@ func TestPrivateBootstrapAndAdminRecoveryAcrossProfiles(t *testing.T) {
 			case "redirected foreground":
 				opts.BootstrapOutput = nil
 			}
+			opts.Config.MultiUser = new(true)
 			i, logs := startSharedOwner(t, opts)
 			bootstrap := ownercontrol.BootstrapPath(c.DataDir)
 			st, err := os.Stat(bootstrap)
@@ -155,7 +155,7 @@ func TestPrivateBootstrapAndAdminRecoveryAcrossProfiles(t *testing.T) {
 				t.Fatalf("claim original user 1 after restart: %v", err)
 			}
 
-			opts.SharedAccess = nil
+			opts.Config.MultiUser = nil
 			_, logs = startSharedOwner(t, opts)
 			gone(t, bootstrap)
 			if _, err := ownercontrol.ReissueSetup(t.Context(), c.DataDir); err == nil {
@@ -175,10 +175,10 @@ func TestSharedOriginNeedsBrowserReachability(t *testing.T) {
 	short := isolate(t)
 	data := filepath.Join(short, "data")
 	c := cfg(t, data, "unix:"+filepath.Join(short, "product.sock"))
-	on := true
+	c.MultiUser = new(true)
 	for _, publicURL := range []string{"", "http://127.0.0.1:7380", "http://stage.example", "https://secret@example.test"} {
 		c.PublicURL = publicURL
-		err := serve.Run(t.Context(), serve.Options{Config: c, SharedAccess: &on, Logger: quiet()})
+		err := serve.Run(t.Context(), serve.Options{Config: c, Logger: quiet()})
 		var invalid *config.InvalidError
 		if !errors.As(err, &invalid) || !strings.Contains(err.Error(), "STAGE_PUBLIC_URL") || strings.Contains(err.Error(), "secret") {
 			t.Fatalf("expected actionable and secret-free origin error, got %v", err)
@@ -187,6 +187,7 @@ func TestSharedOriginNeedsBrowserReachability(t *testing.T) {
 	// Invalid shared configuration must leave the private product socket
 	// available for the unchanged personal installation.
 	c.PublicURL = ""
+	c.MultiUser = nil
 	personal := start(t, c, newT3())
 	if err := personal.stop(t); err != nil {
 		t.Fatal(err)
@@ -198,14 +199,16 @@ func TestSharedOriginNeedsBrowserReachability(t *testing.T) {
 	}
 	publicBind := cfg(t, data, "0.0.0.0:"+port)
 	publicBind.PublicURL = "https://stage.example"
-	if err := serve.Run(t.Context(), serve.Options{Config: publicBind, SharedAccess: &on, Logger: quiet()}); err == nil ||
+	publicBind.MultiUser = new(true)
+	if err := serve.Run(t.Context(), serve.Options{Config: publicBind, Logger: quiet()}); err == nil ||
 		!strings.Contains(err.Error(), "private upstream") {
 		t.Fatalf("accepted a public cleartext upstream: %v", err)
 	}
 	c = cfg(t, data, address)
 	c.PublicURL = "http://" + address
 	output := &syncBuffer{}
-	_, logs := startSharedOwner(t, serve.Options{Config: c, SharedAccess: &on, BootstrapOutput: output})
+	c.MultiUser = new(true)
+	_, logs := startSharedOwner(t, serve.Options{Config: c, BootstrapOutput: output})
 	link := setupLink(t, output.String(), c.PublicURL, "/auth/setup")
 	assertPrivateOwner(t, c, logs.String(), link)
 	headers := claimBrowser(t, http.DefaultClient, c.PublicURL, output.String())
@@ -226,9 +229,9 @@ func TestPrivateBootstrapWriteFailure(t *testing.T) {
 	short := isolate(t)
 	c := cfg(t, filepath.Join(short, "data"), "unix:"+filepath.Join(short, "product.sock"))
 	c.PublicURL = "https://stage.example"
-	on := true
 	output := &failedBootstrap{}
-	_, logs := startSharedOwner(t, serve.Options{Config: c, SharedAccess: &on, BootstrapOutput: output})
+	c.MultiUser = new(true)
+	_, logs := startSharedOwner(t, serve.Options{Config: c, BootstrapOutput: output})
 	first := setupLink(t, output.String(), c.PublicURL, "/auth/setup")
 	if !strings.Contains(logs.String(), "owner reissue-setup") {
 		t.Fatal("operator output failure should identify the recovery command")

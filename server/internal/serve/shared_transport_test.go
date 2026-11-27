@@ -140,8 +140,8 @@ func TestSharedAccountsThroughHTTPSProxyAndUnix(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := &syncBuffer{}
-	on := true
-	i, _ := startSharedOwner(t, serve.Options{Config: c, SharedAccess: &on, BootstrapOutput: output, HarnessOverrides: map[string]any{t3.Kind: fake}})
+	c.MultiUser = new(true)
+	i, _ := startSharedOwner(t, serve.Options{Config: c, BootstrapOutput: output, HarnessOverrides: map[string]any{t3.Kind: fake}})
 	unix := clientFor(i.ready.Listeners[1])
 	anon, owner, member := proxy.Client(), browserClient(t, proxy), browserClient(t, proxy)
 	get := func(h *http.Client, path string, want int, out any) {
@@ -483,9 +483,9 @@ func TestSharedWorkerReadinessAndPrivateGateway(t *testing.T) {
 	if err := personal.stop(t); err != nil {
 		t.Fatal(err)
 	}
-	on := true
 	output := &syncBuffer{}
-	startSharedOwner(t, serve.Options{Config: c, SharedAccess: &on, BootstrapOutput: output, HarnessOverrides: map[string]any{t3.Kind: fake}})
+	c.MultiUser = new(true)
+	startSharedOwner(t, serve.Options{Config: c, BootstrapOutput: output, HarnessOverrides: map[string]any{t3.Kind: fake}})
 	private := listen.Addr{Network: "unix", Address: filepath.Join(short, "worker", "gateway.sock"), Private: true}
 	tcp := listen.Addr{Network: "tcp", Address: freePort(t)}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -597,9 +597,9 @@ func TestSharedClaimResumesWorkOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	on := true
 	output := &syncBuffer{}
-	opts := serve.Options{Config: c, SharedAccess: &on, BootstrapOutput: output, HarnessOverrides: map[string]any{t3.Kind: fake}}
+	c.MultiUser = new(true)
+	opts := serve.Options{Config: c, BootstrapOutput: output, HarnessOverrides: map[string]any{t3.Kind: fake}}
 	instance, _ := startSharedOwner(t, opts)
 	time.Sleep(150 * time.Millisecond)
 	if runs, err := database.ScheduleRuns(ctx, cron.ID, 10); err != nil || len(runs) != 0 || fake.launches.Load() != 1 {
@@ -629,7 +629,7 @@ func TestSharedClaimResumesWorkOnce(t *testing.T) {
 	if err := instance.stop(t); err != nil {
 		t.Fatal(err)
 	}
-	opts.SharedAccess = nil
+	opts.Config.MultiUser = nil
 	startSharedOwner(t, opts)
 	time.Sleep(150 * time.Millisecond)
 	if n := fake.launches.Load(); n != 2 {

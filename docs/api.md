@@ -131,8 +131,14 @@ In shared mode it also returns the calling account's `email`, `role`
 
 ## Shared access transport
 
-The [shared access ADR](adr/0009-shared-access.md#principals-and-endpoint-policy)
-defines the staged rollout. Public mode opt-in is reserved for #460.
+Enable shared access per installation with `STAGE_MULTI_USER=1` or
+`stage serve --multi-user`. See [startup and recovery](runtime.md#shared-setup-and-owner-recovery)
+and the [principal policy](adr/0009-shared-access.md#principals-and-endpoint-policy).
+In claimed mode, protected endpoints return `401` for missing or invalid
+credentials and `403` when an admitted principal lacks permission. During
+first-admin setup they return `403 setup_pending`. Public health, version
+and access status remain available for client negotiation. Worker endpoints
+authenticate with pairing or machine credentials independently of human sessions.
 
 | Request | Credential and result |
 | --- | --- |

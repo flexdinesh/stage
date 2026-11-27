@@ -12,13 +12,13 @@ Pick the self-hosted server when Stage should run on a machine without the deskt
 Browser / PWA (phone, laptop)
         |
         v
-HTTPS proxy with auth
+HTTPS proxy
         |
         v
 Stage server (127.0.0.1:7380) ---> T3 / OpenCode
 
-On the Stage machine itself, a browser opens
-http://127.0.0.1:7380 directly.
+For personal access on the Stage machine,
+open http://127.0.0.1:7380 directly.
 ```
 
 ## Set up
@@ -90,14 +90,62 @@ A foreground server reads its config from the environment, not `service.env`, an
 ## Reach it from other devices
 
 :::warning
-Stage has no authentication. Anyone who can reach its listener can read tasks and journals, stop tasks, and launch agents in full-access mode on the host.
+Personal access is the default. Anyone who can reach a personal listener can read tasks and journals, stop tasks, and launch agents on configured machines. Only expose it on a network where everyone with access can be trusted with that control.
 :::
 
-- Before exposing Stage to a network, put an authenticating HTTPS reverse proxy in front and keep Stage itself unreachable except through it.
-- A tailnet limits who can connect, not what they can do.
-- Stage refuses requests that browsers send on behalf of other sites, and any hostname it does not trust (`403 host … not allowed`). Add your proxy's origin to `STAGE_ALLOWED_ORIGINS`, or set it as `STAGE_PUBLIC_URL`. This is not authentication.
+- To give trusted people their own accounts, [enable shared access](#enable-shared-access).
+- For personal access outside a trusted network, use an authenticating HTTPS reverse proxy as the only way to reach Stage. Set `STAGE_PUBLIC_URL` to the proxy's origin.
+- Stage also checks which Host and browser Origin it receives. See the [Security reference](/docs/reference/security).
 
-Details: [Security reference](/docs/reference/security).
+## Enable shared access
+
+Shared access gives each person their own sign-in and inbox. Everyone works in the same projects and can run tasks through the same workers and harnesses. Invite people you trust to manage the workspace and run code wherever those harnesses permit.
+
+1. Back up existing data. Set up an HTTPS proxy that forwards to a Stage loopback TCP listener or a protected product Unix socket. Preserve the public Host, browser Origin, cookies and Authorization headers.
+2. For a per-user service, add these settings to `service.env`, then run `stage service restart`. For a foreground server, export the same settings or pass `--multi-user` to `stage serve` in place of `STAGE_MULTI_USER=1`.
+
+   ```sh
+   STAGE_LISTEN=unix,127.0.0.1:7380
+   STAGE_PUBLIC_URL=https://stage.example.com
+   STAGE_MULTI_USER=1
+   ```
+
+3. Open the first-admin setup link privately. Interactive foreground Stage prints it to the terminal. Managed and redirected runs write it to `<data dir>/owner/bootstrap.txt` with mode `0600`. The link expires after 30 minutes. Claiming an existing installation keeps its work and paired workers and makes the existing default user the first admin.
+4. In **Admin > Invitations**, enter the person's email and choose **Create invitation**, then **Copy invitation link**. Send it privately to the recipient. They open it and choose a name and password to join. Each invite works once and expires after seven days.
+
+Shared mode persists across restarts. Keep the HTTPS origin and private listener configured. Setting `STAGE_MULTI_USER=0` on shared data causes startup to fail.
+
+### Recover access
+
+While Stage is running, use a terminal on the server as the OS user that runs it. Set `STAGE_DATA_DIR` to the server's data directory when it differs from the default.
+
+```sh
+stage owner reissue-setup
+stage owner recover-admin --email admin@example.com
+```
+
+Use the first command before claim to replace the setup link. Use the second to issue a password reset link for an active admin. Both links expire in 30 minutes. Share a reset link privately with its recipient. Admins can issue member reset links from **Admin > People**.
+
+### Shared access in a container
+
+The bundled Compose setup uses personal access and a wildcard listener inside the container. To run shared Stage, place the HTTPS proxy in Stage's network namespace. For Docker, run the proxy with its HTTPS port published and start Stage with `--network container:<proxy-container>`, a private data volume at `/data`, and these environment values:
+
+```sh
+STAGE_LISTEN=127.0.0.1:7380
+STAGE_PUBLIC_URL=https://stage.example.com
+STAGE_MULTI_USER=1
+```
+
+Point the proxy at `127.0.0.1:7380`. Alternatively, give your proxy access to a protected Stage product socket. If reusing a volume or bind mount, make sure the data directory is owned by the Stage container user (UID 65532 in the image) and has mode `0700`. Keep the owner control socket private. With the distroless image, get the links directly through the Stage binary:
+
+```sh
+docker exec <stage-container> /stage owner reissue-setup
+docker exec <stage-container> /stage owner recover-admin --email admin@example.com
+```
+
+### Test shared access locally
+
+Use `STAGE_PUBLIC_URL=http://127.0.0.1:7380` with a matching loopback listener for local HTTP testing. For other devices use the HTTPS origin they can actually reach.
 
 ## HTTPS and push notifications
 
@@ -136,7 +184,7 @@ The notifications inbox uses a Server-Sent Events stream (`/api/notifications/st
 - Caddy's `reverse_proxy` flushes it immediately. If your config uses `encode`, exclude that path so events are not buffered.
 - Other proxies: disable response buffering (the server sends `X-Accel-Buffering: no`) and allow long-lived responses (a ping every 15s).
 
-HTTP MCP (`/mcp`) does not work through a proxy that forwards to `127.0.0.1`: it answers 403. Agents use stdio MCP or the CLI with `STAGE_URL` set to the proxy URL ([MCP reference](/docs/reference/mcp)).
+Shared Stage serves HTTP MCP at the canonical origin with a scoped agent credential. A personal proxy forwarding to loopback uses stdio MCP or the CLI with `STAGE_URL` set to the proxy URL. [MCP reference](/docs/reference/mcp)
 
 ## Install as an app (PWA)
 
@@ -146,7 +194,7 @@ Over HTTPS (or `localhost`), install Stage as an app to get push notifications:
 - **macOS**: Safari > File > Add to Dock (or use the site in Safari or Chrome), then Settings > Notifications > **Enable notifications**.
 - **Send test** in Settings > Notifications checks the device.
 
-Which events notify (needs input, failed, ready, done, completed) is one filter in Settings that applies to every device.
+The event filter in Settings applies to all of your devices. On a shared server, each account has its own filter and unread badge.
 
 ## Logs, status and updates
 

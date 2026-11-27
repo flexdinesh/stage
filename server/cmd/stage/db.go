@@ -14,6 +14,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/datacopy"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/instance"
+	"github.com/flexdinesh/stage/server/internal/serve"
 )
 
 const dbUsage = `Usage:
@@ -22,10 +23,12 @@ const dbUsage = `Usage:
       into the empty Postgres database at URL (postgres:// or postgresql://),
       then verify every table's row count and checksum. Needs a binary with
       Postgres support (the Docker image). See docs/storage.md "Data copy and cutover".
+  stage db invalidate-access
+      clear restored sessions and account links before restarting the server.
+      Set STAGE_DATA_DIR explicitly. For Postgres, also set STAGE_DATABASE_URL.
 
-Exit: 0 copied and verified, 2 usage, 75 the data dir or the target is held by a
-server, 78 no Postgres support or an invalid URL, 1 refused, failed or mismatched
-(the target is rolled back).
+Exit: 0 success, 2 usage, 75 the data dir or database is held by a server,
+78 incompatible schema or invalid configuration, 1 failed or refused.
 `
 
 // copyStartTimeout bounds opening the target and taking its ownership lock.
@@ -59,8 +62,37 @@ func dbCommand(ctx context.Context, args []string, stdout io.Writer) error {
 		return nil
 	case "copy":
 		return dbCopy(ctx, args[1:], stdout)
+	case "invalidate-access":
+		return dbInvalidateAccess(ctx, args[1:], stdout)
 	}
 	return errUsage{fmt.Sprintf("unknown command %q", args[0])}
+}
+
+func dbInvalidateAccess(ctx context.Context, args []string, stdout io.Writer) error {
+	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
+		fmt.Fprint(stdout, dbUsage)
+		return nil
+	}
+	if len(args) != 0 {
+		return errUsage{"invalidate-access takes no arguments"}
+	}
+	if os.Getenv("STAGE_DATA_DIR") == "" {
+		return config.Invalid(errors.New("Set STAGE_DATA_DIR to the restored installation's data directory."))
+	}
+	dataDir, err := config.DataDirFrom(os.Getenv)
+	if err != nil {
+		return config.Invalid(err)
+	}
+	database, err := config.ParseDatabase(os.Getenv(config.DatabaseEnv))
+	if err != nil {
+		return config.Invalid(err)
+	}
+	cfg := config.Config{DataDir: dataDir, Database: database}
+	if err := serve.InvalidateRestoredAccess(ctx, cfg); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(stdout, "Restored sessions and account links cleared.")
+	return err
 }
 
 // dbCopy is `stage db copy --from PATH --to URL` (docs/storage.md "Data

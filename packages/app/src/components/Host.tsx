@@ -2,8 +2,7 @@
 // active Stage server first answers, the banner for later trouble, and the
 // desktop app's lines and controls in Settings > General > Info (login
 // startup, this machine as a worker of another server: state, leave). A host
-// without `platform.host` (the browser) renders none of it. Server switching
-// (Servers.tsx) is kept but not offered in the UI.
+// without `platform.host` (the browser) renders none of it.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
@@ -29,6 +28,7 @@ import type { HostServices, HostState, HostWorker, HostWorkerControl } from "../
 import { usePlatform } from "../platform/context.tsx";
 import { Step, Steps } from "./Steps.tsx";
 import { DesktopAccessGate } from "./DesktopAccess.tsx";
+import { ServerSwitchButton } from "./Servers.tsx";
 import {
   Alert,
   Button,
@@ -220,7 +220,12 @@ export function ConnectionScreen({ state, host }: { state: HostState; host: Host
             ) : null}
           </div>
         )}
-        {state.phase === "starting" ? null : <Diagnostics host={host} logTail={remote ? [] : state.logTail} />}
+        {state.phase === "starting" ? null : (
+          <>
+            <ServerSwitchButton />
+            <Diagnostics host={host} logTail={remote ? [] : state.logTail} />
+          </>
+        )}
       </div>
     </main>
   );
@@ -228,7 +233,7 @@ export function ConnectionScreen({ state, host }: { state: HostState; host: Host
 
 /**
  * This machine's target while it is a worker of a remote: its own server is off. Offers Leave, which brings this
- * machine's server back (server switching is not offered in the UI).
+ * machine's server back. Saved servers can be opened without leaving the worker.
  */
 function WorkerScreen({ state, worker, host }: { state: HostState; worker: HostWorker; host: HostServices }) {
   const [leaving, setLeaving] = useState(false);
@@ -251,6 +256,7 @@ function WorkerScreen({ state, worker, host }: { state: HostState; worker: HostW
           </div>
         )}
         {leaving && control !== undefined ? <LeaveConfirm worker={worker} control={control} onThisMachine onCancel={() => setLeaving(false)} /> : null}
+        <ServerSwitchButton />
       </div>
     </main>
   );

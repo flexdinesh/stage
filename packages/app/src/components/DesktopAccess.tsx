@@ -3,6 +3,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { ApiError } from "../api/client.ts";
 import { useApi } from "../platform/context.tsx";
 import type { HostState } from "../platform/index.ts";
+import { ServerSwitchButton } from "./Servers.tsx";
 import { Button, ErrorText, ExternalButton, Field, Input, Muted, PageHeader, Panel } from "./ui.tsx";
 
 export function DesktopAccessGate({ state, brand, children }: { state: HostState; brand: ReactNode; children: ReactNode }) {
@@ -22,8 +23,12 @@ export function DesktopAccessGate({ state, brand, children }: { state: HostState
   const pending = access.data?.mode === "setup_pending";
   const url = access.data?.canonicalUrl;
   const addressMatches = state.target.kind === "local" || url === state.target.url;
+  const addressMismatch = url !== undefined && !addressMatches;
   const error = access.error ?? (signingIn ? null : me.error);
-  const title = pending ? "Waiting for server setup" : signingIn ? "Sign in to Stage" : error === null ? "Checking account access" : "Couldn’t check account access";
+  const title = pending ? "Waiting for server setup"
+    : addressMismatch ? "Use the server’s sign-in URL"
+    : signingIn ? "Sign in to Stage"
+    : error === null ? "Checking account access" : "Couldn’t check account access";
   return (
     <main className="min-h-dvh bg-bg text-fg">
       <div className="mx-auto flex w-full max-w-[560px] flex-col gap-3.5 px-4 pt-[max(2.5rem,14vh)] pb-12">
@@ -34,13 +39,17 @@ export function DesktopAccessGate({ state, brand, children }: { state: HostState
         {url === undefined ? null : <p className="break-all font-mono text-meta text-muted">{url}</p>}
         {signingIn && addressMatches ? <DesktopSignIn /> : null}
         {pending ? <Muted>Ask the server owner to finish setup using their link in a browser.</Muted> : null}
+        {addressMismatch ? <Muted>Switch to another server, then update this server’s URL in Settings → General.</Muted> : null}
         <ErrorText error={error} />
-        {error !== null || pending ? (
+        {error !== null || pending || addressMismatch ? (
           <div className="flex flex-wrap gap-2">
-            <Button busy={access.isFetching || me.isFetching} onClick={() => { void access.refetch(); if (access.data?.mode === "claimed") void me.refetch(); }}>Retry</Button>
-            {url !== undefined && (pending || !addressMatches) ? <ExternalButton href={url}>Open in browser</ExternalButton> : null}
+            {error !== null || pending ? (
+              <Button busy={access.isFetching || me.isFetching} onClick={() => { void access.refetch(); if (access.data?.mode === "claimed") void me.refetch(); }}>Retry</Button>
+            ) : null}
+            {url !== undefined && (pending || addressMismatch) ? <ExternalButton href={url}>Open in browser</ExternalButton> : null}
           </div>
         ) : null}
+        <ServerSwitchButton />
       </div>
     </main>
   );

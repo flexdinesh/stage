@@ -21,7 +21,7 @@ import (
 const ServiceEnvFile = "service.env"
 
 func serviceEnvKeys(env harness.EnvOptions) []string {
-	return append([]string{"STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS"}, env.Keys...)
+	return append([]string{"STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS", "STAGE_MULTI_USER"}, env.Keys...)
 }
 
 // managedFixedKeys are ignored when inherited in managed mode and refused in
@@ -104,6 +104,7 @@ STAGE_LISTEN=unix
 
 # STAGE_PUBLIC_URL=
 # STAGE_ALLOWED_ORIGINS=
+# STAGE_MULTI_USER=1
 # Harness connections are set up in Settings > Connections.
 `
 

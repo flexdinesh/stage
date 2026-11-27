@@ -7,8 +7,14 @@ showAskAi: false
 # Security
 
 :::warning
-Stage has no authentication. Anyone who can reach a listener can read tasks and journals, stop tasks, and launch agents in full-access mode on the host (`full-access` is the task default).
+On a personal server, anyone who can reach a product listener can read tasks and journals, stop work, and launch agents wherever configured harnesses permit. Keep personal access on a trusted network or behind an authenticating HTTPS proxy with a private upstream.
 :::
+
+## Shared access
+
+[Enable shared access](/docs/usage/server#enable-shared-access) for named accounts in one trusted workspace. Members can operate every project, task, worker and harness setting. Admins can also invite people, change roles and disable accounts. Members can run code on the server or workers wherever harnesses permit. Use separate OS accounts or hosts for stronger execution isolation.
+
+Stage accepts email and password. An admin creates a single-use invite for a specific address and shares it privately. The OS user who runs Stage controls first-admin setup and admin recovery through a separate owner-only socket. Keep access to the data directory private.
 
 ## Default binding
 
@@ -38,34 +44,30 @@ Binding to `127.0.0.1` keeps other machines out, not browsers on this machine. L
 
 `X-Forwarded-*` headers are never trusted.
 
-### Not authentication
-
-That policy is request-origin hygiene, not authentication. Any process or person that can reach a listener directly has full access. A private socket (`unix`, mode `0600`) limits that to your user.
-
 ## Exposing Stage to a network
 
-Before exposing Stage to a network, put an authenticating HTTPS reverse proxy in front and keep Stage itself unreachable except through it. The proxy setup for a main server with workers: [Workers](/docs/usage/workers). HTTPS options: [Server](/docs/usage/server#https-and-push-notifications).
+- For a personal server outside your trusted network, require proxy authentication and keep the Stage listener reachable only from the proxy.
+- For shared access, use a canonical HTTPS `STAGE_PUBLIC_URL` and bind Stage to loopback TCP or a protected product Unix socket. Preserve the public Host and browser Origin at the proxy. Cookie-based writes require that exact Origin. Protected routes require a credential, even on the product Unix socket.
+- Health, version and access status stay available without signing in so clients can connect. Shared public health omits operational details. Protected requests return `401` for missing or invalid credentials and `403` when an admitted principal lacks permission.
 
-:::note
-A tailnet limits who can connect, not what they can do.
-:::
+HTTPS options and streaming settings are in [Self-hosted server](/docs/usage/server#https-and-push-notifications) and [Multiple machines](/docs/usage/workers#auth-proxy).
 
 ## Worker routes
 
-`/api/worker/*` is the one place Stage authenticates requests itself:
+`/api/worker/*` uses independent machine credentials:
 
 - A worker joins with a one-time pairing code (valid 10 minutes), then authenticates every other worker route with a revocable machine token.
 - Every other route refuses machine tokens.
-- Your proxy passes `/api/worker/*` through without user authentication, forwarding the `Authorization` header unchanged. Creating a pairing link stays behind user authentication.
+- Forward the `Authorization` header unchanged. If a personal server uses an authenticating proxy, let `/api/worker/*` through without proxy user authentication. Keep pairing link creation protected.
 - Removing a machine revokes its token at once.
 
 ## HTTP MCP and loopback
 
-`POST /mcp` also keeps the MCP SDK's own loopback check: a request that arrives on a loopback address with a Host other than a loopback one gets `403 Forbidden: invalid Host header`, even when the origin policy trusts that host. A reverse proxy forwarding to `127.0.0.1:7380` therefore cannot serve HTTP MCP; through a proxy, agents use stdio MCP or the CLI with `STAGE_URL` set to the proxy URL ([MCP tools](/docs/reference/mcp)).
+Shared Stage accepts HTTP MCP at the canonical origin with a scoped agent credential. Personal HTTP MCP keeps its loopback Host check. For a personal proxy forwarding to loopback, use stdio MCP or the CLI at the proxy URL. [MCP tools](/docs/reference/mcp)
 
 ## Agent gateway
 
-A worker's agent gateway forwards `/api` and `/mcp` to the main server with its machine token, so anything that reaches the gateway has agent access to the main server. It listens on a private socket by default. When you add TCP for HTTP MCP clients, use a loopback address (`STAGE_WORKER_LISTEN=unix,127.0.0.1:7381`) and avoid a wildcard host. The gateway cannot manage machines or change any machine's harness setup (403).
+A worker's agent gateway forwards `/api` and `/mcp` to the main server with its machine token. Shared mode admits agent operations through the worker's owner-private default socket. Update older workers for shared gateway access. A personal worker can also accept local HTTP MCP at a loopback address (`STAGE_WORKER_LISTEN=unix,127.0.0.1:7381`). Anyone who reaches that endpoint has agent access. The gateway refuses machine management and harness changes with `403`.
 
 ## Releases
 

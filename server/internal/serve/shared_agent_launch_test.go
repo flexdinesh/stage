@@ -77,10 +77,10 @@ func TestSharedLocalHarnessLaunchAndReportBack(t *testing.T) {
 	openCodeDir := t.TempDir()
 	openCodeURL, openCodePrompt := openCodeLaunchFixture(t, openCodeDir)
 
-	on := true
 	output := &syncBuffer{}
+	c.MultiUser = new(true)
 	i, _ := startSharedOwner(t, serve.Options{
-		Config: c, SharedAccess: &on, BootstrapOutput: output,
+		Config: c, BootstrapOutput: output,
 		Profile: harness.Profile{Kind: harness.ProfileServer, LocalProcesses: true},
 		HarnessOverrides: map[string]any{
 			t3.Kind: t3Fake,

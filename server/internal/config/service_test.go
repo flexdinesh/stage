@@ -9,12 +9,12 @@ import (
 )
 
 func TestParseServiceEnv(t *testing.T) {
-	in := "\ufeff# comment\r\nSTAGE_LISTEN=unix,127.0.0.1:7380\r\n\nSTAGE_PUBLIC_URL = \"http://stage:7380/?a=b\"\nHARNESS_BIN='x=y'\n"
+	in := "\ufeff# comment\r\nSTAGE_LISTEN=unix,127.0.0.1:7380\r\n\nSTAGE_PUBLIC_URL = \"http://stage:7380/?a=b\"\nSTAGE_MULTI_USER=1\nHARNESS_BIN='x=y'\n"
 	got, err := ParseServiceEnv(strings.NewReader(in), testEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"STAGE_LISTEN": "unix,127.0.0.1:7380", "STAGE_PUBLIC_URL": "http://stage:7380/?a=b", "HARNESS_BIN": "x=y"}
+	want := map[string]string{"STAGE_LISTEN": "unix,127.0.0.1:7380", "STAGE_PUBLIC_URL": "http://stage:7380/?a=b", "STAGE_MULTI_USER": "1", "HARNESS_BIN": "x=y"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v", got)
 	}
@@ -66,7 +66,7 @@ func TestLoadManaged(t *testing.T) {
 	inherited := map[string]string{
 		"HOME": home, "STAGE_DATA_DIR": "/elsewhere", "STAGE_ENV": "dev", "STAGE_LISTEN": "127.0.0.1:1",
 		"HARNESS_BIN": "/inherited", "HARNESS_FAKE": "1", "STAGE_ALLOWED_ORIGINS": "bogus",
-		"STAGE_DATABASE_URL": "postgres://u:p@h/db",
+		"STAGE_DATABASE_URL": "postgres://u:p@h/db", "STAGE_MULTI_USER": "1",
 	}
 	getenv := func(k string) string { return inherited[k] }
 	cfg, err := LoadManaged(getenv, map[string]string{"STAGE_LISTEN": "unix", "HARNESS_BIN": "/file"}, testEnv)
@@ -83,14 +83,18 @@ func TestLoadManaged(t *testing.T) {
 	if cfg.Database.Engine() != EngineSQLite {
 		t.Fatalf("inherited STAGE_DATABASE_URL leaked: engine %s", cfg.Database.Engine())
 	}
+	if cfg.MultiUser != nil {
+		t.Fatal("inherited STAGE_MULTI_USER changed the managed access mode")
+	}
 	if len(cfg.Listen) != 1 || cfg.Listen[0].Network != "unix" || !cfg.Listen[0].Private {
 		t.Fatalf("listen %+v", cfg.Listen)
 	}
 	if _, err := LoadManaged(getenv, map[string]string{"STAGE_LISTEN": "127.0.0.1:7380"}, testEnv); err == nil || !strings.Contains(err.Error(), "must include unix") {
 		t.Fatalf("TCP-only accepted: %v", err)
 	}
-	if _, err := LoadManaged(getenv, map[string]string{"STAGE_LISTEN": "unix,127.0.0.1:7380"}, testEnv); err != nil {
-		t.Fatalf("unix+tcp: %v", err)
+	cfg, err = LoadManaged(getenv, map[string]string{"STAGE_LISTEN": "unix,127.0.0.1:7380", "STAGE_MULTI_USER": "1"}, testEnv)
+	if err != nil || cfg.MultiUser == nil || !*cfg.MultiUser {
+		t.Fatalf("managed opt-in: %v %v", cfg.MultiUser, err)
 	}
 }
 

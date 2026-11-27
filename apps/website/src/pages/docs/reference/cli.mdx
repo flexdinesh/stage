@@ -131,9 +131,14 @@ Fields and actions: [Connections](/docs/reference/connections).
 
 | Command | Does |
 |---|---|
-| `stage serve [--listen ADDR]...` | run the server in the foreground (also `stage` with no arguments) |
+| `stage serve [--listen ADDR]... [--multi-user]` | run in the foreground (also `stage` with no arguments). `--multi-user` enables [shared access](/docs/usage/server#enable-shared-access). |
 | `stage serve --managed` | run as the per-user service (what `stage service` registers) |
 | `stage status [--wait DUR]` | the server this CLI reaches: version, readiness, harness states; exit 1 unreachable or another API version, 3 when `--wait` expires |
+| `stage owner reissue-setup` | replace the private first-admin setup link while setup is pending |
+| `stage owner recover-admin --email EMAIL` | issue a 30-minute password reset link for an active admin |
+| `stage db invalidate-access` | clear copied sessions and grants after restoring a database, before starting the server |
+
+Run the owner commands on the server as its OS user. For restore, set `STAGE_DATA_DIR` explicitly and leave the server stopped until invalidation succeeds. [Configuration](/docs/reference/configuration#data)
 
 ## Service
 

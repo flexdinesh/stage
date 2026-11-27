@@ -6,7 +6,7 @@ showAskAi: false
 
 # Desktop app
 
-Pick the desktop app when Stage, your harnesses and you are all on one Linux machine. The app shows the Stage UI in a native window and starts this machine's Stage server as a per-user service, so there is nothing to run by hand. For a machine you reach over the network (a home server, a VM), use the [self-hosted server](/docs/usage/server) instead.
+The desktop app runs the Stage UI in a native window and starts your local server as a per-user service. It can also connect to a [self-hosted server](/docs/usage/server) on a home server or VM.
 
 ```txt
 +-------------+  private   +--------------+     +---------------+
@@ -36,7 +36,7 @@ It installs per user, without root, and puts the `stage` CLI on your `PATH`. Nev
 
 ### Start
 
-Open Stage from your app launcher. On launch the app starts this machine's per-user service and waits for the server to answer.
+Open Stage from your app launcher. The app starts this machine's per-user service and opens the personal workspace through its private socket without a sign-in prompt.
 
 ### Connect a harness
 
@@ -62,11 +62,11 @@ The server runs separately from the window:
 
 Native notifications come from the app itself, so they keep working while the window is closed.
 
-- Which events notify (needs input, failed, ready, done, completed) is one filter in Settings > Notifications, shared with every device. The on/off under **This device** is per installation, on by default.
+- Which events notify is set in **Settings > Notifications**. Shared accounts keep their own filter and unread state across devices. The on/off under **This device** controls delivery here.
 - With the window in front, in-app toasts show instead.
 - Clicking a notification opens its task, or the inbox for a session started outside Stage.
 - On reconnect, missed notifications from the last 15 minutes show (at most 3, then "N more in Stage"). Older ones stay in the inbox.
-- The Dock or launcher badge counts what needs input.
+- The Dock or launcher badge counts unread events for shared accounts and needs-input work on personal servers.
 - macOS asks for permission on the first notification. On Linux, clicks work only while the app runs.
 
 ## Links and login startup
@@ -76,7 +76,9 @@ Native notifications come from the app itself, so they keep working while the wi
 
 ## Other machines
 
-The desktop app connects to this machine's server only. To use a Stage server on another machine, open it in a browser ([Self-hosted server](/docs/usage/server)). To let this machine's harnesses run tasks for a main server elsewhere, make it a worker ([Multiple machines](/docs/usage/workers)).
+To connect to a remote Stage server, open **Settings > General > Servers** and choose **Add server**. Enter its name and URL, choose **Save server**, then **Switch** on its row. For a shared server, use its canonical HTTPS URL and sign in with your Stage email and password. Open first-admin setup, invitations and password reset links in a browser. [Shared access setup](/docs/usage/server#enable-shared-access)
+
+To let this machine's harnesses run tasks for a main server elsewhere, make it a worker. [Multiple machines](/docs/usage/workers)
 
 ## Troubleshooting
 

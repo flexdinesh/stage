@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	ErrSharedAccessRequired = errors.New("this database uses shared access. Remove the explicit false setting and restart in shared mode")
+	ErrSharedAccessRequired = errors.New("this database uses shared access. Remove the false STAGE_MULTI_USER or --multi-user setting and restart")
 	ErrSetupUnavailable     = errors.New("setup is unavailable. Ask the installation owner for a current setup link")
 )
 

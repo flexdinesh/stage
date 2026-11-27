@@ -42,7 +42,7 @@ STAGE_ALLOWED_ORIGINS=https://<machine>.<tailnet>.ts.net
 stage service restart
 ```
 
-Setting it as `STAGE_PUBLIC_URL` works too. Without either, Stage answers `403 host … not allowed`.
+For shared access, set `STAGE_PUBLIC_URL` to this HTTPS origin. A personal server can use either setting.
 
 ### Install the app
 
@@ -50,11 +50,11 @@ On iOS or iPadOS 16.4 or later, open the address in Safari and tap Share > **Add
 
 ### Enable notifications
 
-In the installed app, open Settings > Notifications. Under **This device**, tap **Enable notifications**, then **Send test**.
+In the installed app, sign in if the server uses shared access. Open Settings > Notifications. Under **This device**, tap **Enable notifications**, then **Send test**.
 
 ### Pick which events notify
 
-In the same page, choose the events: needs input, failed, ready, done, completed. The choice applies to every device.
+In the same page, choose the events. The choice applies to all of your signed-in devices in shared access.
 
 ### Answer
 
@@ -63,7 +63,7 @@ When a notification arrives, tap it to open the task (or the inbox, for a sessio
 :::
 
 :::warning
-Stage has no authentication. A tailnet limits who can connect, not what they can do: anyone on it who reaches Stage can read tasks and launch agents ([Security reference](/docs/reference/security)).
+Anyone who reaches a personal Stage listener through the tailnet can read tasks and launch agents. Use [shared access](/docs/usage/server#enable-shared-access) when trusted people need their own sign-in and inbox.
 :::
 
 With a real domain or a LAN name instead of Tailscale, use Caddy or another reverse proxy ([HTTPS and push notifications](/docs/usage/server#https-and-push-notifications)).

@@ -80,7 +80,7 @@ function ServerAccess() {
   if (view.kind === "setup_pending") {
     return (
       <AccessFrame title="Waiting for the owner">
-        <p className="text-body text-muted">The installation owner needs to finish setting up Stage. Check again after setup.</p>
+        <p className="text-body text-muted">The server owner must create the first admin account before you can sign in.</p>
         <div><Button onClick={() => void observer.current?.check(true)}>Check again</Button></div>
       </AccessFrame>
     );

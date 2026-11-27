@@ -50,7 +50,7 @@ func (l *Launcher) TestServer(ctx context.Context, rawURL string) ServerTest {
 func Probe(ctx context.Context, get Getter, rawURL string, wantAPI int) ServerTest {
 	u, err := target.NormalizeURL(rawURL)
 	if err != nil {
-		return ServerTest{Error: err.Error(), Hint: "Use the address Stage listens on, e.g. http://192.168.1.20:7380."}
+		return ServerTest{Error: err.Error(), Hint: "Use the address you open in your browser."}
 	}
 	t := target.Target{ID: "test", Kind: target.KindRemote, URL: u}
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
@@ -71,7 +71,7 @@ func Probe(ctx context.Context, get Getter, rawURL string, wantAPI int) ServerTe
 		return ServerTest{Reachable: true, Error: err.Error(), Hint: "Something answered, but not as a Stage server. Check the address and port."}
 	case err != nil:
 		return ServerTest{Error: err.Error(),
-			Hint: "Check the address, and that Stage on that machine listens on the network (stage serve --listen 0.0.0.0:7380, or STAGE_LISTEN in its service.env) and no firewall blocks the port."}
+			Hint: "Check the address and confirm that the server or its HTTPS proxy is reachable."}
 	case h.Service != "stage":
 		return ServerTest{Reachable: true, Error: fmt.Sprintf("%s is not a Stage server", u), Hint: "Check the address and port."}
 	}

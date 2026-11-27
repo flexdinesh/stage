@@ -96,7 +96,7 @@ compares a harness display name, or imports a harness's files past `src/harnesse
 | `storage` | Per-device preferences (theme, projects sort). Never throws | `storage.ts`: `localStorage` | `storage.ts`: the webview's `localStorage` |
 | `sessionLifecycle?` | Signals shared-session changes across views and suspension or resumption. Clears host-owned private state when the app discards a view | `sessionLifecycle.ts`: same-origin tab signals, page lifecycle events and push session cleanup | Absent in the personal desktop host |
 | `hostHistoryControls?` | The host shows its own back and forward, so the laptop sidebar hides its arrows. Absent or false: the arrows show | `historyControls.ts`: true in a tab or a `minimal-ui` window (`display-mode`), false in the installed standalone window | absent: the webview has no browser chrome |
-| `host?` | Native shell services: the host-managed server connection (`HostState`, retry/start/restart, diagnostics), login startup, navigation requests (deep links). Drives `HostGate`, `HostBanner` and the desktop lines of Settings, General, Info (`components/Host.tsx`) | absent | `host.ts` over the generated MyGo client |
+| `host?` | Native shell services: connection state and actions (`HostState`, retry/start/restart, diagnostics), saved servers and switching, login startup, navigation requests (deep links). Drives `HostGate`, `HostBanner` and the desktop controls in General settings. | absent | `host.ts` over the generated MyGo client |
 
 Not part of the contract: plain DOM and layout (`document` visibility,
 `matchMedia`, `history`, `document.title`, reload). A webview provides them as a browser does.
@@ -116,7 +116,11 @@ Not part of the contract: plain DOM and layout (`document` visibility,
   ([desktop.md](desktop.md)).
 - Server side: one `stage serve` process serves every listener (TCP and/or
   Unix sockets) with one store and runtime, owns its data dir through a lock,
-  and applies the request origin policy to `/api` and `/mcp`
+  and applies the request origin policy to `/api` and `/mcp`. Access mode
+  belongs to the installation, covering every project, worker and harness.
+  In shared mode the server admits human, agent and machine credentials
+  through one transport policy. Internal automation and the private OS
+  owner control path have separate principals
   ([runtime.md](runtime.md)). On a desktop machine an OS per-user service
   (systemd `--user`, launchd) supervises it (`stage service`,
   [service.md](service.md)).

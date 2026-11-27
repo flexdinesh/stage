@@ -100,13 +100,32 @@ func TestLoadDataDirWithoutHome(t *testing.T) {
 // clearEnv unsets every variable Load reads besides the data dir ones.
 func clearEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"STAGE_ENV", "STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS", DatabaseEnv} {
+	for _, k := range []string{"STAGE_ENV", "STAGE_LISTEN", "STAGE_PUBLIC_URL", "STAGE_ALLOWED_ORIGINS", "STAGE_MULTI_USER", DatabaseEnv} {
 		t.Setenv(k, "")
 	}
 	for _, k := range append(append([]string{}, testEnv.Keys...), testEnv.Removed...) {
 		t.Setenv(k, "")
 	}
 	t.Setenv("STAGE_DATA_DIR", t.TempDir())
+}
+
+func TestLoadMultiUser(t *testing.T) {
+	clearEnv(t)
+	cfg, err := Load(nil, testEnv)
+	if err != nil || cfg.MultiUser != nil {
+		t.Fatalf("unset access intent: %v %v", cfg.MultiUser, err)
+	}
+	for value, enabled := range map[string]bool{"1": true, "true": true, "0": false, "false": false} {
+		t.Setenv("STAGE_MULTI_USER", value)
+		cfg, err := Load(nil, testEnv)
+		if err != nil || cfg.MultiUser == nil || *cfg.MultiUser != enabled {
+			t.Errorf("STAGE_MULTI_USER=%s: %v %v", value, cfg.MultiUser, err)
+		}
+	}
+	t.Setenv("STAGE_MULTI_USER", "unexpected-secret")
+	if _, err := Load(nil, testEnv); err == nil || !strings.Contains(err.Error(), "STAGE_MULTI_USER") || strings.Contains(err.Error(), "unexpected-secret") {
+		t.Fatalf("invalid access intent: %v", err)
+	}
 }
 
 func TestLoadListen(t *testing.T) {

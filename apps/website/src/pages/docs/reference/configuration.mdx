@@ -13,7 +13,7 @@ Stage is configured with a few environment variables. Harness connections (T3 an
 | Process | Reads | Apply edits |
 |---|---|---|
 | Per-user service | only `service.env`, never your shell: `~/.config/stage/service.env` (`$XDG_CONFIG_HOME/stage/`) on Linux, `~/Library/Application Support/stage/service.env` on macOS | `stage service restart` |
-| Foreground `stage serve` | the shell environment only (no `.env` file) | restart it |
+| Foreground `stage serve` | command-line flags and the shell environment | restart it |
 | Worker service | only `worker.env`, next to `service.env`, never your shell | `stage worker service restart` |
 | Foreground `stage worker run` | the shell environment | restart it |
 
@@ -26,6 +26,7 @@ Stage is configured with a few environment variables. Harness connections (T3 an
 | Variable | Default | Purpose |
 |---|---|---|
 | `STAGE_LISTEN` | foreground `127.0.0.1:7380`; service `unix` | listen addresses ([Listeners](#listeners)). `stage serve --listen` (repeatable) replaces it. |
+| `STAGE_MULTI_USER` | unset | `1` or `true` enables [shared access](/docs/usage/server#enable-shared-access). Omit to use the persisted mode, personal on a fresh install. `0` or `false` refuses startup on shared data. An explicit foreground `--multi-user` value takes precedence. |
 | `STAGE_PUBLIC_URL` | unset | HTTPS URL the PWA is served at. Its origin is trusted by the request origin policy ([Security](/docs/reference/security)). When `https`, it is the Web Push VAPID subject (a fallback is used otherwise); push works without it. A main server needs it for pairing workers: links are built from it and workers dial it. |
 | `STAGE_ALLOWED_ORIGINS` | unset | comma list of extra trusted browser origins (`http(s)://host[:port]`), for example a Tailscale or Caddy hostname other than `STAGE_PUBLIC_URL`'s. Invalid entries stop startup. |
 | `T3_BIN` | unset | the `t3` CLI that Pair with T3 runs, when it is not on `PATH` or in a usual install dir |
@@ -56,10 +57,12 @@ Stage is configured with a few environment variables. Harness connections (T3 an
 `stage service start` validates `service.env` before starting, so a bad file fails there (exit 7) instead of in a restart loop. It is refused when:
 
 - it has an unknown key, `STAGE_DATA_DIR`, `STAGE_DATABASE_URL` or a retired variable;
+- `STAGE_MULTI_USER` is nonempty and differs from `1`, `true`, `0` or `false`;
 - `STAGE_LISTEN` does not include `unix`;
 - it is readable or writable by group or others (it may hold secrets).
 
 The service ignores these keys in its inherited environment, so it never depends on a shell.
+Use `service.env` to change shared access on the service. `stage serve --managed` rejects `--multi-user`.
 
 `stage worker service start` validates `worker.env` the same way (only the worker keys above, `STAGE_WORKER_LISTEN` must include `unix`, no retired variables, mode `0600`) and refuses until `stage worker join` has run.
 
@@ -76,6 +79,7 @@ One process serves every listener. `STAGE_LISTEN` takes a comma list; `stage ser
 - **Defaults**: foreground `127.0.0.1:7380`; service `unix` only. The service requires `unix` (the socket the desktop and CLI use). For a browser, add TCP with `STAGE_LISTEN=unix,127.0.0.1:7380` in `service.env`, then `stage service restart`.
 - **Both in one process**: `stage serve --listen unix,127.0.0.1:7380`.
 - **Browsers** need TCP, or a reverse proxy in front of a socket (for example Caddy `reverse_proxy unix//run/stage/stage.sock`).
+- **Shared access** uses the canonical HTTPS browser origin in `STAGE_PUBLIC_URL` and a loopback TCP listener or protected product socket. Matching loopback HTTP works for local testing. [Shared access setup](/docs/usage/server#enable-shared-access)
 - **Socket paths** must be absolute and fit the OS limit (107 bytes on Linux, 103 on macOS). Use a shorter explicit `unix:/path` when one does not.
 
 ### Default socket path
@@ -113,12 +117,13 @@ By default the database is SQLite (`stage.db`) in the data dir. A main server ru
 - **Migration backups**: before migrating an existing database (after an update), the server copies it to `<data dir>/backups/stage-schema<N>-<time>.db`, keeping the newest 3. If that copy fails (for example a full disk), the server does not migrate and exits.
 - **Newer database**: a server refuses to start on a database newer than it knows, so an older binary never runs against a migrated database.
 - **Uninstall** keeps the data dir.
+- **Restore** a backup with the server stopped, then run `stage db invalidate-access` with `STAGE_DATA_DIR` set explicitly to its data dir. For Postgres, also use the Docker image with `STAGE_DATABASE_URL` set to the restored database. This clears copied sessions and links before reopening the server.
 
 ### Postgres
 
 Set `STAGE_DATABASE_URL` on a main server run from the Docker image, for example `postgres://stage:PASSWORD@db:5432/stage`. The image is the only build with Postgres support; the desktop app, the installed CLI and the per-user service always use SQLite. Example: [`examples/postgres`](https://github.com/flexdinesh/stage/tree/main/examples/postgres), Stage and Postgres in one compose project.
 
-- **The data dir** stays required but holds only the server's lock and sockets, so it needs no volume.
+- **The data dir** stays required for locks, sockets and any pending private setup output. Postgres holds the durable data.
 - **One server per database**: a second server on the same database exits, whatever its data dir.
 - **Back it up yourself** (`pg_dump`, or your provider's snapshots). The server takes no backup; before migrating after an update it logs a warning that none was taken.
 - **Unreachable database**: the server waits up to 30s at startup, then exits for your restart policy to retry.

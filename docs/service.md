@@ -6,8 +6,8 @@ macOS. The server stays an ordinary foreground process (`stage serve
 --managed`). Stage adds no supervisor of its own: restarts, logs and login
 startup belong to the OS manager. The service runs as you, never root.
 
-The desktop app (a later task) ensures the service through this CLI; the
-service keeps running when the desktop window closes or the app quits.
+The desktop app ensures the service through this CLI. The service keeps
+running when the desktop window closes or the app quits.
 Foreground `stage serve`, compose, and remote `--url`/`STAGE_URL` use are
 unchanged. Code: `server/internal/service`, `server/internal/cli/service.go`,
 `server/cmd/stage` (`--managed`).
@@ -109,6 +109,11 @@ this service runs with: Stage starts the Codex app-server daemon on demand
 and never stops it, so the daemon outlives the service
 ([runtime.md](runtime.md#codex-connection)).
 
+For a shared installation, the service checks readiness without a human
+credential and receives the process instance ID through its private product
+socket. Setup or sign-in does not block service readiness. The owner setup
+link is separate from the logs and status report.
+
 ## Paths per identity
 
 The installation identity (`buildinfo.Identity`, [runtime.md](runtime.md))
@@ -141,7 +146,7 @@ The service's only configuration: a `0600` `KEY=VALUE` file (comments with
 template (`STAGE_LISTEN=unix`) and never overwrites it. Apply edits with
 `stage service restart`.
 
-- `service.env` accepts `STAGE_LISTEN`, `STAGE_PUBLIC_URL`, `STAGE_ALLOWED_ORIGINS`
+- `service.env` accepts `STAGE_LISTEN`, `STAGE_MULTI_USER`, `STAGE_PUBLIC_URL`, `STAGE_ALLOWED_ORIGINS`
   and options declared by the built-in harnesses (`T3_FAKE`, `T3_FAKE_SEED`,
   `T3_BIN`). `T3_BIN` sets the CLI that auto-pair runs. Unknown keys, `STAGE_DATA_DIR`,
   `STAGE_ENV` and `STAGE_DATABASE_URL` are errors (the service is SQLite
@@ -152,11 +157,17 @@ template (`STAGE_LISTEN=unix`) and never overwrites it. Apply edits with
   Connections.
 - `STAGE_LISTEN` must include `unix` (the socket desktop and CLI use); add
   TCP for a browser with `unix,127.0.0.1:7380`.
-- For shared browser access behind an HTTPS proxy, set `STAGE_PUBLIC_URL`
+- To enable shared access, set `STAGE_MULTI_USER=1` in `service.env`. For
+  browser access behind an HTTPS proxy, set `STAGE_PUBLIC_URL`
   to its browser origin and route the proxy to a protected Stage product
   listener. For local HTTP testing, use `STAGE_LISTEN=unix,127.0.0.1:7380`
   with `STAGE_PUBLIC_URL=http://127.0.0.1:7380`. See
   [shared setup and owner recovery](runtime.md#shared-setup-and-owner-recovery).
+  After restarting, read the first-admin link privately from
+  `<data dir>/owner/bootstrap.txt`. The server keeps shared mode in the
+  database after claim and across restarts. An explicit false setting
+  prevents startup on shared data. Use the installation owner's account to
+  reissue setup or recover an admin while the server is running.
 - A file readable or writable by group or others is refused (it may hold
   secrets).
 - `--managed` ignores those keys, `STAGE_DATA_DIR`, `STAGE_ENV` and

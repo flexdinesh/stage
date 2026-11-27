@@ -52,8 +52,6 @@ const ShutdownTimeout = 100 * time.Second
 // Options configure Run.
 type Options struct {
 	Config config.Config
-	// SharedAccess is internal until the shared client rollout is complete.
-	SharedAccess *bool
 	// BootstrapOutput designates private foreground output. When absent, and
 	// always for managed services and containers, use a separate private file.
 	BootstrapOutput io.Writer
@@ -173,8 +171,8 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	database := db.NewStore(pool)
-	sharedRequested := o.SharedAccess != nil && *o.SharedAccess
-	intent := o.SharedAccess
+	sharedRequested := cfg.MultiUser != nil && *cfg.MultiUser
+	intent := cfg.MultiUser
 	if sharedRequested {
 		// Only the account service can opt in, along with the first setup grant.
 		intent = nil
@@ -201,7 +199,7 @@ func Run(ctx context.Context, o Options) error {
 		}
 		origins = append(append([]string(nil), origins...), origin)
 		cfg.PublicURL = origin
-		agentSocket, err := config.AgentSocket(os.Getenv, cfg.DataDir)
+		agentSocket, err := config.AgentSocket(cfg.Getenv, cfg.DataDir)
 		if err != nil {
 			return config.Invalid(err)
 		}
@@ -222,7 +220,7 @@ func Run(ctx context.Context, o Options) error {
 			return fmt.Errorf("clear private startup output: %w", err)
 		}
 		defer control.DiscardBootstrap()
-		state, setup, err = svc.Start(ctx, o.SharedAccess)
+		state, setup, err = svc.Start(ctx, cfg.MultiUser)
 		if err != nil {
 			return errors.New(auth.PublicMessage(err))
 		}

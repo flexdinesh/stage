@@ -27,11 +27,11 @@ COPY --from=web /src/apps/web/dist/ ./internal/webui/dist/
 RUN CGO_ENABLED=0 go build -tags postgres -trimpath -ldflags="-s -w" -o /out/stage ./cmd/stage
 # Data dir (SQLite database, or on Postgres only the lock and sockets), owned by distroless nonroot (65532), so a
 # named volume mounted at /data starts out writable.
-RUN mkdir -p /out/data && chown 65532:65532 /out/data && chmod 0700 /out/data
+RUN mkdir -p /out/root/data && chown 65532:65532 /out/root/data && chmod 0700 /out/root/data
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=server /out/stage /stage
-COPY --from=server --chown=65532:65532 /out/data /data
+COPY --from=server /out/root/ /
 ENV STAGE_DATA_DIR=/data
 # Reachable through a published port (the default is container loopback).
 ENV STAGE_LISTEN=0.0.0.0:7380

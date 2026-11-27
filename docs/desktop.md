@@ -6,13 +6,12 @@ Stage server at a time: this machine's over its Unix socket (the default),
 or a saved remote server over HTTP(S) ([Servers](#servers)).
 Each server stays the sole owner of its SQLite, T3 connection, scheduling
 and business rules; this machine's per-user service supervises the local
-one ([service.md](service.md)). With a remote active, the desktop can make
-this machine a worker of it, so this machine's harnesses run that server's
-tasks ([Worker](#worker)). The page offers only this machine's server: it
-mounts no server switching (no Settings Servers panel, top-bar server menu
-or "Switch server") and no Join as worker. The shell, its bound service and
-`components/Servers.tsx` keep both, unused, for later. Desktop apps are
-expected to be the main machine. The desktop owns windows, OS integration
+one ([service.md](service.md)). Use **Servers** in General settings to add
+and switch installations. A desktop can also run as a worker through the
+CLI so this machine's harnesses run a remote server's tasks.
+[Worker](#worker)
+
+The desktop owns windows, OS integration
 and transport. It never opens `stage.db`, holds no business logic and
 never manages a remote server. Browsers keep using TCP.
 Decisions: [ADR 0001](adr/0001-desktop-shell.md).
@@ -78,13 +77,15 @@ The shell publishes one `HostState` (`packages/app/src/platform/index.ts`, mirro
 
 ## Servers
 
-Not offered in the UI today (see the introduction): the page assumes this machine's server. The shell keeps saved servers and switching as described here.
+Open **Settings → General → Servers** to add or switch to a saved server.
+**Add server** opens the name and URL fields and a connection check. After
+**Save server**, use **Switch** on the server's row.
 
 The desktop connects to one Stage server at a time. Each server is bound to its own T3 backend; the desktop never manages a server's T3 beyond showing that server's onboarding.
 
 - **This machine** (`local`): implicit, always first, labeled "This machine", never edited or removed. Reached over its Unix socket; its service is ensured as in the [launch sequence](#launch-sequence).
 - **Remote servers**: saved by name and URL (`http(s)://host[:port]`, no path, credentials, query or fragment). Personal servers use the existing trusted-network connection. Shared servers use their configured canonical URL and require [sign-in](#shared-access). Names and URLs are unique. "This machine" is reserved. The desktop never starts, stops or configures a remote.
-- **Remote server setup** (on that machine): it must listen on TCP (`stage serve --listen 0.0.0.0:7380`, or `STAGE_LISTEN` in its `service.env`). A URL with an IP literal or `localhost` passes its Host check; a hostname must be in its `STAGE_ALLOWED_ORIGINS` (or be its `STAGE_PUBLIC_URL`), else it answers 403 ([runtime.md](runtime.md#request-origin-policy)). Test connection and the `unreachable` screen name the setting: `STAGE_ALLOWED_ORIGINS=<url>`.
+- **Remote server setup** (on that machine): reach a personal server through its trusted listener or proxy. A hostname must be in `STAGE_ALLOWED_ORIGINS` or match `STAGE_PUBLIC_URL`. For a shared server, use its canonical HTTPS URL through the proxy. [Runtime origin policy](runtime.md#request-origin-policy)
 
 ### Saved list
 
@@ -104,7 +105,9 @@ Missing: local only. Corrupt or another version: logged, local only, replaced on
 
 ### Switching
 
-`SwitchServer(id)` (a notification click from another saved server; the page mounts no switching UI):
+`SwitchServer(id)` runs when the user switches in Settings or opens a
+notification from another saved server. When a different server is saved,
+the sign-in, connection and worker screens also offer a switch action:
 
 1. The choice is saved as `active`.
 2. The bridge is unset at once: every open request and stream to the old server ends (in-flight JSON gets 503 `unavailable`, streams end and EventSource reconnects into the wait), so nothing of the old server reaches the page afterwards.
@@ -125,13 +128,16 @@ Switching to the active server only refreshes its name. Editing the active serve
 
 ### Test connection
 
-`TestServer(url)` before saving: `GET /api/health` as the bridge would (8 s bound), returning `{reachable, apiVersion, identity, version, error, hint, command}`. A 403 from the server's origin policy is `reachable` with `command: "STAGE_ALLOWED_ORIGINS=<url>"`; no answer explains `--listen`; another API version is an `error`.
+`TestServer(url)` probes `GET /api/health` as the bridge would, with an 8 s bound. A 403 from the origin policy reports a reachable server and offers the trusted-origin setting. A connection failure asks the user to check the server or HTTPS proxy. An incompatible API version reports an error.
 
 ### Shared access
 
-Personal is the default. Its embedded service starts over the existing
-product socket and opens directly to the workspace. Shared setups still
-run the desktop's health and version checks. A reachable shared server
+Personal is the default. Its service starts on its private product socket
+and opens directly to the workspace. To share the local installation, the
+owner opts in through [service.env](service.md#serviceenv) and completes
+[first-admin setup](runtime.md#shared-setup-and-owner-recovery) in a browser.
+For a remote shared server, save and switch to its canonical HTTPS URL.
+Shared servers still run the desktop's health and version checks. A reachable shared server
 with a 401 from `/api/me` shows **Sign in to Stage**. During first setup
 the desktop asks the user to finish in a browser. Open private setup,
 invite and reset links at the canonical browser URL. A remote shared server
@@ -321,7 +327,7 @@ Settings, General, Info, "Open Stage at login" turns on both MyGo `SetOpenAtLogi
 
 ## Host differences (restrained)
 
-Kept identical: routes, task operations, needs-input priority, settings, theme, keyboard navigation and the browser/phone design. Desktop-only: native menus and window chrome, `Cmd/Ctrl` accelerators, window persistence, activation, the system clipboard, the connection screen and banner, the desktop lines of Settings, General, Info (with this machine as a worker, [Worker](#worker)), server switching in the shell ([Servers](#servers); not offered in the UI), native OS notifications and the Dock/launcher badge (both from Go, [Notifications](#notifications)). No service worker and no Web Push: Settings "This device" controls the native notifications (the platform's `notifications` has `channel: "native"`), and the page's `attention` is a no-op.
+Kept identical: routes, task operations, needs-input priority, settings, theme, keyboard navigation and the browser/phone design. Desktop-only: native menus and window chrome, `Cmd/Ctrl` accelerators, window persistence, activation, the system clipboard, the connection screen and banner, the desktop lines of Settings, General, Info (with this machine as a worker, [Worker](#worker)), server switching ([Servers](#servers)), native OS notifications and the Dock/launcher badge (both from Go, [Notifications](#notifications)). Settings "This device" controls native notifications through `notifications.channel: "native"`. Go owns badge updates.
 
 ## Identities
 

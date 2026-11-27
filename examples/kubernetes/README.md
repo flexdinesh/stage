@@ -53,8 +53,8 @@ kubectl apply -f pvc.yaml -f service.yaml -f deployment.yaml
 
 ## In front of it
 
-Stage has no user authentication. Keep the Service ClusterIP and put an
-authenticating HTTPS proxy (or ingress) in front, at `STAGE_PUBLIC_URL`:
+The example runs personal Stage. Keep the Service ClusterIP and put an
+authenticating HTTPS proxy or ingress in front at `STAGE_PUBLIC_URL`:
 
 - User auth on everything except `/api/worker/*`, which passes through with
   its `Authorization` header unchanged (workers authenticate with machine
@@ -67,3 +67,10 @@ authenticating HTTPS proxy (or ingress) in front, at `STAGE_PUBLIC_URL`:
 
 Then pair workers from Settings > Connections > Add machine and run
 `stage worker join <link>` on each laptop.
+
+For shared access, run a proxy sidecar in the Stage pod and point it at a
+Stage loopback listener. Point the Service and HTTP probes at the proxy.
+Keep Stage itself unexposed, preserve the configured public Host and Origin
+and set `STAGE_MULTI_USER=1` with the canonical HTTPS `STAGE_PUBLIC_URL`.
+The Stage container's OS account can get a private setup or recovery link
+through `kubectl exec` and `/stage owner`. [Owner recovery](../../docs/runtime.md#shared-setup-and-owner-recovery)
