@@ -14,6 +14,9 @@ type VAPIDKeys struct {
 // PushSubscription is a browser Web Push subscription.
 type PushSubscription struct {
 	ID            int64
+	UserID        int64
+	SessionID     int64
+	Binding       string
 	Endpoint      string
 	P256dh        string
 	Auth          string
@@ -30,13 +33,17 @@ type Push interface {
 	VAPIDKeys(ctx context.Context) (VAPIDKeys, error)
 	// InsertVAPIDKeys stores k unless a pair exists.
 	InsertVAPIDKeys(ctx context.Context, k VAPIDKeys) error
-	// UpsertSubscription inserts or refreshes (keys, user agent) by endpoint.
-	UpsertSubscription(ctx context.Context, endpoint, p256dh, auth, userAgent string) error
-	// DeleteSubscription removes a subscription (no error when unknown).
-	DeleteSubscription(ctx context.Context, endpoint string) error
-	// GetSubscription returns ErrNotFound for an unknown endpoint.
-	GetSubscription(ctx context.Context, endpoint string) (PushSubscription, error)
+	// UpsertSubscription inserts or refreshes a device for an active browser
+	// session (zero for personal mode). Matching keys prove possession when
+	// the same browser subscription is rebound to another session.
+	UpsertSubscription(ctx context.Context, sub PushSubscription) error
+	DeleteSubscription(ctx context.Context, sessionID int64, endpoint string) error
+	GetSubscription(ctx context.Context, sessionID int64, endpoint string) (PushSubscription, error)
+	GetBinding(ctx context.Context, sessionID int64, binding string) (PushSubscription, error)
 	ListSubscriptions(ctx context.Context) ([]PushSubscription, error)
-	// RecordResult stores a send outcome: errMsg nil = success.
-	RecordResult(ctx context.Context, endpoint string, errMsg *string) error
+	PruneInactiveBindings(ctx context.Context) error
+	// These use the original binding so a delayed response cannot update a
+	// device that has since signed in with a different credential.
+	DeleteExpired(ctx context.Context, sub PushSubscription) error
+	RecordResult(ctx context.Context, sub PushSubscription, errMsg *string) error
 }

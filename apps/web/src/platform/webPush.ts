@@ -2,7 +2,7 @@ import type { Api, PushSubscriptionBody } from "@stage/app";
 import type { NotificationDelivery, PushState } from "@stage/app/platform";
 
 /** Server endpoints Web Push uses. */
-export type PushApi = Pick<Api, "pushConfig" | "subscribePush" | "unsubscribePush" | "testPush" | "unreadNotificationTags">;
+export type PushApi = Pick<Api, "pushConfig" | "subscribePush" | "checkPushSubscription" | "unsubscribePush" | "testPush" | "unreadNotificationTags">;
 
 /** Browser facts the push state derives from. */
 export interface PushEnv {
@@ -73,6 +73,18 @@ async function closeSystemNotifications(tag?: string): Promise<void> {
   }
 }
 
+/** Clear old OS notifications and tell the worker to discard in-flight deliveries. */
+export async function clearPushSession(): Promise<void> {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const reg = await registration();
+    reg?.active?.postMessage({ type: "notification-session-changed" });
+  } catch {
+    // The worker may be unavailable. Still try to close shown notifications.
+  }
+  await closeSystemNotifications();
+}
+
 /**
  * Shown tags to close: task/thread tags whose group has no unread notification
  * (viewed on any device). Other tags (e.g. `test`) and untagged ones stay.
@@ -112,7 +124,7 @@ async function currentSubscription(): Promise<PushSubscription | null> {
   return reg === null ? null : reg.pushManager.getSubscription();
 }
 
-async function getPushState(): Promise<PushState> {
+async function getPushState(api: PushApi): Promise<PushState> {
   const ok = supported();
   const state = pushStateFor({
     secure: window.isSecureContext,
@@ -122,7 +134,9 @@ async function getPushState(): Promise<PushState> {
     permission: ok ? Notification.permission : "default",
   });
   if (state !== null) return state;
-  return (await currentSubscription()) === null ? "off" : "on";
+  const sub = await currentSubscription();
+  if (sub === null) return "off";
+  return (await api.checkPushSubscription({ endpoint: sub.endpoint })).bound === true ? "on" : "off";
 }
 
 function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
@@ -193,7 +207,7 @@ function onPushMessage(listener: () => void): () => void {
 /** Web Push through the service worker (/sw.js), registered by main.tsx in production builds. */
 export function webPushNotifications(api: PushApi): NotificationDelivery {
   return {
-    state: getPushState,
+    state: () => getPushState(api),
     enable: () => enablePush(api),
     disable: () => disablePush(api),
     test: () => sendTestPush(api),

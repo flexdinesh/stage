@@ -172,6 +172,15 @@ func copyTable(ctx context.Context, src store.CopySource, l store.CopyLoad, t st
 	if t.Name == "auth_sessions" || t.Name == "auth_grants" {
 		return sum, nil
 	}
+	sessionColumn := -1
+	if t.Name == "push_subscriptions" {
+		for i, col := range t.Columns {
+			if col.Name == "auth_session_id" {
+				sessionColumn = i
+				break
+			}
+		}
+	}
 	var batch []store.CopyRow
 	size := 0
 	flush := func() error {
@@ -185,6 +194,11 @@ func copyTable(ctx context.Context, src store.CopySource, l store.CopyLoad, t st
 		return nil
 	}
 	err := src.Rows(ctx, t, func(row store.CopyRow) error {
+		// A copied device cannot use a session the restore deliberately
+		// invalidates. Personal subscriptions have no session to invalidate.
+		if sessionColumn >= 0 && row[sessionColumn] != nil {
+			return nil
+		}
 		if err := sum.add(row); err != nil {
 			return err
 		}

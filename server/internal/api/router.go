@@ -124,8 +124,8 @@ func NewRouter(deps Deps) http.Handler {
 	agent := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
 		handle(agentRoute, pattern, fn)
 	}
-	staged := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
-		handle(stagedRoute, pattern, fn)
+	passive := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
+		handle(passiveHumanRoute, pattern, fn)
 	}
 
 	s.registerAuth(mux)
@@ -273,18 +273,20 @@ func NewRouter(deps Deps) http.Handler {
 
 	agent("GET /api/preferences", s.getPreferences)
 	h("PUT /api/preferences/default-connection", s.putDefaultConnection)
-	staged("PUT /api/preferences/notifications", s.putNotifyEvents)
+	h("PUT /api/preferences/notifications", s.putNotifyEvents)
 
-	staged("GET /api/push/config", s.pushConfig)
-	staged("POST /api/push/subscriptions", s.subscribePush)
-	staged("DELETE /api/push/subscriptions", s.unsubscribePush)
-	staged("POST /api/push/test", s.testPush)
-	staged("GET /api/badge", s.badge)
-	staged("GET /api/notifications", s.listNotifications)
-	staged("GET /api/notifications/groups", s.listNotificationGroups)
-	staged("POST /api/notifications/read", s.readNotifications)
-	staged("GET /api/notifications/unread-tags", s.unreadNotificationTags)
-	staged("GET /api/notifications/stream", s.streamNotifications)
+	h("GET /api/push/config", s.pushConfig)
+	h("POST /api/push/subscriptions", s.subscribePush)
+	h("DELETE /api/push/subscriptions", s.unsubscribePush)
+	passive("POST /api/push/subscriptions/check", s.checkPush)
+	passive("POST /api/push/delivery", s.pushDelivery)
+	h("POST /api/push/test", s.testPush)
+	h("GET /api/badge", s.badge)
+	h("GET /api/notifications", s.listNotifications)
+	h("GET /api/notifications/groups", s.listNotificationGroups)
+	h("POST /api/notifications/read", s.readNotifications)
+	passive("GET /api/notifications/unread-tags", s.unreadNotificationTags)
+	passive("GET /api/notifications/stream", s.streamNotifications)
 
 	mux.HandleFunc("/api/", s.authorize(humanRoute, func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")

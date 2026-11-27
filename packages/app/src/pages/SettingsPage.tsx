@@ -68,15 +68,15 @@ function UserCard() {
 
 
 const PUSH_CHIP: Record<PushState, { tone: ChipTone; label: string }> = {
-  insecure: { tone: "idle", label: "needs https" },
-  unsupported: { tone: "idle", label: "unsupported" },
-  "ios-install": { tone: "idle", label: "install first" },
+  insecure: { tone: "plain", label: "needs https" },
+  unsupported: { tone: "plain", label: "unsupported" },
+  "ios-install": { tone: "plain", label: "install first" },
   blocked: { tone: "bad", label: "blocked" },
-  off: { tone: "idle", label: "off" },
+  off: { tone: "plain", label: "off" },
   on: { tone: "ok", label: "on" },
 };
 
-/** Display order and copy for the global notification filter. */
+/** Display order and copy for the account's notification filter. */
 const EVENTS: readonly { event: NotificationEvent; label: string; hint: string }[] = [
   { event: "needs_input", label: "Needs input", hint: "waits on you" },
   { event: "failed", label: "Failed", hint: "run failed" },
@@ -86,7 +86,7 @@ const EVENTS: readonly { event: NotificationEvent; label: string; hint: string }
 
 const NOTIFY_EVENTS_KEY = ["setNotifyEvents"];
 
-/** Global (all devices) event filter: each toggle saves at once, optimistically; a failed save reverts. */
+/** The account filter applies on every device. Each toggle saves immediately and reverts on failure. */
 function EventFilter() {
   const api = useApi();
   const qc = useQueryClient();
@@ -110,15 +110,17 @@ function EventFilter() {
     },
   });
   const enabled = prefs.data?.notifyEvents ?? [];
+  const shared = prefs.data?.sharedNotifications === true;
+  const personalCopy = enabled.length === 0
+    ? "All events off. Nothing is recorded or pushed."
+    : "Checked events push to every device and appear in the inbox. Unchecked events are dropped.";
   const toggle = (event: NotificationEvent, on: boolean) =>
     save.mutate(EVENTS.map((e) => e.event).filter((e) => (e === event ? on : enabled.includes(e))));
   return (
-    <FieldGroup label="Events" meta="all devices" aria-busy={pending > 0}>
+    <FieldGroup label="Events" meta={shared ? "your devices" : "all devices"} aria-busy={pending > 0}>
       <QueryState isPending={prefs.isPending} error={prefs.error} hasData={prefs.data !== undefined}>
         <Muted>
-          {enabled.length === 0
-            ? "All events off. Nothing is recorded or pushed."
-            : "Checked events push to every device and appear in the inbox. Unchecked events are dropped."}
+          {shared ? "Checked events arrive unread and can notify your devices. Unchecked events stay in history as read." : personalCopy}
         </Muted>
         <RowList className="border-y border-line">
           {EVENTS.map(({ event, label, hint }) => (
@@ -176,8 +178,10 @@ function DeviceNotificationsCard({ notifications }: { notifications: Notificatio
   const channel = notifications.channel ?? "web-push";
   const copy = DEVICE_COPY[channel];
   const canOpenSettings = notifications.openSystemSettings !== undefined;
-  // Device state, not server state: no polling; rechecked on focus (permission may change in system settings).
+  // Recheck permission and delivery on focus, including the current Web Push binding.
   const state = useQuery({ queryKey: keys.device.push, queryFn: () => notifications.state(), refetchInterval: false });
+  const checkingBinding = channel === "web-push" && state.data === "on" && state.isFetching;
+  const deviceState = channel === "web-push" && (state.isError || checkingBinding) ? undefined : state.data;
   const refresh = () => qc.invalidateQueries({ queryKey: keys.device.push });
   const enable = useMutation({ mutationFn: () => notifications.enable(), onSettled: refresh });
   const disable = useMutation({ mutationFn: () => notifications.disable(), onSettled: refresh });
@@ -185,7 +189,7 @@ function DeviceNotificationsCard({ notifications }: { notifications: Notificatio
   // Resolves false when the host cannot open them; the hint then says where to go. Returning re-checks state on focus.
   const settings = useMutation({ mutationFn: async () => (await notifications.openSystemSettings?.()) ?? false });
   const busy = enable.isPending || disable.isPending || test.isPending || settings.isPending;
-  const chip = state.data === undefined ? null : PUSH_CHIP[state.data];
+  const chip = deviceState === undefined ? null : PUSH_CHIP[deviceState];
   return (
     <Panel
       title="Notifications"
@@ -196,8 +200,8 @@ function DeviceNotificationsCard({ notifications }: { notifications: Notificatio
         <section className="flex flex-col gap-3 border-t border-line pt-4" aria-label="This device">
           <SubHeading title="This device" />
           <Muted>{copy.intro}</Muted>
-          <QueryState isPending={state.isPending} error={state.error} hasData={state.data !== undefined}>
-            {state.data === "insecure" ? (
+          <QueryState isPending={state.isPending || checkingBinding} error={state.error} hasData={deviceState !== undefined}>
+            {deviceState === "insecure" ? (
               <Alert
                 tone="plain"
                 actions={
@@ -209,16 +213,16 @@ function DeviceNotificationsCard({ notifications }: { notifications: Notificatio
                 Push needs HTTPS, or http://localhost on this machine. This page is served over plain HTTP.
               </Alert>
             ) : null}
-            {state.data === "unsupported" ? <Muted>{copy.unsupported}</Muted> : null}
-            {state.data === "ios-install" ? (
+            {deviceState === "unsupported" ? <Muted>{copy.unsupported}</Muted> : null}
+            {deviceState === "ios-install" ? (
               <Alert tone="plain">
                 Add to Home Screen first: Share → Add to Home Screen, then open stage from the Home Screen.
               </Alert>
             ) : null}
-            {state.data === "blocked" && channel === "web-push" ? (
+            {deviceState === "blocked" && channel === "web-push" ? (
               <Alert tone="plain">Notifications are blocked for this site. Allow them in the browser or system settings, then reload.</Alert>
             ) : null}
-            {state.data === "blocked" && channel === "native" ? (
+            {deviceState === "blocked" && channel === "native" ? (
               <Alert
                 tone="plain"
                 actions={
@@ -237,14 +241,14 @@ function DeviceNotificationsCard({ notifications }: { notifications: Notificatio
                 Notifications from Stage are turned off in system settings. Allow them there, then try again.
               </Alert>
             ) : null}
-            {state.data === "off" ? (
+            {deviceState === "off" ? (
               <div>
                 <Button variant="primary" busy={enable.isPending} disabled={busy} onClick={() => enable.mutate()}>
                   Enable notifications
                 </Button>
               </div>
             ) : null}
-            {state.data === "on" ? (
+            {deviceState === "on" ? (
               <div className="flex flex-wrap gap-2">
                 <Button variant="primary" busy={test.isPending} disabled={busy} onClick={() => test.mutate()}>
                   Send test

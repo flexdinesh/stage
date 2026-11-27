@@ -1,24 +1,42 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/notify"
 )
 
 // ---- notifications (Web Push) ----
 
 func (s *server) pushConfig(w http.ResponseWriter, r *http.Request) error {
+	if _, ok := s.pushSession(w, r); !ok {
+		return nil
+	}
 	key, err := s.Push.PublicKey(r.Context())
 	if err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"publicKey": key})
 	return nil
+}
+
+func (s *server) pushSession(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	if s.Access == nil {
+		return 0, true
+	}
+	c, ok := credentialFrom(r.Context())
+	if !ok || c.identity.Session.Audience != store.SessionBrowser {
+		accessError(w, http.StatusForbidden, "principal_forbidden", "Use the Stage browser to manage web push.")
+		return 0, false
+	}
+	return c.identity.Session.ID, true
 }
 
 type pushSubscriptionBody struct {
@@ -42,6 +60,10 @@ func endpointArg(raw string) (string, error) {
 }
 
 func (s *server) subscribePush(w http.ResponseWriter, r *http.Request) error {
+	session, ok := s.pushSession(w, r)
+	if !ok {
+		return nil
+	}
 	var b pushSubscriptionBody
 	if err := decode(r, &b); err != nil {
 		return err
@@ -54,25 +76,37 @@ func (s *server) subscribePush(w http.ResponseWriter, r *http.Request) error {
 	if p256dh == "" || auth == "" {
 		return db.Invalid("keys.p256dh and keys.auth are required")
 	}
-	if err := s.Store.UpsertPushSubscription(r.Context(), endpoint, p256dh, auth, r.UserAgent()); err != nil {
+	if err := s.Store.UpsertPushSubscription(r.Context(), session, endpoint, p256dh, auth, r.UserAgent()); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
-func (s *server) unsubscribePush(w http.ResponseWriter, r *http.Request) error {
+func pushEndpoint(r *http.Request) (string, error) {
 	var b struct {
 		Endpoint string `json:"endpoint"`
 	}
 	if err := decode(r, &b); err != nil {
-		return err
+		return "", err
 	}
 	endpoint := strings.TrimSpace(b.Endpoint)
 	if endpoint == "" {
-		return db.Invalid("endpoint is required")
+		return "", db.Invalid("endpoint is required")
 	}
-	if err := s.Store.DeletePushSubscription(r.Context(), endpoint); err != nil {
+	return endpoint, nil
+}
+
+func (s *server) unsubscribePush(w http.ResponseWriter, r *http.Request) error {
+	session, ok := s.pushSession(w, r)
+	if !ok {
+		return nil
+	}
+	endpoint, err := pushEndpoint(r)
+	if err != nil {
+		return err
+	}
+	if err := s.Store.DeletePushSubscription(r.Context(), session, endpoint); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -80,20 +114,67 @@ func (s *server) unsubscribePush(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) testPush(w http.ResponseWriter, r *http.Request) error {
-	var b struct {
-		Endpoint string `json:"endpoint"`
+	session, ok := s.pushSession(w, r)
+	if !ok {
+		return nil
 	}
-	if err := decode(r, &b); err != nil {
+	endpoint, err := pushEndpoint(r)
+	if err != nil {
 		return err
 	}
-	endpoint := strings.TrimSpace(b.Endpoint)
-	if endpoint == "" {
-		return db.Invalid("endpoint is required")
-	}
-	if err := s.Push.SendTest(r.Context(), endpoint); err != nil {
+	if err := s.Push.SendTest(r.Context(), session, endpoint); err != nil {
 		return err
 	}
 	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+func (s *server) checkPush(w http.ResponseWriter, r *http.Request) error {
+	session, ok := s.pushSession(w, r)
+	if !ok {
+		return nil
+	}
+	endpoint, err := pushEndpoint(r)
+	if err != nil {
+		return err
+	}
+	_, err = s.Store.GetPushSubscription(r.Context(), session, endpoint)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"bound": err == nil})
+	return nil
+}
+
+func (s *server) pushDelivery(w http.ResponseWriter, r *http.Request) error {
+	session, ok := s.pushSession(w, r)
+	if !ok {
+		return nil
+	}
+	if session == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+	var body struct {
+		Binding string `json:"binding"`
+		EventID *int64 `json:"eventId"`
+	}
+	if err := decodeStrict(r, &body); err != nil {
+		return err
+	}
+	if body.Binding == "" || body.EventID == nil || *body.EventID < 0 {
+		return db.Invalid("binding and non-negative eventId are required")
+	}
+	ref := notify.PushReference{Binding: body.Binding, EventID: *body.EventID}
+	payload, err := s.Push.ResolvePush(r.Context(), session, ref)
+	if errors.Is(err, db.ErrNotFound) {
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, payload)
 	return nil
 }
 
@@ -102,7 +183,15 @@ func (s *server) badge(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]int{"needsInput": n})
+	counts := map[string]int{"needsInput": n}
+	if s.Access != nil {
+		unread, err := s.Store.UnreadNotificationCount(r.Context())
+		if err != nil {
+			return err
+		}
+		counts["unread"] = unread
+	}
+	writeJSON(w, http.StatusOK, counts)
 	return nil
 }
 

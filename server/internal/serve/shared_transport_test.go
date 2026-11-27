@@ -206,8 +206,8 @@ func TestSharedAccountsThroughHTTPSProxyAndUnix(t *testing.T) {
 	get(member, "/api/harnesses", 200, nil)
 	get(member, "/api/machines", 200, nil)
 	browserPost(t, member, origin, "/api/machines/pairings", `{"label":"Member worker"}`, 201, nil)
-	get(member, "/api/notifications/stream", 403, nil)
-	get(member, "/api/push/config", 403, nil)
+	get(anon, "/api/notifications/stream", 401, nil)
+	get(member, "/api/push/config", 200, nil)
 	(transportRequest{method: "PUT", path: "/api/preferences/default-connection", origin: origin, body: `{"connectionId":null}`}).send(t, member, origin, 200, nil)
 	var created struct{ ID int64 }
 	browserPost(t, member, origin, "/api/projects", `{"title":"Workspace project"}`, 201, &created)
@@ -261,6 +261,8 @@ func TestSharedAccountsThroughHTTPSProxyAndUnix(t *testing.T) {
 	agentHeaders := http.Header{"Authorization": {"Bearer " + memberAgent}}
 	(transportRequest{method: "GET", path: "/api/projects", headers: agentHeaders}).send(t, unix.HTTP, "http://stage", 200, nil)
 	(transportRequest{method: "GET", path: "/api/me", headers: agentHeaders}).send(t, anon, origin, 403, nil)
+	(transportRequest{method: "GET", path: "/api/notifications/stream", headers: agentHeaders}).send(t, anon, origin, 403, nil)
+	(transportRequest{method: "GET", path: "/api/push/config", headers: cliHeaders}).send(t, anon, origin, 403, nil)
 	(transportRequest{method: "POST", path: "/api/tasks/1/requests/1", headers: agentHeaders}).send(t, anon, origin, 403, nil)
 	(transportRequest{method: "PUT", path: "/api/harnesses/t3/settings", headers: agentHeaders}).send(t, anon, origin, 403, nil)
 	(transportRequest{method: "PUT", path: "/api/machines/1/harnesses/t3/settings", headers: agentHeaders}).send(t, anon, origin, 403, nil)

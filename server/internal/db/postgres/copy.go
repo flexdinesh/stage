@@ -22,12 +22,13 @@ var _ store.CopyTarget = (*DB)(nil)
 // baselineSeeds identifies default rows that do not occupy a copy target.
 // Populated harness settings or status, and any secret, occupy the target.
 var baselineSeeds = map[string]string{
-	"users":               "id = 1 AND email IS NULL AND role = 'admin' AND status = 'active'",
-	"installation_access": "id = 1 AND mode = 'personal'",
-	"machines":            "id = 1",
-	"preferences":         "id = 1",
-	"harness_settings":    `machine_id = 1 AND settings = '{}'::jsonb`,
-	"harness_sync_status": `last_error IS NULL AND last_full_sync_at IS NULL`,
+	"users":                    "id = 1 AND email IS NULL AND role = 'admin' AND status = 'active'",
+	"installation_access":      "id = 1 AND mode = 'personal'",
+	"machines":                 "id = 1",
+	"preferences":              "id = 1",
+	"notification_preferences": `user_id = 1 AND notify_events = '["needs_input","failed","done","ready"]'::jsonb`,
+	"harness_settings":         `machine_id = 1 AND settings = '{}'::jsonb`,
+	"harness_sync_status":      `last_error IS NULL AND last_full_sync_at IS NULL`,
 }
 
 // State reads the version, counts the schema's tables, and (with a schema)

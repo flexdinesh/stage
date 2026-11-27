@@ -39,6 +39,8 @@ type Prefs struct {
 
 // ServerPrefs is one server's stream state.
 type ServerPrefs struct {
+	// SessionScope binds the persisted state to the target and sign-in.
+	SessionScope string `json:"sessionScope,omitempty"`
 	// Cursor is the last notification id handled; nil before the first
 	// hello.
 	Cursor *int64 `json:"cursor,omitempty"`
@@ -62,7 +64,7 @@ func DefaultPrefs() Prefs {
 }
 
 func (sp *ServerPrefs) clone() *ServerPrefs {
-	out := &ServerPrefs{Shown: slices.Clone(sp.Shown)}
+	out := &ServerPrefs{SessionScope: sp.SessionScope, Shown: slices.Clone(sp.Shown)}
 	if sp.Cursor != nil {
 		c := *sp.Cursor
 		out.Cursor = &c

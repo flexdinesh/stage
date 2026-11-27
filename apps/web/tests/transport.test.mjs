@@ -42,6 +42,42 @@ test("requests and asset URLs are same-origin under /api", async () => {
   assert.equal(t.assetUrl("/attachments/7"), "/api/attachments/7");
 });
 
+test("session changes and expired credentials clear the browser host's private state", async () => {
+  const plan = new Map([
+    ["/api/auth/logout", new Response(null, { status: 204 })],
+    ["/api/account/password", new Response(null, { status: 204 })],
+    ["/api/auth/invite", Response.json({ id: 2 })],
+    ["/api/auth/login", Response.json({ code: "sign_in_failed" }, { status: 401 })],
+    ["/api/tasks", Response.json({ code: "authentication_required" }, { status: 401 })],
+    ["/api/admin/accounts", Response.json({ code: "principal_forbidden" }, { status: 403 })],
+  ]);
+  let changes = 0;
+  const t = browserTransport({ fetch: async (path) => plan.get(path), onSessionChanged: () => changes++ });
+  await t.request("/auth/logout", { method: "POST" });
+  await t.request("/account/password", { method: "POST" });
+  await t.request("/auth/invite", { method: "POST" });
+  await t.request("/auth/login", { method: "POST" });
+  await t.request("/admin/accounts", {});
+  assert.equal(changes, 3);
+  const expired = await t.request("/tasks", {});
+  assert.equal(changes, 4);
+  assert.deepEqual(await expired.json(), { code: "authentication_required" });
+});
+
+test("a late authorization error cannot clear the new session's notifications", async () => {
+  const old = Promise.withResolvers();
+  let changes = 0;
+  const t = browserTransport({
+    fetch: (path) => path.endsWith("/tasks") ? old.promise : Promise.resolve(Response.json({ id: 2 })),
+    onSessionChanged: () => changes++,
+  });
+  const pending = t.request("/tasks", {});
+  await t.request("/auth/login", { method: "POST" });
+  old.resolve(Response.json({ code: "authentication_required" }, { status: 401 }));
+  await pending;
+  assert.equal(changes, 1);
+});
+
 test("stream delivers open, named events and errors, then nothing after close", () => {
   const seen = [];
   const sub = transportWith().subscribe("/threads/t/transcript/stream?after=3", {

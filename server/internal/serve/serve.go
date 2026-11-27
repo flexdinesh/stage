@@ -258,14 +258,13 @@ func Run(ctx context.Context, o Options) error {
 	moved := newMovedRetirer(store, eng.Discovery.FullSyncEvery, logger)
 	eng.Discovery.OnFullSync = moved.Kick
 	notifier := notify.New(store, cfg.PublicURL, logger)
+	notifier.SharedAccess = access != nil
 	// One release and one schedule runner per active connection, on every
 	// machine; the sets follow instance switches.
 	releases := newPerConnection(store, func(id int64) *release.Runner {
 		r := release.NewRunner(store, eng.Coordinator, logger)
 		r.ConnectionID = id
-		if access == nil {
-			r.OnReady = notifier.OnReady
-		}
+		r.OnReady = notifier.OnReady
 		return r
 	})
 	var scheduleSince time.Time
@@ -293,9 +292,7 @@ func Run(ctx context.Context, o Options) error {
 	eng.Coordinator.OnTransition = func(ctx context.Context, c workevent.TaskChange) {
 		releases.Each(func(r *release.Runner) { r.OnTransition(ctx, c) })
 		eng.Observe.Kick()
-		if access == nil {
-			notifier.OnTransition(ctx, c)
-		}
+		notifier.OnTransition(ctx, c)
 		inbox.Signal()
 	}
 	eng.Coordinator.OnObservedTransition = func(ctx context.Context, c workevent.TaskChange) {
@@ -303,9 +300,7 @@ func Run(ctx context.Context, o Options) error {
 		eng.Observe.Kick()
 		inbox.Signal()
 	}
-	if access == nil {
-		eng.Observe.RecordNotification = notifier.RecordObservation
-	}
+	eng.Observe.RecordNotification = notifier.RecordObservation
 	eng.Coordinator.OnAccepted = kickTrees
 	if err := local.compose(ctx, store, cfg, registry, o.HarnessOverrides, eng.Kick, logger); err != nil {
 		return err
@@ -413,11 +408,8 @@ func Run(ctx context.Context, o Options) error {
 			return
 		case scheduleSince = <-workReady:
 		}
-		// Shared inbox and delivery stay closed until per-account delivery lands.
-		if access == nil {
-			wg.Go(func() { notifier.Run(systemCtx) })
-			wg.Go(func() { pruneNotifications(systemCtx, store, logger, inbox.Signal) })
-		}
+		wg.Go(func() { notifier.Run(systemCtx) })
+		wg.Go(func() { pruneNotifications(systemCtx, store, logger, inbox.Signal) })
 		wg.Go(func() { eng.Run(systemCtx) })
 		wg.Go(func() { releases.Run(systemCtx) })
 		wg.Go(func() { schedules.Run(systemCtx) })
@@ -565,6 +557,9 @@ func pruneNotifications(ctx context.Context, store *db.Store, log *slog.Logger, 
 		} else if n > 0 {
 			log.Info("pruned notifications", "count", n)
 			signal()
+		}
+		if err := store.PruneInactivePushBindings(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("prune inactive push bindings", "err", err)
 		}
 		select {
 		case <-ctx.Done():

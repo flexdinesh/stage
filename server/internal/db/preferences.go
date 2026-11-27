@@ -9,8 +9,8 @@ import (
 
 // Preferences: DefaultConnectionID is the connection new tasks start on (nil =
 // none, or its connection is no longer active). Each connection pins its own
-// new-task model (HarnessConnection.NewTaskConfig). NotifyEvents: events that
-// notify (inbox + push); others are dropped.
+// new-task model (HarnessConnection.NewTaskConfig). NotifyEvents controls
+// which events notify the acting user.
 type Preferences struct {
 	DefaultConnectionID *int64      `json:"defaultConnectionId"`
 	NotifyEvents        []TaskState `json:"notifyEvents"`
@@ -28,12 +28,12 @@ func (s *Store) GetPreferences(ctx context.Context) (Preferences, error) {
 }
 
 func getPreferences(ctx context.Context, tx store.Tx) (Preferences, error) {
-	row, err := tx.Preferences().Get(ctx)
+	row, err := tx.Preferences().Get(ctx, ActingUser(ctx))
 	p := Preferences{DefaultConnectionID: row.DefaultConnectionID}
 	// Display order (migrations append new events at the end).
 	p.NotifyEvents = make([]TaskState, 0, len(row.NotifyEvents))
 	for _, e := range NotificationEvents {
-		if slices.Contains(row.NotifyEvents, string(e)) {
+		if row.NotifyEvents == nil || slices.Contains(row.NotifyEvents, string(e)) {
 			p.NotifyEvents = append(p.NotifyEvents, e)
 		}
 	}
@@ -58,7 +58,7 @@ func (s *Store) SetNotifyEvents(ctx context.Context, events []TaskState) (Prefer
 		}
 	}
 	return write(ctx, s, func(tx store.Tx) (Preferences, error) {
-		if err := tx.Preferences().SetNotifyEvents(ctx, stored); err != nil {
+		if err := tx.Preferences().SetNotifyEvents(ctx, ActingUser(ctx), stored); err != nil {
 			return Preferences{}, err
 		}
 		return getPreferences(ctx, tx)

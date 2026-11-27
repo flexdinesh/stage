@@ -156,12 +156,37 @@ they differ in more than syntax:
 | tasks | claims rely on the single writer | the claim locks the task row (`Tasks().Lock`) |
 | connections | single writer keeps one active connection per machine and kind | partial unique index plus a lock on the machine row (`Machines().Lock`) |
 | journal, acceptance | `requestId` idempotency under the single writer | the owner row's lock (`Tasks().Lock`, `Trees().Lock`) serializes appends and changes, then read, compare, insert; the unique keys stay as a backstop |
-| notifications | `INSERT OR IGNORE` | `INSERT ... ON CONFLICT DO NOTHING` |
 | attachments, machine tokens | `BLOB` | `bytea` |
 
 The `harness_connections` snapshot cache stays in `db.Store` and is dropped by
 every write to that table, as today. It assumes one process
 ([Design only](#design-only-queue-events-leases)).
+
+## Notification receipts
+
+`notifications` retains one event per occurrence. In shared mode, the event
+and unread `notification_recipients` rows commit in the same transaction.
+The recipient insert selects active human accounts whose current notification
+filter allows the event. Personal mode adds one unread receipt for user 1
+after the notifier applies the owner's filter. Pruning an event deletes its
+receipts through the foreign key. PostgreSQL serializes event ID allocation
+until commit so a stream cursor cannot skip a late commit with a lower ID.
+
+Inbox history and stream replay include retained events for every account.
+Each account sees its own receipt timestamp. An event without a receipt reads
+as of its creation time. Read actions update that account's unread receipts.
+Delivery requires an unread receipt. Joining or changing a filter affects
+future receipts. `notification_preferences` stores each user's filter, with
+all notification events enabled by default. The default connection remains
+an installation-wide setting in `preferences`.
+
+In shared access, browser push subscriptions reference an active browser
+session. Soft revocation deletes the affected bindings in the same
+transaction. Expired sessions are excluded immediately and their bindings
+are pruned. Deleting sessions on explicit restore cascades to their
+subscriptions. Database copy preserves receipts, filters, VAPID keys, and
+personal subscriptions. It skips session-bound subscriptions together
+with the transient credentials.
 
 ## Journal events
 
@@ -513,6 +538,12 @@ and paging. (Thread search was removed with API v3.)
   The migration also enforces a single unconsumed, unrevoked password
   reset per account. Reissuing revokes the outstanding row, including an
   expired one, before inserting the replacement.
+  Paired migration 0043 `notification_recipients` adds account receipts,
+  notification filters, and browser session bindings on SQLite and Postgres.
+  It copies existing read times and the saved filter to user 1 and removes
+  unclaimed push endpoints from already opted-in installations. The legacy
+  columns stay available during the expansion.
+  See [Notification receipts](#notification-receipts).
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -968,7 +999,7 @@ by Go decode) and is `jsonb`.
 | `task_acceptances.evidence` | Evidence: an immutable accepted snapshot (its `evidenceVersion` hash comes from the Go struct, not the stored bytes) | `text` |
 | `acceptance_requests.result` | Queried: decoded for idempotent replay | `jsonb` |
 | `execution_observations.observation` | Queried: `json_extract` in execution, acceptance, notifications, push, tasks | `jsonb` |
-| `tasks`/`schedules.execution_config`, `harness_connections.new_task_config`, `preferences.notify_events` | Queried (decoded) | `jsonb` |
+| `tasks`/`schedules.execution_config`, `harness_connections.new_task_config`, `notification_preferences.notify_events` | Queried (decoded) | `jsonb` |
 | `harness_settings.settings`, `harness_secrets.value` | JSON objects and opaque values compared by value | `jsonb` |
 | `execution_attempts.intent`, `checkpoint`, `observed_session` | Queried (decoded; the checkpoint is opaque adapter state) | `jsonb` |
 | `tasks`/`schedules.model_options`, `threads.pull_requests`, `threads.recent_runs`, `question_responses.answers` | Dropped (see Columns) | none |

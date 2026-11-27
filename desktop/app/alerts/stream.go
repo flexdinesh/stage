@@ -19,11 +19,14 @@ const streamPath = "/api/notifications/stream"
 // server).
 var errNoStream = errors.New("server has no " + streamPath)
 
+// ErrAccessEnded means this target no longer grants access to its inbox.
+var ErrAccessEnded = errors.New("notification stream access ended")
+
 // openStream GETs the notification stream of t (over the socket, or TCP
 // to a remote, with t's Host and no Origin), sending Last-Event-ID when
 // cursor is set. No client timeout: ctx ends it. The caller closes the
 // body.
-func openStream(ctx context.Context, t target.Target, cursor *int64) (io.ReadCloser, error) {
+func openStream(ctx context.Context, t target.Target, cursor *int64, session Session) (io.ReadCloser, error) {
 	tr := t.Transport()
 	tr.DisableKeepAlives = true
 	tr.ResponseHeaderTimeout = 30 * time.Second
@@ -36,6 +39,11 @@ func openStream(ctx context.Context, t target.Target, cursor *int64) (io.ReadClo
 	if cursor != nil {
 		req.Header.Set("Last-Event-ID", strconv.FormatInt(*cursor, 10))
 	}
+	if session.Prepare != nil {
+		if err := session.Prepare(req); err != nil {
+			return nil, err
+		}
+	}
 	client := &http.Client{Transport: tr,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	res, err := client.Do(req)
@@ -43,6 +51,9 @@ func openStream(ctx context.Context, t target.Target, cursor *int64) (io.ReadClo
 		return nil, err
 	}
 	switch {
+	case res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden:
+		res.Body.Close()
+		return nil, ErrAccessEnded
 	case res.StatusCode == http.StatusNotFound:
 		res.Body.Close()
 		return nil, errNoStream

@@ -19,6 +19,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/t3"
 	"github.com/flexdinesh/stage/server/internal/workevent"
 )
@@ -41,6 +42,7 @@ type pushServer struct {
 }
 
 type pushReq struct {
+	path   string
 	header http.Header
 	body   []byte
 }
@@ -51,7 +53,7 @@ func newPushServer(t *testing.T) *pushServer {
 		body, _ := io.ReadAll(r.Body)
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		p.reqs = append(p.reqs, pushReq{header: r.Header.Clone(), body: body})
+		p.reqs = append(p.reqs, pushReq{path: r.URL.Path, header: r.Header.Clone(), body: body})
 		w.WriteHeader(p.status)
 		_, _ = w.Write([]byte("nope"))
 	}))
@@ -74,6 +76,11 @@ func (p *pushServer) requests() []pushReq {
 // subscribe stores a subscription with real browser-style keys.
 func subscribe(t *testing.T, store *db.Store, endpoint string) {
 	t.Helper()
+	subscribeSession(t, store, 0, endpoint)
+}
+
+func subscribeSession(t *testing.T, store *db.Store, sessionID int64, endpoint string) {
+	t.Helper()
 	priv, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -82,10 +89,77 @@ func subscribe(t *testing.T, store *db.Store, endpoint string) {
 	if _, err := rand.Read(auth); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpsertPushSubscription(context.Background(), endpoint,
+	if err := store.UpsertPushSubscription(t.Context(), sessionID, endpoint,
 		base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes()),
 		base64.RawURLEncoding.EncodeToString(auth), "test-agent"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSharedFanoutUsesCurrentRecipients(t *testing.T) {
+	n, database := newNotifier(t)
+	n.SharedAccess = true
+	ctx := t.Context()
+	var owner, member, desktop int64
+	var first, second, muted int64
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := database.WriteAccess(ctx, func(a store.Access) error {
+		on := true
+		if _, err := db.ConfigureAccessTx(ctx, a, &on); err != nil {
+			return err
+		}
+		if err := a.ClaimOwner(ctx, store.AccountInput{DisplayName: "Owner", Email: "owner@example.test"}); err != nil {
+			return err
+		}
+		if err := a.MarkClaimed(ctx, now); err != nil {
+			return err
+		}
+		owner = db.DefaultUser
+		var err error
+		member, err = a.InsertMember(ctx, store.AccountInput{DisplayName: "Member", Email: "member@example.test"})
+		if err != nil {
+			return err
+		}
+		for i, binding := range []struct {
+			user int64
+			id   *int64
+		}{{owner, &first}, {owner, &second}, {member, &muted}, {member, &desktop}} {
+			audience := store.SessionBrowser
+			if binding.id == &desktop {
+				audience = store.SessionCLI
+			}
+			*binding.id, err = a.InsertSession(ctx, store.TokenDigest{byte(i + 1)}, store.AuthSession{
+				UserID: binding.user, Audience: audience, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	memberCtx := db.WithUser(ctx, member)
+	if _, err := database.SetNotifyEvents(memberCtx, nil); err != nil {
+		t.Fatal(err)
+	}
+	srv := newPushServer(t)
+	n.HTTPClient = srv.Client()
+	subscribeSession(t, database, first, srv.URL+"/owner-one")
+	subscribeSession(t, database, second, srv.URL+"/owner-two")
+	subscribeSession(t, database, muted, srv.URL+"/member")
+	if err := database.UpsertPushSubscription(ctx, desktop, srv.URL+"/desktop", "unused", "unused", "test"); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("native session registered browser push: %v", err)
+	}
+	task := seedTask(t, database, db.StateNeedsInput)
+	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateNeedsInput}})
+	requests := srv.requests()
+	if len(requests) != 2 || requests[0].path != "/owner-one" || requests[1].path != "/owner-two" ||
+		requests[0].header.Get("Topic") == requests[1].header.Get("Topic") {
+		t.Fatalf("shared push requests: %v", requests)
+	}
+	if inbox, err := database.ListNotifications(memberCtx, 10, nil); err != nil || len(inbox) != 1 || inbox[0].ReadAt == nil {
+		t.Fatalf("muted event did not remain in history as read: %v, %v", inbox, err)
 	}
 }
 
@@ -270,7 +344,7 @@ func TestSendPath(t *testing.T) {
 	if len(reqs[0].body) == 0 {
 		t.Fatal("empty push body")
 	}
-	sub, err := store.GetPushSubscription(ctx, endpoint)
+	sub, err := store.GetPushSubscription(ctx, 0, endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +359,7 @@ func TestSendPath(t *testing.T) {
 	if len(reqs) != 2 || reqs[1].header.Get("Urgency") != "normal" {
 		t.Fatalf("second push %d %v", len(reqs), reqs[len(reqs)-1].header)
 	}
-	sub, err = store.GetPushSubscription(ctx, endpoint)
+	sub, err = store.GetPushSubscription(ctx, 0, endpoint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +370,7 @@ func TestSendPath(t *testing.T) {
 	// 410 Gone deletes the subscription.
 	srv.setStatus(http.StatusGone)
 	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateFailed}})
-	if _, err := store.GetPushSubscription(ctx, endpoint); !errors.Is(err, db.ErrNotFound) {
+	if _, err := store.GetPushSubscription(ctx, 0, endpoint); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("after 410: %v", err)
 	}
 }
@@ -498,24 +572,24 @@ func TestSendTest(t *testing.T) {
 	ctx := context.Background()
 	srv := newPushServer(t)
 	n.HTTPClient = srv.Client()
-	if err := n.SendTest(ctx, srv.URL+"/unknown"); !errors.Is(err, db.ErrNotFound) {
+	if err := n.SendTest(ctx, 0, srv.URL+"/unknown"); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("unknown endpoint: %v", err)
 	}
 	endpoint := srv.URL + "/push/t"
 	subscribe(t, store, endpoint)
-	if err := n.SendTest(ctx, endpoint); err != nil {
+	if err := n.SendTest(ctx, 0, endpoint); err != nil {
 		t.Fatal(err)
 	}
 	srv.setStatus(http.StatusBadRequest)
 	var perr *PushError
-	if err := n.SendTest(ctx, endpoint); !errors.As(err, &perr) || perr.Status != 400 || !strings.Contains(perr.Msg, "nope") {
+	if err := n.SendTest(ctx, 0, endpoint); !errors.As(err, &perr) || perr.Status != 400 || !strings.Contains(perr.Msg, "nope") {
 		t.Fatalf("rejected: %v", err)
 	}
 	srv.setStatus(http.StatusNotFound)
-	if err := n.SendTest(ctx, endpoint); !errors.As(err, &perr) || perr.Status != 404 {
+	if err := n.SendTest(ctx, 0, endpoint); !errors.As(err, &perr) || perr.Status != 404 {
 		t.Fatalf("404: %v", err)
 	}
-	if _, err := store.GetPushSubscription(ctx, endpoint); !errors.Is(err, db.ErrNotFound) {
+	if _, err := store.GetPushSubscription(ctx, 0, endpoint); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("404 kept subscription: %v", err)
 	}
 }

@@ -33,6 +33,13 @@ type Payload struct {
 	Badge int    `json:"badge"`
 }
 
+// PushReference carries no work details through the push service. The worker
+// must redeem it with the browser session that owns Binding.
+type PushReference struct {
+	Binding string `json:"binding"`
+	EventID int64  `json:"eventId"`
+}
+
 // PushError: the push service rejected the message or was unreachable
 // (API 502). Status 0 = no response.
 type PushError struct {
@@ -48,6 +55,7 @@ type event struct {
 	session *workevent.SessionChange
 	ready   *int64 // a manual tree member whose needs are completed
 	saved   *db.NewNotification
+	savedID int64
 }
 
 func (e event) to() db.TaskState {
@@ -86,6 +94,8 @@ type Notifier struct {
 	SendTimeout time.Duration
 	// Inbox is signalled after each recorded notification (nil = none).
 	Inbox *Hub
+	// SharedAccess records workspace events even when every recipient mutes them.
+	SharedAccess bool
 }
 
 // FallbackSubject is the VAPID subject when STAGE_PUBLIC_URL is not https.
@@ -155,42 +165,72 @@ func (n *Notifier) Run(ctx context.Context) {
 
 func (n *Notifier) handle(ctx context.Context, e event) {
 	if e.saved != nil {
+		if n.SharedAccess {
+			n.sendAll(ctx, e.savedID, e.to(), PayloadFor(notificationFrom(*e.saved), 0))
+			return
+		}
 		badge, err := n.store.NeedsInputCount(ctx)
 		if err != nil {
 			n.log.Warn("build notification", "err", err)
 			return
 		}
-		n.sendAll(ctx, e.to(), PayloadFor(notificationFrom(*e.saved), badge))
+		n.sendAll(ctx, e.savedID, e.to(), PayloadFor(notificationFrom(*e.saved), badge))
 		return
 	}
-	if !n.enabled(ctx, e.to()) {
+	if !n.SharedAccess && !n.enabled(ctx, e.to()) {
 		return
 	}
-	p, rec, err := n.payload(ctx, e)
+	var p Payload
+	var rec db.NewNotification
+	var err error
+	if n.SharedAccess {
+		rec, err = notificationRecord(ctx, n.store, e)
+		p = PayloadFor(notificationFrom(rec), 0)
+	} else {
+		p, rec, err = n.payload(ctx, e)
+	}
 	if err != nil {
 		n.log.Warn("build notification", "err", err)
 		return
 	}
-	// Inbox first (also with no subscriptions); a failed insert still pushes.
-	if _, err := n.store.InsertNotification(ctx, rec); err != nil {
+	// Shared delivery needs a committed event and receipt to resolve. Personal
+	// mode keeps its best-effort direct push if recording fails.
+	id, err := n.store.InsertNotification(ctx, rec)
+	if err != nil {
 		if ctx.Err() == nil {
 			n.log.Warn("record notification", "err", err)
+		}
+		if n.SharedAccess {
+			return
 		}
 	} else {
 		n.Inbox.Signal()
 	}
-	n.sendAll(ctx, e.to(), p)
+	n.sendAll(ctx, id, e.to(), p)
 }
 
-func (n *Notifier) sendAll(ctx context.Context, to db.TaskState, p Payload) {
+func (n *Notifier) sendAll(ctx context.Context, id int64, to db.TaskState, p Payload) {
 	subs, err := n.store.ListPushSubscriptions(ctx)
 	if err != nil {
 		n.log.Warn("list push subscriptions", "err", err)
 		return
 	}
 	for _, sub := range subs {
-		if err := n.send(ctx, sub, p, urgencyFor(to)); err != nil && ctx.Err() == nil {
-			n.log.Warn("push failed", "endpoint", sub.Endpoint, "err", err)
+		var message any = p
+		if sub.Binding != "" {
+			_, err := n.store.NotificationForDelivery(db.WithUser(ctx, sub.UserID), id)
+			if err != nil {
+				if !errors.Is(err, db.ErrNotFound) && ctx.Err() == nil {
+					n.log.Warn("check push recipient", "subscription", sub.ID, "err", err)
+				}
+				continue
+			}
+			message = PushReference{Binding: sub.Binding, EventID: id}
+		} else if n.SharedAccess {
+			continue
+		}
+		if err := n.send(ctx, sub, message, p.Tag, urgencyFor(to)); err != nil && ctx.Err() == nil {
+			n.log.Warn("push failed", "subscription", sub.ID)
 		}
 	}
 }
@@ -202,28 +242,31 @@ func (n *Notifier) RecordObservation(ctx context.Context, tx *db.Store, change w
 	if !workevent.Notifiable(e.to()) {
 		return nil, nil
 	}
-	prefs, err := tx.GetPreferences(ctx)
-	if err != nil || !slices.Contains(prefs.NotifyEvents, e.to()) {
-		return nil, err
+	if !n.SharedAccess {
+		prefs, err := tx.GetPreferences(db.WithUser(ctx, db.DefaultUser))
+		if err != nil || !slices.Contains(prefs.NotifyEvents, e.to()) {
+			return nil, err
+		}
 	}
 	rec, err := notificationRecord(ctx, tx, e)
 	if err != nil {
 		return nil, err
 	}
 	rec.ObservedAt = &change.At
-	if _, err := tx.InsertNotification(ctx, rec); err != nil {
+	id, err := tx.InsertNotification(ctx, rec)
+	if err != nil {
 		return nil, err
 	}
 	return func() {
 		n.Inbox.Signal()
-		n.enqueue(event{saved: &rec})
+		n.enqueue(event{saved: &rec, savedID: id})
 	}, nil
 }
 
-// enabled: the global filter (preferences.notifyEvents) allows the event.
+// enabled checks the personal-mode filter.
 // Read at send time; a failed read notifies (a missed event costs more).
 func (n *Notifier) enabled(ctx context.Context, to db.TaskState) bool {
-	p, err := n.store.GetPreferences(ctx)
+	p, err := n.store.GetPreferences(db.WithUser(ctx, db.DefaultUser))
 	if err != nil {
 		if ctx.Err() == nil {
 			n.log.Warn("read notification filter; notifying", "err", err)
@@ -332,17 +375,34 @@ func (n *Notifier) PublicKey(ctx context.Context) (string, error) {
 
 // SendTest sends a test notification to one subscription synchronously.
 // db.ErrNotFound for an unknown endpoint, *PushError when rejected.
-func (n *Notifier) SendTest(ctx context.Context, endpoint string) error {
-	sub, err := n.store.GetPushSubscription(ctx, endpoint)
+func (n *Notifier) SendTest(ctx context.Context, sessionID int64, endpoint string) error {
+	sub, err := n.store.GetPushSubscription(ctx, sessionID, endpoint)
 	if err != nil {
 		return err
+	}
+	if sub.Binding != "" {
+		return n.send(ctx, sub, PushReference{Binding: sub.Binding}, "test", webpush.UrgencyNormal)
 	}
 	badge, err := n.store.NeedsInputCount(ctx)
 	if err != nil {
 		return err
 	}
-	p := Payload{Title: "stage", Body: "Test notification", URL: "/settings", Tag: "test", Badge: badge}
-	return n.send(ctx, sub, p, webpush.UrgencyNormal)
+	return n.send(ctx, sub, testPayload(badge), "test", webpush.UrgencyNormal)
+}
+
+func testPayload(badge int) Payload {
+	return Payload{Title: "stage", Body: "Test notification", URL: "/settings", Tag: "test", Badge: badge}
+}
+
+func (n *Notifier) ResolvePush(ctx context.Context, sessionID int64, ref PushReference) (Payload, error) {
+	row, badge, err := n.store.PushDelivery(ctx, sessionID, ref.Binding, ref.EventID)
+	if err != nil {
+		return Payload{}, err
+	}
+	if ref.EventID == 0 {
+		return testPayload(badge), nil
+	}
+	return PayloadFor(row, badge), nil
 }
 
 // topicFor is the Web Push Topic for tag: the push service keeps only the
@@ -356,12 +416,12 @@ func topicFor(tag string) string {
 // send pushes p to sub and records the outcome: 2xx → last_success_at;
 // 404/410 → subscription deleted; otherwise last_error. Failures return
 // *PushError.
-func (n *Notifier) send(ctx context.Context, sub db.PushSubscription, p Payload, urgency webpush.Urgency) error {
+func (n *Notifier) send(ctx context.Context, sub db.PushSubscription, message any, tag string, urgency webpush.Urgency) error {
 	keys, err := n.store.VAPIDKeys(ctx)
 	if err != nil {
 		return err
 	}
-	msg, err := json.Marshal(p)
+	msg, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}
@@ -369,8 +429,11 @@ func (n *Notifier) send(ctx context.Context, sub db.PushSubscription, p Payload,
 		HTTPClient: n.HTTPClient, Subscriber: n.subject, TTL: 86400, Urgency: urgency,
 		VAPIDPublicKey: keys.PublicKey, VAPIDPrivateKey: keys.PrivateKey,
 	}
-	if p.Tag != "" {
-		opts.Topic = topicFor(p.Tag)
+	if tag != "" {
+		if sub.Binding != "" {
+			tag = sub.Binding + ":" + tag
+		}
+		opts.Topic = topicFor(tag)
 	}
 	callCtx, cancel := context.WithTimeout(ctx, n.SendTimeout)
 	defer cancel()
@@ -378,29 +441,29 @@ func (n *Notifier) send(ctx context.Context, sub db.PushSubscription, p Payload,
 		Endpoint: sub.Endpoint, Keys: webpush.Keys{P256dh: sub.P256dh, Auth: sub.Auth},
 	}, opts)
 	if err != nil {
-		return n.fail(ctx, sub.Endpoint, &PushError{Msg: "push request failed: " + err.Error()})
+		return n.fail(ctx, sub, &PushError{Msg: "push request failed: " + err.Error()})
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return n.store.RecordPushResult(ctx, sub.Endpoint, nil)
+		return n.store.RecordPushResult(ctx, sub, nil)
 	}
 	perr := &PushError{Status: resp.StatusCode,
 		Msg: fmt.Sprintf("push service returned %d: %s", resp.StatusCode, bytes.TrimSpace(body))}
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
-		if err := n.store.DeletePushSubscription(ctx, sub.Endpoint); err != nil {
+		if err := n.store.DeleteExpiredPushSubscription(ctx, sub); err != nil {
 			return err
 		}
-		n.log.Info("push subscription expired; deleted", "endpoint", sub.Endpoint, "status", resp.StatusCode)
+		n.log.Info("push subscription expired; deleted", "subscription", sub.ID, "status", resp.StatusCode)
 		return perr
 	}
-	return n.fail(ctx, sub.Endpoint, perr)
+	return n.fail(ctx, sub, perr)
 }
 
-func (n *Notifier) fail(ctx context.Context, endpoint string, perr *PushError) error {
+func (n *Notifier) fail(ctx context.Context, sub db.PushSubscription, perr *PushError) error {
 	msg := perr.Msg
-	if err := n.store.RecordPushResult(ctx, endpoint, &msg); err != nil {
-		n.log.Warn("record push error", "endpoint", endpoint, "err", err)
+	if err := n.store.RecordPushResult(ctx, sub, &msg); err != nil {
+		n.log.Warn("record push error", "subscription", sub.ID, "err", err)
 	}
 	return perr
 }

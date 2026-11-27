@@ -95,18 +95,18 @@ function isTyping(target: EventTarget | null): boolean {
   return target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
-/** Mirrors the needs-input count outside the page (browser: tab favicon and installed app badge). */
-function useNeedsInputAttention(count: number | undefined) {
+/** Updates the host's attention indicator (browser: tab favicon and installed app badge). */
+function useAttention(count: number | undefined) {
   const { attention } = usePlatform();
   useEffect(() => attention.setNeedsInput(count), [attention, count]);
 }
 
 function Shell() {
-  const badge = useBadge().data?.needsInput;
-  useNeedsInputAttention(badge);
+  const badge = useBadge().data;
+  useAttention(badge?.unread ?? badge?.needsInput);
   usePushRefresh();
   useSystemNotificationSync();
-  const needsInput = badge ?? 0;
+  const needsInput = badge?.needsInput ?? 0;
   const [inbox, setInbox] = useState(false);
   // A waiting session handed from the inbox to the Track session drawer.
   const [tracking, setTracking] = useState<SessionRef | null>(null);

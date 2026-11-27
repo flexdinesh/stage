@@ -10,6 +10,7 @@ export interface EventSourceLike {
 export interface BrowserTransportDeps {
   fetch: (input: string, init: RequestInit) => Promise<Response>;
   eventSource: (url: string) => EventSourceLike;
+  onSessionChanged: () => void;
 }
 
 /** EventSource.CLOSED: the browser gave up (the server refused the stream). */
@@ -17,18 +18,36 @@ const CLOSED = 2;
 
 const apiUrl = (path: string) => `/api${path}`;
 
+const SESSION_CHANGES = new Set(["/auth/login", "/auth/setup", "/auth/invite", "/auth/reset", "/auth/logout", "/account/password"]);
+
+async function authenticationRequired(response: Response): Promise<boolean> {
+  const error: unknown = await response.clone().json().catch(() => null);
+  return typeof error === "object" && error !== null && "code" in error && error.code === "authentication_required";
+}
+
 /** Same-origin `/api` over the page's own connection: relative fetch, native EventSource and plain asset URLs. */
-export function browserTransport(
-  deps: BrowserTransportDeps = {
-    fetch: (input, init) => fetch(input, init),
-    eventSource: (url) => new EventSource(url),
-  },
-): Transport {
+export function browserTransport({
+  fetch: request = (input, init) => fetch(input, init),
+  eventSource = (url) => new EventSource(url),
+  onSessionChanged,
+}: Partial<BrowserTransportDeps> = {}): Transport {
+  let sessionGeneration = 0;
   return {
-    request: (path, init) => deps.fetch(apiUrl(path), init),
+    async request(path, init) {
+      const generation = sessionGeneration;
+      const response = await request(apiUrl(path), init);
+      if (onSessionChanged === undefined) return response;
+      if (init.method === "POST" && response.ok && SESSION_CHANGES.has(path)) {
+        sessionGeneration++;
+        onSessionChanged();
+      } else if (response.status === 401 && await authenticationRequired(response) && generation === sessionGeneration) {
+        onSessionChanged();
+      }
+      return response;
+    },
     assetUrl: apiUrl,
     subscribe(path: string, handlers: StreamHandlers): Subscription {
-      const es = deps.eventSource(apiUrl(path));
+      const es = eventSource(apiUrl(path));
       let closed = false;
       // EventSource retries by itself (sending Last-Event-ID) unless the server refused the stream.
       es.addEventListener("open", () => {

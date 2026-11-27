@@ -68,20 +68,24 @@ type WaitingSession struct {
 type Notifications interface {
 	// Insert stores n with its resolved session identity and returns its id.
 	Insert(ctx context.Context, n NewNotification, sessionID *int64) (int64, error)
+	// InsertRecipients records unread receipts for an event in the same write transaction.
+	InsertRecipients(ctx context.Context, id, ownerID int64) error
+	// ForDelivery returns ErrNotFound when the user has no unread receipt for id.
+	ForDelivery(ctx context.Context, userID, id int64) (Notification, error)
 	// List returns up to limit entries, newest first, with id < beforeID
 	// when set, only of group key when set.
-	List(ctx context.Context, limit int, beforeID *int64, key *string) ([]Notification, error)
+	List(ctx context.Context, userID int64, limit int, beforeID *int64, key *string) ([]Notification, error)
 	// After returns up to limit entries with id > after, ascending; newest
-	// takes the newest ones (still returned descending).
-	After(ctx context.Context, after int64, limit int, newest bool) ([]Notification, error)
-	ReadState(ctx context.Context) (latestID int64, unread int, err error)
+	// takes the newest ones in the same order.
+	After(ctx context.Context, userID, after int64, limit int, newest bool) ([]Notification, error)
+	ReadState(ctx context.Context, userID int64) (latestID int64, unread int, err error)
 	// Groups aggregates entries with id <= upToID before the cursor/limit.
-	Groups(ctx context.Context, limit int, cursor *NotificationCursor, upToID int64) ([]NotificationGroup, error)
-	UnreadCount(ctx context.Context) (int, error)
-	MarkRead(ctx context.Context, upTo int64) error
-	MarkGroupsRead(ctx context.Context, groupKeys []string) error
+	Groups(ctx context.Context, userID int64, limit int, cursor *NotificationCursor, upToID int64) ([]NotificationGroup, error)
+	UnreadCount(ctx context.Context, userID int64) (int, error)
+	MarkRead(ctx context.Context, userID, upTo int64) error
+	MarkGroupsRead(ctx context.Context, userID int64, groupKeys []string) error
 	// UnreadKeys returns the distinct group keys with unread entries, sorted.
-	UnreadKeys(ctx context.Context) ([]string, error)
+	UnreadKeys(ctx context.Context, userID int64) ([]string, error)
 	// Prune deletes entries created before t.
 	Prune(ctx context.Context, before time.Time) (int64, error)
 	// Waiting lists external sessions needing input with no entry <= upToID.

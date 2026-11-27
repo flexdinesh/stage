@@ -1,5 +1,10 @@
 import type { Notification } from "../api/types.ts";
 
+/** New events toast oldest first. Muted events are already read in shared mode. */
+export function newToastEvents(items: Notification[], after: number, includeRead: boolean): Notification[] {
+  return items.filter((n) => n.id > after && (includeRead || n.readAt === null)).toSorted((a, b) => a.id - b.id);
+}
+
 const entityKey = (n: Notification) => {
   if (n.taskId !== null) return `task:${n.taskId}`;
   // Older payloads may omit the connection: they key by session alone (never assume a fixed connection id).
