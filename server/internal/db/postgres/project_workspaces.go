@@ -42,7 +42,7 @@ func (r projects) WorkspaceRows(ctx context.Context) ([]store.StoredWorkspace, e
 	rows, err := r.Query(ctx, `SELECT e.connection_id,e.external_id,e.title,e.workspace,e.available,e.importable,e.archived,e.active_at,
  b.project_id,b.id,COALESCE(b.is_primary,false),e.file_host,e.canonical_path,e.repo,e.repo_path,e.evidence_at,e.evidence_source,
  e.resolution,e.resolution_reason,e.resolution_rule,e.candidates,c.machine_id,c.active,e.checkout_key,e.inode_hint,
- e.group_project_id,e.group_revision,e.historical_project_id
+ e.group_project_id,e.group_revision,e.historical_project_id,e.blocked_reason
  FROM external_projects e
  JOIN harness_connections c ON c.id=e.connection_id
  LEFT JOIN project_bindings b ON b.connection_id=e.connection_id AND b.external_project_id=e.external_id AND b.workspace=e.workspace AND b.active
@@ -55,7 +55,7 @@ func (r projects) WorkspaceRows(ctx context.Context) ([]store.StoredWorkspace, e
 		err := row.Scan(&w.ConnectionID, &w.ExternalID, &w.Title, &w.Workspace.Workspace, &w.Available, &w.Importable, &w.HarnessArchived, &w.ActiveAt,
 			&w.ProjectID, &w.BindingID, &w.Primary, &w.FileHost, &w.CanonicalPath, &w.Remote, &w.Subpath, &w.EvidenceAt, &w.EvidenceSource,
 			&w.Resolution.Outcome, &w.Resolution.Reason, &w.Resolution.Rule, &w.Resolution.Candidates,
-			&w.MachineID, &w.ConnectionActive, &w.CheckoutKey, &w.InodeHint, &w.GroupProjectID, &w.GroupRevision, &w.HistoricalProjectID)
+			&w.MachineID, &w.ConnectionActive, &w.CheckoutKey, &w.InodeHint, &w.GroupProjectID, &w.GroupRevision, &w.HistoricalProjectID, &w.BlockedReason)
 		return w, err
 	})
 }
@@ -155,10 +155,10 @@ func (r projects) UpsertDiscovered(ctx context.Context, connectionID int64, w st
 	// An available report refreshes legacy status even when it supplies no new
 	// evidence. A gone report retains both the previous evidence and its time.
 	_, err := r.Exec(ctx, `INSERT INTO external_projects(connection_id,external_id,title,workspace,available,importable,archived,active_at,
- repo,repo_path,file_host,canonical_path,checkout_key,inode_hint,evidence_source,evidence_at)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,CASE WHEN $5 OR $15<>'' THEN `+nowSQL+` END)
+ repo,repo_path,file_host,canonical_path,checkout_key,inode_hint,evidence_source,evidence_at,blocked_reason)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,CASE WHEN $5 OR $15<>'' THEN `+nowSQL+` END,$16)
  ON CONFLICT(connection_id,external_id,workspace) DO UPDATE SET title=excluded.title,available=excluded.available,
- importable=excluded.importable,archived=excluded.archived,active_at=excluded.active_at,
+ importable=excluded.importable,archived=excluded.archived,active_at=excluded.active_at,blocked_reason=excluded.blocked_reason,
  repo=CASE WHEN excluded.evidence_source<>'' THEN excluded.repo ELSE external_projects.repo END,
  repo_path=CASE WHEN excluded.evidence_source<>'' THEN excluded.repo_path ELSE external_projects.repo_path END,
  file_host=CASE WHEN excluded.evidence_source<>'' THEN excluded.file_host ELSE external_projects.file_host END,
@@ -169,7 +169,7 @@ func (r projects) UpsertDiscovered(ctx context.Context, connectionID int64, w st
  evidence_at=CASE WHEN excluded.evidence_source<>'' THEN excluded.evidence_at
    ELSE COALESCE(external_projects.evidence_at,excluded.evidence_at) END`,
 		connectionID, w.ExternalID, w.Title, w.Workspace, w.Available, w.Importable, w.Archived, w.ActiveAt,
-		w.Repo, w.RepoPath, w.FileHost, w.CanonicalPath, w.CheckoutKey, w.InodeHint, w.EvidenceSource)
+		w.Repo, w.RepoPath, w.FileHost, w.CanonicalPath, w.CheckoutKey, w.InodeHint, w.EvidenceSource, w.BlockedReason)
 	return err
 }
 

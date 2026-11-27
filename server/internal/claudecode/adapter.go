@@ -243,26 +243,50 @@ func (a *Adapter) images() execution.Availability {
 	return available
 }
 
+// getenv is key in the environment Claude runs with (the last value wins).
+func (c *CLI) getenv(key string) string {
+	value := ""
+	for _, kv := range c.env() {
+		if k, v, _ := strings.Cut(kv, "="); k == key {
+			value = v
+		}
+	}
+	return value
+}
+
+// claudeHome is the home directory Claude runs with.
+func (c *CLI) claudeHome() string {
+	if home := c.getenv("HOME"); home != "" {
+		return home
+	}
+	return c.home()
+}
+
 // claudeJSON is the state file. An explicit CLAUDE_CONFIG_DIR puts the file
 // inside that directory even when it points to ~/.claude.
 func (c *CLI) claudeJSON(configDir string) string {
-	home := c.home()
-	var custom bool
-	for _, kv := range c.env() {
-		key, value, _ := strings.Cut(kv, "=")
-		switch key {
-		case "HOME":
-			if value != "" {
-				home = value
-			}
-		case "CLAUDE_CONFIG_DIR":
-			custom = value != ""
-		}
-	}
+	home := c.claudeHome()
+	custom := c.getenv("CLAUDE_CONFIG_DIR") != ""
 	if !custom && home != "" && filepath.Clean(configDir) == filepath.Join(home, ".claude") {
 		return filepath.Join(home, ".claude.json")
 	}
 	return filepath.Join(configDir, ".claude.json")
+}
+
+// Claude Code starts background sessions (`claude --bg`) only in a trusted
+// workspace (hasTrustDialogAccepted on the checkout's main root, or on the
+// folder or an ancestor up to the checkout top; outside a checkout, up to the
+// filesystem root). Its home folder is trusted one interactive session at a
+// time, so a background session there needs a saved record above it.
+const (
+	untrustedReason = "Not trusted in Claude Code. Run claude in this folder once and accept the trust prompt, then refresh."
+	homeReason      = "Claude Code trusts the home folder one session at a time, so Stage can't start sessions here. Use a project folder."
+)
+
+// sandboxed is Claude's CLAUDE_CODE_SANDBOXED switch, which trusts every
+// workspace (Claude's boolean environment values).
+func sandboxed(v string) bool {
+	return slices.Contains([]string{"1", "true", "yes", "on"}, strings.ToLower(strings.TrimSpace(v)))
 }
 
 // worktreeMarker is the path segment of a Claude-managed worktree.
@@ -270,7 +294,7 @@ const worktreeMarker = "/.claude/worktrees/"
 
 // Workspaces combines Claude's state projects with cwd evidence from its
 // native session list. Machine ops decide whether a folder is a Git checkout
-// top (ImportCheckoutTop).
+// top (ImportCheckoutTop) and whether a trust record covers it (Trust).
 func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, error) {
 	au, err := a.checkedAuth(ctx, true)
 	if err != nil {
@@ -326,15 +350,35 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 			paths[dir] = at
 		}
 	}
-	for dir := range projects {
+	var records []string
+	for dir, raw := range projects {
 		add(dir, st.ModTime().UTC())
+		var project struct {
+			Trusted json.RawMessage `json:"hasTrustDialogAccepted"`
+		}
+		// Claude looks keys up verbatim, so a record is the key as written.
+		if json.Unmarshal(raw, &project) == nil && string(project.Trusted) == "true" && filepath.IsAbs(dir) {
+			records = append(records, dir)
+		}
 	}
 	for _, entry := range entries {
 		add(entry.Cwd, time.Time{})
 	}
+	slices.Sort(records)
+	trust := &execution.TrustRule{Records: records, Reason: untrustedReason}
+	home := filepath.Clean(a.cli.claudeHome())
+	everyFolder := sandboxed(a.cli.getenv("CLAUDE_CODE_SANDBOXED"))
 	out := make([]execution.WorkspaceInfo, 0, len(paths))
 	for dir, at := range paths {
-		out = append(out, execution.WorkspaceInfo{ID: dir, Title: filepath.Base(dir), WorkspaceRoot: dir, CreatedAt: at, UpdatedAt: at, Local: true, ImportIf: execution.ImportCheckoutTop})
+		w := execution.WorkspaceInfo{ID: dir, Title: filepath.Base(dir), WorkspaceRoot: dir, CreatedAt: at, UpdatedAt: at, Local: true, ImportIf: execution.ImportCheckoutTop}
+		switch {
+		case everyFolder:
+		case dir == home:
+			w.Trust = &execution.TrustRule{Records: records, Reason: homeReason}
+		default:
+			w.Trust = trust
+		}
+		out = append(out, w)
 	}
 	slices.SortFunc(out, func(x, y execution.WorkspaceInfo) int { return strings.Compare(x.ID, y.ID) })
 	return out, nil

@@ -519,8 +519,10 @@ Refresh workspace catalogs, organize newly discovered rows and refresh task-owne
   when at least one member has an active connection. Related IDs share
   strong workspace evidence and can be reviewed manually.
 - Each member has `connectionId`, `workspaceId`, `machineId`,
-  `title`, `path` and `catalogState` (`listed`, `missing`,
-  `archived`, or `retired`). These are stored catalog observations.
+  `title`, `path`, `catalogState` (`listed`, `missing`,
+  `archived`, or `retired`) and `blockedReason` (why the harness will not
+  start a session in a listed member, `""` when nothing known stops it).
+  These are stored catalog observations.
   Current destination eligibility comes from the destination projection.
 - Scoped agent group reads return the shared `id`, `title`,
   `archivedAt` and `aliases`. The destination response on
@@ -570,8 +572,10 @@ Scoped agent reads return project summaries and the scoped destination
 projection. Human callers get the same projection with
 `GET /api/projects?view=destinations`. It includes `destinations`, an array
 of `{connectionId, workspaceId, title, connectionLabel, machineLabel,
-discriminator?, projectId?, groupProjectId?, available}`. Use the exact
-pair for selection. A short discriminator distinguishes repeated display
+discriminator?, projectId?, groupProjectId?, available, reason?}`. Use the exact
+pair of an available destination for selection. A listed workspace its harness
+will not launch in (for example, a folder not trusted in Claude Code) has
+`available: false` and `reason` in the harness's words. A short discriminator distinguishes repeated display
 labels. The projection includes eligible rows without historical bindings
 and omits paths, native IDs, evidence and discovery diagnostics. Project
 summaries include identity and aliases. Human project history retains
@@ -579,8 +583,8 @@ recorded binding fields for provenance.
 
 ### Workspace discovery and project identity
 
-`Workspace` is `{connectionId, workspaceId, externalId, title, workspace, available, importable, harnessArchived, activeAt, projectId, groupProjectId, bindingId, primary, fileHost, canonicalPath, remote, subpath, identityKey, evidenceAt, evidenceSource, declined, resolution}`.
-An empty `workspace` is a valid pathless row. `projectId` and `bindingId`
+`Workspace` is `{connectionId, workspaceId, externalId, title, workspace, available, importable, harnessArchived, blockedReason, activeAt, projectId, groupProjectId, bindingId, primary, fileHost, canonicalPath, remote, subpath, identityKey, evidenceAt, evidenceSource, declined, resolution}`.
+An empty `workspace` is a valid pathless row. `blockedReason` says why the harness will not start a session in a listed row (`""` when nothing known stops it); such a row is not an eligible destination ([discovery](discovery.md#eligibility)). `projectId` and `bindingId`
 are null for unbound rows. `resolution` is `{outcome, reason, rule, candidates}`.
 Outcomes are `bound`, `join`, `new` and `review`. Review reasons are
 `suggested`, `ambiguous`, `declined` and `moved`. `candidates` lists project IDs.

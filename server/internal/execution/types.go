@@ -72,8 +72,28 @@ type WorkspaceInfo struct {
 	// machine's ops read the files and set Importable. "": Importable is
 	// the harness's own judgment.
 	ImportIf ImportRule `json:"importIf,omitempty"`
+	// BlockedReason: why the harness will not start a session here, in the
+	// harness's words ("" when nothing known stops it). The row stays in
+	// inventory but is not an eligible destination.
+	BlockedReason string `json:"blockedReason,omitempty"`
+	// Trust: the harness starts sessions only in folders its trust records
+	// cover. The machine's ops read the files and set BlockedReason to
+	// Trust.Reason when no record covers the workspace (TrustRule).
+	Trust *TrustRule `json:"trust,omitempty"`
 	// Evidence comes from machine.Ops on the workspace's file host.
 	Evidence *WorkspaceEvidence `json:"evidence,omitempty"`
+}
+
+// TrustRule is a harness's folder trust (WorkspaceInfo.Trust). A record
+// covers a workspace when it names the checkout's main root (the main
+// working tree of a linked worktree), or the workspace or an ancestor up to
+// the checkout top, or up to the filesystem root outside a checkout.
+type TrustRule struct {
+	// Records: folders the harness recorded as trusted, as written; they
+	// match the canonical path verbatim.
+	Records []string `json:"records"`
+	// Reason: BlockedReason when no record covers the workspace.
+	Reason string `json:"reason"`
 }
 
 // WorkspaceEvidence is read-only filesystem evidence for a local workspace.

@@ -163,6 +163,8 @@ export interface GroupWorkspace {
   title: string;
   path: string;
   catalogState: "listed" | "retired" | "missing" | "archived";
+  /** Why the harness won't start a session in this listed workspace ("" when nothing known stops it). */
+  blockedReason: string;
 }
 
 export interface ProjectGroup extends Pick<Project, "id" | "title" | "archivedAt" | "aliases" | "lastActivityAt"> {
@@ -263,6 +265,8 @@ export interface Workspace extends WorkspaceRef {
   available: boolean;
   importable: boolean;
   harnessArchived: boolean;
+  /** Why the harness won't start a session here, in its own words ("" when nothing known stops it). */
+  blockedReason: string;
   activeAt: string | null;
   projectId: number | null;
   groupProjectId?: number | null;

@@ -298,6 +298,7 @@ export function Combobox({
                   <Highlight text={o.detail} range={o.detailMatch} />
                 </span>
               )) : renderDetail(o)}
+              {o.note === undefined ? null : <span className="text-small text-muted wrap-anywhere">{o.note}</span>}
             </span>
           </div>
         ))}

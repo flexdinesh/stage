@@ -73,7 +73,7 @@ func NewServer(o *Ops) *mcp.Server {
 	del := &mcp.ToolAnnotations{DestructiveHint: &destructive}
 
 	add(s, o, "get_context", "Your session id, cwd, resolved Stage project, owning task, selected workspaceId, and current treeId/treeTitle.", ro, o.Context)
-	add(s, o, "list_projects", "List Stage project groups and available destinations. Use connectionId and workspaceId to launch.", ro, o.ListProjects)
+	add(s, o, "list_projects", "List Stage project groups and destinations. Use connectionId and workspaceId of an available destination to launch; an unavailable one carries the reason (for example, not trusted in its harness).", ro, o.ListProjects)
 	add(s, o, "list_models", "List execution capabilities for connectionId. Supply workspaceId for exact workspace-specific models and agents.", ro, o.ListModels)
 	add(s, o, "get_project", "Read a Stage project by id: id, title, archivedAt, aliases.", ro, o.GetProject)
 	add(s, o, "list_project_groups", "List logical project groups (id, title, archivedAt, aliases); unarchived by default (archived true|all for others).", ro, o.ListProjectGroups)

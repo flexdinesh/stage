@@ -48,25 +48,40 @@ func title(name, canonical string) string {
 	return base
 }
 
-// Workspaces lists OpenCode's project inventory. A project is importable
-// when it is a version-controlled checkout OpenCode has not archived;
-// plain directories (home, config, scratch) stay manual-bind only.
-func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, error) {
-	var projects []struct {
-		ID, Name, Canonical, Vcs string
-		Time                     struct{ Created, Updated, Active, Archived int64 }
-	}
+type wireProject struct {
+	ID, Name, Canonical, Vcs string
+	Time                     struct{ Created, Updated, Active, Archived int64 }
+}
+
+// projects reads OpenCode's project inventory, archived included. It is a
+// pure read: unlike location-scoped requests, it never resolves, persists
+// or unarchives a project.
+func (a *Adapter) projects(ctx context.Context) ([]wireProject, error) {
+	var projects []wireProject
 	if e := a.get(ctx, "/api/project?archived=true", &projects); e != nil {
 		return nil, e
 	}
 	if projects == nil {
 		return nil, errors.New("invalid OpenCode project inventory")
 	}
-	out := make([]execution.WorkspaceInfo, 0, len(projects))
 	for _, p := range projects {
 		if p.ID == "" || p.Canonical == "" || p.Time.Created <= 0 || p.Time.Updated <= 0 {
 			return nil, errors.New("incomplete OpenCode project inventory")
 		}
+	}
+	return projects, nil
+}
+
+// Workspaces lists OpenCode's project inventory. A project is importable
+// when it is a version-controlled checkout OpenCode has not archived;
+// plain directories (home, config, scratch) stay manual-bind only.
+func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, error) {
+	projects, err := a.projects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]execution.WorkspaceInfo, 0, len(projects))
+	for _, p := range projects {
 		// A project binding pins the canonical checkout. Created worktrees
 		// belong to its separate per-project inventory.
 		w := execution.WorkspaceInfo{
@@ -81,21 +96,47 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 	}
 	return out, nil
 }
-func (a *Adapter) verifyLocation(ctx context.Context, project, dir string) error {
-	var loc struct {
-		Directory string
-		Project   struct{ ID, Directory, Canonical string }
-	}
+
+// boundProject finds project in OpenCode's inventory and requires it to be
+// unarchived.
+func (a *Adapter) boundProject(ctx context.Context, project, dir string) (wireProject, error) {
 	if dir == "" || project == "" {
-		return errors.New("choose a bound OpenCode project and directory")
+		return wireProject{}, errors.New("choose a bound OpenCode project and directory")
 	}
-	if e := a.get(ctx, "/api/location"+queryDirectory(dir), &loc); e != nil {
-		return e
+	projects, err := a.projects(ctx)
+	if err != nil {
+		return wireProject{}, err
 	}
-	if loc.Directory != dir || loc.Project.ID != project || loc.Project.Directory != dir {
+	i := slices.IndexFunc(projects, func(p wireProject) bool { return p.ID == project })
+	if i < 0 {
+		return wireProject{}, errors.New("OpenCode no longer lists this project. Refresh workspaces.")
+	}
+	if projects[i].Time.Archived > 0 {
+		return wireProject{}, errors.New("Archived in OpenCode. Unarchive it there, then refresh.")
+	}
+	return projects[i], nil
+}
+
+// verifyLocation confirms dir is the project's canonical checkout or one of
+// its saved worktrees using only pure inventory reads. Location-scoped
+// requests (location[directory], e.g. GET /api/location) resolve and persist
+// the project in OpenCode, recreating it or clearing its archived time.
+func (a *Adapter) verifyLocation(ctx context.Context, project, dir string) error {
+	p, err := a.boundProject(ctx, project, dir)
+	if err != nil || dir == p.Canonical {
+		return err
+	}
+	trees, err := a.worktrees(ctx, project)
+	if err != nil {
+		return err
+	}
+	if !listed(trees, dir) {
 		return errors.New("OpenCode resolved a different checkout or project. Verify its binding.")
 	}
 	return nil
+}
+func listed(trees []location, dir string) bool {
+	return slices.ContainsFunc(trees, func(w location) bool { return w.Directory == dir })
 }
 func (a *Adapter) worktrees(ctx context.Context, project string) ([]location, error) {
 	var trees []location
@@ -107,15 +148,20 @@ func (a *Adapter) worktrees(ctx context.Context, project string) ([]location, er
 	}
 	return trees, nil
 }
+
+// verifyWorktree confirms a created worktree is in the project's inventory
+// and the project is still listed and unarchived. A listed worktree passes
+// verifyLocation, so the inventory is read once.
 func (a *Adapter) verifyWorktree(ctx context.Context, project, dir string) error {
 	trees, err := a.worktrees(ctx, project)
 	if err != nil {
 		return err
 	}
-	if !slices.ContainsFunc(trees, func(w location) bool { return w.Directory == dir }) {
+	if !listed(trees, dir) {
 		return errors.New("created workspace is missing from the OpenCode project inventory")
 	}
-	return a.verifyLocation(ctx, project, dir)
+	_, err = a.boundProject(ctx, project, dir)
+	return err
 }
 
 var available = execution.Availability{Available: true}
@@ -173,6 +219,9 @@ func (a *Adapter) FeaturesForWorkspace(ctx context.Context, project, dir string)
 	if err != nil {
 		return c, err
 	}
+	// Verify with pure reads first. Location-scoped reads persist the
+	// project, so they run only once it is listed and unarchived: they can
+	// then neither create nor unarchive it.
 	if e := a.verifyLocation(ctx, project, dir); e != nil {
 		return c, e
 	}

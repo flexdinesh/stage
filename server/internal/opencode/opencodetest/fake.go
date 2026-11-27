@@ -198,7 +198,6 @@ func spec() map[string]any {
 		{"get", "/api/project", "project.list"},
 		{"get", "/api/worktree", "worktree.list"},
 		{"post", "/api/worktree", "worktree.create"},
-		{"get", "/api/location", "location.get"},
 		{"get", "/api/agent", "agent.list"},
 		{"get", "/api/model", "model.list"},
 		{"post", "/api/session", "session.create"},

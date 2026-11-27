@@ -17,6 +17,8 @@ export interface ComboboxOption {
   tagMatch?: MatchRange | null | undefined;
   /** Listed but not choosable (e.g. a saved value the harness no longer offers). */
   disabled?: boolean | undefined;
+  /** Plain line under the detail saying why a disabled option can't be chosen. */
+  note?: string | undefined;
 }
 
 /** Lists with more options than this get a type-to-filter input; shorter ones are select-only. */

@@ -71,7 +71,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		"WorkspaceInfo": execution.WorkspaceInfo{
 			OriginRemote: "git@github.com:o/r.git", ID: "p", Title: "r", WorkspaceRoot: "/w", ArchivedAt: &at, DeletedAt: &later,
 			CreatedAt: at, UpdatedAt: later, Importable: true, ActiveAt: &at, Repo: "github.com/o/r", RepoPath: "packages/web",
-			Local: true, ImportIf: execution.ImportInCheckout, Evidence: &evidence,
+			Local: true, ImportIf: execution.ImportInCheckout, BlockedReason: "Not trusted.", Trust: &execution.TrustRule{Records: []string{"/w"}, Reason: "Not trusted."}, Evidence: &evidence,
 		},
 		"Capabilities": execution.Capabilities{
 			Permissions: []execution.Choice{choice}, Options: []execution.Option{option}, ModeLabel: "Agent",

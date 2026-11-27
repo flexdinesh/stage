@@ -16,12 +16,22 @@ export interface TaskTemplate {
 
 type SelectableWorkspace = Workspace & { workspaceId: string };
 
-export function availableTaskWorkspaces(inventory: WorkspaceInventory | undefined, connectionId: number, projectId: number | undefined) {
+function listedTaskWorkspaces(inventory: WorkspaceInventory | undefined, connectionId: number, projectId: number | undefined) {
   if (inventory?.inventory?.state !== "ready") return [];
   const inProject = (row: Workspace) => Number(row.groupProjectId === projectId);
   return inventory.workspaces.filter((row): row is SelectableWorkspace => (
     row.connectionId === connectionId && row.available && !row.harnessArchived && !!row.workspaceId
   )).toSorted((a, b) => inProject(b) - inProject(a) || a.title.localeCompare(b.title) || a.workspace.localeCompare(b.workspace));
+}
+
+/** Listed workspaces on the connection the harness will start sessions in, the project's first. */
+export function availableTaskWorkspaces(inventory: WorkspaceInventory | undefined, connectionId: number, projectId: number | undefined) {
+  return listedTaskWorkspaces(inventory, connectionId, projectId).filter((row) => !row.blockedReason);
+}
+
+/** Listed workspaces the harness won't start sessions in (blockedReason), shown but not choosable. */
+export function blockedTaskWorkspaces(inventory: WorkspaceInventory | undefined, connectionId: number, projectId: number | undefined) {
+  return listedTaskWorkspaces(inventory, connectionId, projectId).filter((row) => !!row.blockedReason);
 }
 
 export function suggestedTaskWorkspace(rows: readonly SelectableWorkspace[], projectId: number | undefined) {

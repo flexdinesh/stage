@@ -166,3 +166,72 @@ func TestWorkspaceEvidenceFailsIncompleteReadsAndRecovers(t *testing.T) {
 		t.Fatalf("authoritative empty inventory: %+v %v", ws, err)
 	}
 }
+
+// Untrusted folders stay in inventory with Claude's trust rule, so machine
+// ops mark them not launchable; trust follows hasTrustDialogAccepted.
+func TestWorkspacesCarryClaudeTrust(t *testing.T) {
+	f := claudetest.New(t)
+	f.GitInit()
+	trustedParent := filepath.Join(f.Home, "work")
+	inherited := filepath.Join(trustedParent, "notes")
+	declined := filepath.Join(f.Home, "lab")
+	for _, dir := range []string{inherited, declined} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state := `{"projects":{
+		"` + f.Home + `":{"hasTrustDialogAccepted":false},
+		"` + f.Workspace + `":{"hasTrustDialogAccepted":true},
+		"` + trustedParent + `":{"hasTrustDialogAccepted":true},
+		"` + declined + `/":{"hasTrustDialogAccepted":true},
+		"` + inherited + `":{"hasTrustDialogAccepted":false},
+		"` + declined + `":{},
+		"/odd":{"hasTrustDialogAccepted":"true"},
+		"/broken":[]
+	}}`
+	if err := os.WriteFile(filepath.Join(f.Home, ".claude.json"), []byte(state), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.Update(func(s *fakestate.State) { s.Sessions = nil })
+	cli := f.CLI()
+	ws, err := claudecode.New(claudecode.Options{Connection: conn, CLI: cli, Identity: f.ConfigDir()}).Workspaces(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := []string{declined + "/", trustedParent, f.Workspace}
+	slices.Sort(records)
+	rows := map[string]execution.WorkspaceInfo{}
+	for _, w := range ws {
+		rows[w.ID] = w
+		if w.Trust == nil || !slices.Equal(w.Trust.Records, records) || w.BlockedReason != "" {
+			t.Fatalf("trust rule for %s: %+v", w.ID, w.Trust)
+		}
+	}
+	if got := rows[f.Home].Trust.Reason; !strings.Contains(got, "home folder one session at a time") {
+		t.Fatalf("home reason %q", got)
+	}
+	if got := rows[declined].Trust.Reason; got != "Not trusted in Claude Code. Run claude in this folder once and accept the trust prompt, then refresh." {
+		t.Fatalf("untrusted reason %q", got)
+	}
+
+	withEvidence, err := machine.LocalOps{}.Inventory(t.Context(), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := map[string]bool{}
+	for _, w := range withEvidence {
+		blocked[w.ID] = w.BlockedReason != ""
+	}
+	for dir, want := range map[string]bool{f.Workspace: false, trustedParent: false, inherited: false, declined: true, f.Home: true} {
+		if blocked[dir] != want {
+			t.Errorf("%s blocked = %v, want %v", dir, blocked[dir], want)
+		}
+	}
+
+	cli.Environ = append(cli.Environ, "CLAUDE_CODE_SANDBOXED= Yes ")
+	ws, err = claudecode.New(claudecode.Options{Connection: conn, CLI: cli, Identity: f.ConfigDir()}).Workspaces(t.Context())
+	if err != nil || slices.ContainsFunc(ws, func(w execution.WorkspaceInfo) bool { return w.Trust != nil }) {
+		t.Fatalf("sandboxed Claude trusts every workspace: %+v %v", ws, err)
+	}
+}

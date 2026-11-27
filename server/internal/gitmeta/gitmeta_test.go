@@ -147,3 +147,41 @@ func TestRemoteIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestMainRoot(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	main := filepath.Join(root, "repo")
+	write(t, filepath.Join(main, ".git", "config"), config)
+	linked := func(name, common string) string {
+		wt := filepath.Join(root, name)
+		admin := filepath.Join(common, "worktrees", name)
+		write(t, filepath.Join(admin, "commondir"), "../..\n")
+		write(t, filepath.Join(admin, "gitdir"), filepath.Join(wt, ".git")+"\n")
+		write(t, filepath.Join(wt, ".git"), "gitdir: "+admin+"\n")
+		return wt
+	}
+	wt := linked("wt", filepath.Join(main, ".git"))
+	bare := filepath.Join(root, "bare.git")
+	write(t, filepath.Join(bare, "config"), config)
+	bareWt := linked("bare-wt", bare)
+	moved := linked("moved", filepath.Join(main, ".git"))
+	write(t, filepath.Join(main, ".git", "worktrees", "moved", "gitdir"), filepath.Join(root, "elsewhere", ".git")+"\n")
+	sub := filepath.Join(root, "sub")
+	write(t, filepath.Join(main, ".git", "modules", "sub", "config"), config)
+	write(t, filepath.Join(sub, ".git"), "gitdir: ../repo/.git/modules/sub\n")
+
+	for _, tc := range []struct{ top, want string }{
+		{main, main},
+		{wt, main},
+		{bareWt, bare},
+		{moved, moved}, // the admin directory points at another checkout
+		{sub, sub},     // a submodule has no common directory
+	} {
+		if got := Main(tc.top); got != tc.want {
+			t.Errorf("Main(%s) = %s, want %s", tc.top, got, tc.want)
+		}
+	}
+}

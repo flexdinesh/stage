@@ -102,7 +102,7 @@ the role on the connection's machine.
 | Role | Methods and consumers |
 | --- | --- |
 | `Catalog` | `Health` reports reachability and instance identity. `Features` declares launch choices and operation availability for setup and task controls. |
-| `Inventory` | `Workspaces` reports harness workspace IDs, paths, availability and provenance. [Discovery](../server/internal/discovery/inventory.go) enriches local paths with read-only evidence from the file host's `machine.Ops.Inventory`. A failed read preserves the last inventory. See [workspace evidence](discovery.md). |
+| `Inventory` | `Workspaces` reports harness workspace IDs, paths, availability and provenance. [Discovery](../server/internal/discovery/inventory.go) enriches local paths with read-only evidence from the file host's `machine.Ops.Inventory`. A failed read preserves the last inventory. A row the harness will not launch in sets `BlockedReason`; folder trust that depends on Git layout declares a `TrustRule` that `machine.Ops` settles. See [workspace evidence](discovery.md) and [eligibility](discovery.md#eligibility). |
 | `Sessions` | `Observe` supplies normalized snapshots, including replies when available. `Opening` reads the first prompt and `Attention` lists sessions surfaced to Stage. The observer uses these snapshots and the coordinator applies them to tracked tasks. |
 | `Launcher` | `Launch` applies the frozen intent and saves durable checkpoints. `Stop` interrupts a scoped session when available. The coordinator owns dispatch and reconciliation. |
 

@@ -199,7 +199,8 @@ func (s *Store) RecordWorkspaceRefreshFailure(ctx context.Context, connection in
 }
 
 // DestinationWorkspaces returns exact rows with a complete, successful
-// inventory. Callers still check reachability and launch policy.
+// inventory, including listed rows the harness will not launch in
+// (BlockedReason). Callers still check reachability and launch policy.
 func (s *Store) DestinationWorkspaces(ctx context.Context) ([]Workspace, error) {
 	return read(ctx, s, func(tx store.Tx) ([]Workspace, error) {
 		rows, err := tx.Projects().WorkspaceRows(ctx)

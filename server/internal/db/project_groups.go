@@ -38,6 +38,9 @@ type GroupWorkspace struct {
 	Title        string `json:"title"`
 	Path         string `json:"path"`
 	CatalogState string `json:"catalogState"`
+	// BlockedReason: why the harness will not start a session in a listed
+	// workspace ("" when nothing known stops it).
+	BlockedReason string `json:"blockedReason"`
 }
 
 func groupWorkspace(row store.StoredWorkspace) GroupWorkspace {
@@ -51,12 +54,13 @@ func groupWorkspace(row store.StoredWorkspace) GroupWorkspace {
 		state = "archived"
 	}
 	return GroupWorkspace{
-		ConnectionID: row.ConnectionID,
-		WorkspaceID:  WorkspaceID(row.ConnectionID, row.ExternalID, row.Workspace.Workspace),
-		MachineID:    row.MachineID,
-		Title:        WorkspaceTitle(row.Title, row.Workspace.Workspace),
-		Path:         row.Workspace.Workspace,
-		CatalogState: state,
+		ConnectionID:  row.ConnectionID,
+		WorkspaceID:   WorkspaceID(row.ConnectionID, row.ExternalID, row.Workspace.Workspace),
+		MachineID:     row.MachineID,
+		Title:         WorkspaceTitle(row.Title, row.Workspace.Workspace),
+		Path:          row.Workspace.Workspace,
+		CatalogState:  state,
+		BlockedReason: row.BlockedReason,
 	}
 }
 

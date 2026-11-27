@@ -301,3 +301,39 @@ func TestWorkerInventoryKeepsLastGoodOnNegotiationFailureAndOffline(t *testing.T
 		t.Fatalf("recovered inventory %+v", recovered)
 	}
 }
+
+// A workspace the harness will not launch in stays listed with its reason
+// and is offered as an unavailable destination.
+func TestBlockedWorkspaceIsAnUnavailableDestination(t *testing.T) {
+	const reason = "Not trusted in Claude Code. Run claude in this folder once and accept the trust prompt, then refresh."
+	a := &inventoryAdapter{Adapter: t3.NewAdapter(t3.NewFake()), rows: []execution.WorkspaceInfo{
+		{ID: "open", Title: "Open", WorkspaceRoot: "/w/open"},
+		{ID: "lab", Title: "Lab", WorkspaceRoot: "/w/lab", BlockedReason: reason},
+	}}
+	e := newEnv(t, func(d *api.Deps) {
+		d.Engine = engine.NewWithAdapters(d.Store, testHarnesses, map[int64]execution.Adapter{dbtest.T3Connection: a}, d.Logger)
+	})
+	var inventory workspaceInventory
+	e.must("GET", fmt.Sprintf("/api/connections/%d/workspaces", dbtest.T3Connection), nil, 200, &inventory)
+	lab := slices.IndexFunc(inventory.Workspaces, func(w db.Workspace) bool { return w.ExternalID == "lab" })
+	if inventory.Inventory.State != "ready" || lab < 0 || inventory.Workspaces[lab].BlockedReason != reason || !inventory.Workspaces[lab].Available {
+		t.Fatalf("inventory keeps the blocked row listed with its reason: %+v", inventory)
+	}
+	var catalog client.ProjectSummaries
+	e.must("GET", "/api/projects?view=destinations", nil, 200, &catalog)
+	byTitle := map[string]db.Destination{}
+	for _, d := range catalog.Destinations {
+		byTitle[d.Title] = d
+	}
+	if d := byTitle["Lab"]; d.Available || d.Reason != reason || d.WorkspaceID != inventory.Workspaces[lab].WorkspaceID {
+		t.Fatalf("blocked destination %+v", d)
+	}
+	if d := byTitle["Open"]; !d.Available || d.Reason != "" {
+		t.Fatalf("open destination %+v", d)
+	}
+	var refused struct{ Error, Code string }
+	body := map[string]any{"title": "t", "prompt": "p", "connectionId": dbtest.T3Connection, "workspaceId": inventory.Workspaces[lab].WorkspaceID}
+	if code := e.do("POST", "/api/tasks", body, &refused); code != 409 || !strings.HasSuffix(refused.Error, reason) {
+		t.Fatalf("create on a blocked workspace: %d %+v", code, refused)
+	}
+}

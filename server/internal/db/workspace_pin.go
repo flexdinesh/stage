@@ -17,6 +17,12 @@ func DestinationUnavailable() error {
 	return &ConflictError{Code: "destination_unavailable", Msg: "The selected workspace is unavailable on its connection. Restore that workspace or choose a connection and workspace again."}
 }
 
+// DestinationBlocked: the workspace is listed, but its harness will not
+// start a session there (Workspace.BlockedReason, in the harness's words).
+func DestinationBlocked(reason string) error {
+	return &ConflictError{Code: "destination_unavailable", Msg: "The selected workspace can't launch. " + reason}
+}
+
 func pinOf(w Workspace) *WorkspacePin {
 	return &WorkspacePin{ExternalID: w.ExternalID, Root: w.Workspace}
 }
@@ -55,6 +61,9 @@ func resolveDestination(ctx context.Context, tx store.Tx, connection int64, sele
 		}
 		if status.RefreshedAt == nil || status.LastError != nil {
 			break
+		}
+		if row.BlockedReason != "" {
+			return Workspace{}, DestinationBlocked(row.BlockedReason)
 		}
 		row.WorkspaceID = selector
 		return row.Workspace, nil

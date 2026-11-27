@@ -34,6 +34,8 @@ type Destination struct {
 	ProjectID       *int64 `json:"projectId,omitempty"`
 	GroupProjectID  *int64 `json:"groupProjectId,omitempty"`
 	Available       bool   `json:"available"`
+	// Reason: why a listed workspace is not available, when Available is false.
+	Reason string `json:"reason,omitempty"`
 }
 
 // ProjectSummary exposes project identity and aliases without catalog details.

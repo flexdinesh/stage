@@ -1,4 +1,5 @@
 import type { GroupWorkspace, ProjectGroup } from "../api/types.ts";
+import { groupWorkspaceBlocked } from "../lib/projectGroups.ts";
 import { Chip, Meta, type ChipTone } from "./ui.tsx";
 import type { WorkspaceConnections } from "./WorkspaceDisplay.tsx";
 
@@ -58,6 +59,7 @@ export function GroupWorkspaceState({ workspace, connections }: {
   else if (site.disconnected) label = "Disconnected";
   else if (state === "archived") label = "Archived by harness";
   else if (state === "missing") label = "Missing from catalog";
+  else if (groupWorkspaceBlocked(workspace) !== null) label = "Can't start";
   else if (site.live) tone = "ok";
   return <Chip tone={tone} dot>{label}</Chip>;
 }
