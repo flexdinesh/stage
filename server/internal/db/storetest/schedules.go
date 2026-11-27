@@ -17,6 +17,7 @@ func init() {
 	register("WhitespaceScheduleNotesDoNotBlockRuns", caseWhitespaceScheduleNotesDoNotBlockRuns)
 	register("FireSchedule", caseFireSchedule)
 	register("SchedulePauseAndDelete", caseSchedulePauseAndDelete)
+	register("TaskScheduleFilter", caseTaskScheduleFilter)
 	register("TaskStartAt", caseTaskStartAt)
 }
 
@@ -227,6 +228,51 @@ func caseSchedulePauseAndDelete(t *testing.T, open Factory) {
 	task, err = s.GetTask(ctx, task.ID)
 	if err != nil || task.ScheduleID != nil || task.ScheduleTitle != nil {
 		t.Fatalf("task after delete = %+v %v", task, err)
+	}
+}
+
+// caseTaskScheduleFilter: TaskFilter.ScheduleID lists only the tasks that
+// schedule spawned, composing with the other filters.
+func caseTaskScheduleFilter(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
+	p := mustProject(t, s, ctx, "proj")
+	a := mustSchedule(t, s, ctx, p.ID, "0 2 * * *")
+	b := mustSchedule(t, s, ctx, p.ID, "0 3 * * *")
+	mustTask(t, s, ctx, p.ID, "manual", nil)
+	runA, err := s.RunScheduleNow(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RunScheduleNow(ctx, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	ids := func(f db.TaskFilter) []int64 {
+		t.Helper()
+		ts, err := s.ListTasks(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := []int64{}
+		for _, task := range ts {
+			out = append(out, task.ID)
+		}
+		return out
+	}
+	if got := ids(db.TaskFilter{ScheduleID: &a.ID}); !slices.Equal(got, []int64{runA.ID}) {
+		t.Fatalf("schedule a = %v, want [%d]", got, runA.ID)
+	}
+	if got := ids(db.TaskFilter{ScheduleID: &a.ID, ProjectID: &p.ID, Closed: "all"}); !slices.Equal(got, []int64{runA.ID}) {
+		t.Fatalf("schedule a in project = %v", got)
+	}
+	if got := ids(db.TaskFilter{ScheduleID: &a.ID, Q: "no such text"}); len(got) != 0 {
+		t.Fatalf("schedule a with q = %v", got)
+	}
+	unknown := int64(9999)
+	if got := ids(db.TaskFilter{ScheduleID: &unknown}); len(got) != 0 {
+		t.Fatalf("unknown schedule = %v", got)
+	}
+	if got := ids(db.TaskFilter{}); len(got) != 3 {
+		t.Fatalf("unfiltered = %v", got)
 	}
 }
 

@@ -5,8 +5,10 @@ package agenttools
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -276,8 +278,13 @@ type ProjectsOut struct {
 	client.ProjectSummaries
 }
 
-func (o *Ops) ListProjects(ctx context.Context, _ struct{}) (ProjectsOut, error) {
-	ps, err := o.Client.ProjectSummaries(ctx)
+// ListProjectsArgs is list_projects.
+type ListProjectsArgs struct {
+	Archived string `json:"archived,omitempty" jsonschema:"false (default: active projects) | true (archived only) | all"`
+}
+
+func (o *Ops) ListProjects(ctx context.Context, a ListProjectsArgs) (ProjectsOut, error) {
+	ps, err := o.Client.ProjectSummariesArchived(ctx, a.Archived)
 	if err != nil {
 		return ProjectsOut{}, err
 	}
@@ -339,7 +346,44 @@ type ConfigArgs struct {
 	Project         string       `json:"project,omitempty" jsonschema:"Stage project id or unambiguous exact title; optional with workspaceId. Sets historical context and can use the caller's Stage project for backlog"`
 	Title           string       `json:"title" jsonschema:"short task title"`
 	Prompt          string       `json:"prompt" jsonschema:"the full prompt the agent session starts with; self-contained"`
-	ImagePaths      []string     `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp, max 8) sent with the prompt; stdio/CLI only"`
+	ImagePaths      []string     `json:"imagePaths,omitempty" jsonschema:"local image files (png/jpeg/gif/webp) sent with the prompt; stdio/CLI only. At most 8 images in all (attachmentIds, imagePaths, images)"`
+	Images          []ImageInput `json:"images,omitempty" jsonschema:"inline images sent with the prompt (any transport); uploaded first, like imagePaths"`
+	AttachmentIDs   []int64      `json:"attachmentIds,omitempty" jsonschema:"staged upload ids (POST /api/uploads) to attach, before imagePaths and images"`
+}
+
+// ImageInput is an inline image, staged through POST /api/uploads.
+type ImageInput struct {
+	Name     string `json:"name,omitempty" jsonschema:"file name (default image.<subtype>)"`
+	MimeType string `json:"mimeType" jsonschema:"image/png | image/jpeg | image/gif | image/webp; must match the data"`
+	Data     string `json:"data" jsonschema:"standard base64 of the image bytes (at most 10 MB decoded)"`
+}
+
+// decode validates the image as POST /api/uploads would.
+func (in ImageInput) decode() (string, []byte, error) {
+	if !slices.Contains(db.AttachmentMimeTypes, in.MimeType) {
+		return "", nil, fmt.Errorf("unsupported image mimeType %q (want %s)", in.MimeType, strings.Join(db.AttachmentMimeTypes, ", "))
+	}
+	if len(in.Data) > base64.StdEncoding.EncodedLen(db.MaxAttachmentBytes) {
+		return "", nil, errors.New("image is larger than 10 MB")
+	}
+	data, err := base64.StdEncoding.DecodeString(in.Data)
+	if err != nil {
+		return "", nil, fmt.Errorf("image data is not valid base64: %w", err)
+	}
+	if len(data) == 0 {
+		return "", nil, errors.New("image is empty")
+	}
+	if len(data) > db.MaxAttachmentBytes {
+		return "", nil, errors.New("image is larger than 10 MB")
+	}
+	if got := http.DetectContentType(data); got != in.MimeType {
+		return "", nil, fmt.Errorf("image data is %s, not mimeType %s", got, in.MimeType)
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		name = "image." + strings.TrimPrefix(in.MimeType, "image/")
+	}
+	return name, data, nil
 }
 
 // resolvedConfig is ConfigArgs resolved against the API.
@@ -381,15 +425,32 @@ func startMode(s string) (parsedStartMode, error) {
 	}
 }
 
-// uploadImages stages local images and returns their attachment ids.
-func (o *Ops) uploadImages(ctx context.Context, paths []string) ([]int64, error) {
-	if len(paths) == 0 {
+// uploadImages stages local and inline images and returns their attachment
+// ids (paths first). kept counts the other images toward the limit; every
+// image is checked before any upload.
+func (o *Ops) uploadImages(ctx context.Context, paths []string, images []ImageInput, kept int) ([]int64, error) {
+	if len(paths) == 0 && len(images) == 0 {
 		return nil, nil
 	}
-	if !o.LocalFiles {
-		return nil, errors.New("imagePaths needs local file access: use the stdio MCP server (`stage mcp`) or the CLI")
+	if kept+len(paths)+len(images) > db.MaxTaskAttachments {
+		return nil, fmt.Errorf("at most %d images", db.MaxTaskAttachments)
 	}
-	ids := make([]int64, 0, len(paths))
+	if len(paths) > 0 && !o.LocalFiles {
+		return nil, errors.New("imagePaths needs local file access: use images (inline base64), the stdio MCP server (`stage mcp`) or the CLI")
+	}
+	type upload struct {
+		name string
+		data []byte
+	}
+	inline := make([]upload, 0, len(images))
+	for i, img := range images {
+		name, data, err := img.decode()
+		if err != nil {
+			return nil, fmt.Errorf("images[%d]: %w", i, err)
+		}
+		inline = append(inline, upload{name, data})
+	}
+	ids := make([]int64, 0, len(paths)+len(images))
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -398,6 +459,13 @@ func (o *Ops) uploadImages(ctx context.Context, paths []string) ([]int64, error)
 		att, err := o.Client.Upload(ctx, filepath.Base(p), data)
 		if err != nil {
 			return nil, fmt.Errorf("upload %s: %w", p, err)
+		}
+		ids = append(ids, att.ID)
+	}
+	for i, img := range inline {
+		att, err := o.Client.Upload(ctx, img.name, img.data)
+		if err != nil {
+			return nil, fmt.Errorf("upload images[%d]: %w", i, err)
 		}
 		ids = append(ids, att.ID)
 	}
@@ -457,7 +525,8 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 		}
 	}
 	rc.config = &config
-	if config.Model != "" || config.Mode != "" || config.Permission != "" || len(config.Options) > 0 || len(a.ImagePaths) > 0 {
+	images := len(a.AttachmentIDs)+len(a.ImagePaths)+len(a.Images) > 0
+	if config.Model != "" || config.Mode != "" || config.Permission != "" || len(config.Options) > 0 || images {
 		f, err := o.destinationCapabilities(ctx, rc.connectionID, a.WorkspaceID)
 		if err != nil {
 			return rc, err
@@ -465,13 +534,16 @@ func (o *Ops) resolveConfig(ctx context.Context, a ConfigArgs, c agentctx.Caller
 		if err := f.ValidateConfig(config); err != nil {
 			return rc, err
 		}
-		if len(a.ImagePaths) > 0 {
+		if images {
 			if err := execution.RequireAvailable("images", f.Operations[execution.OpImages]); err != nil {
 				return rc, err
 			}
 		}
 	}
-	rc.attachmentIDs, err = o.uploadImages(ctx, a.ImagePaths)
+	uploaded, err := o.uploadImages(ctx, a.ImagePaths, a.Images, len(a.AttachmentIDs))
+	if len(a.AttachmentIDs)+len(uploaded) > 0 {
+		rc.attachmentIDs = append(slices.Clone(a.AttachmentIDs), uploaded...)
+	}
 	return rc, err
 }
 
@@ -520,6 +592,10 @@ type ListTasksArgs struct {
 	Project       string         `json:"project,omitempty" jsonschema:"project id or title; omitted = all projects"`
 	States        []string       `json:"states,omitempty" jsonschema:"backlog|launching|running|needs_input|done|failed|interrupted|cancelled"`
 	Query         string         `json:"query,omitempty" jsonschema:"substring of title or prompt"`
+	ScheduleID    *int64         `json:"scheduleId,omitempty" jsonschema:"only tasks this schedule spawned"`
+	From          string         `json:"from,omitempty" jsonschema:"createdAt >= from: ISO date or RFC 3339 datetime (no zone = UTC)"`
+	To            string         `json:"to,omitempty" jsonschema:"createdAt < to: ISO date or RFC 3339 datetime (no zone = UTC)"`
+	CompletedFrom string         `json:"completedFrom,omitempty" jsonschema:"completedAt (user acceptance) >= completedFrom: ISO date or RFC 3339 datetime (no zone = UTC)"`
 	Closed        string         `json:"closed,omitempty" jsonschema:"false (default: open tasks only) | true (archived, or in a done or archived tree) | all"`
 	Limit         int            `json:"limit,omitempty" jsonschema:"max rows (default 50)"`
 }
@@ -544,6 +620,17 @@ func (o *Ops) ListTasks(ctx context.Context, a ListTasksArgs) (TasksOut, error) 
 	}
 	q.States, q.Q = a.States, a.Query
 	q.OriginSession = a.OriginSession
+	q.ScheduleID = a.ScheduleID
+	var err error
+	if q.From, err = parseTime("from", a.From); err != nil {
+		return TasksOut{}, err
+	}
+	if q.To, err = parseTime("to", a.To); err != nil {
+		return TasksOut{}, err
+	}
+	if q.CompletedFrom, err = parseTime("completedFrom", a.CompletedFrom); err != nil {
+		return TasksOut{}, err
+	}
 	switch a.Closed {
 	case "", "false":
 	case "true", "all":
@@ -567,6 +654,24 @@ func (o *Ops) ListTasks(ctx context.Context, a ListTasksArgs) (TasksOut, error) 
 		out.Tasks = append(out.Tasks, taskRow(t))
 	}
 	return out, nil
+}
+
+// parseTime parses an ISO date (midnight UTC) or RFC 3339 datetime
+// (no zone = UTC), as the REST list filters do; "" = nil.
+func parseTime(name, v string) (*time.Time, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil, nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+		return &t, nil
+	}
+	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02"} {
+		if t, err := time.ParseInLocation(layout, v, time.UTC); err == nil {
+			return &t, nil
+		}
+	}
+	return nil, fmt.Errorf("invalid %s %q (want ISO date or datetime)", name, v)
 }
 
 func (o *Ops) GetTask(ctx context.Context, a IDArgs) (client.TaskDetail, error) {
@@ -632,16 +737,43 @@ func (o *Ops) CreateTask(ctx context.Context, a CreateTaskArgs) (client.Task, er
 // UpdateArgs are editable config fields (nil = unchanged). Outside backlog
 // only the title changes.
 type UpdateArgs struct {
-	ConnectionID    int64               `json:"connectionId,omitempty" jsonschema:"destination connection from list_projects"`
-	WorkspaceID     db.Optional[string] `json:"workspaceId,omitzero" jsonschema:"exact destination workspace from list_projects; null clears the pin"`
-	ExecutionConfig *ConfigInput        `json:"executionConfig,omitempty"`
-	ID              int64               `json:"id"`
-	Project         *string             `json:"project,omitempty" jsonschema:"move to project (id or title)"`
-	Title           *string             `json:"title,omitempty"`
-	Prompt          *string             `json:"prompt,omitempty"`
+	ConnectionID    int64                    `json:"connectionId,omitempty" jsonschema:"destination connection from list_projects"`
+	WorkspaceID     db.Optional[string]      `json:"workspaceId,omitzero" jsonschema:"exact destination workspace from list_projects; null clears the pin"`
+	ExecutionConfig db.Optional[ConfigInput] `json:"executionConfig,omitzero" jsonschema:"replaces the stored model, options, permission and mode (list_models); null clears it (the harness defaults)"`
+	ID              int64                    `json:"id"`
+	Project         *string                  `json:"project,omitempty" jsonschema:"move to project (id or title)"`
+	Title           *string                  `json:"title,omitempty"`
+	Prompt          *string                  `json:"prompt,omitempty"`
+	// Images: the result is attachmentIds (else the current images) then
+	// imagePaths then images, sent as the exact set (PATCH attachmentIds).
+	AttachmentIDs *[]int64     `json:"attachmentIds,omitempty" jsonschema:"the exact images to keep: ids from the current attachments (get_task or get_schedule) or staged uploads; current images not listed are deleted; [] removes all. Omitted keeps the current images"`
+	ImagePaths    []string     `json:"imagePaths,omitempty" jsonschema:"local image files added after the kept images; stdio/CLI only"`
+	Images        []ImageInput `json:"images,omitempty" jsonschema:"inline images added after the kept images (any transport). At most 8 images in all"`
 }
 
-func (o *Ops) configPatch(ctx context.Context, a UpdateArgs) (client.Patch, error) {
+// imagePatch is the attachmentIds a's image fields send (set=false: none);
+// current reads the stored images when attachmentIds is omitted.
+func (o *Ops) imagePatch(ctx context.Context, a UpdateArgs, current func() ([]db.Attachment, error)) ([]int64, bool, error) {
+	if a.AttachmentIDs == nil && len(a.ImagePaths) == 0 && len(a.Images) == 0 {
+		return nil, false, nil
+	}
+	ids := []int64{}
+	if a.AttachmentIDs != nil {
+		ids = append(ids, *a.AttachmentIDs...)
+	} else {
+		atts, err := current()
+		if err != nil {
+			return nil, false, err
+		}
+		for _, att := range atts {
+			ids = append(ids, att.ID)
+		}
+	}
+	added, err := o.uploadImages(ctx, a.ImagePaths, a.Images, len(ids))
+	return append(ids, added...), true, err
+}
+
+func (o *Ops) configPatch(ctx context.Context, a UpdateArgs, current func() ([]db.Attachment, error)) (client.Patch, error) {
 	p := client.Patch{}
 	if a.ConnectionID != 0 {
 		p["connectionId"] = a.ConnectionID
@@ -656,8 +788,10 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs) (client.Patch, erro
 		}
 		p["projectId"] = pr.ID
 	}
-	if a.ExecutionConfig != nil {
-		cfg, err := a.ExecutionConfig.config()
+	if a.ExecutionConfig.Null {
+		p["executionConfig"] = nil
+	} else if a.ExecutionConfig.Set {
+		cfg, err := a.ExecutionConfig.V.config()
 		if err != nil {
 			return nil, err
 		}
@@ -669,6 +803,13 @@ func (o *Ops) configPatch(ctx context.Context, a UpdateArgs) (client.Patch, erro
 	}
 	if a.Prompt != nil {
 		p["prompt"] = *a.Prompt
+	}
+	ids, set, err := o.imagePatch(ctx, a, current)
+	if err != nil {
+		return nil, err
+	}
+	if set {
+		p["attachmentIds"] = ids
 	}
 	return p, nil
 }
@@ -683,7 +824,10 @@ type UpdateTaskArgs struct {
 }
 
 func (o *Ops) UpdateTask(ctx context.Context, a UpdateTaskArgs) (client.Task, error) {
-	p, err := o.configPatch(ctx, a.UpdateArgs)
+	p, err := o.configPatch(ctx, a.UpdateArgs, func() ([]db.Attachment, error) {
+		t, err := o.Client.Task(ctx, a.ID)
+		return t.Attachments, err
+	})
 	if err != nil {
 		return client.Task{}, err
 	}
@@ -818,7 +962,13 @@ type SchedulesOut struct {
 	Schedules []db.Schedule `json:"schedules"`
 }
 
-func (o *Ops) ListSchedules(ctx context.Context, a ProjectArgs) (SchedulesOut, error) {
+// ListSchedulesArgs is list_schedules.
+type ListSchedulesArgs struct {
+	ProjectArgs
+	DueWithin string `json:"dueWithin,omitempty" jsonschema:"Go duration, e.g. 24h: only unpaused schedules whose next run is within it"`
+}
+
+func (o *Ops) ListSchedules(ctx context.Context, a ListSchedulesArgs) (SchedulesOut, error) {
 	var pid *int64
 	if a.Project != "" {
 		p, _, err := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, a.Project)
@@ -827,7 +977,7 @@ func (o *Ops) ListSchedules(ctx context.Context, a ProjectArgs) (SchedulesOut, e
 		}
 		pid = &p.ID
 	}
-	ss, err := o.Client.Schedules(ctx, pid)
+	ss, err := o.Client.Schedules(ctx, pid, a.DueWithin)
 	return SchedulesOut{Schedules: ss}, err
 }
 
@@ -871,7 +1021,10 @@ type UpdateScheduleArgs struct {
 }
 
 func (o *Ops) UpdateSchedule(ctx context.Context, a UpdateScheduleArgs) (db.Schedule, error) {
-	p, err := o.configPatch(ctx, a.UpdateArgs)
+	p, err := o.configPatch(ctx, a.UpdateArgs, func() ([]db.Attachment, error) {
+		sc, err := o.Client.Schedule(ctx, a.ID)
+		return sc.Attachments, err
+	})
 	if err != nil {
 		return db.Schedule{}, err
 	}

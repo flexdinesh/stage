@@ -36,6 +36,7 @@ func runTree(ctx context.Context, env Env, args []string) error {
 		c.fs.BoolVar(&a.All, "all", false, "every tree (default: active)")
 		c.fs.StringVar(&a.Status, "status", "", "active|done|archived|all (default active)")
 		c.fs.StringVar(&a.Project, "project", "", "project")
+		c.fs.StringVar(&a.CompletedFrom, "completed-from", "", "with active: also trees completed since (ISO date or datetime, UTC)")
 		if err := c.parse(rest); err != nil {
 			return err
 		}
@@ -186,6 +187,19 @@ func runTree(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		return c.out(res, func(w io.Writer) { success(w, "Deleted tree %d and its tasks", id) })
+	case "dissolve":
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		id, err := c.oneID()
+		if err != nil {
+			return err
+		}
+		res, err := c.ops().DissolveTree(ctx, agenttools.TreeIDArgs{ID: id})
+		if err != nil {
+			return err
+		}
+		return c.out(res, func(w io.Writer) { success(w, "Dissolved tree %d: its tasks are standalone, the tree is archived", id) })
 	}
 	return usagef("tree %s: unknown", v)
 }

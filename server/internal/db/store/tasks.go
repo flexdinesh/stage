@@ -226,6 +226,7 @@ type LaunchDestination struct {
 type TaskFilter struct {
 	OriginSession *SessionRef
 	ProjectID     *int64
+	ScheduleID    *int64 // tasks the schedule spawned
 	States        []string
 	// Q is the Search capability (docs/storage.md "Search"): a
 	// case-insensitive substring of title or prompt, every character

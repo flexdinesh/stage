@@ -204,6 +204,8 @@ func TestToolList(t *testing.T) {
 		"list_trees", "get_tree", "create_tree", "update_tree", "delete_tree", "add_to_tree", "remove_from_tree", "set_needs", "start_tree",
 		"adopt_session", "read_journal", "get_journal_entry", "append_note",
 		"list_actions", "run_action",
+		"dissolve_tree", "get_project", "list_project_groups", "get_project_group", "list_connections",
+		"list_machines", "get_machine", "list_harnesses", "get_harness_status", "get_preferences",
 	}
 	slices.Sort(names)
 	slices.Sort(want)
@@ -893,7 +895,7 @@ func TestHTTPHandler(t *testing.T) {
 	}
 	defer cs.Close()
 	res, err := cs.ListTools(ctx, nil)
-	if err != nil || len(res.Tools) != 36 {
+	if err != nil || len(res.Tools) != 46 {
 		t.Fatalf("tools %v %v", res, err)
 	}
 	var out agenttools.ProjectsOut

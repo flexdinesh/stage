@@ -28,7 +28,7 @@ const guide = `Stage owns projects, tasks, trees, accepted results and journals.
 - A dependent launch receives Stage's stored accepted reply and references unless handoff is disabled. Stage does not start a dependent from its predecessor's branch: the handoff carries the branch the harness reported. A worktree, its base ref or branch are launch options in executionConfig where the harness declares them (list_models).
 - Append findings and outcomes with append_note. Provide taskId for a task note, or treeId and the current sourceTaskId for a tree conclusion. Reuse requestId only for identical retries. Agents can report outcomes. Acceptance belongs to the user.
 - For a shared server, use the agent address in the launch instructions or the configured Stage MCP integration. Keep passwords and credentials out of prompts, notes and callerSession.
-- Use list_tasks with originSession to find work you created. Use read_ref with a Stage task, tree, schedule, project or journal entry link, a harness session link or a scoped session. get_task returns stored results and available links. Use the native harness for the conversation.
+- Use list_tasks with originSession to find work you created. Use read_ref with a Stage task, tree, schedule, project or journal entry link, a harness session link or a scoped session; get_project and get_project_group read a project or group by id. get_task returns stored results and available links. Use the native harness for the conversation.
 - create_schedule queues recurring work. Use get_task, get_tree, list_tasks or wait_task for progress. The CLI exposes the same workflows through {cli} task, tree, schedule, sessions adopt and show. Run {cli} help for flags.`
 
 // Guide is the agent workflow guidance naming cli, the CLI installed on
@@ -75,6 +75,15 @@ func NewServer(o *Ops) *mcp.Server {
 	add(s, o, "get_context", "Your session id, cwd, resolved Stage project, owning task, selected workspaceId, and current treeId/treeTitle.", ro, o.Context)
 	add(s, o, "list_projects", "List Stage project groups and available destinations. Use connectionId and workspaceId to launch.", ro, o.ListProjects)
 	add(s, o, "list_models", "List execution capabilities for connectionId. Supply workspaceId for exact workspace-specific models and agents.", ro, o.ListModels)
+	add(s, o, "get_project", "Read a Stage project by id: id, title, archivedAt, aliases.", ro, o.GetProject)
+	add(s, o, "list_project_groups", "List logical project groups (id, title, archivedAt, aliases); unarchived by default (archived true|all for others).", ro, o.ListProjectGroups)
+	add(s, o, "get_project_group", "Read a project group by id (a project id or legacy alias): id, title, archivedAt, aliases.", ro, o.GetProjectGroup)
+	add(s, o, "list_connections", "List harness connections (the active one per harness and replaced ones): id, machineId, harness, label, active, configured, autoComplete, retiredAt, task count and newTaskConfig (the model pin).", ro, o.ListConnections)
+	add(s, o, "list_machines", "List machines that run harnesses (local first): status, version and their connections.", ro, o.ListMachines)
+	add(s, o, "get_machine", "Read a machine by id.", ro, o.GetMachine)
+	add(s, o, "list_harnesses", "List harness kinds on a machine (default: the server's): availability, session and attribution policy, setup fields and actions.", ro, o.ListHarnesses)
+	add(s, o, "get_harness_status", "Read a harness kind's connection setup on a machine (default: the server's): configured, connected, state, phase, lastError, fix, fields and actions. Refreshes a stale probe.", ro, o.GetHarnessStatus)
+	add(s, o, "get_preferences", "Read preferences: defaultConnectionId (the shared new-task connection default) and notifyEvents (empty for agents on a shared server).", ro, o.GetPreferences)
 	add(s, o, "list_actions", "List harness actions for exactly one connectionId, taskId, or projectId. For a project, also supply onConnectionId and workspaceId.", ro, o.ListActions)
 	add(s, o, "run_action", "Run a harness action by actionId from list_actions. Use the same target and pass its declared input fields. A journalError in the result means the action succeeded and Stage could not record it.", nil, o.RunAction)
 
@@ -98,6 +107,7 @@ func NewServer(o *Ops) *mcp.Server {
 	add(s, o, "create_tree", "Create a tree from existing tasks with the needs between them (a task in another tree moves).", nil, o.CreateTree)
 	add(s, o, "update_tree", "Rename a tree, set its start mode (auto | manual; inherited by default, preserves explicit task overrides), or set its status: done (you will not work on the rest; members keep their states, nothing more starts), archived, or open (reopen). Done and archived trees leave the default lists; member activity does not reopen the tree.", nil, o.UpdateTree)
 	add(s, o, "delete_tree", "Delete a tree and all its tasks only when no recorded work is protected, including work from former members; otherwise archive it.", del, o.DeleteTree)
+	add(s, o, "dissolve_tree", "Dissolve a tree: detach every member (each becomes standalone and its needs go) and archive the tree. Tasks, the tree's identity and its journal stay readable.", nil, o.DissolveTree)
 	add(s, o, "add_to_tree", "Add a task to a tree: without needs it is a parallel root; with needs it runs after those members (a task in another tree moves).", nil, o.AddToTree)
 	add(s, o, "remove_from_tree", "Take a task out of its tree; its dependents take over its needs. The task stays.", nil, o.RemoveFromTree)
 	add(s, o, "set_needs", "Replace a backlog task's needs ([] clears them); a task outside a tree joins the needs' tree.", nil, o.SetNeeds)
@@ -155,7 +165,8 @@ func retiredInputResult(field string) *mcp.CallToolResult {
 func add[In, Out any](s *mcp.Server, o *Ops, name, desc string, ann *mcp.ToolAnnotations, op func(context.Context, In) (Out, error)) {
 	// PATCH distinguishes an omitted selector from an explicit null.
 	input, err := jsonschema.For[In](&jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
-		reflect.TypeFor[db.Optional[string]](): {Types: []string{"string", "null"}},
+		reflect.TypeFor[db.Optional[string]]():      {Types: []string{"string", "null"}},
+		reflect.TypeFor[db.Optional[ConfigInput]](): nullableConfigSchema,
 	}})
 	if err != nil {
 		panic(fmt.Sprintf("MCP tool %s input schema: %v", name, err))

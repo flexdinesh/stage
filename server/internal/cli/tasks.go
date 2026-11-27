@@ -42,6 +42,7 @@ type configFlags struct {
 	executionConfig                    *agenttools.ConfigInput
 	project, title, prompt, promptFile string
 	images                             list
+	clearConfig                        bool // --execution-config null (edit only)
 }
 
 // removedConfigFlags are the T3 model flags removed with API v8.
@@ -62,17 +63,21 @@ func removeWorkspaceFlags(c *cmd, names ...string) {
 }
 
 func (f *configFlags) configInputFlag(c *cmd) {
-	c.fs.Func("execution-config", "harness configuration as JSON", func(raw string) error {
+	c.fs.Func("execution-config", "harness configuration as JSON (null clears it on edit)", func(raw string) error {
+		if strings.TrimSpace(raw) == "null" {
+			f.executionConfig, f.clearConfig = nil, true
+			return nil
+		}
 		var cfg agenttools.ConfigInput
 		dec := json.NewDecoder(strings.NewReader(raw))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&cfg); err != nil {
 			return err
 		}
-		if !json.Valid([]byte(raw)) || strings.TrimSpace(raw) == "null" {
+		if !json.Valid([]byte(raw)) {
 			return fmt.Errorf("expected one configuration object")
 		}
-		f.executionConfig = &cfg
+		f.executionConfig, f.clearConfig = &cfg, false
 		return nil
 	})
 }
@@ -85,7 +90,7 @@ func (f *configFlags) register(c *cmd) {
 	c.fs.StringVar(&f.title, "title", "", "title")
 	c.fs.StringVar(&f.prompt, "prompt", "", "prompt text (- = stdin)")
 	c.fs.StringVar(&f.promptFile, "prompt-file", "", "read the prompt from a file")
-	c.fs.Var(&f.images, "image", "image file (repeatable)")
+	c.fs.Var(&f.images, "image", "image file (repeatable; on edit, added to the current images)")
 	removeWorkspaceFlags(c, removedWorkspaceFlags[:4]...)
 	for _, name := range removedConfigFlags {
 		c.fs.Func(name, "removed", func(string) error {
@@ -117,6 +122,9 @@ func (f *configFlags) create(c *cmd) (agenttools.ConfigArgs, error) {
 	if strings.TrimSpace(f.title) == "" || strings.TrimSpace(prompt) == "" {
 		return agenttools.ConfigArgs{}, usagef("--title and --prompt are required")
 	}
+	if f.clearConfig {
+		return agenttools.ConfigArgs{}, usagef("--execution-config null clears a configuration on edit; omit it here for the defaults")
+	}
 	if c.set("workspace-id") && f.workspace == "" {
 		return agenttools.ConfigArgs{}, usagef("--workspace-id requires a workspace ID from projects ls")
 	}
@@ -142,15 +150,18 @@ func boolFlag(c *cmd, name string, v bool) *bool {
 }
 
 func (f *configFlags) update(c *cmd, id int64) (agenttools.UpdateArgs, error) {
-	if len(f.images) > 0 {
-		return agenttools.UpdateArgs{}, usagef("--image is not supported on edit")
-	}
 	prompt, promptSet, err := f.readPrompt(c)
 	if err != nil {
 		return agenttools.UpdateArgs{}, err
 	}
 	a := agenttools.UpdateArgs{
-		ConnectionID: f.connection, ExecutionConfig: f.executionConfig, ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
+		ConnectionID: f.connection, ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
+		ImagePaths: f.images,
+	}
+	if f.clearConfig {
+		a.ExecutionConfig = db.Optional[agenttools.ConfigInput]{Set: true, Null: true}
+	} else if f.executionConfig != nil {
+		a.ExecutionConfig = db.Optional[agenttools.ConfigInput]{Set: true, V: *f.executionConfig}
 	}
 	if c.set("workspace-id") {
 		a.WorkspaceID = db.Optional[string]{Set: true, Null: f.workspace == "", V: f.workspace}
@@ -234,9 +245,14 @@ func runTask(ctx context.Context, env Env, args []string) error {
 		var a agenttools.ListTasksArgs
 		origin := c.sessionFlags("origin")
 		var states string
+		var schedule int64
 		c.fs.StringVar(&a.Project, "project", "", "project")
+		c.fs.Int64Var(&schedule, "schedule", 0, "only tasks this schedule spawned")
 		c.fs.StringVar(&states, "state", "", "states")
 		c.fs.StringVar(&a.Query, "q", "", "search")
+		c.fs.StringVar(&a.From, "from", "", "created at or after (ISO date or datetime, UTC)")
+		c.fs.StringVar(&a.To, "to", "", "created before (ISO date or datetime, UTC)")
+		c.fs.StringVar(&a.CompletedFrom, "completed-from", "", "completed (accepted) at or after (ISO date or datetime, UTC)")
 		c.fs.StringVar(&a.Closed, "closed", "", "false|true|all (default false: open tasks only)")
 		c.fs.IntVar(&a.Limit, "limit", 50, "max rows")
 		if err := c.parse(rest); err != nil {
@@ -248,6 +264,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		a.States = csv(states)
+		a.ScheduleID = int64Flag(c, "schedule", schedule)
 		res, err := o().ListTasks(ctx, a)
 		if err != nil {
 			return err
@@ -450,8 +467,9 @@ func runSchedule(ctx context.Context, env Env, args []string) error {
 	printSchedule := func(s any) error { return c.out(s, func(w io.Writer) { printAnySchedule(w, s) }) }
 	switch v {
 	case "ls", "list":
-		var a agenttools.ProjectArgs
+		var a agenttools.ListSchedulesArgs
 		c.fs.StringVar(&a.Project, "project", "", "project")
+		c.fs.StringVar(&a.DueWithin, "due-within", "", "only unpaused schedules firing within this Go duration (e.g. 24h)")
 		if err := c.parse(rest); err != nil {
 			return err
 		}

@@ -13,7 +13,7 @@ Stage exposes its agent operations as MCP tools, over the server's REST API. The
 | Front end | How | Notes |
 |---|---|---|
 | stdio | `stage mcp` | Finds the server like the CLI (`STAGE_URL`, the private socket, then `http://127.0.0.1:7380`). Can read local files (`imagePaths`). |
-| HTTP | `POST /mcp` on the running server | Streamable HTTP, stateless, served in-process; nothing to install. Cannot read local files, so no `imagePaths`. |
+| HTTP | `POST /mcp` on the running server | Streamable HTTP, stateless, served in-process; nothing to install. Cannot read local files, so no `imagePaths`; send inline `images` instead. |
 
 On a worker's machine, both reach the main server through the worker's agent gateway ([Workers](/docs/usage/workers)).
 
@@ -77,11 +77,13 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 
 | Area | Tools |
 |---|---|
-| Context | `get_context`, `list_projects`, `list_models` |
+| Context | `get_context`, `list_projects`, `list_models`, `get_preferences` |
+| Projects | `get_project`, `list_project_groups`, `get_project_group` |
+| Connections and machines | `list_connections`, `list_machines`, `get_machine`, `list_harnesses`, `get_harness_status` |
 | Harness actions | `list_actions`, `run_action` |
 | Journals | `read_journal`, `get_journal_entry`, `append_note` |
 | Tasks | `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `archive_task`, `start_task`, `stop_task`, `duplicate_task`, `wait_task` |
-| Trees | `list_trees`, `get_tree`, `create_tree`, `update_tree`, `delete_tree`, `add_to_tree`, `remove_from_tree`, `set_needs`, `start_tree` |
+| Trees | `list_trees`, `get_tree`, `create_tree`, `update_tree`, `delete_tree`, `dissolve_tree`, `add_to_tree`, `remove_from_tree`, `set_needs`, `start_tree` |
 | Schedules | `list_schedules`, `get_schedule`, `create_schedule`, `update_schedule`, `delete_schedule`, `run_schedule`, `preview_schedule` |
 | Sessions | `adopt_session`, `read_ref` |
 
@@ -93,7 +95,9 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 - `list_tasks` rows carry `treeId`, `needs`, `readiness`, `adopted` and `lastWordPreview`. Open tasks by default; `closed: true|all` adds archived tasks and members of done or archived trees.
 - `list_trees` returns active trees by default (`status` done, archived or all for others).
 - `get_task` returns the task's events, `session`, available session links, `finalReply`, its tree, `handoff` and `currentHandoffs`. `stage task show` prints the final reply and the session's web or native link when available.
-- `imagePaths` reads local files (PNG, JPEG, GIF, WebP, up to 8) and uploads them. CLI and stdio only; HTTP MCP rejects them.
+- `imagePaths` reads local files (PNG, JPEG, GIF, WebP, up to 8) and uploads them; CLI and stdio only. Over any transport, `images` takes inline `{name?, mimeType, data}` (base64, up to 10 MB each). On `update_task` and `update_schedule`, `attachmentIds` is the exact set to keep (`[]` removes all); new uploads are added after it.
+- `list_tasks` filters by `scheduleId`, `from`, `to` and `completedFrom`; `list_trees` by `completedFrom`; `list_schedules` by `dueWithin`; `list_projects` by `archived`.
+- `update_task` with `executionConfig: null` clears the stored config so harness defaults apply.
 - `stop_task` interrupts a task's running session.
 - `wait_task` polls the task every 3s until its state is in `until` (default `needs_input done failed interrupted cancelled`) or `timeoutSeconds` passes (default 600, max 3600). CLI `task wait` defaults to `--timeout 10m` and exits 3 on timeout.
 - `preview_schedule` returns the next three fire times of a cron in a zone.

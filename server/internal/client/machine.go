@@ -45,6 +45,13 @@ func (c *Client) Machines(ctx context.Context) ([]Machine, error) {
 	return out.Machines, err
 }
 
+// Machine reads one machine.
+func (c *Client) Machine(ctx context.Context, id int64) (Machine, error) {
+	var out Machine
+	err := c.do(ctx, "GET", machinePath(id), nil, &out)
+	return out, err
+}
+
 // RenameMachine sets a machine's label.
 func (c *Client) RenameMachine(ctx context.Context, id int64, label string) (Machine, error) {
 	var out Machine

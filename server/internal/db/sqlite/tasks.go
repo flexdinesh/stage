@@ -129,6 +129,9 @@ func (r tasks) List(ctx context.Context, f store.TaskFilter) ([]store.Task, erro
 	if f.ProjectID != nil {
 		w.add("t.project_id = " + w.arg(*f.ProjectID))
 	}
+	if f.ScheduleID != nil {
+		w.add("t.schedule_id = " + w.arg(*f.ScheduleID))
+	}
 	if len(f.States) > 0 {
 		w.add("t.state IN (SELECT value FROM json_each(" + w.arg(jsonArray(f.States)) + "))")
 	}

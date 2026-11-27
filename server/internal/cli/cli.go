@@ -222,6 +222,7 @@ Usage:
   stage tree start ID                 start every ready member
   stage tree done|archive ID [--undo] mark done / archive (--undo reopens)
   stage tree rm-tree ID               delete a tree and its tasks (none started)
+  stage tree dissolve ID              detach every task (needs go) and archive the tree
   stage schedule ls [--project P]
   stage schedule show ID
   stage schedule add --title T --prompt TEXT --cron CRON --tz ZONE [config] [--paused]

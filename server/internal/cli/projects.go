@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+
+	"github.com/flexdinesh/stage/server/internal/agenttools"
 )
 
 func runProjects(ctx context.Context, env Env, args []string) error {
@@ -12,10 +14,12 @@ func runProjects(ctx context.Context, env Env, args []string) error {
 	c := newCmd(env, "projects "+v)
 	switch v {
 	case "ls":
+		var a agenttools.ListProjectsArgs
+		c.fs.StringVar(&a.Archived, "archived", "", "false|true|all (default false: active projects)")
 		if err := c.parse(rest); err != nil {
 			return err
 		}
-		res, err := c.ops().ListProjects(ctx, struct{}{})
+		res, err := c.ops().ListProjects(ctx, a)
 		if err != nil {
 			return err
 		}

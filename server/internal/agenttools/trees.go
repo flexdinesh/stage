@@ -52,6 +52,8 @@ type ListTreesArgs struct {
 	All     bool   `json:"all,omitempty" jsonschema:"every tree (status all)"`
 	Status  string `json:"status,omitempty" jsonschema:"active (default: open with a member not accepted) | done (marked done, or every member accepted) | archived | all"`
 	Project string `json:"project,omitempty" jsonschema:"project id or title: trees with a member there; omitted = all projects"`
+	// CompletedFrom widens status active (REST completedFrom).
+	CompletedFrom string `json:"completedFrom,omitempty" jsonschema:"with status active: also open trees whose latest acceptance is at or after it; ISO date or RFC 3339 datetime (no zone = UTC)"`
 }
 
 // TreesOut is list_trees.
@@ -61,6 +63,10 @@ type TreesOut struct {
 
 func (o *Ops) ListTrees(ctx context.Context, a ListTreesArgs) (TreesOut, error) {
 	q := client.TreeQuery{All: a.All, Status: a.Status}
+	var err error
+	if q.CompletedFrom, err = parseTime("completedFrom", a.CompletedFrom); err != nil {
+		return TreesOut{}, err
+	}
 	if a.Project != "" {
 		p, _, err := agentctx.ResolveProject(ctx, o.Client, agentctx.Caller{}, a.Project)
 		if err != nil {
