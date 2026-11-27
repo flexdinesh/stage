@@ -38,20 +38,41 @@ func (s *Store) RecordSessionAction(ctx context.Context, taskID int64, ref Sessi
 		}
 		return struct{}{}, tx.Journal().InsertEvent(ctx, store.JournalEvent{
 			TaskID: &taskID, TreeID: t.TreeID, SourceSessionID: sourceID, Attempt: &attempt,
-			EventType: "session_action",
-			Text:      fmt.Sprintf("Action %q ran on session %q (connection %d), called by %s.", action, ref.ExternalSessionID, ref.ConnectionID, caller),
+			EventType:   "session_action",
+			Text:        fmt.Sprintf("Action %q ran on session %q (connection %d), called by %s.", action, ref.ExternalSessionID, ref.ConnectionID, caller),
+			Attribution: WorkAttribution(ctx),
 		})
 	})
 	return err
+}
+
+// RecordTaskOperation records a dispatched operation against the same task
+// session and re-arms polling. The harness call itself happens before this write.
+func (s *Store) RecordTaskOperation(ctx context.Context, id int64, ref SessionRef, event, detail string) error {
+	return s.e.Write(ctx, func(tx store.Tx) error {
+		if err := tx.Tasks().Lock(ctx, id); err != nil {
+			return err
+		}
+		task, err := tx.Tasks().Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if task.Session == nil || *task.Session != ref {
+			return Conflict("The task's linked session changed during the action.")
+		}
+		if _, err := tx.Tasks().Touch(ctx, id); err != nil {
+			return err
+		}
+		return addTaskEventType(ctx, tx, id, &task.State, task.State, detail, nil, event)
+	})
 }
 
 // Derived writes (docs/storage.md "Journal events"). Every change that
 // implies a journal event or another derived row goes through one helper
 // here, in the caller's Write, so the derived rows commit and roll back with
 // their cause. Former SQLite triggers (migration 0026 dropped them); their
-// events keep the trigger's attribution: the default user (column default)
-// and no source machine. TestDerivedWritesBoundary keeps the raw repository
-// writes in this file.
+// event creator default remains for compatibility. The actor stamp identifies
+// new writes. TestDerivedWritesBoundary keeps raw derived writes here.
 
 // workStates record work on the task that enters them.
 var workStates = []TaskState{StateLaunching, StateRunning, StateNeedsInput, StateDone, StateFailed, StateInterrupted}
@@ -64,7 +85,12 @@ func addTaskEvent(ctx context.Context, tx store.Tx, taskID int64, from *TaskStat
 }
 
 func addTaskEventAt(ctx context.Context, tx store.Tx, taskID int64, from *TaskState, to TaskState, detail string, observedAt *time.Time) error {
-	at, err := tx.Tasks().AddEvent(ctx, taskID, from, to, detail, observedAt)
+	return addTaskEventType(ctx, tx, taskID, from, to, detail, observedAt, "")
+}
+
+func addTaskEventType(ctx context.Context, tx store.Tx, taskID int64, from *TaskState, to TaskState, detail string, observedAt *time.Time, eventType string) error {
+	attribution := WorkAttribution(ctx)
+	at, err := tx.Tasks().AddEvent(ctx, taskID, from, to, detail, observedAt, attribution)
 	if err != nil {
 		return err
 	}
@@ -80,9 +106,12 @@ func addTaskEventAt(ctx context.Context, tx store.Tx, taskID int64, from *TaskSt
 		kind = "task_state_changed"
 		text += fmt.Sprintf(" (%s -> %s)", *from, to)
 	}
+	if eventType != "" {
+		kind = eventType
+	}
 	attempt := st.LaunchAttempt
 	if err := tx.Journal().InsertEvent(ctx, store.JournalEvent{TaskID: &taskID, TreeID: st.TreeID, SourceSessionID: st.SessionID,
-		Attempt: &attempt, EventType: kind, Text: text, At: &at}); err != nil {
+		Attempt: &attempt, EventType: kind, Text: text, At: &at, Attribution: attribution}); err != nil {
 		return err
 	}
 	if !st.RecordedWork && (st.LaunchAttempt > 0 || st.SessionID != nil || st.Adopted || slices.Contains(workStates, to)) {
@@ -100,7 +129,7 @@ func addTaskEventAt(ctx context.Context, tx store.Tx, taskID int64, from *TaskSt
 // insertNote writes a note; it protects its task and tree, and stamps the
 // tree's updated_at with the note's time.
 func insertNote(ctx context.Context, tx store.Tx, o JournalOwner, in AppendNoteInput, sourceID *int64) (JournalEntry, error) {
-	e, err := tx.Journal().InsertNote(ctx, o, in, sourceID, ActingUser(ctx), ActingMachine(ctx))
+	e, err := tx.Journal().InsertNote(ctx, o, in, sourceID, ActingUser(ctx), ActingMachine(ctx), WorkAttribution(ctx))
 	if err != nil {
 		return JournalEntry{}, err
 	}
@@ -124,7 +153,7 @@ func insertNote(ctx context.Context, tx store.Tx, o JournalOwner, in AppendNoteI
 
 // treeEvent journals event on tree.
 func treeEvent(ctx context.Context, tx store.Tx, tree int64, event, text string) error {
-	return tx.Journal().InsertEvent(ctx, store.JournalEvent{TreeID: &tree, EventType: event, Text: text})
+	return tx.Journal().InsertEvent(ctx, store.JournalEvent{TreeID: &tree, EventType: event, Text: text, Attribution: WorkAttribution(ctx)})
 }
 
 // insertTree creates a tree and journals it.
@@ -209,7 +238,7 @@ func setMembership(ctx context.Context, tx store.Tx, taskID int64, tree *int64) 
 		}
 		touched = append(touched, *owner)
 		if err := tx.Journal().InsertEvent(ctx, store.JournalEvent{TreeID: owner, SourceTaskID: &taskID, EventType: "task_moved",
-			Text: st.Title, FromTreeID: old, ToTreeID: tree}); err != nil {
+			Text: st.Title, FromTreeID: old, ToTreeID: tree, Attribution: WorkAttribution(ctx)}); err != nil {
 			return err
 		}
 	}
@@ -236,7 +265,7 @@ func needsChanged(ctx context.Context, tx store.Tx, verb string, edges []store.T
 			continue
 		}
 		if err := tx.Journal().InsertEvent(ctx, store.JournalEvent{TreeID: tree, SourceTaskID: &e.TaskID, EventType: "needs_changed",
-			Text: fmt.Sprintf("%s need #%d", verb, e.NeedID)}); err != nil {
+			Text: fmt.Sprintf("%s need #%d", verb, e.NeedID), Attribution: WorkAttribution(ctx)}); err != nil {
 			return err
 		}
 	}
@@ -306,7 +335,7 @@ func insertAcceptance(ctx context.Context, tx store.Tx, taskID int64, provenance
 	if err != nil {
 		return 0, err
 	}
-	return tx.Acceptances().Insert(ctx, taskID, provenance, evidence, note, st.SessionID)
+	return tx.Acceptances().Insert(ctx, taskID, provenance, evidence, note, st.SessionID, WorkAttribution(ctx))
 }
 
 // recordHandoff stores the handoff with its source session: the evidence's

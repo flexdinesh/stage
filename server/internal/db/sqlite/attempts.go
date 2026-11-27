@@ -17,7 +17,7 @@ func (t *tx) Attempts() store.Attempts { return attempts{t.r} }
 
 func (r attempts) Get(ctx context.Context, id int64, n int) (store.Attempt, error) {
 	a := store.Attempt{TaskID: id, Number: n}
-	err := r.QueryRow(ctx, `SELECT intent,checkpoint,phase,revision,error,retry_at,retry_count,observed_session FROM execution_attempts WHERE task_id=$1 AND attempt=$2`, id, n).Scan(&a.Intent, &a.Checkpoint, &a.Phase, &a.Revision, &a.Error, &a.RetryAt, &a.RetryCount, &a.Session)
+	err := r.QueryRow(ctx, `SELECT intent,checkpoint,phase,revision,error,retry_at,retry_count,observed_session, `+attributionColumns("execution_attempts.attribution")+` FROM execution_attempts WHERE task_id=$1 AND attempt=$2`, id, n).Scan(&a.Intent, &a.Checkpoint, &a.Phase, &a.Revision, &a.Error, &a.RetryAt, &a.RetryCount, &a.Session, &a.Attribution, &a.Actor.DisplayName)
 	return a, notFound(err)
 }
 
@@ -69,8 +69,8 @@ func (r attempts) Reject(ctx context.Context, a store.Attempt, reason string) (b
 	return err == nil && res.RowsAffected() == 1, err
 }
 
-func (r attempts) Begin(ctx context.Context, taskID int64, n int) error {
-	_, err := r.Exec(ctx, `INSERT INTO execution_attempts(task_id,attempt,phase) VALUES($1,$2,'prepared') ON CONFLICT DO NOTHING`, taskID, n)
+func (r attempts) Begin(ctx context.Context, taskID int64, n int, attribution store.Attribution) error {
+	_, err := r.Exec(ctx, `INSERT INTO execution_attempts(task_id,attempt,phase,attribution) VALUES($1,$2,'prepared',$3) ON CONFLICT DO NOTHING`, taskID, n, attribution)
 	return err
 }
 

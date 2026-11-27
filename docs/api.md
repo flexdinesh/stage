@@ -93,9 +93,32 @@ authenticates humans and agents, preserves row 1 across claim, and
 records known person IDs in existing creator fields. Authorization comes
 from the admitted principal. Historical creator fields never confer
 permissions. Worker gateways carry machine provenance. Background work runs
-with an internal system principal. Durable actor projections follow in #456.
+with an internal system principal.
 
-**Source machine.** A write that arrived through a worker's agent gateway ([Agent gateway route](#apiworkergatewayapi-and-apiworkergatewaymcp)) also records the forwarding machine: `sourceMachineId` on `Task`, `Tree`, `JournalEntry`, `Schedule` and `Project`, next to `createdBy` (still the acting user). `null` when the write did not come through a gateway (the UI, an agent on the main server's machine, background work), for derived journal events (tree, membership, needs and task-state events; [storage.md](storage.md#journal-events)), discovered projects and schedule-spawned tasks (the schedule spawns them, also on Run now). The machine may since have been removed.
+### Work attribution
+
+Task events, journal entries, accepted results, launch attempts and
+schedule runs expose `actor`. Its `kind` is `human`, `personal`, `agent`,
+`machine`, `system`, `cron`, `unknown` or `historical`. Named human
+actors have `userId`. Agent credentials may identify their account through
+`credentialAccountId`. An agent operation invoked by a signed-in browser
+or automation derived from human work may have `initiatorUserId`. The
+optional `displayName` is the public name of the direct human or initiator.
+Login addresses remain in the caller's account and admin views.
+
+`cause` can link an event to a schedule, prerequisite acceptance, launch
+attempt, session or request. `sourceMachineId` records the forwarding
+machine or verified observation source when known. The actor, cause and
+machine are independent from the task's execution destination and caller
+session hints. Personal access identifies the trusted deployment boundary.
+Legacy rows without an actor stamp are historical even when their
+`createdBy` is 1. Attribution has no effect on authorization.
+
+Schedule-spawned tasks and template notes keep the schedule's creator ID.
+Cron is the actor for automatic fires, and Run now records its admitted
+requester. Launch confirmations and retries link to the original claim.
+Account disable revokes the person's sessions and agent credential.
+Existing tasks and schedules remain workspace-owned.
 
 ### `GET /api/me`
 200 `User`, the acting user:

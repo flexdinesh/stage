@@ -121,6 +121,7 @@ func (s *Service) applyRecord(ctx context.Context, tx *db.Store, machine int64, 
 	if o.UpdatedAt.After(time.Now().Add(maxClockSkew)) {
 		return reject("invalid_record", db.Invalid("malformed observation: updatedAt is more than 5 minutes ahead of the server's clock")), nil
 	}
+	ctx = db.ObservedWork(ctx, o.Session, c.MachineID)
 	task, err := tx.TaskBySession(ctx, ref)
 	var result recordResult
 	switch {
@@ -144,7 +145,7 @@ func (s *Service) applyRecord(ctx context.Context, tx *db.Store, machine int64, 
 	}
 	if err == nil && s.RecordNotification != nil && (result.task != nil || result.session != nil) {
 		result.afterCommit, err = s.RecordNotification(ctx, tx, workevent.ObservationChange{
-			Task: result.task, Session: result.session, At: r.ObservedAt,
+			Task: result.task, Session: result.session, At: r.ObservedAt, Attribution: db.WorkAttribution(ctx),
 		})
 	}
 	return result, err
@@ -174,7 +175,7 @@ func (s *Service) applyAttention(ctx context.Context, tx *db.Store, kind string,
 		return nil, nil
 	}
 	prev := db.TaskState(previous.State)
-	return &workevent.SessionChange{Session: &o.Session, ProjectID: o.Project, Title: o.Title, From: &prev, To: db.TaskState(o.State)}, nil
+	return &workevent.SessionChange{Session: &o.Session, ProjectID: o.Project, Title: o.Title, From: &prev, To: db.TaskState(o.State), Attribution: db.WorkAttribution(ctx)}, nil
 }
 
 // CommitBatch validates the envelope before mutation, then commits one

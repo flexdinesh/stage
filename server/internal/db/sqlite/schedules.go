@@ -136,14 +136,14 @@ func (r schedules) Delete(ctx context.Context, id int64) (bool, error) {
 
 func (r schedules) Runs(ctx context.Context, id int64, limit int) ([]store.ScheduleRun, error) {
 	rows, err := r.Query(ctx, `
-SELECT id, schedule_id, fire_at, outcome, task_id, detail, at FROM schedule_runs
+SELECT id, schedule_id, fire_at, outcome, task_id, detail, at, `+attributionColumns("schedule_runs.attribution")+` FROM schedule_runs
 WHERE schedule_id = $1 ORDER BY id DESC LIMIT $2`, id, limit)
 	if err != nil {
 		return nil, err
 	}
 	return collectRows(rows, func(row rowScanner) (store.ScheduleRun, error) {
 		var r store.ScheduleRun
-		err := row.Scan(&r.ID, &r.ScheduleID, &r.FireAt, &r.Outcome, &r.TaskID, &r.Detail, &r.At)
+		err := row.Scan(&r.ID, &r.ScheduleID, &r.FireAt, &r.Outcome, &r.TaskID, &r.Detail, &r.At, &r.Attribution, &r.Actor.DisplayName)
 		return r, err
 	})
 }
@@ -156,10 +156,10 @@ SELECT project_id, title, prompt, notes, tz, connection_id, binding_id,(SELECT j
 	return in, notFound(err)
 }
 
-func (r schedules) InsertRun(ctx context.Context, id int64, fireAt time.Time, outcome string, taskID *int64, detail string) error {
+func (r schedules) InsertRun(ctx context.Context, id int64, fireAt time.Time, outcome string, taskID *int64, detail string, attribution store.Attribution) error {
 	_, err := r.Exec(ctx, `
-INSERT INTO schedule_runs (schedule_id, fire_at, outcome, task_id, detail) VALUES ($1, $2, $3, $4, $5)`,
-		id, fireAt, outcome, taskID, detail)
+INSERT INTO schedule_runs (schedule_id, fire_at, outcome, task_id, detail, attribution) VALUES ($1, $2, $3, $4, $5, $6)`,
+		id, fireAt, outcome, taskID, detail, attribution)
 	return err
 }
 

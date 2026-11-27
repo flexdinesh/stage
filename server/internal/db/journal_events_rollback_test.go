@@ -8,6 +8,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/db/store"
+	"github.com/flexdinesh/stage/server/internal/principal"
 )
 
 // derivedState fingerprints every row a derived write or its cause touches.
@@ -72,6 +73,22 @@ func newDerivedFixture(t *testing.T, s *Store, ctx context.Context) derivedFixtu
 }
 
 var errRollback = errors.New("roll back")
+
+func TestTaskEditRollsBackWhenActorJournalWriteFails(t *testing.T) {
+	s, ctx, pool := connectionStore(t)
+	f := newDerivedFixture(t, s, ctx)
+	ctx = principal.With(ctx, principal.Actor{Kind: principal.Admin, AccountID: DefaultUser})
+	mustExec(t, pool, `CREATE TRIGGER reject_edit BEFORE INSERT ON journal_entries
+		WHEN NEW.event_type = 'task_edited' BEGIN SELECT RAISE(ABORT, 'reject edit'); END`)
+	before := derivedState(t, pool)
+	if _, err := s.UpdateTask(ctx, f.a, TaskPatch{Title: Optional[string]{Set: true, V: "changed"}}); err == nil {
+		t.Fatal("update committed without its journal event")
+	}
+	task, err := s.GetTask(ctx, f.a)
+	if err != nil || task.Title != "a" || derivedState(t, pool) != before {
+		t.Fatalf("failed write changed state: %s, %v", task.Title, err)
+	}
+}
 
 // Each derived write commits exactly its rows with its cause and rolls
 // back with it.

@@ -161,6 +161,12 @@ func TestStopWhileModelCatalogIsUnavailable(t *testing.T) {
 	if a.State != "interrupted" || len(e.fake.Interrupted) != 1 || a.ExternalSessionID == nil || e.fake.Interrupted[0] != *a.ExternalSessionID {
 		t.Fatalf("Stop did not interrupt the task's session: %+v, %v", a, e.fake.Interrupted)
 	}
+	page, err := e.store.ReadJournal(t.Context(), db.JournalOwner{TaskID: &a.ID}, db.JournalQuery{Kind: "events"})
+	if err != nil || !slices.ContainsFunc(page.Entries, func(entry db.JournalEntry) bool {
+		return entry.EventType == "task_stopped" && entry.Actor.Kind == "personal" && entry.Actor.UserID == 0
+	}) {
+		t.Fatalf("manual stop attribution: %+v, %v", page.Entries, err)
+	}
 }
 
 func (f *flakyT3) ListPendingQuestions(ctx context.Context, threadID string) ([]string, error) {

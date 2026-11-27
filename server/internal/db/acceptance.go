@@ -132,6 +132,7 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 	if reopen && (in.Note != "" || in.EvidenceVersion != "") {
 		return result, Invalid("reopen accepts requestId and revision only")
 	}
+	ctx = WithWorkCause(ctx, Cause{Kind: "acceptance_request", RequestID: in.RequestID})
 	raw, _ := json.Marshal(struct {
 		AcceptanceRequest
 		Reopen bool
@@ -210,7 +211,8 @@ func recordAcceptance(ctx context.Context, tx store.Tx, id, revision int64, acce
 	if err := ac.SetCurrent(ctx, id, revision, acceptanceID); err != nil {
 		return err
 	}
-	if err := ac.JournalEvent(ctx, id, event, detail, ActingUser(ctx), ActingMachine(ctx)); err != nil {
+	attribution := WorkAttribution(ctx)
+	if err := ac.JournalEvent(ctx, id, event, detail, ActingUser(ctx), ActingMachine(ctx), attribution); err != nil {
 		return err
 	}
 	return ac.ResetDependentsReady(ctx, id)

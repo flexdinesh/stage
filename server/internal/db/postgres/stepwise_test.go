@@ -55,6 +55,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{name: "personal reads and devices retained", seed: seedV0043NotificationRecipients, check: checkV0043NotificationRecipients},
 		{name: "shared legacy devices removed", seed: seedV0043SharedPush, check: checkV0043SharedPush},
 	},
+	44: {{name: "work attribution leaves old evidence untouched", seed: seedV0044Attribution, check: checkV0044Attribution}},
 }
 
 func seedV0043NotificationRecipients(t *testing.T, pool *sql.DB) {
@@ -107,6 +108,33 @@ func checkV0043SharedPush(t *testing.T, pool *sql.DB) {
 	var count int
 	if err := pool.QueryRowContext(t.Context(), `SELECT count(*) FROM push_subscriptions`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("legacy device count %d, %v", count, err)
+	}
+}
+
+func seedV0044Attribution(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	seedV0040SharedAccess(t, pool)
+	for _, q := range []string{
+		`INSERT INTO task_events(task_id,to_state,detail) VALUES(6,'backlog','created')`,
+		`INSERT INTO task_acceptances(task_id,provenance,evidence,note) VALUES(6,'user','{ "taskId": 6 }','old result')`,
+	} {
+		if _, err := pool.ExecContext(t.Context(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func checkV0044Attribution(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`SELECT count(*) FROM task_events WHERE task_id=6 AND detail='created' AND attribution IS NULL`,
+		`SELECT count(*) FROM journal_entries WHERE id=8 AND text='old evidence  ✓' AND created_by_user_id=7 AND attribution IS NULL`,
+		`SELECT count(*) FROM task_acceptances WHERE task_id=6 AND evidence='{ "taskId": 6 }' AND note='old result' AND attribution IS NULL`,
+	} {
+		var got int
+		if err := pool.QueryRowContext(t.Context(), q).Scan(&got); err != nil || got != 1 {
+			t.Fatalf("%s: %d, %v; want 1", q, got, err)
+		}
 	}
 }
 

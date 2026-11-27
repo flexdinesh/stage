@@ -161,16 +161,16 @@ pauses work-producing runners until claim. Public opt-in ships in task #460.
 schedules and machines expose their durable `created_by_user_id` as `createdBy`.
 Authenticated writes with a known person set `db.WithUser`. Operations with no
 known person still use the legacy creator default. The request principal
-controls authorization independently of `db.ActingUser`. Scheduled tasks and their initial notes keep the schedule
-creator on cron and Run now. Derived journal events currently use the column
-default and are written in the same transaction as their cause. See [API users](api.md#users)
-and [journal events](storage.md#journal-events).
+controls authorization independently of `db.ActingUser`. Scheduled tasks and
+their initial notes keep the schedule creator on cron and Run now. Work events
+carry actor and cause in the transaction that recorded them.
+[Work attribution](api.md#work-attribution) · [Journal events](storage.md#journal-events)
 
 Migration 0021 adds `source_machine_id` on projects, tasks, trees, journal
 entries and schedules. The worker gateway sets the forwarding machine from its
 token through `db.WithMachine`. `db.ActingMachine(ctx)` supplies it for writes,
-and the API exposes it as `sourceMachineId`. Project import, schedule spawns
-and derived journal events leave it null. Machine tokens identify machines.
+and the API exposes it as `sourceMachineId`. Project import and schedule
+spawns keep their existing ownership fields. Machine tokens identify machines.
 The shared-access actor contract records people, agents, machines and automation
 independently of these provenance fields. Existing creator IDs and historical
 evidence carry forward. See [agent gateway](runtime.md#agent-gateway) and

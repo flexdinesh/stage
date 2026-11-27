@@ -37,6 +37,14 @@ The main server composes `coordinator`, `observe` and `discovery` in
 the adapters and ingests samples on the main server. Discovery reads workspace
 inventory and filesystem evidence and owns full sync.
 
+Stage records the admitted actor when it claims a launch. Handoffs and
+adapter outcomes link to the recorded attempt, including across process
+restarts. Dependency release links to the latest current prerequisite
+acceptance. Scheduled launches derive their source from the latest start
+time edit or creation event. Harness observations record automation with
+the verified connection and session. Notifications receive that same
+attribution from the committed transition. [Work attribution](api.md#work-attribution)
+
 ## Modules and the registry
 
 The ordered module list in `internal/harnesses/modules.go` supplies the

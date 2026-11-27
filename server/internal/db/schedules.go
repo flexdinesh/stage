@@ -322,7 +322,7 @@ func (s *Store) spawnTask(ctx context.Context, tx store.Tx, id int64, startAt *t
 	tz, notes := tpl.Tz, tpl.Notes
 	// The schedule spawns the task, not the request that ran it: no source
 	// machine.
-	ctx = withoutMachine(WithUser(ctx, tpl.CreatedBy))
+	ctx = withoutMachine(WithUser(WithAttribution(ctx, WorkAttribution(ctx)), tpl.CreatedBy))
 	in.ScheduleID = &id
 	if startAt != nil {
 		in.StartAt, in.StartTz = startAt, &tz
@@ -359,6 +359,29 @@ func (s *Store) DueForConnection(ctx context.Context, now time.Time, connection 
 	return read(ctx, s, func(tx store.Tx) ([]DueTask, error) { return tx.Schedules().DueTasks(ctx, now, connection) })
 }
 
+// scheduledStart derives a delayed launch from the last explicit time edit
+// or the creation event. Old tasks can lack a recorded source.
+func scheduledStart(ctx context.Context, tx store.Tx, taskID int64) (context.Context, error) {
+	events, err := tx.Tasks().Events(ctx, taskID)
+	if err != nil {
+		return ctx, err
+	}
+	cause := Cause{Kind: "scheduled_start", TaskID: taskID}
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		if e.FromState != nil && (e.Cause == nil || e.Cause.Kind != "start_time") {
+			continue
+		}
+		kind := "system"
+		if e.Actor.Kind == "cron" && e.Cause != nil {
+			kind = "cron"
+			cause.ScheduleID = e.Cause.ScheduleID
+		}
+		return AutomatedWork(ctx, kind, cause, e.Attribution), nil
+	}
+	return AutomatedWork(ctx, "system", cause, Attribution{}), nil
+}
+
 // FireResult is what FireSchedule did ("" outcome: not due, nothing written).
 type FireResult struct {
 	Outcome string
@@ -377,6 +400,7 @@ func (s *Store) FireSchedule(ctx context.Context, id int64, now time.Time, grace
 // FireScheduleSince records a due fire before the installation claim as
 // missed even when the normal scheduler grace period has not elapsed.
 func (s *Store) FireScheduleSince(ctx context.Context, id int64, now time.Time, grace time.Duration, since time.Time) (FireResult, error) {
+	ctx = AutomatedWork(ctx, "cron", Cause{Kind: "schedule", ScheduleID: id}, Attribution{})
 	var res FireResult
 	err := s.e.Write(ctx, func(tx store.Tx) error {
 		// Write may rerun fn (Postgres retry): start each run from scratch.
@@ -414,7 +438,7 @@ func (s *Store) FireScheduleSince(ctx context.Context, id int64, now time.Time, 
 				detail = "missed 1 fire"
 			}
 			res.Outcome = RunMissed
-			err = sc.InsertRun(ctx, id, fireAt, RunMissed, nil, detail)
+			err = sc.InsertRun(ctx, id, fireAt, RunMissed, nil, detail, WorkAttribution(ctx))
 		default:
 			var prev int64
 			var prevState TaskState
@@ -422,14 +446,14 @@ func (s *Store) FireScheduleSince(ctx context.Context, id int64, now time.Time, 
 			switch {
 			case err == nil:
 				res.Outcome = RunSkipped
-				err = sc.InsertRun(ctx, id, fireAt, RunSkipped, nil, fmt.Sprintf("#%d still %s", prev, stateWords(prevState)))
+				err = sc.InsertRun(ctx, id, fireAt, RunSkipped, nil, fmt.Sprintf("#%d still %s", prev, stateWords(prevState)), WorkAttribution(ctx))
 			case errors.Is(err, ErrNotFound):
 				var task int64
 				if task, err = s.spawnTask(ctx, tx, id, &fireAt); err != nil {
 					return err
 				}
 				res.Outcome, res.TaskID = RunStarted, &task
-				err = sc.InsertRun(ctx, id, fireAt, RunStarted, &task, "")
+				err = sc.InsertRun(ctx, id, fireAt, RunStarted, &task, "", WorkAttribution(ctx))
 			}
 		}
 		if err != nil {
@@ -458,6 +482,7 @@ func stateWords(s TaskState) string {
 // RunScheduleNow spawns a backlog task from the schedule (no start time) and
 // records a manual run; the caller starts it.
 func (s *Store) RunScheduleNow(ctx context.Context, id int64) (Task, error) {
+	ctx = WithWorkCause(ctx, Cause{Kind: "schedule", ScheduleID: id})
 	var task int64
 	err := s.e.Write(ctx, func(tx store.Tx) error {
 		if err := tx.Projects().LockIdentity(ctx); err != nil {
@@ -476,7 +501,7 @@ func (s *Store) RunScheduleNow(ctx context.Context, id int64) (Task, error) {
 		if task, err = s.spawnTask(ctx, tx, id, nil); err != nil {
 			return err
 		}
-		return tx.Schedules().InsertRun(ctx, id, time.Now(), RunManual, &task, "run now")
+		return tx.Schedules().InsertRun(ctx, id, time.Now(), RunManual, &task, "run now", WorkAttribution(ctx))
 	})
 	if err != nil {
 		return Task{}, err

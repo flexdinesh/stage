@@ -12,6 +12,7 @@ type JournalOwner struct {
 }
 
 type JournalEntry struct {
+	Attribution
 	SourceSession *SessionRef `json:"sourceSession"`
 	ID            int64       `json:"id"`
 	Kind          string      `json:"kind"`
@@ -64,7 +65,8 @@ type JournalEvent struct {
 	EventType, Text              string
 	FromTreeID, ToTreeID         *int64
 	// At is the event time (nil: now).
-	At *time.Time
+	At          *time.Time
+	Attribution Attribution
 }
 
 // Journal is the task and tree journal repository.
@@ -75,15 +77,14 @@ type Journal interface {
 	Get(ctx context.Context, id int64) (JournalEntry, error)
 	// NoteByRequest is o's note written with requestID (ErrNotFound).
 	NoteByRequest(ctx context.Context, o JournalOwner, requestID string) (JournalEntry, error)
-	InsertNote(ctx context.Context, o JournalOwner, in AppendNoteInput, sourceSessionID *int64, createdBy int64, sourceMachine *int64) (JournalEntry, error)
-	// InsertEvent appends a derived event. It takes the column defaults for
-	// its creator (the default user) and source machine (none).
+	InsertNote(ctx context.Context, o JournalOwner, in AppendNoteInput, sourceSessionID *int64, createdBy int64, sourceMachine *int64, attribution Attribution) (JournalEntry, error)
+	// InsertEvent appends a derived event, retaining the legacy creator default.
 	InsertEvent(ctx context.Context, e JournalEvent) error
 	// Read pages o's entries matching q, newest first: at most limit
 	// entries with id < before (0: from the newest).
 	Read(ctx context.Context, o JournalOwner, q JournalQuery, before int64, limit int) ([]JournalEntry, error)
 	// Duplicated records that task dst was duplicated from src.
-	Duplicated(ctx context.Context, dst, src, createdBy int64, sourceMachine *int64) error
+	Duplicated(ctx context.Context, dst, src, createdBy int64, sourceMachine *int64, attribution Attribution) error
 	// LaunchContext is the attempt's frozen instructions (ErrNotFound).
 	LaunchContext(ctx context.Context, taskID int64, attempt int) (string, error)
 	SetLaunchContext(ctx context.Context, taskID int64, attempt int, instructions string) error

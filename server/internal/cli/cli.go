@@ -478,5 +478,6 @@ func runMCP(ctx context.Context, env Env, args []string) error {
 	// by the harness for the agent that spawned it, is the fallback.
 	ops := c.ops()
 	ops.Caller = agentctx.Caller{}
+	ops.Client = ops.Client.AsToolTransport()
 	return agenttools.NewServer(ops).Run(ctx, &mcp.StdioTransport{})
 }

@@ -10,6 +10,7 @@ import { dateTime, relativeTime } from "../lib/format.ts";
 import { MAX_NOTE_BYTES, noteBytes, noteRequest } from "../lib/journal.ts";
 import { isActive, statusChips, type StatusChip } from "../lib/tasks.ts";
 import { IconArrowRight } from "./icons.tsx";
+import { ActorLabel } from "./ActorLabel.tsx";
 import { useLaunchGate } from "./LaunchGate.tsx";
 import { statusChipView, taskStateLabel } from "./StateBadge.tsx";
 import {
@@ -58,7 +59,7 @@ function Evidence({ evidence: e }: { evidence: AcceptedEvidence }) {
 
 export function AcceptedResult({ acceptance, current, harness }: { acceptance: Acceptance; current: boolean; harness: Task["harness"] }) {
   const descriptor = useHarnesses().descriptor(harness);
-  return <Panel title={current ? "Accepted result" : "Previous accepted result"} meta={`#${acceptance.id} · ${relativeTime(acceptance.acceptedAt)}`}>
+  return <Panel title={current ? "Accepted result" : "Previous accepted result"} meta={<>#{acceptance.id} · {relativeTime(acceptance.acceptedAt)} · <ActorLabel work={acceptance} /></>}>
     <div className="flex flex-col gap-3">
       <Muted>{provenanceText(acceptance.provenance, descriptor)}</Muted>
       {acceptance.note === "" ? null : <section><SubHeading title="Acceptance note" className="mb-1" /><p className="whitespace-pre-wrap break-words text-small">{acceptance.note}</p></section>}

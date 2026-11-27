@@ -90,6 +90,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{"personal reads and devices retained", seedV0043NotificationRecipients, checkV0043NotificationRecipients},
 		{"shared legacy devices removed", seedV0043SharedPush, checkV0043SharedPush},
 	},
+	44: {{"work attribution leaves old evidence untouched", seedV0044Attribution, checkV0044Attribution}},
 }
 
 func seedV0043NotificationRecipients(t *testing.T, pool *sqlite.DB) {
@@ -118,6 +119,27 @@ func seedV0043SharedPush(t *testing.T, pool *sqlite.DB) {
 
 func checkV0043SharedPush(t *testing.T, pool *sqlite.DB) {
 	wantRows(t, pool, `SELECT count(*) FROM push_subscriptions`, "0")
+}
+
+func seedV0044Attribution(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	seedV0040SharedAccess(t, pool)
+	mustExec(t, pool, `INSERT INTO task_events(task_id,to_state,detail) VALUES(6,'backlog','created')`)
+	mustExec(t, pool, `INSERT INTO task_acceptances(task_id,provenance,evidence,note) VALUES(6,'user','{ "taskId": 6 }','old result')`)
+}
+
+func checkV0044Attribution(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`SELECT count(*) FROM task_events WHERE task_id=6 AND detail='created' AND attribution IS NULL`,
+		`SELECT count(*) FROM journal_entries WHERE id=8 AND text='old evidence  ✓' AND created_by_user_id=7 AND attribution IS NULL`,
+		`SELECT count(*) FROM task_acceptances WHERE task_id=6 AND evidence='{ "taskId": 6 }' AND note='old result' AND attribution IS NULL`,
+	} {
+		var got int
+		if err := pool.QueryRow(q).Scan(&got); err != nil || got != 1 {
+			t.Fatalf("%s: %d, %v; want 1", q, got, err)
+		}
+	}
 }
 
 func seedV0041AccessAudit(t *testing.T, pool *sqlite.DB) {

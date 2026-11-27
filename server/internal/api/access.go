@@ -158,6 +158,11 @@ func (s *server) authorize(scope routeScope, next http.HandlerFunc) http.Handler
 		if s.Access == nil {
 			if _, ok := principal.From(r.Context()); !ok {
 				ctx := principal.With(r.Context(), principal.Actor{Kind: principal.Personal, AccountID: db.ActingUser(r.Context())})
+				if r.Header.Get(principal.ToolTransportHeader) == "mcp" {
+					stamp := db.WorkAttribution(ctx)
+					stamp.Actor.Kind = "agent"
+					ctx = db.WithAttribution(ctx, stamp)
+				}
 				r = r.WithContext(ctx)
 			}
 			next(w, r)
@@ -220,6 +225,9 @@ func (a *Access) MCP(next http.Handler) http.Handler {
 			// loopback Host rule to the canonical public Host.
 			ctx = context.WithValue(ctx, http.LocalAddrContextKey, nil)
 			w = privateMCPResponse{w}
+		}
+		if actor.IsHuman() {
+			actor.InitiatorID = actor.AccountID
 		}
 		actor.Kind = principal.Agent
 		ctx, stop := a.watchSession(principal.With(ctx, actor))

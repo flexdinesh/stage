@@ -14,11 +14,14 @@ type journal struct{ *runner }
 
 func (t *tx) Journal() store.Journal { return journal{t.r} }
 
-const journalColumns = `id, kind, task_id, tree_id, source_task_id, attempt, category, text, event_type, from_tree_id, to_tree_id, created_at, (SELECT jsonb_build_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=source_session_id), created_by_user_id, source_machine_id`
+var journalColumns = `id, kind, task_id, tree_id, source_task_id, attempt, category, text, event_type, from_tree_id, to_tree_id, created_at, (SELECT jsonb_build_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=source_session_id), created_by_user_id, source_machine_id, ` + attributionColumns("journal_entries.attribution")
 
 func scanJournal(r rowScanner) (store.JournalEntry, error) {
 	var e store.JournalEntry
-	err := r.Scan(&e.ID, &e.Kind, &e.TaskID, &e.TreeID, &e.SourceTaskID, &e.Attempt, &e.Category, &e.Text, &e.EventType, &e.FromTreeID, &e.ToTreeID, &e.CreatedAt, &e.SourceSession, &e.CreatedBy, &e.SourceMachineID)
+	err := r.Scan(&e.ID, &e.Kind, &e.TaskID, &e.TreeID, &e.SourceTaskID, &e.Attempt, &e.Category, &e.Text, &e.EventType, &e.FromTreeID, &e.ToTreeID, &e.CreatedAt, &e.SourceSession, &e.CreatedBy, &e.SourceMachineID, &e.Attribution, &e.Actor.DisplayName)
+	if e.SourceMachineID == nil {
+		e.SourceMachineID = e.Attribution.SourceMachine
+	}
 	return e, notFound(err)
 }
 
@@ -40,14 +43,14 @@ func (r journal) NoteByRequest(ctx context.Context, o store.JournalOwner, reques
 	return scanJournal(r.QueryRow(ctx, `SELECT `+journalColumns+` FROM journal_entries WHERE kind = 'note' AND task_id IS NOT DISTINCT FROM $1::bigint AND tree_id IS NOT DISTINCT FROM $2::bigint AND request_id = $3`, o.TaskID, o.TreeID, requestID))
 }
 
-func (r journal) InsertNote(ctx context.Context, o store.JournalOwner, in store.AppendNoteInput, sourceID *int64, createdBy int64, sourceMachine *int64) (store.JournalEntry, error) {
-	return scanJournal(r.QueryRow(ctx, `INSERT INTO journal_entries (kind, task_id, tree_id, source_task_id, category, text, request_id,source_session_id,created_by_user_id,source_machine_id) VALUES ('note', $1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+journalColumns, o.TaskID, o.TreeID, in.SourceTaskID, in.Category, in.Text, in.RequestID, sourceID, createdBy, sourceMachine))
+func (r journal) InsertNote(ctx context.Context, o store.JournalOwner, in store.AppendNoteInput, sourceID *int64, createdBy int64, sourceMachine *int64, attribution store.Attribution) (store.JournalEntry, error) {
+	return scanJournal(r.QueryRow(ctx, `INSERT INTO journal_entries (kind, task_id, tree_id, source_task_id, category, text, request_id,source_session_id,created_by_user_id,source_machine_id,attribution) VALUES ('note', $1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING `+journalColumns, o.TaskID, o.TreeID, in.SourceTaskID, in.Category, in.Text, in.RequestID, sourceID, createdBy, sourceMachine, attribution))
 }
 
 func (r journal) InsertEvent(ctx context.Context, e store.JournalEvent) error {
-	_, err := r.Exec(ctx, `INSERT INTO journal_entries (kind, task_id, tree_id, source_task_id, source_session_id, attempt, event_type, text, from_tree_id, to_tree_id, created_at)
-VALUES ('event', $1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::timestamptz, `+nowSQL+`))`,
-		e.TaskID, e.TreeID, e.SourceTaskID, e.SourceSessionID, e.Attempt, e.EventType, e.Text, e.FromTreeID, e.ToTreeID, e.At)
+	_, err := r.Exec(ctx, `INSERT INTO journal_entries (kind, task_id, tree_id, source_task_id, source_session_id, attempt, event_type, text, from_tree_id, to_tree_id, created_at, attribution)
+VALUES ('event', $1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::timestamptz, `+nowSQL+`), $11)`,
+		e.TaskID, e.TreeID, e.SourceTaskID, e.SourceSessionID, e.Attempt, e.EventType, e.Text, e.FromTreeID, e.ToTreeID, e.At, e.Attribution)
 	return err
 }
 
@@ -87,8 +90,8 @@ func (r journal) Read(ctx context.Context, o store.JournalOwner, q store.Journal
 	return collectRows(rows, scanJournal)
 }
 
-func (r journal) Duplicated(ctx context.Context, dst, src, createdBy int64, sourceMachine *int64) error {
-	_, err := r.Exec(ctx, `INSERT INTO journal_entries (kind, task_id, source_task_id, event_type, text, created_by_user_id, source_machine_id) VALUES ('event', $1, $2, 'task_duplicated', 'Duplicated from task #' || $2::bigint::text, $3, $4)`, dst, src, createdBy, sourceMachine)
+func (r journal) Duplicated(ctx context.Context, dst, src, createdBy int64, sourceMachine *int64, attribution store.Attribution) error {
+	_, err := r.Exec(ctx, `INSERT INTO journal_entries (kind, task_id, source_task_id, event_type, text, created_by_user_id, source_machine_id, attribution) VALUES ('event', $1, $2, 'task_duplicated', 'Duplicated from task #' || $2::bigint::text, $3, $4, $5)`, dst, src, createdBy, sourceMachine, attribution)
 	return err
 }
 

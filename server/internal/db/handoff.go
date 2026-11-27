@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/flexdinesh/stage/server/internal/db/store"
 )
@@ -30,11 +31,19 @@ func (s *Store) RecordHandoff(ctx context.Context, taskID int64, h Handoff) erro
 		detail = fmt.Sprintf("handoff from %s skipped: %s", sourceLabel(h), reason)
 	}
 	return s.e.Write(ctx, func(tx store.Tx) error {
+		a, err := tx.Attempts().Get(ctx, taskID, h.Attempt)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
 		if err := recordHandoff(ctx, tx, taskID, h); err != nil {
 			return err
 		}
 		from := StateLaunching
-		return addTaskEvent(ctx, tx, taskID, &from, StateLaunching, detail)
+		cause := Cause{Kind: "handoff", Attempt: h.Attempt, Session: h.Session}
+		if h.SourceTaskID != nil {
+			cause.TaskID = *h.SourceTaskID
+		}
+		return addTaskEvent(AutomatedWork(ctx, "system", cause, a.Attribution), tx, taskID, &from, StateLaunching, detail)
 	})
 }
 

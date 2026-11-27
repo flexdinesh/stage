@@ -26,7 +26,7 @@ export function provenanceText(provenance: Provenance, harness?: Pick<HarnessDes
     case "historical_settlement":
       return "Migrated from historical T3 settlement. Evidence reflects the local cache at migration.";
     case "user":
-      return "Completed by you in Stage. This result stays unchanged when execution continues.";
+      return "Completed in Stage. This result stays unchanged when execution continues.";
     default:
       return closureFor(provenance, harness)?.completed ?? "Completed automatically when its harness closed the session. This result stays unchanged when execution continues.";
   }

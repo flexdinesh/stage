@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	gosync "sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/engine"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/principal"
 )
 
 // Two more fake harnesses prove the optional contract without T3 or
@@ -365,8 +367,8 @@ func TestContractInteraction(t *testing.T) {
 			{ID: "q1", Kind: "approval", Title: "Run tests?", Preview: "go test ./...", TextOption: "no", Options: []execution.Choice{{ID: "yes"}, {ID: "no"}}},
 			{ID: "q2", Kind: "question", Title: "Pick", Questions: []execution.Question{{ID: "0", Header: "Color", Prompt: "Which color?", Options: []execution.QuestionOption{{Label: "Red", Description: "warm"}}, Multi: true, Custom: true}}},
 		}}
-		_, svc, task := v2Setup(t, p, "hosted", f)
-		ctx := t.Context()
+		store, svc, task := v2Setup(t, p, "hosted", f)
+		ctx := principal.With(t.Context(), principal.Actor{Kind: principal.Human, AccountID: db.DefaultUser})
 		if _, err := svc.Coordinator.Requests(ctx, task.ID); err == nil {
 			t.Fatal("requests without a session")
 		}
@@ -395,6 +397,13 @@ func TestContractInteraction(t *testing.T) {
 		}
 		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q2", execution.Response{Answers: map[string][]string{"0": {"Red", "teal"}}}); err != nil || len(f.responses["q2"].Answers["0"]) != 2 {
 			t.Fatal("answers", err, f.responses)
+		}
+		page, err := store.ReadJournal(ctx, db.JournalOwner{TaskID: &task.ID}, db.JournalQuery{Kind: "events"})
+		if err != nil || !slices.ContainsFunc(page.Entries, func(e db.JournalEntry) bool {
+			return e.EventType == "session_response" && e.Actor.Kind == "human" && e.Actor.UserID == db.DefaultUser &&
+				e.Cause != nil && e.Cause.RequestID == "q1"
+		}) {
+			t.Fatalf("approval attribution: %+v, %v", page.Entries, err)
 		}
 		if _, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: "also update docs"}); err != nil || len(f.messages) != 1 {
 			t.Fatal(err, f.messages)
