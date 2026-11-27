@@ -16,10 +16,15 @@ declared capabilities, project identity):
 [ADR 0007](adr/0007-harness-boundary.md).
 The harness foundation target and its delivery layers:
 [ADR 0008](adr/0008-harness-foundation.md),
-[workspace discovery and project identity](discovery.md),
+[shipped workspace discovery and bindings](discovery.md),
 [harness authoring](harnesses.md).
 
 ## Ownership
+
+Stage owns logical projects, grouping decisions and durable work history.
+Each harness connection owns its workspace catalog and sessions.
+[ADR 0010](adr/0010-harness-workspaces-and-logical-projects.md) defines exact
+destinations and the transition from project bindings.
 
 | Path | Owns | Must not |
 | --- | --- | --- |

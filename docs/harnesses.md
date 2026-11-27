@@ -1,7 +1,8 @@
 # Adding a harness
 
-Stage owns projects, tasks, trees, schedules, journals, acceptance and handoff.
-The harness owns sessions, their workspaces and worktrees, branches, archive,
+Stage owns logical project groups, tasks, trees, schedules, journals,
+acceptance and handoff. Each harness connection owns its workspace catalog
+and sessions. The harness owns worktrees, branches, archive,
 models, permissions and processes. Stage records a session as
 `{connectionId, externalSessionId}`. See [ADR 0007](adr/0007-harness-boundary.md),
 [ADR 0008](adr/0008-harness-foundation.md) and the [execution contract](execution.md).
@@ -101,7 +102,7 @@ the role on the connection's machine.
 | Role | Methods and consumers |
 | --- | --- |
 | `Catalog` | `Health` reports reachability and instance identity. `Features` declares launch choices and operation availability for setup and task controls. |
-| `Inventory` | `Workspaces` reports harness workspace IDs, paths, availability and provenance. [Discovery](../server/internal/discovery/inventory.go) enriches local paths with read-only evidence from the file host's `machine.Ops.Inventory` and resolves Stage projects on the main server. A failed read preserves the last inventory. See [workspace evidence](discovery.md). |
+| `Inventory` | `Workspaces` reports harness workspace IDs, paths, availability and provenance. [Discovery](../server/internal/discovery/inventory.go) enriches local paths with read-only evidence from the file host's `machine.Ops.Inventory`. A failed read preserves the last inventory. See [workspace evidence](discovery.md). |
 | `Sessions` | `Observe` supplies normalized snapshots, including replies when available. `Opening` reads the first prompt and `Attention` lists sessions surfaced to Stage. The observer uses these snapshots and the coordinator applies them to tracked tasks. |
 | `Launcher` | `Launch` applies the frozen intent and saves durable checkpoints. `Stop` interrupts a scoped session when available. The coordinator owns dispatch and reconciliation. |
 
@@ -112,6 +113,25 @@ A partial adapter such as a worker proxy must also advertise the trait in
 its ready snapshot. The trait says whether the interface is callable.
 Check the corresponding operation, policy or action availability for the
 requested scope. Polling reconciles missed `EventSource` events.
+
+### Workspace and session selection
+
+[ADR 0010](adr/0010-harness-workspaces-and-logical-projects.md) defines
+the target contract as clients move off shipped project bindings. Report
+meaningful catalog rows even when they lack Git evidence or would be
+ineligible for automatic import. Supply the stable native ID and the
+discriminator for each exact launchable workspace, including distinct
+roots under one ID. Attest locality only when the files live on the
+connection's machine. Report trust, archive, disappearance and
+unavailability through the adapter contract. Stage handles grouping.
+
+Implement roster search as an optional declared role on the owning
+connection. Return bounded pages of harness-listed metadata and preserve
+eligibility checks for direct lookup and adoption. Browse includes eligible
+completed sessions still listed by the harness. Declare an unavailable
+reason when the harness or worker cannot safely enumerate. Attention, the
+watch set and transcript files are outside the roster search source.
+Route collection browsing through the human policy.
 
 ## Choose an extension
 

@@ -8,6 +8,10 @@
 
 ## Context
 
+[ADR 0010](0010-harness-workspaces-and-logical-projects.md) supersedes
+[D9](#d9) and [D10](#d10). Read-only evidence still informs grouping.
+Launches use an exact workspace on the selected connection.
+
 [ADR 0007](0007-harness-boundary.md) establishes the Stage and harness
 boundary. At the baseline, adding a harness still requires per-kind storage,
 configuration, worker dispatch and composition. The server drives remote
