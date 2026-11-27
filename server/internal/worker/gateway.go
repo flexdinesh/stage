@@ -22,8 +22,10 @@ import (
 )
 
 // strippedHeaders never leave the machine: browser context the local
-// origin policy already judged, and any credential but the machine token.
-var strippedHeaders = []string{"Origin", "Referer", "Cookie", "Authorization"}
+// origin policy already judged, caller credentials and gateway attestation.
+var strippedHeaders = []string{"Origin", "Referer", "Cookie", "Authorization", workerchan.PrivateGatewayHeader}
+
+type privateGatewayKey struct{}
 
 // NewGateway is the agent gateway handler (docs/runtime.md "Agent
 // gateway"): the request-origin policy of a Stage listener (guard.Policy,
@@ -31,8 +33,9 @@ var strippedHeaders = []string{"Origin", "Referer", "Cookie", "Authorization"}
 // server's gateway route (workerchan.GatewayPath) with the machine token.
 // The caller's Stage-Caller-Session and body pass unchanged; browser
 // headers (Origin, Sec-Fetch-*, Cookie, Referer) and the caller's own
-// Authorization are dropped. Streams (SSE, streamable MCP) flush as they
-// arrive. Other paths are 404.
+// Authorization are dropped. Only requests from the private default socket
+// get the worker's private gateway header. Streams (SSE, streamable MCP)
+// flush as they arrive. Other paths are 404.
 func NewGateway(cfg Config, transport http.RoundTripper, log *slog.Logger) (http.Handler, error) {
 	if log == nil {
 		log = slog.Default()
@@ -49,12 +52,14 @@ func NewGateway(cfg Config, transport http.RoundTripper, log *slog.Logger) (http
 		transport = http.DefaultTransport
 	}
 	base := strings.TrimRight(target.Path, "/")
+	escapedBase := strings.TrimRight(target.EscapedPath(), "/")
 	apiVersion := strconv.Itoa(buildinfo.APIVersion)
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			out := pr.Out
 			out.URL.Scheme, out.URL.Host = target.Scheme, target.Host
-			out.URL.Path, out.URL.RawPath = base+workerchan.GatewayPath+pr.In.URL.Path, ""
+			out.URL.Path = base + workerchan.GatewayPath + pr.In.URL.Path
+			out.URL.RawPath = escapedBase + workerchan.GatewayPath + pr.In.URL.EscapedPath()
 			// The main server's Host (its origin policy allows it), never the
 			// local one ("stage" on the socket).
 			out.Host = ""
@@ -69,6 +74,9 @@ func NewGateway(cfg Config, transport http.RoundTripper, log *slog.Logger) (http
 			out.Header.Set("Authorization", "Bearer "+cfg.Token)
 			out.Header.Set(buildinfo.APIVersionHeader, apiVersion)
 			out.Header.Set(workerchan.VersionHeader, buildinfo.Version)
+			if private, _ := pr.In.Context().Value(privateGatewayKey{}).(bool); private {
+				out.Header.Set(workerchan.PrivateGatewayHeader, workerchan.PrivateGatewayProof(cfg.Token))
+			}
 		},
 		Transport:     transport,
 		FlushInterval: -1,
@@ -135,7 +143,13 @@ func openGateway(addrs []listen.Addr, getenv func(string) string, h http.Handler
 	ctx, cancel := context.WithCancel(context.Background())
 	g := &gateway{
 		srv: &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second,
-			BaseContext: func(net.Listener) context.Context { return ctx }},
+			BaseContext: func(ln net.Listener) context.Context {
+				// Listen verifies the private directory and sets the socket mode.
+				if l, ok := ln.(*listen.Listener); ok && l.Spec.Network == "unix" && l.Spec.Private {
+					return context.WithValue(ctx, privateGatewayKey{}, true)
+				}
+				return ctx
+			}},
 		lns: lns, cancel: cancel,
 	}
 	for _, l := range lns {

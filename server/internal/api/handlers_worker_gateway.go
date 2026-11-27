@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/principal"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
@@ -30,6 +31,9 @@ var gatewayForbidden = func() *http.ServeMux {
 		"PUT /api/machines/{id}/harnesses/{kind}/settings",
 		"POST /api/machines/{id}/harnesses/{kind}/actions/{action}",
 		"DELETE /api/machines/{id}/harnesses/{kind}/connection",
+		"PUT /api/harnesses/{kind}/settings",
+		"POST /api/harnesses/{kind}/actions/{action}",
+		"DELETE /api/harnesses/{kind}/connection",
 	} {
 		m.HandleFunc(p, func(http.ResponseWriter, *http.Request) {})
 	}
@@ -47,10 +51,33 @@ func (s *server) workerGateway(w http.ResponseWriter, r *http.Request) error {
 	if !ok {
 		return db.ErrInvalidMachineToken
 	}
+	ctx := db.WithMachine(r.Context(), id)
+	ctx = principal.With(ctx, principal.Actor{Kind: principal.Agent, MachineID: id})
+	if s.Access != nil {
+		token := bearer(r)
+		proof := r.Header.Values(workerchan.PrivateGatewayHeader)
+		if len(proof) != 1 || !workerchan.ValidPrivateGatewayProof(token, proof[0]) {
+			accessError(w, http.StatusForbidden, "private_gateway_required", "Update the worker and connect through its private Stage socket.")
+			return nil
+		}
+		ctx = withGatewayCheck(ctx, func(ctx context.Context) error {
+			_, err := s.Store.AuthenticateMachine(ctx, token)
+			return err
+		})
+	}
 	rest := strings.TrimPrefix(r.URL.Path, GatewayPrefix)
-	inner := r.Clone(db.WithMachine(r.Context(), id))
+	inner := r.Clone(ctx)
 	inner.Header.Del("Authorization")
-	inner.URL.Path, inner.URL.RawPath = rest, ""
+	inner.Header.Del(workerchan.PrivateGatewayHeader)
+	inner.URL.Path = rest
+	if inner.URL.RawPath != "" {
+		if raw, ok := strings.CutPrefix(inner.URL.RawPath, GatewayPrefix); ok {
+			inner.URL.RawPath = raw
+		} else {
+			writeError(w, http.StatusNotFound, "not found")
+			return nil
+		}
+	}
 	inner.RequestURI = inner.URL.RequestURI()
 	switch {
 	case rest == "/mcp" && s.MCP != nil:

@@ -6,6 +6,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/principal"
 )
 
 // Interaction with a task's running session (docs/api.md "Session
@@ -30,7 +31,11 @@ func (s *server) taskRequests(w http.ResponseWriter, r *http.Request) error {
 // or forwarded by a worker's agent gateway, so only the user answers or
 // drives a session (best effort: a bare request carries neither).
 func agentCaller(w http.ResponseWriter, r *http.Request, msg string) bool {
-	if r.Header.Get(agentctx.CallerHeader) == "" && db.ActingMachine(r.Context()) == nil {
+	if a, ok := principal.From(r.Context()); ok && a.Kind != principal.Personal {
+		if a.IsHuman() {
+			return false
+		}
+	} else if r.Header.Get(agentctx.CallerHeader) == "" && db.ActingMachine(r.Context()) == nil {
 		return false
 	}
 	writeJSON(w, http.StatusForbidden, map[string]string{"error": msg, "code": "agent_forbidden"})

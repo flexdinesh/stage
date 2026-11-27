@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 	"github.com/flexdinesh/stage/server/internal/api"
+	"github.com/flexdinesh/stage/server/internal/auth"
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
@@ -32,6 +34,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/listen"
 	"github.com/flexdinesh/stage/server/internal/machine"
 	"github.com/flexdinesh/stage/server/internal/notify"
+	"github.com/flexdinesh/stage/server/internal/ownercontrol"
+	"github.com/flexdinesh/stage/server/internal/principal"
 	"github.com/flexdinesh/stage/server/internal/release"
 	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/schedule"
@@ -48,7 +52,7 @@ const ShutdownTimeout = 100 * time.Second
 // Options configure Run.
 type Options struct {
 	Config config.Config
-	// SharedAccess is internal until the shared transport gates are composed.
+	// SharedAccess is internal until the shared client rollout is complete.
 	SharedAccess *bool
 	// BootstrapOutput designates private foreground output. When absent, and
 	// always for managed services and containers, use a separate private file.
@@ -149,11 +153,6 @@ func Run(ctx context.Context, o Options) error {
 	if err := owner.Record(meta); err != nil {
 		return err
 	}
-	policy, err := guard.New(cfg.AllowedOrigins, logger)
-	if err != nil {
-		return config.Invalid(err)
-	}
-
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	pool, err := openEngine(ctx, cfg, meta.InstanceID, logger)
@@ -184,21 +183,43 @@ func Run(ctx context.Context, o Options) error {
 		}
 		return err
 	}
+	var access *api.Access
+	var control *ownercontrol.Server
+	var setup auth.Link
+	var prepareWork func(time.Time)
+	workReady := make(chan time.Time, 1)
+	origins := cfg.AllowedOrigins
 	if sharedRequested || state.Mode != store.AccessPersonal {
 		origin, err := sharedOrigin(cfg.PublicURL, lns)
 		if err != nil {
 			return config.Invalid(err)
 		}
-		// The transport slice opens product traffic and resumes work after the
-		// initial claim. Until then the dedicated owner socket is all we serve.
-		for _, l := range lns {
-			_ = l.Close()
+		origins = append(append([]string(nil), origins...), origin)
+		cfg.PublicURL = origin
+		svc := auth.New(database, origin, time.Now)
+		control, err = ownercontrol.Open(cfg.DataDir, svc)
+		if err != nil {
+			return config.Invalid(fmt.Errorf("open private owner socket: %w", err))
 		}
-		meta.Listeners = nil
-		if err := owner.Record(meta); err != nil {
-			return err
+		defer control.Close()
+		if err := control.DiscardBootstrap(); err != nil {
+			return fmt.Errorf("clear private startup output: %w", err)
 		}
-		return runSharedOwner(ctx, o, cfg.DataDir, origin, database, lease, logger)
+		defer control.DiscardBootstrap()
+		state, setup, err = svc.Start(ctx, o.SharedAccess)
+		if err != nil {
+			return errors.New(auth.PublicMessage(err))
+		}
+		access = api.NewAccess(svc, origin, state, func(at time.Time) {
+			if err := control.DiscardBootstrap(); err != nil {
+				logger.Warn("Could not remove private setup output. Remove owner/bootstrap.txt from the data directory.")
+			}
+			prepareWork(at)
+		})
+	}
+	policy, err := guard.New(origins, logger)
+	if err != nil {
+		return config.Invalid(err)
 	}
 	if w := cfg.WarnRemovedEnv(); w != "" {
 		logger.Warn(w)
@@ -231,6 +252,7 @@ func Run(ctx context.Context, o Options) error {
 	machines := machine.MustSet(local)
 	eng := engine.New(engine.Options{Store: store, Machines: machines, Harnesses: registry, Log: logger})
 	eng.Coordinator.PublicURL = cfg.PublicURL
+	eng.Coordinator.SharedAccess = access != nil
 	eng.Coordinator.CLI = cliName
 	// Retires connections whose instance moved to another machine (moved.go).
 	moved := newMovedRetirer(store, eng.Discovery.FullSyncEvery, logger)
@@ -241,12 +263,16 @@ func Run(ctx context.Context, o Options) error {
 	releases := newPerConnection(store, func(id int64) *release.Runner {
 		r := release.NewRunner(store, eng.Coordinator, logger)
 		r.ConnectionID = id
-		r.OnReady = notifier.OnReady
+		if access == nil {
+			r.OnReady = notifier.OnReady
+		}
 		return r
 	})
+	var scheduleSince time.Time
 	schedules := newPerConnection(store, func(id int64) *schedule.Runner {
 		sc := schedule.NewRunner(store, eng.Coordinator, logger)
 		sc.ConnectionID = id
+		sc.Since = scheduleSince
 		return sc
 	})
 	kickTrees := func() {
@@ -267,7 +293,9 @@ func Run(ctx context.Context, o Options) error {
 	eng.Coordinator.OnTransition = func(ctx context.Context, c workevent.TaskChange) {
 		releases.Each(func(r *release.Runner) { r.OnTransition(ctx, c) })
 		eng.Observe.Kick()
-		notifier.OnTransition(ctx, c)
+		if access == nil {
+			notifier.OnTransition(ctx, c)
+		}
 		inbox.Signal()
 	}
 	eng.Coordinator.OnObservedTransition = func(ctx context.Context, c workevent.TaskChange) {
@@ -275,16 +303,35 @@ func Run(ctx context.Context, o Options) error {
 		eng.Observe.Kick()
 		inbox.Signal()
 	}
-	eng.Observe.RecordNotification = notifier.RecordObservation
+	if access == nil {
+		eng.Observe.RecordNotification = notifier.RecordObservation
+	}
 	eng.Coordinator.OnAccepted = kickTrees
 	if err := local.compose(ctx, store, cfg, registry, o.HarnessOverrides, eng.Kick, logger); err != nil {
 		return err
 	}
 	// Worker channels end with ctx, so Shutdown does not wait on their
 	// streams (docs/runtime.md "Worker channel").
-	channels := workerchan.NewHub(ctx, workerchan.Options{Version: buildinfo.Version, Seen: api.TouchMachineFunc(store, func(err error) {
-		logger.Warn("machine presence", "err", err)
-	})})
+	channels := workerchan.NewHub(ctx, workerchan.Options{
+		Version: buildinfo.Version,
+		Seen: api.TouchMachineFunc(store, func(err error) {
+			logger.Warn("machine presence", "err", err)
+		}),
+		AllowUpcall: func(kind string) bool {
+			if !access.Pending() {
+				return true
+			}
+			switch kind {
+			case remote.KindSetupSnapshot, remote.KindSettingsGet, remote.KindStatusError,
+				remote.KindIdentityActive, remote.KindIdentityActiveIdentity, remote.KindIdentitySet, remote.KindIdentitySwitch:
+				// Existing workers can reconcile their own harness
+				// identities so they can advertise a ready snapshot.
+				return true
+			default:
+				return false
+			}
+		},
+	})
 	eng.ServeWorkers(channels)
 	// Remote machines: each joined machine's connections are proxied over
 	// its worker channel (ADR 0002, docs/execution.md "Remote machines").
@@ -346,16 +393,37 @@ func Run(ctx context.Context, o Options) error {
 		}
 		eng.ConnectionsChanged(old, next)
 	}
-	// Before the poller, release runner, scheduler and HTTP server can touch launching tasks.
-	eng.Coordinator.RecoverLaunching(ctx)
-	wg.Add(4)
-	go func() { defer wg.Done(); notifier.Run(ctx) }()
-	go func() { defer wg.Done(); eng.Run(ctx) }()
-	wg.Go(func() { releases.Run(ctx) })
-	wg.Go(func() { schedules.Run(ctx) })
-	wg.Go(func() { moved.Run(ctx) })
-	go func() { defer wg.Done(); sweepStagedAttachments(ctx, store, logger) }()
-	go func() { defer wg.Done(); pruneNotifications(ctx, store, logger, inbox.Signal) }()
+	systemCtx := principal.With(ctx, principal.Actor{Kind: principal.System})
+	prepareWork = func(at time.Time) {
+		// Recover launching tasks before runners or product requests can act
+		// on them. The successful claim calls this once after commit.
+		eng.Coordinator.RecoverLaunching(systemCtx)
+		workReady <- at
+	}
+	if !access.Pending() {
+		var at time.Time
+		if state.ClaimedAt != nil {
+			at = *state.ClaimedAt
+		}
+		prepareWork(at)
+	}
+	wg.Go(func() {
+		select {
+		case <-systemCtx.Done():
+			return
+		case scheduleSince = <-workReady:
+		}
+		// Shared inbox and delivery stay closed until per-account delivery lands.
+		if access == nil {
+			wg.Go(func() { notifier.Run(systemCtx) })
+			wg.Go(func() { pruneNotifications(systemCtx, store, logger, inbox.Signal) })
+		}
+		wg.Go(func() { eng.Run(systemCtx) })
+		wg.Go(func() { releases.Run(systemCtx) })
+		wg.Go(func() { schedules.Run(systemCtx) })
+		wg.Go(func() { moved.Run(systemCtx) })
+		wg.Go(func() { sweepStagedAttachments(systemCtx, store, logger) })
+	})
 
 	mux := http.NewServeMux()
 	// The MCP handler serves through the API router, and the router's agent
@@ -366,6 +434,7 @@ func Run(ctx context.Context, o Options) error {
 	apiHandler := api.NewRouter(api.Deps{
 		Config: cfg, Store: store, Engine: eng, Push: notifier, Logger: logger,
 		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees,
+		Access: access, InstallationID: state.ID,
 		LiveConnectors: func() harness.Connectors {
 			c, err := machines.Connectors(registry)
 			if err != nil {
@@ -376,9 +445,9 @@ func Run(ctx context.Context, o Options) error {
 		Harnesses: registry, Channels: channels, Machines: hosts,
 		MCP: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mcpHandler.ServeHTTP(w, r) }),
 	})
-	mcpHandler = agenttools.HTTPHandler(&agenttools.Ops{
+	mcpHandler = access.MCP(agenttools.HTTPHandler(&agenttools.Ops{
 		Client: client.NewInProcess(apiHandler, addrs[0].URL()), CLI: cliName,
-	})
+	}))
 	// Browser-facing endpoints get the request-origin policy; the UI's
 	// static files do not need it.
 	mux.Handle("/api/", policy.Wrap(apiHandler))
@@ -387,14 +456,19 @@ func Run(ctx context.Context, o Options) error {
 	// validation stays in one place. No local file access.
 	// Machine tokens are worker-route credentials only (api.RejectMachineTokens;
 	// /api applies it itself).
-	mux.Handle("/mcp", policy.Wrap(api.RejectMachineTokens(mcpHandler)))
+	mux.Handle("/mcp", policy.Wrap(mcpHandler))
 	mux.Handle("/", webui.Handler())
 
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	errCh := make(chan error, len(lns))
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second,
+		BaseContext: func(net.Listener) context.Context { return ctx }}
+	errCh := make(chan error, len(lns)+1)
 	for _, l := range lns {
 		go func() { errCh <- srv.Serve(l) }()
 		logger.Info("listening", "addr", l.Spec.String())
+	}
+	if control != nil {
+		wg.Go(func() { errCh <- control.Serve(ctx) })
+		announceShared(o, control, cfg.DataDir, state, setup, logger)
 	}
 	if err := instance.Notify("READY=1"); err != nil {
 		logger.Warn("readiness notification", "err", err)

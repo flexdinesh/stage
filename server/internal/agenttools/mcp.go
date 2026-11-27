@@ -201,9 +201,13 @@ type headerKey struct{}
 
 // HTTPHandler serves streamable HTTP MCP over ops (no local file access). A
 // request may name its caller with the agentctx.CallerHeader header.
+// That hint is provenance. The enclosing transport authenticates each
+// request before this handler passes its context to the tools.
 func HTTPHandler(o *Ops) http.Handler {
 	s := NewServer(&Ops{Client: o.Client, PollEvery: o.PollEvery, CLI: o.CLI})
-	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, &mcp.StreamableHTTPOptions{Stateless: true})
+	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s }, &mcp.StreamableHTTPOptions{
+		Stateless: true, PropagateRequestCancellation: true,
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if v := r.Header.Get(agentctx.CallerHeader); v != "" {
 			ref, err := agentctx.ParseSession(v)

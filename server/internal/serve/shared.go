@@ -1,21 +1,16 @@
 package serve
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/url"
 	"os"
 	"strconv"
-	"time"
 
 	"github.com/flexdinesh/stage/server/internal/auth"
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
-	"github.com/flexdinesh/stage/server/internal/config"
-	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/harness"
 	"github.com/flexdinesh/stage/server/internal/install"
@@ -36,6 +31,11 @@ func sharedOrigin(configured string, listeners []*listen.Listener) (string, erro
 	if err != nil {
 		return "", errors.New("Set STAGE_PUBLIC_URL to the browser URL for shared access.")
 	}
+	for _, l := range listeners {
+		if addr, ok := l.Addr().(*net.TCPAddr); ok && !addr.IP.IsLoopback() {
+			return "", errors.New("Shared access requires a private upstream. Bind Stage TCP to loopback or use a protected Unix socket, then connect through the HTTPS proxy.")
+		}
+	}
 	if u.Scheme == "https" {
 		// TLS terminates at the configured browser-facing proxy. The upstream
 		// can be a protected product socket instead of TCP.
@@ -47,29 +47,15 @@ func sharedOrigin(configured string, listeners []*listen.Listener) (string, erro
 	}
 	for _, l := range listeners {
 		addr, ok := l.Addr().(*net.TCPAddr)
-		if ok && addr.Port == port && (addr.IP.IsUnspecified() || addr.IP.IsLoopback() &&
-			(u.Hostname() == "localhost" || addr.IP.Equal(net.ParseIP(u.Hostname())))) {
+		if ok && addr.Port == port && addr.IP.IsLoopback() &&
+			(u.Hostname() == "localhost" || addr.IP.Equal(net.ParseIP(u.Hostname()))) {
 			return origin, nil
 		}
 	}
 	return "", errors.New(browserListener)
 }
 
-func runSharedOwner(ctx context.Context, o Options, dataDir, origin string, database *db.Store, lease store.Lease, logger *slog.Logger) error {
-	svc := auth.New(database, origin, time.Now)
-	control, err := ownercontrol.Open(dataDir, svc)
-	if err != nil {
-		return config.Invalid(fmt.Errorf("open private owner socket: %w", err))
-	}
-	defer control.Close()
-	if err := control.DiscardBootstrap(); err != nil {
-		return fmt.Errorf("clear private startup output: %w", err)
-	}
-	defer control.DiscardBootstrap()
-	state, setup, err := svc.Start(ctx, o.SharedAccess)
-	if err != nil {
-		return errors.New(auth.PublicMessage(err))
-	}
+func announceShared(o Options, control *ownercontrol.Server, dataDir string, state store.InstallationAccess, setup auth.Link, logger *slog.Logger) {
 	home, _ := os.UserHomeDir()
 	reissue := install.CLIName(home, buildinfo.Identity) + " owner reissue-setup"
 	switch {
@@ -79,21 +65,6 @@ func runSharedOwner(ctx context.Context, o Options, dataDir, origin string, data
 		}
 	case state.Mode == store.AccessPending:
 		logger.Info("Shared setup is pending. Run the setup reissue command as the installation owner.", "command", reissue)
-	}
-	logger.Info("Shared access is awaiting transport integration. Only installation owner commands are available.")
-	ctx, stop := context.WithCancel(ctx)
-	defer stop()
-	done := make(chan error, 1)
-	go func() { done <- control.Serve(ctx) }()
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		return <-done
-	case <-lease.Lost():
-		stop()
-		<-done
-		return store.ErrOwnershipLost
 	}
 }
 

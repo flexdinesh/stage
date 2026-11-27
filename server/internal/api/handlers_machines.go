@@ -11,6 +11,8 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/guard"
+	"github.com/flexdinesh/stage/server/internal/principal"
 )
 
 // Machines and worker auth (docs/api.md "Machines", docs/runtime.md
@@ -303,9 +305,20 @@ func RejectMachineTokens(h http.Handler) http.Handler {
 // worker guards a worker route. Channel routes negotiate their own protocol.
 // Other worker routes check the product API version. Authenticated routes
 // require a machine token; join accepts only a pairing code.
-func (s *server) worker(authed, checkAPI bool, fn func(http.ResponseWriter, *http.Request) error) http.Handler {
+func (s *server) worker(authed, checkAPI, pendingOK bool, fn func(http.ResponseWriter, *http.Request) error) http.Handler {
 	want := strconv.Itoa(buildinfo.APIVersion)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.Access != nil {
+			w.Header().Set("Cache-Control", "private, no-store")
+			if s.Access.Pending() && !pendingOK {
+				pending(w)
+				return
+			}
+			if _, dispatched := principal.From(r.Context()); dispatched || !guard.PrivatePeer(r) {
+				accessError(w, http.StatusForbidden, "principal_forbidden", "Use the Stage server's worker endpoint.")
+				return
+			}
+		}
 		if got := r.Header.Get(buildinfo.APIVersionHeader); checkAPI && got != want {
 			writeJSON(w, http.StatusConflict, map[string]string{
 				"error": fmt.Sprintf("API version mismatch: this server speaks %s, the worker sent %q; install the same Stage version on both", want, got),
@@ -331,6 +344,7 @@ func (s *server) worker(authed, checkAPI bool, fn func(http.ResponseWriter, *htt
 				return
 			}
 			ctx = context.WithValue(ctx, workerMachineKey{}, id)
+			ctx = principal.With(ctx, principal.Actor{Kind: principal.Machine, MachineID: id})
 		}
 		if err := fn(w, r.WithContext(ctx)); err != nil {
 			s.writeErr(w, r, err)

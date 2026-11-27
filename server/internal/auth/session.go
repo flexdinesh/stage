@@ -149,3 +149,57 @@ func (s *Service) SignOut(ctx context.Context, token string, audience store.Sess
 		return r.RevokeSession(ctx, session.ID, session.UserID, now)
 	})
 }
+
+// RotateAgent replaces this account's agent credential without affecting
+// human sessions. The active-account check and rotation share a transaction.
+func (s *Service) RotateAgent(ctx context.Context, issuer string, audience store.SessionAudience) (SignInResult, error) {
+	return withAccess(s.db.WriteAccess, ctx, func(r store.Access) (SignInResult, error) {
+		account, err := s.lockAgentAccount(ctx, r, issuer, audience)
+		if err != nil {
+			return SignInResult{}, err
+		}
+		userID := account.ID
+		now := s.now()
+		if err := r.RevokeUserAudience(ctx, userID, store.SessionAgent, now); err != nil {
+			return SignInResult{}, err
+		}
+		result, err := insertSession(ctx, r, account, store.SessionAgent, now)
+		if err != nil {
+			return SignInResult{}, err
+		}
+		return result, audit(ctx, r, now, "agent_credential_rotated", &userID, &userID, nil)
+	})
+}
+
+func (s *Service) RevokeAgent(ctx context.Context, issuer string, audience store.SessionAudience) error {
+	return s.db.WriteAccess(ctx, func(r store.Access) error {
+		account, err := s.lockAgentAccount(ctx, r, issuer, audience)
+		if err != nil {
+			return err
+		}
+		userID := account.ID
+		now := s.now()
+		if err := r.RevokeUserAudience(ctx, userID, store.SessionAgent, now); err != nil {
+			return err
+		}
+		return audit(ctx, r, now, "agent_credential_revoked", &userID, &userID, nil)
+	})
+}
+
+func (s *Service) lockAgentAccount(ctx context.Context, r store.Access, issuer string, audience store.SessionAudience) (store.Account, error) {
+	digest, ok := tokenDigest(issuer)
+	if !ok || audience != store.SessionBrowser && audience != store.SessionCLI {
+		return store.Account{}, ErrSession
+	}
+	if err := lockedMode(ctx, r, store.AccessClaimed, ErrForbidden); err != nil {
+		return store.Account{}, err
+	}
+	session, err := r.ActiveSession(ctx, digest, audience, s.now())
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Account{}, ErrSession
+	}
+	if err != nil {
+		return store.Account{}, err
+	}
+	return activeAccount(ctx, r, session.UserID, ErrSession)
+}

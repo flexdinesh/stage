@@ -371,6 +371,12 @@ type FireResult struct {
 // or active skips it; else a task is spawned with start_at = the fire time.
 // next_run_at always advances past now.
 func (s *Store) FireSchedule(ctx context.Context, id int64, now time.Time, grace time.Duration) (FireResult, error) {
+	return s.FireScheduleSince(ctx, id, now, grace, time.Time{})
+}
+
+// FireScheduleSince records a due fire before the installation claim as
+// missed even when the normal scheduler grace period has not elapsed.
+func (s *Store) FireScheduleSince(ctx context.Context, id int64, now time.Time, grace time.Duration, since time.Time) (FireResult, error) {
 	var res FireResult
 	err := s.e.Write(ctx, func(tx store.Tx) error {
 		// Write may rerun fn (Postgres retry): start each run from scratch.
@@ -398,7 +404,7 @@ func (s *Store) FireSchedule(ctx context.Context, id int64, now time.Time, grace
 		fireAt := *next
 		advance := spec.Next(now)
 		switch {
-		case now.Sub(fireAt) > grace:
+		case fireAt.Before(since) || now.Sub(fireAt) > grace:
 			n := 0
 			for t := fireAt; !t.IsZero() && !t.After(now) && n < 100000; t = spec.Next(t) {
 				n++

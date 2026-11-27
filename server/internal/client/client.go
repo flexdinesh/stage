@@ -341,17 +341,19 @@ func (c *Client) checkVersion(res *http.Response) error {
 
 // Health is GET /api/health (docs/api.md).
 type Health struct {
-	Status     string     `json:"status"`
-	DB         string     `json:"db"`
-	Service    string     `json:"service"`
-	Identity   string     `json:"identity"`
-	Version    string     `json:"version"`
-	Commit     string     `json:"commit"`
-	APIVersion int        `json:"apiVersion"`
-	InstanceID string     `json:"instanceId"`
-	StartedAt  *time.Time `json:"startedAt"`
-	Schema     int64      `json:"schema"`
-	Engine     string     `json:"engine"` // sqlite | postgres
+	Status       string     `json:"status"`
+	DB           string     `json:"db"`
+	Service      string     `json:"service"`
+	Identity     string     `json:"identity"`
+	Version      string     `json:"version"`
+	Commit       string     `json:"commit"`
+	APIVersion   int        `json:"apiVersion"`
+	InstanceID   string     `json:"instanceId"`
+	StartedAt    *time.Time `json:"startedAt"`
+	Schema       int64      `json:"schema"`
+	Engine       string     `json:"engine"` // sqlite | postgres
+	SharedAccess bool       `json:"sharedAccess,omitempty"`
+	SetupPending bool       `json:"setupPending,omitempty"`
 	// Harnesses is each connected harness's last known state.
 	Harnesses []struct {
 		Kind         string  `json:"kind"`
@@ -391,6 +393,19 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 		return h, &Error{Status: res.StatusCode, Msg: "database " + h.DB}
 	}
 	return h, nil
+}
+
+// AccessStatus discovers capabilities without credentials. The installation
+// ID is useful only together with the client's exact configured target.
+type AccessStatus struct {
+	Mode           string `json:"mode"`
+	InstallationID string `json:"installationId"`
+}
+
+func (c *Client) AccessStatus(ctx context.Context) (AccessStatus, error) {
+	var status AccessStatus
+	err := c.do(ctx, http.MethodGet, "/api/auth/status", nil, &status)
+	return status, err
 }
 
 func setID(q url.Values, key string, id *int64) {

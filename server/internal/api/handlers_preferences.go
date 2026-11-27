@@ -13,6 +13,10 @@ func (s *server) getPreferences(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if s.Access != nil {
+		// Notification preferences still belong to the personal inbox.
+		p.NotifyEvents = []db.TaskState{}
+	}
 	writeJSON(w, http.StatusOK, p)
 	return nil
 }
@@ -28,6 +32,9 @@ func (s *server) putDefaultConnection(w http.ResponseWriter, r *http.Request) er
 	p, err := s.Store.SetDefaultConnection(r.Context(), body.ConnectionID)
 	if err != nil {
 		return err
+	}
+	if s.Access != nil {
+		p.NotifyEvents = []db.TaskState{}
 	}
 	writeJSON(w, http.StatusOK, p)
 	return nil

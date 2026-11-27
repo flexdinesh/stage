@@ -1,9 +1,6 @@
 // Package guard rejects browser requests a Stage server must not serve:
 // DNS-rebinding Hosts, cross-site requests and form-encodable bodies. It is
-// request-origin hygiene, not authentication: anything that can reach a
-// listener directly (a local process, a non-browser client) still has full
-// access. Remote use belongs behind an authenticating HTTPS reverse proxy
-// (docs/runtime.md, "Request origin policy").
+// request-origin hygiene. The API separately authenticates principals.
 package guard
 
 import (
@@ -80,7 +77,7 @@ func New(allowedOrigins []string, log *slog.Logger) (*Policy, error) {
 //     cross-site form can send).
 func (p *Policy) Wrap(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		unix := isUnix(r)
+		unix := Unix(r)
 		host := hostname(r.Host)
 		if !p.hostAllowed(host, unix) {
 			if _, seen := p.logged.LoadOrStore(host, struct{}{}); !seen {
@@ -126,8 +123,8 @@ func (p *Policy) hostAllowed(host string, unix bool) bool {
 	return net.ParseIP(host) != nil
 }
 
-// isUnix reports whether the request arrived on a unix socket listener.
-func isUnix(r *http.Request) bool {
+// Unix reports whether the request arrived on a unix socket listener.
+func Unix(r *http.Request) bool {
 	a, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
 	return ok && a != nil && a.Network() == "unix"
 }
@@ -141,6 +138,29 @@ func hostname(h string) string {
 }
 
 func safeMethod(m string) bool { return m == "GET" || m == "HEAD" || m == "OPTIONS" }
+
+// CanonicalBrowser enforces the public Host and exact Origin. The installer
+// protects the upstream listener; forwarding headers carry no authority.
+func CanonicalBrowser(r *http.Request, origin, host string) bool {
+	if !strings.EqualFold(r.Host, host) {
+		return false
+	}
+	values := r.Header.Values("Origin")
+	if len(values) == 0 {
+		return safeMethod(r.Method)
+	}
+	return len(values) == 1 && values[0] == origin
+}
+
+// PrivatePeer recognizes requests received over Unix or a loopback hop.
+// Shared startup also rejects TCP binds outside loopback.
+func PrivatePeer(r *http.Request) bool {
+	if Unix(r) {
+		return true
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	return err == nil && net.ParseIP(host).IsLoopback()
+}
 
 func jsonOrMultipart(ct string) bool {
 	mt, _, err := mime.ParseMediaType(ct)

@@ -154,13 +154,14 @@ credential fields, sessions and grants specified in [ADR 0009](adr/0009-shared-a
 
 Personal startup uses the implicit user 1 and existing listener defaults.
 Shared opt-in is sticky. A successful setup claim attaches the first admin's
-credentials to user 1 in place. The foundation refuses startup against shared
-state until transport gates arrive in task #454. Public opt-in ships in task #460.
+credentials to user 1 in place. Internal shared startup gates requests and
+pauses work-producing runners until claim. Public opt-in ships in task #460.
 
 `GET /api/me` reports the acting user. Projects, tasks, trees, journal entries,
 schedules and machines expose their durable `created_by_user_id` as `createdBy`.
-Current writes use `db.ActingUser(ctx)` with the user set by `db.WithUser`, else
-the legacy default. Scheduled tasks and their initial notes keep the schedule
+Authenticated writes with a known person set `db.WithUser`. Operations with no
+known person still use the legacy creator default. The request principal
+controls authorization independently of `db.ActingUser`. Scheduled tasks and their initial notes keep the schedule
 creator on cron and Run now. Derived journal events currently use the column
 default and are written in the same transaction as their cause. See [API users](api.md#users)
 and [journal events](storage.md#journal-events).

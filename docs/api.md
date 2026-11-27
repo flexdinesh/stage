@@ -20,8 +20,8 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 | Status | Meaning |
 |---|---|
 | 400 | invalid body or query (bad enum, missing required field, bad JSON) |
-| 401 | worker routes only: bad, used or expired pairing code, missing, invalid or revoked machine token; any route: a machine token outside `/api/worker/*` ([Machines](#machines)) |
-| 403 | rejected by the request origin policy or the action's caller policy |
+| 401 | missing, expired, invalid or revoked credential on a protected route, invalid pairing code, or a machine token outside `/api/worker/*` |
+| 403 | rejected by the request origin policy, insufficient principal scope, unavailable grant, or setup pending |
 | 404 | resource not found |
 | 409 | conflict: action not allowed in current state, duplicate unique value, T3 setup refused (other T3 environment, auto-pair unavailable) |
 | 415 | write body not `application/json` / `multipart/form-data` |
@@ -84,10 +84,16 @@ Where and how a session starts is a harness launch option in `executionConfig.op
 - 503: the DB query failed (`status` and `db` are `"error"`, `schema` is `0`; the other fields are still present).
 - `service` is always `"stage"`, so a client can tell a Stage server from anything else on an address. `identity` is the installation identity, `version` the build (`"dev"` when unstamped), `commit` may be `""`. `instanceId` and `startedAt` identify the running process (`startedAt` is `null` only outside a real server). `schema` is the database's migration version ([runtime.md](runtime.md#schema-and-backups)). `engine` is the storage engine, `"sqlite"` or `"postgres"` ([storage.md](storage.md#engines-and-selection)); never the database URL. `publicUrl` is `STAGE_PUBLIC_URL` without a trailing slash, `null` when unset; the desktop uses it for copied links. `harnesses[].lastError` is nullable.
 - `apiVersion` equals the `Stage-Api-Version` header. See [runtime.md](runtime.md#health-and-version) for readiness and compatibility rules.
+- Shared public health limits the body to `status`, `db`, `service`, `version`, `apiVersion`, `sharedAccess`, and `setupPending`. The local service probe on Unix also receives `instanceId`. Active human sessions receive detailed health.
 
 ## Users
 
-Stage has no sign-in and no API auth (browser and API access stay behind the proxy boundary). One user exists, the default user (id 1), and every write is attributed to it ([architecture.md](architecture.md#users)). Sign-in identities will map to users later; machine tokens (ADR 0002) are machine principals, never users.
+Personal mode uses the default user (id 1). Internally staged shared mode
+authenticates humans and agents, preserves row 1 across claim, and
+records known person IDs in existing creator fields. Authorization comes
+from the admitted principal. Historical creator fields never confer
+permissions. Worker gateways carry machine provenance. Background work runs
+with an internal system principal. Durable actor projections follow in #456.
 
 **Source machine.** A write that arrived through a worker's agent gateway ([Agent gateway route](#apiworkergatewayapi-and-apiworkergatewaymcp)) also records the forwarding machine: `sourceMachineId` on `Task`, `Tree`, `JournalEntry`, `Schedule` and `Project`, next to `createdBy` (still the acting user). `null` when the write did not come through a gateway (the UI, an agent on the main server's machine, background work), for derived journal events (tree, membership, needs and task-state events; [storage.md](storage.md#journal-events)), discovered projects and schedule-spawned tasks (the schedule spawns them, also on Run now). The machine may since have been removed.
 
@@ -96,6 +102,54 @@ Stage has no sign-in and no API auth (browser and API access stay behind the pro
 ```json
 { "id": 1, "displayName": "Default user", "createdAt": "2026-11-22T10:00:00Z" }
 ```
+
+In shared mode it also returns the calling account's `email`, `role`
+(`admin` or `member`) and `status`. It requires a browser or CLI session.
+
+## Shared access transport
+
+The [shared access ADR](adr/0009-shared-access.md#principals-and-endpoint-policy)
+defines the staged rollout. Public mode opt-in is reserved for #460.
+
+| Request | Credential and result |
+| --- | --- |
+| `GET /api/auth/status` | Public `{mode, installationId}`. Mode is `personal`, `setup_pending` or `claimed`. The ID identifies the installation across process restarts. |
+| `POST /api/auth/login` | Browser JSON `{email,password}`. Exact canonical origin. Returns the account and sets the browser session cookie. |
+| `POST /api/auth/cli/login` | Native JSON `{email,password}` without browser origin, cookie or fetch headers, at the canonical target or its product Unix socket. Returns `{token, expiresAt, installationId}` with CLI audience. |
+| `POST /api/auth/{setup\|invite\|reset}/inspect` | Exact browser origin and purpose-bound `{token}`. Returns `{email,expiresAt}` without consuming the grant. |
+| `POST /api/auth/setup` | Exact browser origin and `{token,email,name,password}`. Claims the first admin and sets a browser session. |
+| `POST /api/auth/invite` | Exact browser origin and `{token,name,password}`. Redeems the grant for its fixed email and sets a browser session. |
+| `POST /api/auth/reset` | Exact browser origin and `{token,password}`. Returns 204 and revokes that account's sessions. |
+| `POST /api/auth/logout` | Revokes the presented human session. Clears the browser cookie when used and returns 204. |
+| `PATCH /api/account` | Human session and `{name}`. Returns the updated account. |
+| `POST /api/account/password` | Human session and `{currentPassword,password}`. Returns 204 and revokes all of that account's sessions. |
+| `POST /api/account/agent-credential` | Human session. Replaces the calling account's agent credential and returns `{token, expiresAt, installationId}` once. |
+| `DELETE /api/account/agent-credential` | Human session. Revokes only that account's agent credential and returns 204. |
+| `GET /api/admin/accounts`, `GET /api/admin/invitations` | Admin session. Lists newest first with optional `beforeId` and `limit` (maximum 100). |
+| `PATCH /api/admin/accounts/{id}/role` | Admin session and `{role}`. Returns 204. |
+| `POST /api/admin/accounts/{id}/disable` | Admin session. Revokes existing browser, CLI and agent sessions for that account and returns 204. |
+| `POST /api/admin/accounts/{id}/reset` | Admin session. Creates a member reset grant (201). Admin recovery uses local owner control. |
+| `POST /api/admin/invitations` | Admin session and `{email}`. Creates an invite grant (201). |
+| `POST /api/admin/invitations/{id}/replace`, `DELETE /api/admin/invitations/{id}` | Admin session. Replaces the invite (201) or revokes it (204). |
+
+Grant creation returns `{id,url,expiresAt}` once. The grant token is in the
+URL fragment. Send it only in the appropriate inspection or redemption body.
+These endpoints and protected shared responses use a no-store policy.
+Cookie requests that write, including login and logout, must include the
+exact configured browser `Origin`.
+
+CLI bearer credentials authorize human REST. Agent bearer credentials
+authorize scoped REST and HTTP MCP, independent of any caller-session hint.
+A signed-in browser with the canonical origin can invoke MCP with agent
+authority. MCP reuses the same policy on each tool's in-process REST
+requests. Shared mode requires authentication on direct Unix and TCP.
+Clients must bind stored credentials to both the installation ID and exact
+configured target. Credential storage and client login commands land in
+later slices. Unauthenticated product clients receive
+`401 authentication_required`. Valid credentials with an incompatible
+scope receive `403 principal_forbidden`. Pending setup returns
+`403 setup_pending`. Legacy inbox, push and their SSE remain closed with
+`403 shared_client_unavailable` until per-account delivery is available.
 
 ## Machines
 
@@ -168,7 +222,7 @@ Called by `stage worker` on a remote machine, never by the UI. They are the only
 - except the channel GET and POST, requires `Stage-Api-Version` equal to the server's `apiVersion`; missing or different: 409 `{error, code: "api_version_mismatch"}`;
 - except join, requires `Authorization: Bearer <machine token>`. Missing: 401 `machine_token_required` with `WWW-Authenticate: Bearer realm="stage-worker"`. Malformed, wrong, or its machine removed: 401 `machine_token_invalid` with `error="invalid_token"`. An unknown worker path needs a token before it gets 404.
 
-A machine token (`stage_mt_<id>_<secret>`, 256 random bits) is a machine principal, not a user. One exists per machine; the server stores only its SHA-256 and compares in constant time. It is accepted only here: `Authorization: Bearer stage_mt_...` on any other `/api` route or on `/mcp` gets 401 `machine_token_not_accepted`. Other `Authorization` values (a proxy's own) are ignored there.
+A machine token (`stage_mt_<id>_<secret>`, 256 random bits) identifies a machine principal. The server stores its SHA-256 and compares in constant time. Using it on a non-worker `/api` route or `/mcp` gets 401 `machine_token_not_accepted`. Personal mode passes other authorization schemes through for authenticating proxies.
 
 #### `POST /api/worker/join`
 Redeem a pairing code. Body (strict) `{ "code": string, "label"?: string, "version"?: string }` (`label`: the worker's suggested name, used when the pairing has none; `version`: its build). No `Authorization` header (400 if sent). 201, `Cache-Control: no-store`:
@@ -288,7 +342,10 @@ that the main has requested a fresh watch sample after a gap.
 #### `/api/worker/gateway/api/...` and `/api/worker/gateway/mcp`
 A worker's agent gateway forwards the local `/api/...` and `/mcp` requests of agents on its machine here ([runtime.md](runtime.md#agent-gateway)), any method, with the machine token and `Stage-Api-Version` (the worker route checks above apply first). The server serves the rest of the path as that same request on its own `/api` or `/mcp`, with the same handlers, bodies, statuses and streams, and with the token's machine as the forwarding machine: writes record it as `sourceMachineId` ([Users](#users)). The `Authorization` header is dropped before the inner request; `Stage-Caller-Session` and body caller fields (`callerSession`, `sourceSession`, `originSession`) pass unchanged.
 
-- Machine management and per-machine harness setup changes are refused: `POST /api/machines/pairings`, `DELETE /api/machines/pairings/{id}`, `PATCH` and `DELETE /api/machines/{id}`, `POST /api/machines/{id}/ping`, `PUT /api/machines/{id}/harnesses/{kind}/settings`, `POST /api/machines/{id}/harnesses/{kind}/actions/{action}` and `DELETE /api/machines/{id}/harnesses/{kind}/connection` get 403 `gateway_forbidden` (a token that could mint pairing codes could outlive its revocation). Reads (`GET /api/machines`, `GET /api/machines/{id}/harnesses...`) work.
+- Machine management and harness setup changes return 403 `gateway_forbidden`. This covers both the local `/api/harnesses/...` and the per-machine routes. Machine inventory and harness status remain readable.
+- Shared gateway requests require a valid private-socket attestation in
+  `Stage-Private-Worker-Gateway` along with the machine token. See
+  [Agent gateway](runtime.md#agent-gateway).
 - `POST /api/connections/:connectionId/observations` pushes only for the forwarding machine's own connections; another machine's is 403 `gateway_forbidden`.
 - `/api/worker/*` and any path that is neither `/api/...` nor `/mcp`: 404.
 
