@@ -27,6 +27,9 @@ type Fake struct {
 	Catalog     Catalog
 	Sent        []FakeSend
 	Interrupted []string // interrupted thread ids
+	// Renamed: every accepted RenameThread; RenameErr fails it (tests).
+	Renamed   []FakeRename
+	RenameErr error
 	// Uploads: every UploadAttachment, in order. Discarded: discarded ids.
 	Uploads   []FakeUpload
 	Discarded []string
@@ -645,6 +648,25 @@ func (f *Fake) Interrupt(_ context.Context, threadID string) error {
 	if t.ActiveRunID != "" {
 		f.setStatus(t, StatusInterrupted)
 	}
+	return nil
+}
+
+// FakeRename is one RenameThread call.
+type FakeRename struct{ ThreadID, Title string }
+
+// RenameThread mimics t3_thread_update rename: the thread takes the title.
+func (f *Fake) RenameThread(_ context.Context, threadID, title string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.RenameErr != nil {
+		return f.RenameErr
+	}
+	t, ok := f.threads[threadID]
+	if !ok {
+		return ErrNotFound
+	}
+	t.Title = strings.TrimSpace(title)
+	f.Renamed = append(f.Renamed, FakeRename{ThreadID: threadID, Title: t.Title})
 	return nil
 }
 

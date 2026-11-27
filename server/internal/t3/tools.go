@@ -3,6 +3,7 @@ package t3
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -446,6 +447,18 @@ func (c *MCPClient) Interrupt(ctx context.Context, threadID string) error {
 		return ErrNotFound
 	}
 	return c.call(ctx, "t3_thread_interrupt", map[string]any{"threadId": threadID, "stop": true}, nil)
+}
+
+func (c *MCPClient) RenameThread(ctx context.Context, threadID, title string) error {
+	title = strings.TrimSpace(title)
+	if threadID == "" {
+		return ErrNotFound
+	}
+	if title == "" {
+		return errors.New("t3 t3_thread_update: title is required")
+	}
+	args := map[string]any{"threadId": threadID, "action": "rename", "title": title, "clientRequestId": "stage-rename:" + rand.Text()}
+	return c.call(ctx, "t3_thread_update", args, nil)
 }
 
 func (c *MCPClient) Capabilities(ctx context.Context) (Catalog, error) {

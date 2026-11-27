@@ -24,12 +24,14 @@ test("capability lines: declared operations in Stage's order and words, with the
     launch: { available: true },
     images: { available: false },
     stop: { available: true, reason: "ignored while available" },
+    sessionRename: { available: false, reason: "Claude Code has no rename interface." },
   });
   assert.deepEqual(lines, [
     { op: "launch", label: OPERATION_LABELS.launch, available: true, reason: null },
     { op: "stop", label: OPERATION_LABELS.stop, available: true, reason: null },
     { op: "images", label: OPERATION_LABELS.images, available: false, reason: null },
     { op: "send", label: OPERATION_LABELS.send, available: false, reason: "Sessions take follow-ups in their own client." },
+    { op: "sessionRename", label: "Rename sessions with the task title", available: false, reason: "Claude Code has no rename interface." },
   ]);
   assert.deepEqual(capabilityLines({}), []);
 });

@@ -179,6 +179,17 @@ func (h *Host) Handlers() map[string]workerchan.WorkerHandler {
 			}
 			return searcher.SearchSessions(ctx, q)
 		}),
+		KindSessionRename: h.with(func(ctx context.Context, a execution.Adapter, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
+			namer, ok := execution.As[execution.SessionNamer](a)
+			if !ok {
+				return nil, unsupported("session rename")
+			}
+			var r SessionRenameRequest
+			if err := decode(env, &r); err != nil {
+				return nil, err
+			}
+			return Empty{}, namer.RenameSession(ctx, r.Session, r.Title)
+		}),
 		KindOpening: h.with(func(ctx context.Context, a execution.Adapter, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
 			var r OpeningRequest
 			if err := decode(env, &r); err != nil {

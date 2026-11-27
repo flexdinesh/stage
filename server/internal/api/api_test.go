@@ -189,6 +189,11 @@ type env struct {
 const publicURL = "http://localhost:3773"
 
 func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
+	return newEnvWrapped(t, nil, opts...)
+}
+
+// newEnvWrapped is newEnv with the T3 adapter wrapped (nil: as is).
+func newEnvWrapped(t *testing.T, wrap func(*t3.Adapter) execution.Adapter, opts ...func(*api.Deps)) *env {
 	pool := testDB.Reset(t)
 	store := db.NewStore(pool)
 	// Tests complete tasks explicitly; inference tests turn auto-complete on.
@@ -198,7 +203,11 @@ func newEnv(t *testing.T, opts ...func(*api.Deps)) *env {
 	fake := t3.NewFake()
 	client := &flakyT3{Fake: fake}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := engine.NewWithAdapters(store, testHarnesses, map[int64]execution.Adapter{dbtest.T3Connection: t3.NewAdapter(client)}, log)
+	var adapter execution.Adapter = t3.NewAdapter(client)
+	if wrap != nil {
+		adapter = wrap(t3.NewAdapter(client))
+	}
+	svc := engine.NewWithAdapters(store, testHarnesses, map[int64]execution.Adapter{dbtest.T3Connection: adapter}, log)
 	runner := release.NewRunner(store, svc.Coordinator, log)
 	svc.Coordinator.OnTransition = runner.OnTransition
 	push := notify.New(store, "https://stage.test", log)

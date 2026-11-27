@@ -64,6 +64,9 @@ type Client interface {
 	DiscardAttachment(ctx context.Context, attachmentID string) error
 	// Interrupt calls t3_thread_interrupt with stop:true (Stop button semantics).
 	Interrupt(ctx context.Context, threadID string) error
+	// RenameThread calls t3_thread_update {action: "rename"} with a fresh
+	// clientRequestId (reused when the call is retried).
+	RenameThread(ctx context.Context, threadID, title string) error
 	// Capabilities calls orchestrator_capabilities. Returns all providers
 	// unfiltered; callers drop providers with non-empty Constraints.
 	Capabilities(ctx context.Context) (Catalog, error)

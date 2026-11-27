@@ -415,7 +415,7 @@ declared capabilities.
 
 Use a typed operation when Stage branches on availability.
 `execution.Op` covers `launch`, `stop`, `adopt`, `reply`, `opening`,
-`attention`, `sessionSearch`, `images`, `respond` and `send`.
+`attention`, `sessionSearch`, `images`, `respond`, `send` and `sessionRename`.
 Every adapter declares each operation and a reason when unavailable.
 For example, `images` gates image fields and image delivery in the API
 and MCP. The remote proxy passes the declarations through.
@@ -445,6 +445,37 @@ On workers the operation requires both the `sessionSearcher` trait on
 the connection and the `adapter.sessionSearch` request kind. These use
 the existing worker channel negotiation. An older worker can still
 serve its other operations. [Session search API](api.md#session-search)
+
+### Session rename
+
+`execution.SessionNamer` is an optional role gated by the `sessionRename`
+operation: `RenameSession(ctx, ref, title)` gives a session a new name in
+its harness. Stage calls it only after a task's title changes (`PATCH
+/api/tasks/:id`, whatever the caller: UI, MCP or CLI), and only for a
+session Stage launched; an adopted session keeps the name its harness
+gave it. The coordinator runs the rename in the background with a 10 s
+timeout. Renames of one task run in order, each with the title current
+when it runs, so the last edit names the session. A declared-unavailable
+operation is skipped. Any other failure (the harness or worker is
+unreachable, its declaration cannot be read, or the rename fails) appends
+a system journal note, "Could not rename the <harness> session: <reason>",
+and never fails the update. The harness owns the name; Stage stores
+nothing about it.
+
+Each harness names a session at launch from the task title, and renames
+it with its own interface:
+
+| Harness | Name at launch | Rename |
+| --- | --- | --- |
+| T3 | `t3_thread_launch` `title`. | `t3_thread_update {threadId, action: "rename", title, clientRequestId}` (fresh key per rename, retried with the same key). |
+| Codex | `thread/name/set` right after `thread/start`; a failure leaves Codex's preview. | `thread/name/set {threadId, name}`. |
+| OpenCode | `POST /api/session` `title`. | `PATCH /api/session/{id} {title}` (204). Available when OpenAPI advertises `session.update` with a `title`; otherwise unavailable with a version reason. |
+| Claude Code | `claude --bg -n <title>`. | Unavailable: "Claude Code has no rename interface." |
+
+On workers the operation requires both the `sessionNamer` trait on the
+connection and the `adapter.sessionRename` request kind. An older worker
+declares it unavailable ("Update Stage on the worker machine...") and
+keeps its other operations. [Task update](api.md#patch-apitasksid)
 
 ### Interaction
 

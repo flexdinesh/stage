@@ -766,6 +766,12 @@ func TestFeatures(t *testing.T) {
 			t.Fatalf("%s %+v", op, a)
 		}
 	}
+	if a := c.Operations[execution.OpSessionRename]; a.Available || a.Reason != "Claude Code has no rename interface." {
+		t.Fatalf("session rename %+v", a)
+	}
+	if _, ok := execution.As[execution.SessionNamer](f.Adapter(conn)); ok {
+		t.Fatal("Claude Code offers a session rename it does not have")
+	}
 	for _, op := range []execution.Op{execution.OpImages, execution.OpSend, execution.OpAttention} {
 		if a := c.Operations[op]; !a.Available {
 			t.Fatalf("%s %+v", op, a)

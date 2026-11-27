@@ -23,10 +23,11 @@ const (
 	OpImages        Op = "images"        // launch with image attachments
 	OpRespond       Op = "respond"       // list and answer pending requests (Interactive)
 	OpSend          Op = "send"          // send a message to the session (Interactive)
+	OpSessionRename Op = "sessionRename" // rename a Stage-launched session after its task's title (SessionNamer)
 )
 
 // Ops are every operation, in a fixed order.
-var Ops = []Op{OpLaunch, OpStop, OpAdopt, OpReply, OpOpening, OpAttention, OpSessionSearch, OpImages, OpRespond, OpSend}
+var Ops = []Op{OpLaunch, OpStop, OpAdopt, OpReply, OpOpening, OpAttention, OpSessionSearch, OpImages, OpRespond, OpSend, OpSessionRename}
 
 // DeclaresOperations reports an operation c leaves out, or one unavailable
 // without a reason. Every adapter declares them all (its contract tests).

@@ -132,6 +132,9 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	if contract.search.available {
 		ops[execution.OpSessionSearch] = available
 	}
+	if contract.rename {
+		ops[execution.OpSessionRename] = available
+	}
 	return execution.Capabilities{Operations: ops, ModeLabel: "Agent", Options: launchOptions()}, nil
 }
 
@@ -154,6 +157,7 @@ func operations() map[execution.Op]execution.Availability {
 		execution.OpImages:        {Reason: "Image attachment delivery has not been verified for this adapter."},
 		execution.OpRespond:       answer,
 		execution.OpSend:          answer,
+		execution.OpSessionRename: {Reason: sessionRenameUnavailable},
 	}
 }
 

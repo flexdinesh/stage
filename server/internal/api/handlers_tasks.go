@@ -360,6 +360,10 @@ func (s *server) updateTask(w http.ResponseWriter, r *http.Request) error {
 	if p.StartMode.Set {
 		s.treeChanged()
 	}
+	// A new title renames the session Stage launched, in the background.
+	if p.Title.Set && task.Title != current.Title && !task.Adopted && task.Session != nil {
+		s.Engine.Coordinator.RenameSessionLater(r.Context(), id)
+	}
 	writeJSON(w, http.StatusOK, s.task(task))
 	return nil
 }
