@@ -488,7 +488,11 @@ acts on. A request that is no longer pending returns `ErrNotFound` (404).
 A successful follow-up records a task timeline entry. Users and agents can
 send and respond, never from the task's own session
 (`self_action_forbidden`, [ADR 0011](adr/0011-agent-operation-parity.md)). Claude Code supplies both operations, with responses requiring
-its hook receiver. [Interaction API](api.md#session-interaction-api-v6)
+its hook receiver. T3 supplies both for its questions and messages
+([T3 interaction](#t3-interaction)). A harness that can wait on requests
+it can't list declares `unlistedRequests` on its descriptor with where to
+answer them; the app then shows that instead of a Reply composer when a
+needs-input session lists none. [Interaction API](api.md#session-interaction-api-v6)
 
 ### Actions and facts
 
@@ -624,6 +628,33 @@ as Backlog. The newest run supplies the observed state and end time, skipping
 cancelled or rolled-back runs that never started, such as queued follow-ups.
 Settlement reports a `settled` closure and grants acceptance only through
 inferred completion.
+
+### T3 interaction
+
+T3 implements `Interactive` over its MCP (`server/internal/t3/interaction.go`).
+
+- **Requests.** `t3_pending_request` lists a thread's pending user-input
+  requests; each is read and becomes one `question` request. Questions keep
+  their ID, header, prompt and multi-select, are `custom` unless T3
+  disallows free answers, and their options keep label, description and
+  preview. A request answered while Stage reads it is left out. T3 reports
+  no request time, so `createdAt` is zero. T3's MCP neither lists nor
+  answers permission requests: they are answered in T3, and the descriptor
+  declares `unlistedRequests` ("Approve permission requests in T3.").
+- **Respond.** Stage answers by option label or one custom text. The adapter
+  sends T3's option value for a valued option and checks the answers by
+  T3's client rules (every question, arrays only for multi-select, custom
+  text only where allowed) before sending. A misfit answer, an option or
+  text without answers, or T3 refusing the answer is `*Invalid` (400). A
+  request already answered, expired, unknown, or on a missing thread is
+  `ErrNotFound` (404).
+- **Send.** `t3_thread_send` in mode `auto`: an idle thread starts a new
+  turn and a running one is steered (T3 queues when it can't steer). The
+  app still waits for a running task's turn to end; agents, the CLI and the
+  API can steer. A thread with any pending request takes no message
+  (`*Busy`, 409 `session_busy`: answer its questions first, or approve its
+  permission request in T3), nor does one T3 won't send to
+  (`thread_not_sendable`, such as an archived thread).
 
 ## OpenCode adapter
 

@@ -164,7 +164,7 @@ degrades through declared availability.
 | Scoped action | Relay a harness-specific operation such as labelling a session. | Declare the target, inputs, confirmation, caller authorization and availability. Connection setup uses the connector. Session and project actions use `execution.Actor` and capability declarations. The owner validates opaque input. |
 | Typed operation | Let Stage decide whether it can launch, stop, adopt, read a reply or opening, list attention, search for sessions, launch with images, respond or send. | Declare each [`execution.Op`](../server/internal/execution/ops.go) with availability and a reason when unavailable. Use `WorkspaceFeatures` for a workspace-specific declaration. |
 | Launch option | Pass a choice, boolean or text value at launch, such as a harness worktree option. | Declare the field in capabilities and validate and translate it from `execution.Config`. |
-| Descriptor policy | Apply a Stage invariant such as launch recovery, attribution, identity or completion from a closure signal. | Declare it in the descriptor. Stage interprets the policy for every kind that uses it. |
+| Descriptor policy | Apply a Stage invariant such as launch recovery, attribution, identity or completion from a closure signal. | Declare it in the descriptor. Stage interprets the policy for every kind that uses it. A harness whose `respond` lists only some request kinds declares `unlistedRequests` with where to answer the rest (T3: permission requests). |
 
 An agent can invoke an action only when the declaration allows agents.
 Project actions use an exact workspace scoped to its owning connection.

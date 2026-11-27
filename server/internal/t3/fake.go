@@ -586,8 +586,12 @@ func launchResult(d *ThreadDetail) LaunchResult {
 func (f *Fake) SendMessage(_ context.Context, threadID, message string, mode SendMode) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, ok := f.threads[threadID]; !ok {
+	t, ok := f.threads[threadID]
+	if !ok {
 		return ErrNotFound
+	}
+	if t.Archived {
+		return &ToolError{Tool: "t3_thread_send", Code: "thread_not_sendable", Message: "Thread " + threadID + " is archived."}
 	}
 	f.Sent = append(f.Sent, FakeSend{ThreadID: threadID, Message: message, Mode: mode})
 	return nil
@@ -941,7 +945,8 @@ func demoQuestions() []Question {
 	return []Question{
 		{ID: "approach", Header: "Approach", Question: "Which rollout approach should I take?", Options: []QuestionOption{
 			{Label: "Big bang", Description: "Replace the sync loop in one change"},
-			{Label: "Incremental", Description: "Run old and new loops side by side, compare, then switch", Value: ptrString("incremental")},
+			{Label: "Incremental", Description: "Run old and new loops side by side, compare, then switch", Value: ptrString("incremental"),
+				Preview: "sync.loop = flag(\"sync-v2\") ? newLoop : oldLoop\ncompare(oldLoop, newLoop) // one week"},
 		}},
 		{ID: "checks", Header: "Checks", Question: "Which checks must pass before merging?", MultiSelect: true, Options: []QuestionOption{
 			{Label: "Unit tests", Description: "go test ./..."},

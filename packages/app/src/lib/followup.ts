@@ -23,15 +23,16 @@ export const mayFollowUp = (state: TaskState): boolean => state === "needs_input
 /**
  * The composer for a task, or null when it has none: the connection doesn't offer `send` or is retired, the task has
  * no session, its state can't take a message (backlog, failed, interrupted, cancelled), or its session waits
- * on requests (the Requests panel answers those) or Stage hasn't read them yet.
+ * on requests (the Requests panel answers those), on requests only its harness answers (`unlisted`: the harness
+ * declares `unlistedRequests`), or Stage hasn't read them yet.
  */
 export function followUpView(
   task: { state: TaskState; externalSessionId: string | null; connectionActive?: boolean },
-  session: { offered: boolean; requestsReady: boolean; requestCount: number },
+  session: { offered: boolean; requestsReady: boolean; requestCount: number; unlisted?: boolean },
 ): FollowUpView | null {
   if (!session.offered || task.connectionActive === false || task.externalSessionId === null) return null;
   if (task.state === "needs_input") {
-    return session.requestsReady && session.requestCount === 0 ? { placement: "lead", title: "Reply", busy: false } : null;
+    return session.requestsReady && session.requestCount === 0 && session.unlisted !== true ? { placement: "lead", title: "Reply", busy: false } : null;
   }
   if (task.state === "done") return { placement: "after-reply", title: "Follow up", busy: false };
   if (BUSY_STATES.includes(task.state)) return { placement: "after-reply", title: "Follow up", busy: true };

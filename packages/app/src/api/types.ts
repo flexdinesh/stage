@@ -373,6 +373,8 @@ export interface HarnessDescriptor {
   linkSchemes: string[];
   /** Session web links can require a browser address in connection settings. */
   webAddress?: boolean;
+  /** The harness can wait on requests Stage can't list: a needs-input session with none listed waits on one of those, not on a reply. The copy says where to answer them. */
+  unlistedRequests?: string;
   setup: HarnessSetup;
   /** How the harness names an agent's session: MCP _meta keys it sends per call, and the variable its agents read their session id from. */
   attribution: {
@@ -920,6 +922,8 @@ export interface RequestQuestion {
 export interface RequestQuestionOption {
   label: string;
   description?: string;
+  /** Preformatted text the option shows (monospaced). */
+  preview?: string;
 }
 
 /** Answers a SessionRequest: an option id, text, or both; a question request answers each question id (labels, or one free text). */

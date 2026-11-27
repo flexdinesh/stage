@@ -111,6 +111,11 @@ type Descriptor struct {
 	SessionHint string `json:"sessionHint,omitempty"`
 	// DiscoveryHint explains how to make a workspace visible to this harness.
 	DiscoveryHint string `json:"discoveryHint,omitempty"`
+	// UnlistedRequests: the harness can wait on requests that Stage can't
+	// list (Interactive.Requests omits them), so a needs-input session with
+	// no listed requests waits on one of those, not on a reply. It is the
+	// copy saying where to answer them. "": every request is listed.
+	UnlistedRequests string `json:"unlistedRequests,omitempty"`
 	// Wraps declares that this harness can run other harnesses' sessions.
 	// Nil means it runs only its own.
 	Wraps *Wraps `json:"wraps,omitempty"`

@@ -175,7 +175,7 @@ function stamp(iso: string): string {
 
 function TaskBody({ task }: { task: TaskDetail }) {
   const api = useApi();
-  const { kindName } = useHarnesses();
+  const { kindName, descriptor } = useHarnesses();
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
   const [form, setForm] = useState<"edit" | "duplicate" | null>(null);
@@ -224,7 +224,9 @@ function TaskBody({ task }: { task: TaskDetail }) {
   // A follow-up into the session: leads under the alert when its turn ended asking you, else sits under Last word.
   // The draft and the send live here so both survive the panel moving and the session working.
   const sendOp = useConnectionOperation(task.connectionId, "send", task.externalSessionId !== null && mayFollowUp(task.state));
-  const followUp = followUpView(task, { offered: sendOp.offered, requestsReady, requestCount: requests.length });
+  // Requests Stage can't list (the harness declares them): a needs-input session with none listed waits on one there.
+  const unlisted = descriptor(task.harness)?.unlistedRequests ?? "";
+  const followUp = followUpView(task, { offered: sendOp.offered, requestsReady, requestCount: requests.length, unlisted: unlisted !== "" });
   const replyLeads = followUp?.placement === "lead";
   const sendMessage = useSendMessage(task.id);
   const [draft, setDraft] = useState("");
@@ -303,7 +305,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
               ? `${kindName(task.harness)} is waiting for your answer.`
               : replyLeads
                 ? replyPrompt(kindName(task.harness))
-                : `${kindName(task.harness)} needs input${action?.kind === "resume" ? ". Answer it in a terminal with the resume command." : ""}`}
+                : `${kindName(task.harness)} needs input${unlisted !== "" ? `. ${unlisted}` : action?.kind === "resume" ? ". Answer it in a terminal with the resume command." : ""}`}
           </Alert>
         ) : null}
         <RequestsPanel taskId={task.id} requests={requests} harness={kindName(task.harness)} needsInput={task.state === "needs_input"} />
