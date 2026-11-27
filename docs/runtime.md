@@ -353,14 +353,14 @@ message up (`POST /api/worker/channel`), both worker routes
 `server/internal/workerchan` owns protocol and transport.
 `server/internal/api` serves the routes and authenticates callers.
 `server/internal/worker` runs the client and `server/internal/remote`
-proxies remote machine calls. The main server runs each connection's
-observation loops and routes event callbacks to `observe.Service.Ingest`.
+proxies remote machine calls. Each worker runs observation beside its
+adapters and delivers batches to the main server.
 [Remote machines](execution.md#remote-machines) · [Observation](execution.md#observation)
 
 - **Handshake.** The authenticated opening GET carries the inclusive
   `Stage-Channel-Protocol-Min` and `Stage-Channel-Protocol-Max` integer
-  headers. Both bounds are 2 for this channel contract. The server uses the highest shared
-  version and advertises its `protocolRange` (`min`, `max`),
+  headers. The server uses the highest shared version and advertises its
+  `protocolRange` (`min`, `max`),
   `protocolVersion`, harness `kinds` and accepted `channelKinds` in
   `hello`. Malformed ranges get 400 `invalid_channel_protocol`.
   Disjoint ranges or a legacy worker with no range get 409
@@ -395,15 +395,23 @@ observation loops and routes event callbacks to `observe.Service.Ingest`.
   request kind or trait answers `operation_unavailable` before dispatch.
 - **Worker-initiated calls.** An up POST may carry a call; its result is the
   POST's response. A callback names the waiting request (`call`) and runs
-  only while that request waits (`checkpoint.save`, `launch.image`,
-  `events.observation`); after that it gets `call_ended`. A callback still
-  running when its request stops waiting is cancelled, and the request
-  returns only after it ended. An up message is at most 32 MiB (launch images travel
-  down one per `launch.image` reply). Public settings upcalls
-  `setup.settings.get` and `setup.settings.save` and the generic
-  `setup.status.error` callback are announced in `hello.channelKinds`.
-  Settings reads needed by composition may run before ready. Update the
-  main server and its workers together when upgrading from protocol 1.
+  only while that request waits (`checkpoint.save`, `launch.image`); after
+  that it gets `call_ended`. A callback still running when its request stops
+  waiting is cancelled, and the request returns after it ends. An up message
+  is at most 32 MiB (launch images travel down one per `launch.image` reply).
+  `hello.channelKinds` includes `setup.snapshot`, `setup.settings.get`,
+  `setup.settings.save` and `setup.status.error`. `setup.snapshot` supplies
+  public settings and active connection identities for the kinds selected
+  by the worker. Setup reads needed by composition may run before ready.
+- **Observation.** The main advertises `observe.batch` in
+  `hello.channelKinds`. The worker advertises `observe.watch` in
+  `ready.channelKinds` and `observe.batch` in `ready.upKinds`. Remote observation requires both. The main sends the
+  full watch set when the worker attaches and as the set changes. The
+  worker acknowledges it with its durable producer ID. Batches go up on
+  the authenticated channel independently of command requests. A reconnect
+  establishes a new channel session and keeps the producer and queued
+  cursors. Update the main server and its workers together for this
+  channel change. [Observation wire format](api.md#worker-observation)
 - **Presence.** The server reports `negotiating` until ready is accepted,
   then `online` while the session remains live. A refusal appears as
   `needs_update` with `statusReason` in Machines until compatible
@@ -457,6 +465,46 @@ All take `--config PATH` and `--json`. Worker commands never use
   does not wait for the channel.
 - One identity runs the main server or a worker service, not both (the
   desktop switches roles on join and leave, [desktop.md](desktop.md#worker)).
+
+### Worker observation files
+
+The worker keeps public compose inputs in `settings-cache.json`, its last
+accepted snapshot in `watch.json`, and pending observations under `outbox/`, beside
+the worker config. The files are private (`0600`, under `0700` directories),
+atomically replaced and scoped to the current join. The settings cache
+carries a schema and join identity, harness kinds, connection identities and
+public settings. Harness credentials remain in `credentials.json`. Join
+and leave discard the previous join's observation state.
+
+A restarted worker can compose its adapters and resume observation from a
+valid cache and watch before the main server is reachable. A first start
+without a cache waits for setup. Invalid or mismatched cache data is logged
+and recovered through the next successful channel attachment. Worker status
+reports `waiting_for_setup`, `waiting_for_watch`, `recovery_needed`,
+`sampling` or `degraded` under `process.observation`. On reconnect,
+the worker reconciles public settings and connection changes with the main
+and applies its fresh watch. Queued records keep their original identity.
+Setup mutations and task commands still need the main server.
+
+The outbox keeps the latest redundant sample per scoped session and
+preserves distinct entries into `needs_input`, `done` and `failed`, including
+an intervening state when needed to distinguish repeated entries. Samples
+keep their observed times. Cursors are assigned when a batch is sealed.
+Only one sealed batch is in flight at a time. Retries and restarts keep its
+IDs and records intact. A partial acknowledgement advances the confirmed
+cursor, and the sealed batch remains intact until fully acknowledged.
+
+The persisted queue holds at most 16 MiB and 10,000 records, including the sealed
+batch. Atomic writes use a temporary file before replacing the queue file.
+A normal batch holds at most 100 records and 256 KiB. One larger
+record may go alone within both the queue limit and the 32 MiB transport
+limit. Under pressure the queue reclaims redundant samples first. If it
+cannot retain all records, it accounts for the loss with a durable gap
+count and time range. The main requests a fresh sample after ingesting a
+gap. Resampling repairs the current view. The gap records the loss of
+history that a later read cannot recover. Worker status reports the
+producer's cumulative count in `process.observationLost`. A fresh
+resample watch clears the degraded state and retains that count.
 
 ## Agent gateway
 
@@ -558,8 +606,8 @@ User guide: website `/docs/usage/workers` (Multiple machines).
 - **Image.** The Docker image sets `STAGE_MACHINE_PROFILE=container`: the main
   server's own machine never runs local-process harnesses
   ([Machine profile](#machine-profile-and-hosted-harnesses)). It reports
-  build version `dev`; the worker and the main server need the same API
-  version, not the same build.
+  build version `dev`. Workers need a compatible channel protocol for the
+  channel and the same API version for the remaining worker routes.
 
 **Proxy.** In front of every listener a network can reach:
 

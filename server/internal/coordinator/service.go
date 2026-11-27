@@ -26,7 +26,8 @@ type Service struct {
 	CLI                  string // installed CLI name (install.CLIName), named in launch journal instructions
 	LaunchAttemptTimeout time.Duration
 	OnTransition         func(context.Context, workevent.TaskChange)
-	OnAccepted           func() // a completion was inferred (tree release may follow)
+	OnObservedTransition func(context.Context, workevent.TaskChange) // observation inbox writes have already committed
+	OnAccepted           func()                                      // a completion was inferred (tree release may follow)
 }
 
 type Workspaces interface {

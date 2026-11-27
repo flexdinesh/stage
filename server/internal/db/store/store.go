@@ -47,6 +47,7 @@ type Tx interface {
 	Tasks() Tasks
 	Attempts() Attempts
 	Observations() Observations
+	ObservationProducers() ObservationProducers
 	Journal() Journal
 	Acceptances() Acceptances
 	Schedules() Schedules

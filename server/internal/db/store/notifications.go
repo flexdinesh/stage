@@ -34,6 +34,7 @@ type NewNotification struct {
 	Title        string
 	ProjectTitle *string
 	URL          string
+	ObservedAt   *time.Time // observation time for created_at
 }
 
 // NotificationGroup summarizes all retained notifications for one task or session.

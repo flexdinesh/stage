@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
+	"github.com/flexdinesh/stage/server/internal/filelock"
 )
 
 // JoinOptions configure Join.
@@ -73,6 +74,7 @@ func Join(ctx context.Context, o JoinOptions) (Config, error) {
 		return Config{}, joinError(err)
 	}
 	c := Config{Schema: ConfigSchema, URL: base, MachineID: out.MachineID, Label: out.Label, Token: out.Token, JoinedAt: now().UTC()}
+	removeDetachedObservationFiles(o.ConfigPath)
 	if err := SaveConfig(o.ConfigPath, c); err != nil {
 		return Config{}, fmt.Errorf("joined as machine %d but could not save %s (remove the machine in Settings and pair again): %w", c.MachineID, o.ConfigPath, err)
 	}
@@ -147,5 +149,32 @@ func Leave(ctx context.Context, o LeaveOptions) (LeaveResult, error) {
 		}
 	}
 	res.Running, _, _ = ReadHolder(dir)
+	if !res.Running {
+		removeDetachedObservationFiles(o.ConfigPath)
+	}
 	return res, nil
+}
+
+// A running worker still owns these files. Leave lets it clear them after it
+// stops. Join fingerprints also prevent an old worker's files being reused.
+func removeDetachedObservationFiles(configPath string) {
+	dir := Dir(configPath)
+	path := filepath.Join(dir, LockFile)
+	if held, err := filelock.Held(path); err != nil || held {
+		return
+	}
+	lock, err := filelock.Acquire(path, 0o600)
+	if err != nil {
+		return
+	}
+	defer lock.Release()
+	if _, err := os.Lstat(configPath); errors.Is(err, os.ErrNotExist) {
+		removeObservationFiles(dir)
+	}
+}
+
+func removeObservationFiles(dir string) {
+	_ = os.Remove(filepath.Join(dir, watchFile))
+	_ = os.Remove(filepath.Join(dir, "settings-cache.json"))
+	_ = os.RemoveAll(filepath.Join(dir, outboxDir))
 }

@@ -22,6 +22,8 @@ import (
 	"github.com/flexdinesh/stage/server/internal/config"
 	"github.com/flexdinesh/stage/server/internal/instance"
 	"github.com/flexdinesh/stage/server/internal/listen"
+	"github.com/flexdinesh/stage/server/internal/machine"
+	"github.com/flexdinesh/stage/server/internal/observe"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 )
 
@@ -55,6 +57,10 @@ type RunOptions struct {
 	// worker-initiated call to the main server over the live channel
 	// (ErrOffline when none). Nil serves ping only.
 	Host func(machineID int64, call workerchan.Upcall) Host
+	// ScopedHost supplies a host and optional startup restore hook. The
+	// identity is an opaque fingerprint of the join. Restore returns false
+	// when setup is missing, or an error when it needs recovery.
+	ScopedHost func(machineID int64, identity string, call workerchan.Upcall) (Host, func(context.Context) (bool, error))
 	// ProtocolRange defaults to workerchan.CurrentRange.
 	ProtocolRange workerchan.VersionRange
 }
@@ -138,13 +144,34 @@ func Run(ctx context.Context, o RunOptions) error {
 			return workerchan.Pong{Version: buildinfo.Version, Time: time.Now().UTC()}, nil
 		},
 	}
-	if o.Host != nil {
+	life, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var restore func(context.Context) (bool, error)
+	identity := cfg.cacheIdentity()
+	if o.ScopedHost != nil {
+		w.host, restore = o.ScopedHost(cfg.MachineID, identity, w.call)
+	} else if o.Host != nil {
 		w.host = o.Host(cfg.MachineID, w.call)
+	}
+	if w.host != nil {
 		for kind, h := range w.host.Handlers() {
-			if kind != workerchan.KindPing {
+			if kind != workerchan.KindPing && kind != observe.KindWatch {
 				w.handlers[kind] = h
 			}
 		}
+	}
+	settingsRestored := true
+	var settingsErr error
+	if restore != nil {
+		settingsRestored, settingsErr = restore(life)
+	}
+	var observing sync.WaitGroup
+	if host, ok := w.host.(interface{ Local() *machine.Local }); ok && host.Local() != nil {
+		previous, _ := ReadState(dir)
+		w.observer = newObservationWorker(w, host.Local(), identity)
+		w.observer.restore(settingsRestored, settingsErr, previous)
+		observing.Go(func() { w.observer.work.Run(life) })
+		observing.Go(func() { w.observer.deliver(life) })
 	}
 	w.set(State{State: StateConnecting})
 	if err := instance.Notify("READY=1"); err != nil {
@@ -154,9 +181,15 @@ func Run(ctx context.Context, o RunOptions) error {
 		o.Ready()
 	}
 	log.Info("worker started", "server", cfg.URL, "machine", cfg.MachineID, "dir", dir)
-	life, cancel := context.WithCancel(ctx)
 	err = w.loop(life)
 	cancel()
+	observing.Wait()
+	if w.observer != nil {
+		w.observer.pause()
+	}
+	if _, err := LoadConfig(o.ConfigPath); errors.Is(err, ErrNotJoined) {
+		removeObservationFiles(dir)
+	}
 	_ = instance.Notify("STOPPING=1")
 	if errors.Is(err, ErrRevoked) {
 		w.set(State{State: StateRevoked, LastError: err.Error()})
@@ -178,6 +211,7 @@ type runner struct {
 	// handlers answer the main server's calls by kind; host may be nil.
 	handlers map[string]workerchan.WorkerHandler
 	host     Host
+	observer *observationWorker
 
 	mu    sync.Mutex
 	state State
@@ -197,7 +231,27 @@ func (w *runner) call(ctx context.Context, kind string, body any) (json.RawMessa
 
 // set records a state change in worker.state.json.
 func (w *runner) set(s State) {
+	w.updateState(func(prev State) State {
+		prev.State, prev.LastError, prev.Session = s.State, s.LastError, s.Session
+		if s.ServerVersion != "" {
+			prev.ServerVersion = s.ServerVersion
+		}
+		return prev
+	})
+}
+
+func (w *runner) waitForObservationWatch() {
+	w.updateState(func(s State) State {
+		if s.Observation != observationRecovery && s.Observation != observationDegraded {
+			s.Observation = observationWaitingWatch
+		}
+		return s
+	})
+}
+
+func (w *runner) updateState(update func(State) State) {
 	w.mu.Lock()
+	s := update(w.state)
 	s.PID, s.Managed, s.URL, s.MachineID, s.Gateway = os.Getpid(), w.o.Managed, w.cfg.URL, w.cfg.MachineID, w.gateway
 	if s.ServerVersion == "" {
 		s.ServerVersion = w.state.ServerVersion
@@ -207,13 +261,18 @@ func (w *runner) set(s State) {
 	} else {
 		s.Since = time.Now().UTC()
 	}
-	changed := s.State != w.state.State || s.LastError != w.state.LastError || s.Session != w.state.Session
+	changed := s.State != w.state.State || s.LastError != w.state.LastError || s.Session != w.state.Session ||
+		s.Observation != w.state.Observation || s.ObservationError != w.state.ObservationError ||
+		s.ObservationLost != w.state.ObservationLost || s.ObservationRecovered != w.state.ObservationRecovered ||
+		s.ObservationProducer != w.state.ObservationProducer
 	w.state = s
-	w.mu.Unlock()
 	if !changed {
+		w.mu.Unlock()
 		return
 	}
-	if err := writeState(w.dir, s); err != nil {
+	err := writeState(w.dir, s)
+	w.mu.Unlock()
+	if err != nil {
 		w.log.Warn("worker state", "err", err)
 	}
 	if w.o.OnState != nil {
@@ -307,7 +366,14 @@ func (w *runner) session(parent context.Context) error {
 		}
 	}
 	var wg sync.WaitGroup
-	defer func() { cancel(nil); wg.Wait() }()
+	var sess *channel
+	defer func() {
+		cancel(nil)
+		wg.Wait()
+		if w.observer != nil && sess != nil {
+			w.observer.detach(sess, parent.Err() == nil)
+		}
+	}()
 	var timeoutMu sync.Mutex
 	initial := timeout
 	wg.Go(func() {
@@ -356,7 +422,10 @@ func (w *runner) session(parent context.Context) error {
 	if hello.HeartbeatSec > 0 {
 		heartbeat = time.Duration(hello.HeartbeatSec) * time.Second
 	}
-	sess := &channel{w: w, id: hello.Session, ctx: ctx, cancel: cancel, calls: map[string]context.CancelFunc{}, serverKinds: hello.ChannelKinds}
+	sess = &channel{w: w, id: hello.Session, ctx: ctx, cancel: cancel, calls: map[string]context.CancelFunc{}, serverKinds: hello.ChannelKinds}
+	if w.observer != nil {
+		w.observer.reconcile()
+	}
 
 	wg.Go(func() { sess.heartbeats(heartbeat) })
 	w.cur.Store(sess)
@@ -475,9 +544,15 @@ func (c *channel) advertise(life context.Context, kinds []string, serverVersion 
 		}
 		changes = c.w.host.Changes()
 	}
+	if c.w.observer != nil {
+		c.w.observer.attach(c)
+	}
 	if err := c.ready(); err != nil {
 		c.cancel(fmt.Errorf("publish worker capabilities: %w", err))
 		return
+	}
+	if c.w.observer != nil {
+		c.w.observer.ready(c)
 	}
 	c.w.set(State{State: StateOnline, Session: c.id, ServerVersion: serverVersion})
 	c.w.log.Info("worker channel online", "session", c.id)
@@ -506,6 +581,9 @@ func (c *channel) ready() error {
 	}
 	snapshot.ChannelKinds = slices.Collect(maps.Keys(c.w.handlers))
 	snapshot.ChannelKinds = append(snapshot.ChannelKinds, workerchan.KindCancel)
+	if c.w.observer != nil {
+		c.w.observer.capabilities(c, &snapshot)
+	}
 	slices.Sort(snapshot.ChannelKinds)
 	body, err := json.Marshal(snapshot)
 	if err != nil {
@@ -560,10 +638,19 @@ func (c *channel) handle(env workerchan.Envelope) {
 	}()
 	res := workerchan.Envelope{ID: env.ID, Kind: workerchan.KindResult}
 	h, ok := c.w.handlers[env.Kind]
+	if env.Kind == observe.KindWatch && c.w.observer != nil && slices.Contains(c.serverKinds, observe.KindBatch) {
+		h, ok = func(ctx context.Context, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
+			return c.w.observer.accept(c, ctx, env)
+		}, true
+	}
+	var receipt watchReceipt
 	if !ok {
 		res.Error = &workerchan.Error{Code: workerchan.CodeUnknownKind, Message: "this worker does not handle " + env.Kind}
 	} else {
 		body, err := h(ctx, env, c.upcall(env))
+		if watch, ok := body.(watchReceipt); ok {
+			receipt, body = watch, watch.ack
+		}
 		if changed, ok := body.(workerchan.RefreshCapabilities); ok && err == nil {
 			// Setup has already changed. Recover the snapshot on a fresh session
 			// if the server cannot acknowledge this update.
@@ -595,8 +682,12 @@ func (c *channel) handle(env workerchan.Envelope) {
 	if c.ctx.Err() != nil {
 		return // the stream ended: the main server resolves the call as lost
 	}
-	if err := c.post(res, nil); err != nil && c.ctx.Err() == nil {
-		c.w.log.Warn("worker result", "id", env.ID, "err", err)
+	if err := c.post(res, nil); err != nil {
+		if c.ctx.Err() == nil {
+			c.w.log.Warn("worker result", "id", env.ID, "err", err)
+		}
+	} else if receipt.revision != 0 && res.Error == nil {
+		c.w.observer.acknowledged(c, receipt)
 	}
 }
 

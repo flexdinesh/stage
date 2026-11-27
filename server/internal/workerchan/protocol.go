@@ -159,6 +159,7 @@ type Hello struct {
 type Ready struct {
 	Kinds        []string        `json:"kinds"`
 	ChannelKinds []string        `json:"channelKinds"`
+	UpKinds      []string        `json:"upKinds,omitempty"` // independent worker-initiated capabilities
 	Connections  []Connection    `json:"connections"`
 	Details      json.RawMessage `json:"details,omitempty"`
 }

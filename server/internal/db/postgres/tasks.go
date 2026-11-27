@@ -198,14 +198,14 @@ func (r tasks) Events(ctx context.Context, taskID int64) ([]store.TaskEvent, err
 	})
 }
 
-func (r tasks) AddEvent(ctx context.Context, taskID int64, from *store.TaskState, to store.TaskState, detail string) (time.Time, error) {
+func (r tasks) AddEvent(ctx context.Context, taskID int64, from *store.TaskState, to store.TaskState, detail string, observedAt *time.Time) (time.Time, error) {
 	var f *string
 	if from != nil {
 		v := string(*from)
 		f = &v
 	}
 	var at time.Time
-	err := r.QueryRow(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail, at) VALUES ($1, $2, $3, $4, `+nowSQL+`) RETURNING at`, taskID, f, string(to), detail).Scan(&at)
+	err := r.QueryRow(ctx, `INSERT INTO task_events (task_id, from_state, to_state, detail, at) VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz,`+nowSQL+`)) RETURNING at`, taskID, f, string(to), detail, observedAt).Scan(&at)
 	return at, err
 }
 
@@ -354,13 +354,13 @@ UPDATE tasks SET
   launched_at = CASE WHEN $4::bigint IS NOT NULL THEN `+nowSQL+` ELSE COALESCE(launched_at,$8::timestamptz) END,
   last_error = CASE WHEN $3::boolean THEN NULL WHEN $5::text IS NOT NULL THEN $5::text ELSE last_error END,
   finished_at = CASE WHEN $3::boolean THEN NULL
-                     WHEN $6::boolean AND finished_at IS NULL THEN `+nowSQL+` ELSE finished_at END,
+                     WHEN $6::boolean AND finished_at IS NULL THEN COALESCE($9::timestamptz,`+nowSQL+`) ELSE finished_at END,
   start_at = CASE WHEN $3::boolean THEN NULL ELSE start_at END,
   start_tz = CASE WHEN $3::boolean THEN NULL ELSE start_tz END,
   ready_at = CASE WHEN $3::boolean THEN NULL ELSE ready_at END,
   updated_at = `+nowSQL+`
 WHERE id = $1 RETURNING launch_attempt, COALESCE(launch_request_id, '')`,
-		t.TaskID, string(t.To), t.BeginAttempt, sessionID, t.LastError, t.To.Finished(), newUUID(), t.ObservedStart,
+		t.TaskID, string(t.To), t.BeginAttempt, sessionID, t.LastError, t.To.Finished(), newUUID(), t.ObservedStart, t.ObservedAt,
 	).Scan(&attempt, &requestID)
 	return attempt, requestID, err
 }

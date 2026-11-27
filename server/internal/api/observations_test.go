@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -181,8 +180,7 @@ func TestPushObservationsThroughGateway(t *testing.T) {
 	}
 }
 
-// An offline worker is an offline harness: a push for a connection on its
-// machine changes nothing and answers as a launch there would.
+// A bridge can report an active connection's session while its worker is offline.
 func TestPushObservationsForAnOfflineMachine(t *testing.T) {
 	e := newEnv(t, withPublicURL, func(d *api.Deps) {
 		hub := workerchan.NewHub(t.Context(), workerchan.Options{Version: buildinfo.Version})
@@ -207,12 +205,27 @@ func TestPushObservationsForAnOfflineMachine(t *testing.T) {
 	}
 	conn := sw.New
 	ref := db.SessionRef{ConnectionID: conn, ExternalSessionID: "laptop-thread"}
-	var out errOut
-	path := fmt.Sprintf("/api/connections/%d/observations", conn)
-	if rec := raw(t, e.h, "POST", path, nil, pushBody(pushed(conn, ref.ExternalSessionID, "proj", "running", time.Now().UTC())), &out); rec.Code != 409 || out.Code != "connection_unavailable" || out.Error != "Its machine is offline: the Stage worker there is not connected." {
-		t.Fatalf("push on an offline machine: %d %+v", rec.Code, out)
+	p, err := e.store.InsertProject(t.Context(), db.Project{
+		Title: "Remote", Bindings: []db.ProjectBinding{{ConnectionID: conn, ExternalProjectID: "proj", Workspace: "/proj"}},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := e.store.Observation(t.Context(), ref); !errors.Is(err, db.ErrNotFound) {
-		t.Fatalf("offline push stored an observation: %v", err)
+	task, err := e.store.CreateTask(t.Context(), db.NewTask{ConnectionID: conn, ProjectID: p.ID, Title: "Remote task", Prompt: "Work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.TransitionTask(t.Context(), db.Transition{TaskID: task.ID, To: db.StateRunning, Session: &ref}); err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/connections/%d/observations", conn)
+	var out struct{ Results []api.ObservationResult }
+	e.must("POST", path, pushBody(pushed(conn, ref.ExternalSessionID, "proj", "done", time.Now().UTC())), 200, &out)
+	if len(out.Results) != 1 || out.Results[0].Status != "ingested" {
+		t.Fatalf("push on an offline machine: %+v", out)
+	}
+	got, err := e.store.GetTask(t.Context(), task.ID)
+	if err != nil || got.State != db.StateDone {
+		t.Fatalf("offline push task: %s %v", got.State, err)
 	}
 }

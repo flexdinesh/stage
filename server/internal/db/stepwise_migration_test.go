@@ -82,6 +82,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 		{"unconfigured defaults retained", nil, checkV0036HarnessSetupDefaults},
 	},
 	37: {{"existing connection and task evidence retained", seedV0037ConnectionFacts, checkV0037ConnectionFacts}},
+	39: {{"observation producer history", nil, checkV0039ObservationProducers}},
 	38: {{"identity history and workspace bindings", seedV0038ProjectIdentity, checkV0038ProjectIdentity}},
 }
 
@@ -924,4 +925,34 @@ func checkV0038ProjectIdentity(t *testing.T, pool *sqlite.DB) {
 
 	seedV0032(`DELETE FROM project_bindings WHERE id=6`)(t, pool)
 	wantRows(t, pool, bindingsUnset, "schedule", "task")
+}
+
+func checkV0039ObservationProducers(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	wantRows(t, pool, `SELECT CAST(count(*) AS TEXT) FROM observation_producers`, "0")
+	wantRows(t, pool, `SELECT CAST(count(*) AS TEXT) FROM observation_dispositions`, "0")
+	for _, q := range []string{
+		`INSERT INTO machines (id, label) VALUES (2, 'Worker')`,
+		`INSERT INTO observation_producers (machine_id, producer, active, cursor) VALUES (2, 'old', false, 1)`,
+		`INSERT INTO observation_producers (machine_id, producer) VALUES (2, 'current')`,
+		`INSERT INTO observation_dispositions (machine_id, producer, cursor, code, lost) VALUES (2, 'old', 1, 'invalid_record', '0')`,
+	} {
+		if _, err := pool.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	for _, q := range []string{
+		`INSERT INTO observation_producers (machine_id, producer) VALUES (2, 'second-current')`,
+		`INSERT INTO observation_dispositions (machine_id, producer, cursor, code, lost) VALUES (1, 'old', 1, 'invalid_record', '0')`,
+	} {
+		if _, err := pool.Exec(q); err == nil {
+			t.Fatalf("expected constraint failure: %s", q)
+		}
+	}
+	q := `DELETE FROM machines WHERE id=2`
+	if _, err := pool.Exec(q); err != nil {
+		t.Fatal(err)
+	}
+	wantRows(t, pool, `SELECT CAST(count(*) AS TEXT) FROM observation_producers`, "0")
+	wantRows(t, pool, `SELECT CAST(count(*) AS TEXT) FROM observation_dispositions`, "0")
 }

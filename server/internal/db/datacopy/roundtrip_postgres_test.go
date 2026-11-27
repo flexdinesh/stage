@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/datacopy"
@@ -96,6 +97,31 @@ newline and 日本語', 1)`,
 	`DELETE FROM snippets WHERE id = 3`,
 }
 
+var observationGapFrom = time.Date(2026, 11, 2, 10, 0, 0, 1000, time.UTC)
+var observationGapTo = time.Date(2026, 11, 2, 11, 0, 0, 456789000, time.UTC)
+
+func seedObservationProducers(t *testing.T, s *db.Store) {
+	t.Helper()
+	for _, item := range []struct {
+		producer    string
+		disposition db.ObservationDisposition
+	}{
+		{"worker-old", db.ObservationDisposition{Code: "gap", Lost: ^uint64(0), From: observationGapFrom, To: observationGapTo}},
+		{"worker-current", db.ObservationDisposition{Code: "invalid record with private payload"}},
+	} {
+		ctx := t.Context()
+		if err := s.BindObservationProducer(ctx, 2, item.producer); err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.CommitObservationRecord(ctx, 2, item.producer, 1, func(*db.Store) (db.ObservationDisposition, error) {
+			return item.disposition, nil
+		})
+		if err != nil || got != (db.ObservationCommit{Cursor: 1, Applied: true}) {
+			t.Fatalf("seed observation receipt: %+v %v", got, err)
+		}
+	}
+}
+
 // sourceDB writes a migrated SQLite database seeded with seedSQL (plus
 // extra statements) into a temp data dir, closes it and returns its path.
 func sourceDB(t *testing.T, version int64, extra ...string) string {
@@ -115,6 +141,7 @@ func sourceDB(t *testing.T, version int64, extra ...string) string {
 				t.Fatalf("seed %q: %v", q, err)
 			}
 		}
+		seedObservationProducers(t, db.NewStore(d))
 	}
 	if err := d.Close(); err != nil {
 		t.Fatal(err)
@@ -223,6 +250,27 @@ func TestRoundTrip(t *testing.T) {
 	}
 	t.Cleanup(func() { lite.Close() })
 	ls, ps := db.NewStore(lite), db.NewStore(dst)
+	if err := ps.BindObservationProducer(ctx, 2, "worker-old"); !errors.Is(err, db.ErrObservationProducer) {
+		t.Fatalf("copied retired producer: %v", err)
+	}
+	replayed, err := ps.CommitObservationRecord(ctx, 2, "worker-current", 1, func(*db.Store) (db.ObservationDisposition, error) {
+		return db.ObservationDisposition{}, errors.New("copied cursor did not fence replay")
+	})
+	if err != nil || replayed != (db.ObservationCommit{Cursor: 1}) {
+		t.Fatalf("copied active cursor: %+v %v", replayed, err)
+	}
+	var code, lost string
+	var from, to time.Time
+	err = dst.Pool().QueryRow(ctx, `SELECT code,lost,observed_from,observed_to FROM observation_dispositions WHERE machine_id=2 AND producer='worker-old' AND cursor=1`).
+		Scan(&code, &lost, &from, &to)
+	if err != nil || code != "gap" || lost != "18446744073709551615" || !from.Equal(observationGapFrom) || !to.Equal(observationGapTo) {
+		t.Fatalf("copied gap: %q %q %v %v %v", code, lost, from, to, err)
+	}
+	err = dst.Pool().QueryRow(ctx, `SELECT code FROM observation_dispositions WHERE machine_id=2 AND producer='worker-current' AND cursor=1`).Scan(&code)
+	if err != nil || code != "invalid_disposition" {
+		t.Fatalf("copied rejected record: %q %v", code, err)
+	}
+
 	one, two := int64(1), int64(2)
 	reads := map[string]func(*db.Store) (any, error){
 		"T3 settings":           func(s *db.Store) (any, error) { return s.HarnessSettings(ctx, one, "t3") },

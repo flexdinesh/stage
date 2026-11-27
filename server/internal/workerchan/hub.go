@@ -108,10 +108,12 @@ type Session struct {
 	// ready is immutable after publication and protected by hub.mu.
 	ready *Ready
 
-	hub  *Hub
-	out  chan Envelope
-	done chan struct{}
-	once sync.Once
+	hub    *Hub
+	out    chan Envelope
+	done   chan struct{}
+	ctx    context.Context
+	cancel context.CancelFunc
+	once   sync.Once
 
 	mu        sync.Mutex
 	pending   map[string]*pending
@@ -214,10 +216,12 @@ func randomID() string {
 // attach starts negotiation and replaces any older session for the machine.
 func (h *Hub) attach(machineID int64, version string, gateway []string) *Session {
 	now := h.opts.Now()
+	ctx, cancel := context.WithCancel(h.ctx)
 	s := &Session{
 		ID: randomID(), MachineID: machineID, Version: version, Gateway: gateway, hub: h,
 		out: make(chan Envelope, 64), done: make(chan struct{}),
 		pending: map[string]*pending{}, lastSeen: now, persisted: now,
+		ctx: ctx, cancel: cancel,
 	}
 	h.mu.Lock()
 	old := h.sessions[machineID]
@@ -325,6 +329,19 @@ func (h *Hub) Advertisement(machineID int64) (*Ready, string) {
 		return nil, ""
 	}
 	return s.ready, s.ID
+}
+
+// ReadyMachines lists the machines currently advertising channel capabilities.
+func (h *Hub) ReadyMachines() []int64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var ids []int64
+	for id, s := range h.sessions {
+		if s.ready != nil && s.alive() {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // SessionID is machineID's live channel session ("" when offline).
@@ -438,7 +455,33 @@ func (h *Hub) Deliver(ctx context.Context, machineID int64, sessionID string, en
 	if fn == nil {
 		return &Envelope{ID: env.ID, Kind: KindResult, Error: &Error{Code: CodeUnknownKind, Message: "unknown kind " + strconv.Quote(env.Kind)}}, nil
 	}
+	ctx, cancel := context.WithCancel(context.WithValue(ctx, sessionKey{}, s.ID))
+	defer cancel()
+	stop := context.AfterFunc(s.ctx, cancel)
+	defer stop()
+	if s.ctx.Err() != nil {
+		return nil, ErrReplaced
+	}
 	return answer(ctx, env, func(ctx context.Context) (any, error) { return fn(ctx, machineID, env) }), nil
+}
+
+type sessionKey struct{}
+
+// CallingSession identifies the authenticated attachment of an upstream call.
+func CallingSession(ctx context.Context) string {
+	id, _ := ctx.Value(sessionKey{}).(string)
+	return id
+}
+
+// SessionContext cancels work started on an attachment when it is replaced.
+func (h *Hub) SessionContext(ctx context.Context, machineID int64, sessionID string) (context.Context, func(), error) {
+	s := h.current(machineID, sessionID)
+	if s == nil {
+		return nil, nil, ErrReplaced
+	}
+	child, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(s.ctx, cancel)
+	return child, func() { stop(); cancel() }, nil
 }
 
 func (h *Hub) publish(s *Session, body json.RawMessage) error {
@@ -617,7 +660,11 @@ func (s *Session) alive() bool {
 // close ends the session once; true for the call that ended it.
 func (s *Session) close() bool {
 	first := false
-	s.once.Do(func() { close(s.done); first = true })
+	s.once.Do(func() {
+		s.cancel()
+		close(s.done)
+		first = true
+	})
 	return first
 }
 

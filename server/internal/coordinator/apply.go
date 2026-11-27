@@ -10,6 +10,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
+	"github.com/flexdinesh/stage/server/internal/workevent"
 )
 
 func (s *Service) PollTask(ctx context.Context, task db.Task) error {
@@ -33,51 +34,95 @@ func (s *Service) PollTask(ctx context.Context, task db.Task) error {
 // Apply records an observation of task's session, polled or pushed, and
 // moves the task to its state.
 func (s *Service) Apply(ctx context.Context, task db.Task, o execution.Observation) error {
-	if o.Session != *task.Session {
-		return errors.New("observation returned a different session")
-	}
 	if e := s.CheckObservation(task.Harness, o); e != nil {
 		return e
 	}
-	if e := s.putObservation(ctx, o); e != nil {
-		return e
+	var change *workevent.TaskChange
+	var inferred bool
+	err := s.store.WriteObservation(ctx, func(tx *db.Store) error {
+		if err := tx.LockObservationConnection(ctx, o.Session.ConnectionID); err != nil {
+			return err
+		}
+		current, err := tx.GetTask(ctx, task.ID)
+		if err != nil {
+			return err
+		}
+		change, inferred, err = s.ApplyObservation(ctx, tx, current, o, time.Now().UTC())
+		return err
+	})
+	if err == nil {
+		s.PublishObservation(ctx, change, inferred, false)
 	}
-	o, e := s.store.Observation(ctx, *task.Session)
-	if e != nil {
-		return e
+	return err
+}
+
+// ApplyObservation reconciles a validated observation within the caller's
+// unit of work. The caller publishes its effects after commit.
+func (s *Service) ApplyObservation(ctx context.Context, tx *db.Store, task db.Task, o execution.Observation, at time.Time) (*workevent.TaskChange, bool, error) {
+	if task.Session == nil || o.Session != *task.Session {
+		return nil, false, errors.New("observation returned a different session")
+	}
+	previous, err := tx.Observation(ctx, o.Session)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return nil, false, err
+	}
+	if previous.UpdatedAt.After(o.UpdatedAt) {
+		return nil, false, nil
+	}
+	d, _ := s.conns.Descriptor(task.Harness)
+	o.Facts = d.DisplayFacts(o.Facts)
+	if err := tx.PutObservation(ctx, o); err != nil {
+		return nil, false, err
+	}
+	o, err = tx.Observation(ctx, o.Session)
+	if err != nil {
+		return nil, false, err
 	}
 	if task.State == db.StateBacklog && !task.Adopted {
-		return nil
+		return nil, false, nil
 	}
 	// Idle never overwrites a known state, but it may carry a closure (a
 	// Claude session removed with its state): inference reads the stored
 	// task state, so only a task Stage recorded done can complete.
-	if o.State != "idle" {
+	var transition *workevent.TaskChange
+	if o.State != "idle" && task.State != db.StateLaunching {
 		detail := "execution observed " + o.State
 		if o.StateReason != "" {
 			detail += " (" + o.StateReason + ")"
 		}
-		change := db.Transition{TaskID: task.ID, From: []db.TaskState{task.State}, To: db.TaskState(o.State), Detail: detail}
+		change := db.Transition{TaskID: task.ID, From: []db.TaskState{task.State}, To: db.TaskState(o.State), Detail: detail, ObservedAt: &at}
 		if task.Adopted && task.LaunchedAt == nil {
 			change.ObservedStart = o.StartedAt
 		}
-		if _, e = s.transition(ctx, change); e != nil {
-			return e
+		res, err := tx.TransitionTask(ctx, change)
+		if err != nil {
+			return nil, false, err
+		}
+		if res.Changed {
+			transition = &workevent.TaskChange{TaskID: task.ID, From: res.From, To: change.To, Detail: detail}
 		}
 	}
 	closure, ok := s.closure(task.Harness, o)
 	if !ok {
-		return nil
+		return transition, false, nil
 	}
-	inferred, e := s.store.InferCompletion(ctx, task.ID, o, closure)
-	if e != nil || !inferred {
-		return e
+	inferred, err := tx.InferCompletion(ctx, task.ID, o, closure)
+	return transition, inferred, err
+}
+
+func (s *Service) PublishObservation(ctx context.Context, change *workevent.TaskChange, inferred, inboxRecorded bool) {
+	if change != nil {
+		hook := s.OnTransition
+		if inboxRecorded && s.OnObservedTransition != nil {
+			hook = s.OnObservedTransition
+		}
+		if hook != nil {
+			hook(ctx, *change)
+		}
 	}
-	s.log.Info("completion inferred from harness closure", "task", task.ID, "signal", o.Closed.Signal, "execution", o.ExecutionID)
-	if s.OnAccepted != nil {
+	if inferred && s.OnAccepted != nil {
 		s.OnAccepted()
 	}
-	return nil
 }
 
 // refusal refuses o, a session of kind that another registered harness

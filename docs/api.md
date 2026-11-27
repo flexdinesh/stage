@@ -186,14 +186,99 @@ The machine removes itself (`stage worker leave`): 204, with the effects of `DEL
 #### `GET /api/worker/channel`
 The worker channel's down half is a `text/event-stream` ([runtime.md](runtime.md#worker-channel)). Send inclusive integer bounds in `Stage-Channel-Protocol-Min` and `Stage-Channel-Protocol-Max`, with min at least 1 and max at least min. Invalid bounds return 400 `invalid_channel_protocol`. A disjoint range or a legacy worker with no range returns 409 `channel_protocol_mismatch` after token authentication. `Stage-Version` identifies the worker build. `Stage-Worker-Gateway` lists its agent gateway listener URLs, comma-separated.
 
-- `hello`: `{ "session": "...", "machineId": 2, "protocolRange": { "min": 3, "max": 3 }, "protocolVersion": 3, "kinds": [], "channelKinds": [], "heartbeatSec": 15, "timeoutSec": 45 }`. The version is the highest shared version.
+- `hello`: `{session, machineId, protocolRange: {min, max}, protocolVersion, kinds, channelKinds, heartbeatSec, timeoutSec}`. The version is the highest shared version. The server advertises `observe.batch` in `channelKinds`.
 - `rpc`: an envelope `{ "id", "kind", "deadline"?, "connectionId"?, "call"?, "body"?, "error"? }`. Calls include `ping`, the worker's advertised `adapter.*`, `ops.*` and `connector.*`, and `cancel` for a caller that stopped waiting. [Request bodies and errors](execution.md#remote-machines).
 - `: keepalive` comments every 15s.
 
 A newer stream replaces the old session. Removing the machine closes it.
 
 #### `POST /api/worker/channel`
-The up half takes one envelope (at most 32 MiB), with `Stage-Channel-Session: <hello.session>`. `ready` carries `body: {kinds, channelKinds, connections: [{connectionId, traits}], details?}`. It publishes or replaces capabilities after composition (204). `heartbeat` (every 15s) and `result` (reply by id) also return 204. A worker-initiated call gets a `result` envelope (200). Launch and events callbacks name the waiting request in `call`; when it stops waiting they get `call_ended`. A replaced or ended session returns 409 `channel_replaced`.
+The up half takes one envelope (at most 32 MiB), with `Stage-Channel-Session: <hello.session>`. `ready` carries `body: {kinds, channelKinds, upKinds?, connections: [{connectionId, traits}], details?}`. It publishes or replaces capabilities after composition (204). `heartbeat` (every 15s) and `result` (reply by id) also return 204. A worker-initiated call gets a `result` envelope (200). Launch callbacks name the waiting request in `call`. When it stops waiting they get `call_ended`. A replaced or ended session returns 409 `channel_replaced`.
+
+#### Worker observation
+
+Both directions must be advertised for observation. The worker advertises
+`observe.watch` in `ready.channelKinds` and `observe.batch` in
+`ready.upKinds`. The main sends `observe.watch`
+down, and the worker replies with a result body containing its producer
+ID. The authenticated machine determines the scope of both messages.
+
+This watch follows two sessions on connection 8.
+
+```json
+{
+  "epoch": "main-epoch",
+  "generation": 12,
+  "connections": [
+    {"id": 8, "attention": true, "sessions": [{"id": "s1"}, {"id": "s2", "stale": true}]}
+  ]
+}
+```
+
+```json
+{"producer": "worker-producer"}
+```
+
+Each watch replaces the complete set. An empty `connections` array clears
+it. A generation orders snapshots within the server epoch. An identical
+generation can be replayed. A session is fast by default, or stale with
+`stale: true`. `attention` enables attention discovery for a connection or
+marks a session already followed for attention.
+The main includes `resample: true` to request an immediate full sample
+after a gap, even when the set is unchanged.
+
+The worker POSTs `observe.batch` after attachment without a `call` field.
+The batch `cursor` is its highest included record cursor. Cursors are
+contiguous within the producer. A record carries the source `observedAt`
+and an observation, a status change or a gap. An observation record scopes
+the adapter's `Observation` by `connectionId` and `externalSessionId`.
+Status records can signal an unavailable read or a stream error. An empty
+`streamError` clears the previous error. `attention` marks an attention
+sample, and `quiet` suppresses attention notifications during seeding. A gap
+carries the count and time range of lost samples.
+
+This batch reports a gap before the next observation.
+
+```json
+{
+  "producer": "worker-producer",
+  "cursor": 42,
+  "records": [
+    {
+      "cursor": 41,
+      "observedAt": "2026-11-27T02:31:00Z",
+      "gap": {"from": "2026-11-27T02:30:00Z", "to": "2026-11-27T02:31:00Z", "count": 3}
+    },
+    {
+      "cursor": 42,
+      "connectionId": 8,
+      "externalSessionId": "s1",
+      "observedAt": "2026-11-27T02:32:00Z",
+      "observation": {
+        "session": {"connectionId": 8, "externalSessionId": "s1"},
+        "project": "workspace-1",
+        "state": "done",
+        "active": false,
+        "updatedAt": "2026-11-27T02:31:58Z",
+        "executionId": "run-1"
+      }
+    }
+  ]
+}
+```
+
+```json
+{"cursor": 42, "resample": true}
+```
+
+The acknowledgement returns the durable contiguous cursor, which may cover
+only a prefix if a write fails. The worker retries the sealed records until
+acknowledged. Stale or permanently rejected records are consumed, including
+records for retired connections. The main rejects an unbound or fenced
+producer, or a batch that names another machine's connection. A retry after
+a lost acknowledgement returns the committed cursor. `resample` reports
+that the main has requested a fresh watch sample after a gap.
+[Batch and outbox limits](runtime.md#worker-observation-files)
 
 #### `/api/worker/gateway/api/...` and `/api/worker/gateway/mcp`
 A worker's agent gateway forwards the local `/api/...` and `/mcp` requests of agents on its machine here ([runtime.md](runtime.md#agent-gateway)), any method, with the machine token and `Stage-Api-Version` (the worker route checks above apply first). The server serves the rest of the path as that same request on its own `/api` or `/mcp`, with the same handlers, bodies, statuses and streams, and with the token's machine as the forwarding machine: writes record it as `sourceMachineId` ([Users](#users)). The `Authorization` header is dropped before the inner request; `Stage-Caller-Session` and body caller fields (`callerSession`, `sourceSession`, `originSession`) pass unchanged.
@@ -386,7 +471,7 @@ to make a workspace appear before refreshing inventory.
 - `PUT /api/connections/:connectionId/auto-complete`: strict `{autoComplete: boolean}`. 200 `{connection}`; 400 missing/invalid body; 404 unknown connection.
 - `PUT /api/connections/:connectionId/new-task-config`: strict `{config: {model, options} | null}`, the model and options new tasks on the connection start with (`newTaskConfig` on its row; null or an empty config unpins). Checked against the connection's capabilities (no project). Pairing another instance of the harness carries the pin to the replacement. 200 `{connection}`; 400 unknown or replaced connection, a model or option value the connection does not offer, or a `permission` / `mode` (never pinned).
 - `DELETE /api/connections/:connectionId`: forget a retired connection, or an active one that is disconnected (`configured: false`) on a machine that answers (the local machine or an online worker): it retires (the default connection is cleared; its tasks, backlog and schedules stay as history) and is forgotten at once. Removed outright when no task, session or launch references it; otherwise its tasks and history stay (still naming it), its identity is cleared (that instance can no longer revive it; pairing it again starts a new connection), its bindings are deactivated, and its cached workspace inventory is dropped. 204. 404 unknown or already forgotten. 409 the connection is connected (`Disconnect it first`), or its machine is offline.
-- `POST /api/connections/:connectionId/observations`: an external bridge or hook pushes observations of the connection's sessions, for a harness Stage cannot poll or stream well ([external push](execution.md#external-push)). Strict body `{observations: Observation[]}`, 1 to 100 (body at most 1 MiB); `Observation` uses the adapter contract's JSON. Keys are `session` (`{connectionId, externalSessionId}`), `project`, `title`, `state`, `active`, `archived`, `child`, `branch`, `directory`, `links`, `createdAt`, `updatedAt`, `startedAt`, `endedAt`, `executionId`, `config`, and optional `parent`, `reply`, `usage`, `closed`, `stateReason` and `origin`. `links` may contain `web`, `native` and `command`. `reply` contains `itemId`, `runId`, `text`, `truncated` and `updatedAt`. For the removed keys and their 400 responses, see [API v9 changes](#api-v9-changes). `observe.Service.Ingest` handles pushes from both the bridge and `execution.EventSource` events. The coordinator's apply path enforces the harness's policies, updates task state and checks inferred completion. `updatedAt` orders snapshots: one older than the stored observation never replaces it. 200 `{results: [{status, reason?}]}`, one per observation in order: `ingested` (the owning task took it), `ignored` (no task owns the session, left to discovery; or its task is launching and the launch reconciles it), `invalid` (malformed: unknown state or reason, contradictory activity, missing identity or `updatedAt`, an `updatedAt` more than 5 minutes ahead of the server's clock (it would pin the stored snapshot), a reason the harness may not report; nothing changes; `reason` says why). Polling continues and reconciles. 400 bad JSON, unknown field, an empty or oversized batch, or any observation whose session is on another connection (nothing is ingested); 404 unknown connection; 409 `connection_retired` (a replaced connection) or `connection_unavailable` with the reason, as for a launch (no adapter hosted for it; its machine does not allow the harness; or its machine is offline or needs an update: an offline worker is an offline harness, so nothing changes); 403 `gateway_forbidden` through a worker's agent gateway for a connection of another machine. A storage failure is 500 after the observations before it were ingested; pushing the batch again is safe. No MCP tool or CLI command pushes.
+- `POST /api/connections/:connectionId/observations`: an external bridge or hook pushes observations of the connection's sessions, for a harness Stage cannot poll or stream well ([external push](execution.md#external-push)). Strict body `{observations: Observation[]}`, 1 to 100 (body at most 1 MiB); `Observation` uses the adapter contract's JSON. Keys are `session` (`{connectionId, externalSessionId}`), `project`, `title`, `state`, `active`, `archived`, `child`, `branch`, `directory`, `links`, `createdAt`, `updatedAt`, `startedAt`, `endedAt`, `executionId`, `config`, and optional `parent`, `reply`, `usage`, `closed`, `stateReason` and `origin`. `links` may contain `web`, `native` and `command`. `reply` contains `itemId`, `runId`, `text`, `truncated` and `updatedAt`. For the removed keys and their 400 responses, see [API v9 changes](#api-v9-changes). Bridge pushes share ingest rules with local adapter events and worker batches. The coordinator's apply path enforces the harness's policies, updates task state and checks inferred completion. `updatedAt` orders snapshots: one older than the stored observation never replaces it. 200 `{results: [{status, reason?}]}`, one per observation in order: `ingested` (the owning task took it), `ignored` (no task owns the session, left to discovery; or its task is launching and the launch reconciles it), `invalid` (malformed: unknown state or reason, contradictory activity, missing identity or `updatedAt`, an `updatedAt` more than 5 minutes ahead of the server's clock (it would pin the stored snapshot), a reason the harness may not report; nothing changes; `reason` says why). Polling continues and reconciles. 400 bad JSON, unknown field, an empty or oversized batch, or any observation whose session is on another connection (nothing is ingested); 404 unknown connection; 409 `connection_retired` (a replaced connection). Any active connection accepts pushes, including one whose worker is offline or incompatible. 403 `gateway_forbidden` through a worker's agent gateway for a connection of another machine. A storage failure is 500 after the observations before it were ingested; pushing the batch again is safe. No MCP tool or CLI command pushes.
 - Retired connections: binding a project, creating or moving a task or schedule to a retired connection returns 409 `code: "connection_retired"`. Tasks carry `harness`, `connectionActive` and `connectionLabel`; project bindings carry `connectionActive` and `connectionLabel`. A task on a retired T3 connection has null T3 links.
 OpenCode's setup: fields `endpoint`, `browserEndpoint`, `webClient`, `username`, `password` and `newInstance`; actions `connect-local` (`{newInstance}`) and `pair` (`{link, newInstance}`); disconnect. `GET /api/harnesses/opencode/status` `details` reports connectionId, state (`unconfigured`, `connected`, `unavailable`, or `rejected` when the service answers 401/403), diagnostic reason, checkedAt, endpoint, browserEndpoint, webClient, hasCredentials, and:
 

@@ -37,9 +37,12 @@ type ProcessStatus struct {
 	Version   string    `json:"version"`
 	StartedAt time.Time `json:"startedAt"`
 	// State is its channel state (connecting, online, needs_update).
-	State     string    `json:"state"`
-	Since     time.Time `json:"since"`
-	LastError string    `json:"lastError,omitempty"`
+	State            string    `json:"state"`
+	Since            time.Time `json:"since"`
+	LastError        string    `json:"lastError,omitempty"`
+	Observation      string    `json:"observation,omitempty"`
+	ObservationError string    `json:"observationError,omitempty"`
+	ObservationLost  uint64    `json:"observationLost,omitempty"`
 	// Gateway is its agent gateway's listener URLs.
 	Gateway []string `json:"gateway,omitempty"`
 }
@@ -70,6 +73,8 @@ func ReadStatus(ctx context.Context, configPath string, hc *http.Client) (Status
 		p := &ProcessStatus{PID: h.PID, Managed: h.Managed, Version: h.Version, StartedAt: h.StartedAt}
 		if s, _ := ReadState(dir); s != nil && s.PID == h.PID {
 			p.State, p.Since, p.LastError, p.Gateway = s.State, s.Since, s.LastError, s.Gateway
+			p.Observation, p.ObservationError = s.Observation, s.ObservationError
+			p.ObservationLost = s.ObservationLost
 		}
 		st.Process = p
 	}
