@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceLocation, taskWorkspaceSelection } from "../src/lib/taskForm.ts";
+import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceLocation, availableTaskWorkspaces, suggestedTaskWorkspace } from "../src/lib/taskForm.ts";
 import { setOption } from "../src/lib/options.ts";
 
 const config = { model: "m", options: [], permission: "", mode: "" };
-const template = { projectId: 1, title: "T", prompt: "P", connectionId: 3, bindingId: null, executionConfig: config };
+const template = { projectId: 1, title: "T", prompt: "P", connectionId: 3, workspaceId: "ws_saved", executionConfig: config };
 const task = {
   ...template,
   id: 7,
+  bindingId: null,
   attachments: [],
   handoff: true,
   startMode: null,
@@ -62,25 +63,15 @@ test("a connection change sends reset options without altering unrelated task fi
   assert.deepEqual(taskUpdateBody(update({ template: next })), { connectionId: 4, executionConfig });
 });
 
-test("task and schedule payloads use null for Primary and the id for an explicit workspace", () => {
+test("task and schedule payloads pin the exact workspace and backlog can explicitly clear it", () => {
   const taskState = { notes: "", attachmentIds: [], timed: null, startNow: false, tree: undefined, treeStart: "inherit" };
   const scheduleState = { notes: "", attachmentIds: [], cron: "0 9 * * *", tz: "UTC" };
-  for (const bindingId of [null, 42]) {
-    const placement = { ...template, bindingId };
-    assert.equal(taskCreateBody(placement, taskState).bindingId, bindingId);
-    assert.equal(scheduleBody(placement, scheduleState).bindingId, bindingId);
-  }
-});
-
-test("task edits preserve the saved workspace until it is changed or cleared", () => {
-  const before = { ...task, bindingId: 42 };
-  const titleOnly = { ...template, bindingId: 42, title: "Renamed" };
-  assert.deepEqual(taskUpdateBody(update({ before, template: titleOnly })), { title: "Renamed" });
-  assert.deepEqual(taskUpdateBody(update({ before, template })), { bindingId: null });
-  assert.deepEqual(taskUpdateBody(update({ before, template: { ...template, bindingId: 43 } })), { bindingId: 43 });
-  assert.deepEqual(taskUpdateBody(update({ before, template: { ...template, projectId: 2 } })), {
-    projectId: 2,
-    bindingId: null,
+  const pin = { ...template, workspaceId: "ws_unbound" };
+  assert.equal(taskCreateBody(pin, taskState).workspaceId, pin.workspaceId);
+  assert.equal(scheduleBody(pin, scheduleState).workspaceId, pin.workspaceId);
+  assert.equal(taskCreateBody({ ...template, workspaceId: null }, taskState).workspaceId, null);
+  assert.deepEqual(taskUpdateBody(update({ template: { ...template, workspaceId: null } })), {
+    workspaceId: null,
     executionConfig: config,
   });
 });
@@ -108,37 +99,27 @@ test("a schedule edit preserves the saved workspace and repeat until changed", (
   });
 });
 
-test("workspace placement chooses the primary by default and scopes explicit choices to the live connection", () => {
-  const primary = { id: 42, connectionId: 3, machineId: 1, connectionActive: true, primary: true, status: "available", workspace: "/project" };
-  const alternate = { ...primary, id: 43, primary: false, workspace: "/review", revision: 4 };
-  const otherConnection = { ...primary, id: 44, connectionId: 4 };
-  const retired = { ...primary, id: 45, connectionActive: false };
-  const bindings = [alternate, otherConnection, retired, primary];
+test("workspace choices use only ready, eligible rows on the selected connection", () => {
+  const linked = { workspaceId: "ws_linked", connectionId: 3, projectId: 5, title: "Linked", workspace: "/linked", available: true };
+  const unbound = { ...linked, projectId: null, workspaceId: "ws_unbound", title: "Alone" };
+  const foreign = { ...linked, connectionId: 4 };
+  const archived = { ...linked, workspaceId: "ws_archived", harnessArchived: true };
+  const missing = { ...linked, workspaceId: "ws_missing", available: false };
+  const inventory = { workspaces: [unbound, foreign, linked, archived, missing], inventory: { state: "ready" } };
 
-  const defaultPlacement = taskWorkspaceSelection(bindings, 3, null);
-  assert.deepEqual(defaultPlacement.choices, [primary, alternate]);
-  assert.equal(defaultPlacement.available, primary);
-  assert.equal(defaultPlacement.issue, null);
-  assert.equal(taskWorkspaceSelection(bindings, 3, 43).available, alternate);
-  for (const id of [44, 45]) {
-    const placement = taskWorkspaceSelection(bindings, 3, id);
-    assert.equal(placement.available, undefined);
-    assert.match(placement.issue, /no longer available/);
+  const choices = availableTaskWorkspaces(inventory, 3, 5);
+  assert.deepEqual(choices, [linked, unbound]);
+  assert.equal(suggestedTaskWorkspace(choices, 5), linked);
+  assert.equal(suggestedTaskWorkspace(choices, 6), undefined);
+  assert.equal(suggestedTaskWorkspace(choices, undefined), undefined);
+  assert.equal(suggestedTaskWorkspace([unbound], undefined), unbound);
+  const regrouped = { ...linked, groupProjectId: 6 };
+  assert.equal(suggestedTaskWorkspace([regrouped], 5), undefined);
+  assert.equal(suggestedTaskWorkspace([regrouped], 6), regrouped);
+  assert.deepEqual(availableTaskWorkspaces(inventory, 4, undefined), [foreign]);
+  for (const state of ["pending", "refreshing", "stale", "unavailable", "retired"]) {
+    assert.deepEqual(availableTaskWorkspaces({ ...inventory, inventory: { state } }, 3, 5), []);
   }
-});
-
-test("an unavailable explicit choice requires repair while a missing primary leaves the project unbound", () => {
-  const primary = { id: 42, connectionId: 3, machineId: 1, connectionActive: true, primary: true, status: "missing", workspace: "/project" };
-  const changed = { ...primary, id: 43, primary: false, status: "changed" };
-  const bindings = [primary, changed];
-
-  const defaultPlacement = taskWorkspaceSelection(bindings, 3, null);
-  assert.deepEqual(defaultPlacement.choices, []);
-  assert.equal(defaultPlacement.available, undefined);
-  assert.equal(defaultPlacement.issue, null);
-  assert.match(taskWorkspaceSelection(bindings, 3, 42).issue, /no longer reports/);
-  assert.match(taskWorkspaceSelection(bindings, 3, 43).issue, /changed/);
-  assert.match(taskWorkspaceSelection(bindings, 3, 404).issue, /no longer available/);
 });
 
 test("task workspace display keeps the recorded path or pathless external identity", () => {

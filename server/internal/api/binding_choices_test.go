@@ -80,6 +80,54 @@ func TestExactUnboundWorkspaceSurvivesEditAndDuplicate(t *testing.T) {
 	}
 }
 
+func TestExplicitUnresolvedBacklogDoesNotInheritThePrimary(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/primary")
+	body := map[string]any{"connectionId": 1, "projectId": p.ID, "workspaceId": nil, "title": "Plan", "prompt": "p"}
+	var planned db.Task
+	e.must("POST", "/api/tasks", body, 201, &planned)
+	if planned.WorkspaceID != "" || planned.BindingID != nil || planned.ProjectID != p.ID || planned.State != db.StateBacklog {
+		t.Fatalf("unresolved task inherited a destination: %+v", planned)
+	}
+	e.must("POST", taskPath(planned.ID, "/start"), nil, 409, nil)
+	body["start"] = true
+	e.must("POST", "/api/tasks", body, 409, nil)
+	delete(body, "start")
+	body["cron"], body["tz"] = "0 2 * * *", "UTC"
+	e.must("POST", "/api/schedules", body, 409, nil)
+	if len(e.t3.launchRequestIDs()) != 0 {
+		t.Fatal("planning work launched without a destination")
+	}
+}
+
+func TestDuplicateDraftPinsVisibleWorkspaceAndCopiesSelectedImages(t *testing.T) {
+	e, _, connection, _, projectID := imagesEnv(t)
+	var source db.Task
+	a, b, staged := e.mustUpload("keep.png"), e.mustUpload("leave.png"), e.mustUpload("new.png")
+	input := map[string]any{"connectionId": connection, "projectId": projectID, "title": "Original", "prompt": "p", "attachmentIds": []int64{a.ID, b.ID}}
+	e.must("POST", "/api/tasks", input, 201, &source)
+	input["workspaceId"] = db.WorkspaceID(connection, "repo", hostedWorkspace)
+	input["title"], input["prompt"] = "Edited copy", "New prompt"
+	input["attachmentIds"] = []int64{a.ID, staged.ID}
+	var duplicate db.Task
+	e.must("POST", taskPath(source.ID, "/duplicate"), input, 201, &duplicate)
+	if duplicate.Title != "Edited copy" || duplicate.Prompt != "New prompt" || duplicate.WorkspaceID != input["workspaceId"] || duplicate.BindingID != nil || duplicate.ID == source.ID {
+		t.Fatalf("duplicate did not save the draft: %+v", duplicate)
+	}
+	images, err := e.store.TaskAttachments(t.Context(), duplicate.ID)
+	if err != nil || len(images) != 2 || !slices.ContainsFunc(images, func(image db.AttachmentData) bool {
+		return image.Name == a.Name && image.ID != a.ID
+	}) || !slices.ContainsFunc(images, func(image db.AttachmentData) bool { return image.ID == staged.ID }) {
+		t.Fatalf("duplicate images = %+v, %v", images, err)
+	}
+	originalImages, err := e.store.TaskAttachments(t.Context(), source.ID)
+	if err != nil || len(originalImages) != 2 || originalImages[0].ID != a.ID || originalImages[1].ID != b.ID {
+		t.Fatalf("source images changed: %+v, %v", originalImages, err)
+	}
+	input["attachmentIds"] = []int64{staged.ID}
+	e.must("POST", taskPath(source.ID, "/duplicate"), input, 400, nil)
+}
+
 func TestLegacyProjectCannotBorrowSharedDefault(t *testing.T) {
 	e, _, preferred, other, projectID := imagesEnv(t)
 	if _, err := e.store.SetDefaultConnection(t.Context(), &preferred); err != nil {

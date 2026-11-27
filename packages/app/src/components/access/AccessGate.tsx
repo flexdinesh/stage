@@ -4,6 +4,7 @@ import { Navigate, Outlet, useLocation, useNavigate } from "react-router";
 import { grantKind, LOGIN_PATH, returnToWork } from "../../lib/accessPaths.ts";
 import { CHECKING, observeAccess, type Access } from "../../lib/accessState.ts";
 import { useHostState } from "../../lib/hostState.ts";
+import { hostAccessScope } from "../../lib/host.ts";
 import { PlatformProvider, useApi, usePlatform } from "../../platform/context.tsx";
 import { Button, SkeletonRows } from "../ui.tsx";
 import { AccessFrame, FormProblem, GrantScreen, LoginScreen } from "./AccessScreens.tsx";
@@ -41,7 +42,7 @@ function CheckingAccess() {
 
 export function AccessGate() {
   const host = useHostState();
-  return <ServerAccess key={JSON.stringify([host?.target.id, host?.target.url, host?.accountEpoch])} />;
+  return <ServerAccess key={hostAccessScope(host)} />;
 }
 
 function ServerAccess() {

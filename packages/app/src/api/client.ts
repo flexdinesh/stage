@@ -24,6 +24,7 @@ import type {
   BindWorkspaceRequest,
   CreateProjectRequest,
   CreateTaskRequest,
+  DuplicateTaskRequest,
   CreateSnippetRequest,
   CreateScheduleRequest,
   DestinationCatalog,
@@ -241,8 +242,8 @@ export function createApi(transport: Transport) {
     project: (id: number) => apiFetch<Project>(`/projects/${id}`),
     createProject: (body: CreateProjectRequest) => apiFetch<Project>("/projects", post(body)),
     updateProject: (id: number, body: {title: string; archived: boolean}) => apiFetch<Project>(`/projects/${id}`, patch(body)),
-    workspaces: (connectionId: number, refresh = true) =>
-      apiFetch<WorkspaceInventory>(`/connections/${connectionId}/workspaces${refresh ? "" : "?refresh=false"}`),
+    workspaces: (connectionId: number, refresh = true, signal?: AbortSignal) =>
+      apiFetch<WorkspaceInventory>(`/connections/${connectionId}/workspaces${refresh ? "" : "?refresh=false"}`, { signal }),
     resolveWorkspaces: (connectionId: number, body: { apply: boolean; previewToken?: string }) =>
       apiFetch<WorkspaceResolveResult>(`/connections/${connectionId}/resolve`, post(body)),
     workspaceReview: () => apiFetch<WorkspaceReview>("/workspaces/review"),
@@ -299,7 +300,7 @@ export function createApi(transport: Transport) {
     respondRequest: (id: number, requestId: string, body: RequestResponse) => apiFetch<Task>(`/tasks/${id}/requests/${encodeURIComponent(requestId)}`, post(body)),
     /** Sends the session a follow-up (409 `session_busy` when it can't take one now, 403 `agent_forbidden` for agents). */
     sendMessage: (id: number, body: SendMessageRequest) => apiFetch<Task>(`/tasks/${id}/messages`, post(body)),
-    duplicateTask: (id: number) => apiFetch<Task>(`/tasks/${id}/duplicate`, post()),
+    duplicateTask: (id: number, draft?: DuplicateTaskRequest) => apiFetch<Task>(`/tasks/${id}/duplicate`, post(draft)),
     /** Replaces a backlog task's needs ([] clears them); a task outside a tree joins the needs' tree. */
     setNeeds: (id: number, needs: number[]) => apiFetch<Task>(`/tasks/${id}/needs`, { method: "PUT", body: { needs } }),
 

@@ -810,11 +810,11 @@ Query (all optional): `originConnectionId` with `originSessionId` (the creator s
 Body `CreateTaskRequest`:
 ```jsonc
 {
-  "projectId": 1,                // required
+  "projectId": 1,                // required without an exact workspace
   "title": "Say OK",             // required
   "prompt": "reply OK",          // required
   "connectionId": 1,             // connection that owns the selected workspace
-  "workspaceId": "ws_...",       // exact selector from that connection's catalog
+  "workspaceId": "ws_...",       // exact selector from that connection's catalog, or null for unresolved backlog
   "executionConfig": { "model": "", "options": [], "permission": "", "mode": "" }, // optional; "" = harness default
   "initialNote": "",             // optional: first task journal note
   "treeId": null,                // optional: join this tree (tree rules)
@@ -830,6 +830,8 @@ Body `CreateTaskRequest`:
 }
 ```
 201 `Task` (state `backlog`, or `launching` when started). 400 (incl. an `attachmentIds` entry that is not a staged upload, more than 8; `startLocal` without `startTz` or vice versa; unknown zone; unparseable `startLocal`; a start time not in the future; `startLocal` together with needs or `start: true`; `start: true` with needs; bad `startMode`). 404 project / tree / need / `needsSession` (session not mirrored). 409 tree rule broken (e.g. needs in different trees) or `needsSession` not adoptable. The removed T3 model inputs `providerInstanceId`, `model`, `modelOptions`, `runtimeMode` and `interactionMode` are 400 `<field> was removed in API v8; send executionConfig with connectionId` (also on update and on schedules). An omitted `executionConfig` runs on the harness defaults. Start errors retain the task: preflight/rejection leaves backlog; uncertainty remains launching.
+
+With an exact selector, omitting `projectId` associates the task with that workspace's project. An explicit `workspaceId: null` saves a backlog task without a pin, even if the project has a primary workspace on the connection. It requires `projectId` and `connectionId`. Starting the task requires choosing an exact workspace first. `start`, timed starts, recurring schedule creation and `bindingId` cannot be combined with an explicit unresolved selection. Omitting both workspace fields keeps legacy selector behavior.
 
 ### `GET /api/tasks/:id`
 200 `TaskDetail`. 404.
@@ -991,6 +993,7 @@ sends.
 
 ### `POST /api/tasks/:id/duplicate`
 New `backlog` task with the same project, title, prompt, images (copied), execution config (launch options included); no copied notes, no tree, no needs, no start time, no schedule.
+An optional JSON draft takes `title`, `prompt`, `connectionId`, `workspaceId`, and optional `projectId`, `executionConfig`, and `attachmentIds` under the create rules. For a draft, `attachmentIds` selects source images to copy and staged images to attach. Both forms record the source link in the copy's journal.
 201 `Task`. 404. 409 for an adopted task.
 
 ## Journals

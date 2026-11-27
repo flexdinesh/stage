@@ -100,6 +100,11 @@ export function isServerSwitch(prev: HostState, next: HostState): boolean {
   return (prev.target.id !== next.target.id || prev.target.url !== next.target.url) && prev.serverEpoch > 0;
 }
 
+/** Cache and access lifetimes follow the target and account, including before the server has been ready. */
+export function hostAccessScope(state: HostState | null): string {
+  return JSON.stringify([state?.target.id, state?.target.url, state?.accountEpoch]);
+}
+
 export type ServerTone = "ok" | "run" | "bad" | "idle";
 
 /** A saved server's marker and note: only the active one has a known state; the others read idle, no note. */

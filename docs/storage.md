@@ -907,6 +907,10 @@ refreshes and group membership edits. Task and schedule creation uses the
 same association when the caller selects a workspace without naming a
 project. The caller's exact workspace selection supplies the launch pin.
 
+Explicitly unresolved backlog creates skip legacy pin selection. A duplicate
+draft commits its new destination, copied or staged images, and source journal
+link in the same transaction while keeping the source task intact.
+
 Migration 0047 adds nullable `workspace_pin` to tasks and schedules on both
 engines. With the owner's `connection_id`, its native ID and root identify one
 catalog row. Legacy selections backfill when the recorded binding and catalog
