@@ -155,7 +155,15 @@ catalog row's native workspace ID and directory.
 `Workspaces` reports harness project IDs, directories, timestamps,
 availability and import evidence. The adapter marks paths on its machine's
 filesystem. Discovery uses that machine's `Ops.Inventory` to enrich those
-paths, refreshes stored workspaces and organizes new rows into project groups. Failed inventory
+paths, refreshes stored workspaces and organizes new rows into project groups.
+A row the harness will not start a session in carries `BlockedReason` in the
+harness's words. A harness whose folder trust depends on Git layout declares
+a `TrustRule` (its trust records and reason) instead, and `Ops.Inventory` sets
+`BlockedReason` when no record covers the folder: a record on the checkout's
+main root (the main working tree of a linked worktree), else on the folder or
+an ancestor up to the checkout top, or up to the filesystem root outside a
+checkout. A blocked row stays listed and grouped but is not an eligible
+destination (see [discovery](discovery.md#eligibility)). Failed inventory
 reads leave the last stored inventory in place. Full sync guards against
 concurrent runs per connection, reports progress and records successful sync
 for the active connection. [Workspace discovery](discovery.md)
@@ -700,6 +708,19 @@ default base. Stage verifies the resulting inventory entry, project and
 directory. Permission overrides and image delivery report a reason when
 unavailable.
 
+Every location-scoped OpenCode request (`/api/location`, `/api/model`,
+`/api/agent` with `location[directory]`) builds that location on first load,
+and building it persists the directory as a project and clears its archive
+(OpenCode 2.3.2, `Project.resolve` with persist). So Stage verifies a bound
+directory with pure reads only: `GET /api/project?archived=true` (the project
+must be listed and not archived) and `GET /api/worktree?projectID=` (the
+directory must be the project's canonical directory or a listed worktree).
+`Workspaces`, `Features` and verification never call `/api/location`. The
+workspace catalog reads `/api/model` and `/api/agent` with the location only
+after verification passes, when the project exists unarchived and the read
+can neither create nor unarchive it. Launch passes the location for its own
+directory.
+
 ### Launch and recovery
 
 Stage saves the frozen intent, reserved IDs and an attempt marker before dispatch.
@@ -899,6 +920,23 @@ to run on that machine.
   Managed worktrees are excluded, and machine evidence still limits
   automatic import to Git checkout roots. Missing or malformed state and
   roster failures keep the last successful inventory. See [discovery](discovery.md#shipped-inventory).
+  `claude --bg` refuses an untrusted folder ("Workspace not trusted"), and
+  Agent SDK runs (T3, for example) record folders without trusting them, so
+  every row carries Claude's trust as a `TrustRule`: the project keys whose
+  `hasTrustDialogAccepted` is JSON `true`, matched verbatim as Claude looks
+  them up. This mirrors Claude Code
+  2.1.332's background trust check. Trust is keyed on the canonical
+  repository root (a linked worktree's main checkout), then on the nearest
+  record from the folder up to the checkout top, or up to the filesystem root
+  outside a checkout. A `false` record does not stop a trusted ancestor.
+  Untrusted rows stay listed with "Not trusted in Claude Code. Run claude in
+  this folder once and accept the trust prompt, then refresh." The home
+  folder is trusted one interactive session at a time, so it gets its own
+  reason unless a record above it covers it. A truthy
+  `CLAUDE_CODE_SANDBOXED` (`1`, `true`, `yes`, `on`) trusts every folder.
+  Not mirrored: Claude's fallback for a record reached through a symlinked
+  launch path. Stage launches with the folder as the working directory, so
+  only the real path matters.
 - **Features.** Models: Claude's default, `opus`, `sonnet`, `haiku`,
   `fable` (aliases for the latest). Harness-wide option `effort` (`low` to
   `max`) and launch option `worktree` (boolean, default off; Claude

@@ -144,3 +144,84 @@ func TestLocalInventoryOnlyMarksMissingDirectoriesGone(t *testing.T) {
 		}
 	}
 }
+
+// TrustRule mirrors Claude Code's `claude --bg` workspace trust: the main
+// checkout root's record, else the nearest record from the folder up to the
+// checkout top, or up to the filesystem root outside a checkout.
+func TestLocalInventoryAppliesTrustRule(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	trustedParent := filepath.Join(root, "workspace")
+	plain := filepath.Join(trustedParent, "notes", "deep")
+	repo := filepath.Join(trustedParent, "repo")
+	repoSub := filepath.Join(repo, "pkg")
+	trustedRepo := filepath.Join(root, "trusted-repo")
+	trustedSub := filepath.Join(trustedRepo, "pkg")
+	linked := filepath.Join(root, "linked")
+	untrusted := filepath.Join(root, "elsewhere")
+	explicitFalse := filepath.Join(trustedParent, "declined")
+	for _, d := range []string{plain, repoSub, trustedSub, untrusted, explicitFalse} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(t, repo, "init", "-q")
+	git(t, trustedRepo, "init", "-q")
+	git(t, trustedRepo, "commit", "-q", "--allow-empty", "-m", "init")
+	git(t, trustedRepo, "worktree", "add", "-q", linked)
+	gone := filepath.Join(root, "gone")
+	t.Setenv("PATH", t.TempDir())
+
+	sloppy := filepath.Join(root, "sloppy")
+	if err := os.Mkdir(sloppy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rule := &execution.TrustRule{Records: []string{trustedParent, trustedRepo, sloppy + "/", "relative"}, Reason: "Not trusted."}
+	cases := []struct {
+		path    string
+		blocked bool
+	}{
+		{trustedParent, false},
+		{plain, false},         // outside a checkout, an ancestor's record counts
+		{explicitFalse, false}, // a folder without its own record inherits
+		{repo, true},           // a checkout stops the walk at its top
+		{repoSub, true},
+		{trustedRepo, false},
+		{trustedSub, false}, // walks up to the trusted checkout top
+		{linked, false},     // a linked worktree uses its main checkout's record
+		{untrusted, true},
+		{gone, false},  // no evidence of a folder: nothing to judge
+		{sloppy, true}, // records match verbatim, like Claude's lookup
+	}
+	ws := make([]execution.WorkspaceInfo, 0, len(cases)+2)
+	for _, c := range cases {
+		ws = append(ws, execution.WorkspaceInfo{WorkspaceRoot: c.path, Local: true, Trust: rule})
+	}
+	ws = append(ws,
+		execution.WorkspaceInfo{WorkspaceRoot: untrusted, Local: true, Trust: rule, BlockedReason: "Adapter reason."},
+		execution.WorkspaceInfo{WorkspaceRoot: untrusted, Local: true})
+	out, err := machine.LocalOps{}.Inventory(t.Context(), ws)
+	if err != nil || len(out) != len(ws) {
+		t.Fatalf("inventory %+v: %v", out, err)
+	}
+	for i, c := range cases {
+		want := ""
+		if c.blocked {
+			want = "Not trusted."
+		}
+		if out[i].BlockedReason != want {
+			t.Errorf("%s: blocked reason %q, want %q", c.path, out[i].BlockedReason, want)
+		}
+	}
+	if got := out[len(cases)].BlockedReason; got != "Adapter reason." {
+		t.Errorf("an adapter's own reason was replaced: %q", got)
+	}
+	if got := out[len(cases)+1].BlockedReason; got != "" {
+		t.Errorf("a row without a trust rule was blocked: %q", got)
+	}
+	if ws[len(cases)-2].BlockedReason != "" {
+		t.Fatal("inventory changed its input")
+	}
+}

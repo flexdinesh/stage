@@ -3,7 +3,7 @@ import { useState } from "react";
 import { keys, useHarnesses, useMachines } from "../api/queries.ts";
 import type { HarnessConnection, Workspace } from "../api/types.ts";
 import { POLL } from "../lib/polling.ts";
-import { availableTaskWorkspaces, suggestedTaskWorkspace, workspaceLine } from "../lib/taskForm.ts";
+import { availableTaskWorkspaces, blockedTaskWorkspaces, suggestedTaskWorkspace, workspaceLine } from "../lib/taskForm.ts";
 import { useApi } from "../platform/context.tsx";
 import { IconClose, IconRefresh } from "./icons.tsx";
 import { Combobox, ErrorText, Field, IconButton, TextLink, type ComboboxOption } from "./ui.tsx";
@@ -57,6 +57,7 @@ export function useTaskDestination({ initialConnection, initialWorkspace, allowP
   const state = inventory.data?.inventory?.state;
   const ready = !refreshing && !refresh.isError && !inventory.isError && picked?.active === true && picked.configured && state === "ready";
   const rows = ready ? availableTaskWorkspaces(inventory.data, connection, projectId) : [];
+  const blocked = ready ? blockedTaskWorkspaces(inventory.data, connection, projectId) : [];
   const prefill = draft.workspace !== undefined ? undefined : suggestedTaskWorkspace(rows, projectId);
   if (prefill !== undefined) setDraft({ connection, workspace: workspaceChoice(prefill) });
 
@@ -66,8 +67,12 @@ export function useTaskDestination({ initialConnection, initialWorkspace, allowP
     const choice = workspaceChoice(row);
     return { value: choice.id, label: choice.label, detail: choice.detail === choice.label ? undefined : choice.detail };
   };
-  const workspaceOptions = rows.map(option);
-  if (saved != null && selected === undefined) {
+  // The harness won't start sessions in these, so they are listed with its reason but can't be chosen.
+  const workspaceOptions = [...rows.map(option), ...blocked.map((row): ComboboxOption => ({
+    ...option(row), detail: row.workspace || row.externalId, chip: "can't start", note: row.blockedReason, disabled: true,
+  }))];
+  const savedBlocked = saved == null ? undefined : blocked.find((row) => row.workspaceId === saved.id);
+  if (saved != null && selected === undefined && savedBlocked === undefined) {
     const lastKnown = inventory.data?.workspaces.find((row) => row.connectionId === connection && row.workspaceId === saved.id);
     workspaceOptions.push({ value: saved.id, label: lastKnown?.title || saved.label, detail: saved.detail, disabled: true });
   }
@@ -91,14 +96,20 @@ export function useTaskDestination({ initialConnection, initialWorkspace, allowP
     status = saved == null ? "Connection unavailable." : "Connection unavailable. The saved workspace needs verification.";
   } else if (inventory.isError || refresh.isError || state === "stale") {
     status = "Couldn’t verify the workspace inventory. Refresh workspaces to try again.";
+  } else if (savedBlocked !== undefined) {
+    status = savedBlocked.blockedReason;
   } else if (ready && saved != null && selected === undefined) {
     status = "The selected workspace is no longer available. Choose a workspace to run this work.";
+  } else if (ready && rows.length === 0 && blocked.length > 0) {
+    status = "No workspace on this connection can start work yet. Open the list to see why.";
   } else if (ready && rows.length === 0) {
     status = inventory.data?.workspaces.length === 0 ? "This connection has no known workspaces." : "This connection has no eligible workspaces.";
   }
 
   return {
     harnesses, picked, connection, connectionOptions, workspaceOptions, selected, status, loading,
+    /** Blocked rows stay browsable so their reasons can be read. */
+    canBrowse: rows.length > 0 || blocked.length > 0,
     workspaceId: saved?.id ?? prefill?.workspaceId ?? null,
     canRefresh: picked?.active === true,
     refreshing,
@@ -156,7 +167,7 @@ export function TaskDestinationFields({ destination: d, readOnly, canClear, chec
               <Combobox key={d.connection} id={id} value={d.workspaceId ?? ""} options={d.workspaceOptions}
                 onChange={onWorkspace} listLabel="Workspaces" placeholder={d.workspacePlaceholder} searchable
                 className="min-w-0 flex-1"
-                disabled={readOnly || d.selected === undefined && d.workspaceOptions.every((o) => o.disabled === true)} />
+                disabled={readOnly || d.selected === undefined && !d.canBrowse} />
               {readOnly ? null : (
                 <IconButton variant="secondary" icon={IconRefresh} label="Refresh workspaces" busy={d.refreshing}
                   disabled={!d.canRefresh} onClick={d.refresh} />

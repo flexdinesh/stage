@@ -13,6 +13,11 @@ export function groupWorkspaceSummary(group: ProjectGroup): string {
   return `${group.members.length} workspaces`;
 }
 
+/** Why the harness won't start a session in this listed workspace, or null. */
+export function groupWorkspaceBlocked(workspace: GroupWorkspace): string | null {
+  return workspace.catalogState === "listed" && workspace.blockedReason ? workspace.blockedReason : null;
+}
+
 export function canRunProjectActions(projectId: number, workspace: GroupWorkspace, destinations: readonly Destination[] | undefined): boolean {
   return workspace.catalogState === "listed" && destinations?.some((row) =>
     row.available && row.connectionId === workspace.connectionId && row.workspaceId === workspace.workspaceId &&

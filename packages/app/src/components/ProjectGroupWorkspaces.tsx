@@ -2,7 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { keys, useDestinations, useInvalidateProjects, useProject } from "../api/queries.ts";
 import type { GroupWorkspace, ProjectGroup } from "../api/types.ts";
-import { canRunProjectActions } from "../lib/projectGroups.ts";
+import { canRunProjectActions, groupWorkspaceBlocked } from "../lib/projectGroups.ts";
 import { useApi } from "../platform/context.tsx";
 import { DeclaredActions } from "./DeclaredActions.tsx";
 import { GroupMembershipDrawer, type MembershipAction } from "./GroupMembershipDrawer.tsx";
@@ -83,6 +83,7 @@ export function ProjectGroupWorkspaces({ group, connections }: {
             {group.members.map((workspace) => {
               const site = groupWorkspaceLabel(workspace, connections);
               const path = groupWorkspaceLocation(workspace);
+              const blocked = groupWorkspaceBlocked(workspace);
               return (
                 <Row key={workspace.workspaceId} className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
                   <div className="flex min-w-0 flex-col gap-1">
@@ -95,6 +96,7 @@ export function ProjectGroupWorkspaces({ group, connections }: {
                       <code className="min-w-0 wrap-anywhere text-meta">{path}</code>
                       <CopyButton text={path} label="Copy" accessibleLabel={`Copy ${path} on ${site}`} variant="ghost" />
                     </div>
+                    {blocked === null ? null : <p className="text-small text-muted wrap-anywhere">{blocked}</p>}
                     {canRunProjectActions(group.id, workspace, destinations.data?.destinations)
                       ? <ProjectHarnessActions projectId={group.id} workspace={workspace} /> : null}
                   </div>

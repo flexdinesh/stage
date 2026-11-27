@@ -97,6 +97,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	47: {{"backfill proven workspace pins and preserve attempts", seedV0047WorkspacePins, checkV0047WorkspacePins}},
 	48: {{"proven group memberships and historical work retained", seedProjectGroups, checkProjectGroups}},
 	49: {{"project events keep history and accept workspace_added", seedV0049ProjectEvents, checkV0049ProjectEvents}},
+	50: {{"existing workspace is not blocked until refreshed", seedV0046HistoricalWorkspaceProject, checkV0050BlockedReason}},
 }
 
 func seedV0049ProjectEvents(t *testing.T, pool *sqlite.DB) {
@@ -115,6 +116,10 @@ func checkV0049ProjectEvents(t *testing.T, pool *sqlite.DB) {
 	if _, err := pool.Exec(`INSERT INTO project_events(project_id,type,text) VALUES(7,'unknown','x')`); err == nil {
 		t.Fatal("project event type check accepted an unknown type")
 	}
+}
+
+func checkV0050BlockedReason(t *testing.T, pool *sqlite.DB) {
+	wantRows(t, pool, `SELECT external_id,available,blocked_reason FROM external_projects WHERE connection_id=42`, "ext|1|")
 }
 
 func seedV0046HistoricalWorkspaceProject(t *testing.T, pool *sqlite.DB) {

@@ -576,6 +576,11 @@ and paging. (Thread search was removed with API v3.)
   `attribution` stamp to `project_events` and allows type
   `workspace_added`. SQLite rebuilds the table to change its CHECK,
   preserving IDs and the sequence. Existing events keep a null stamp.
+  Paired migration 0050 `workspace_blocked_reason` adds
+  `external_projects.blocked_reason` (text, default `''`): why the harness
+  will not start a session in a listed workspace, from the latest complete
+  inventory. Each complete refresh rewrites it, so existing rows need no
+  backfill and copies carry it unchanged.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -887,6 +892,7 @@ there are active bindings. Tasks and schedule templates store a nullable
 | `project_bindings.rule` | `manual`, `new`, `remote`, `local`, `moved`. Records how the binding was made. |
 | `external_projects.resolution` | Empty for unresolved legacy or unavailable unbound rows, otherwise `bound`, `join`, `new` or `review`. Derived from workspace evidence, bindings and declines. |
 | `external_projects.resolution_reason` | Empty or `ambiguous`, `declined`, `moved`, `suggested`. The resolution also stores the resolver rule and candidate project IDs. |
+| `external_projects.blocked_reason` | Empty, or why the harness will not start a session in this listed workspace (for example, not trusted in Claude Code). A blocked row is not an eligible destination. Paired migration 0050 adds it. |
 | `external_projects.historical_project_id` | Nullable project used when a human tracks a session in this exact workspace without a current binding. Paired migration 0046 adds it. |
 
 `workspace_declines` stores both the identity and external keys per

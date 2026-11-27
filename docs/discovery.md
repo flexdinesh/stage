@@ -72,9 +72,22 @@ project and attribution stay with the original work. See
 [workspace selection](api.md#task-and-schedule-workspace-selection) and
 [retired routes](api.md#retired-workspace-routes).
 
+### Eligibility
+
+A listed row is an eligible destination unless its harness archived it or
+the harness will not start a session there. The second case is
+`blockedReason`, in the harness's words, for example a Claude Code folder
+that is not trusted. A blocked row stays in the catalog, keeps its group
+membership and appears in the destination summary with `available: false`
+and its `reason`. Creating or editing a task or schedule with it, and the
+launch claim after the pre-launch refresh, return `destination_unavailable`
+with that reason. The next refresh after the person fixes it in the harness
+makes the row eligible again. See the
+[Claude Code inventory](execution.md#claude-code-adapter).
+
 ## Refresh and adapter contract (07 behavior, 09 ownership)
 
-A harness implements `Workspaces` with stable external IDs within its connection, display titles, and paths where available. It reports import eligibility and any known archive, deletion or activity information. It sets locality only when the files are local to the connection's machine. It can supply an origin and checkout-relative subpath learned from its harness. `machine.Ops` supplies filesystem evidence. The optional descriptor field `discoveryHint` tells a user how to make a workspace appear.
+A harness implements `Workspaces` with stable external IDs within its connection, display titles, and paths where available. It reports import eligibility, any known archive, deletion or activity information, and a `BlockedReason` (or a `TrustRule` that machine evidence settles) for a row it will not launch in. It sets locality only when the files are local to the connection's machine. It can supply an origin and checkout-relative subpath learned from its harness. `machine.Ops` supplies filesystem evidence. The optional descriptor field `discoveryHint` tells a user how to make a workspace appear.
 
 Return success only for a complete snapshot. A successful empty snapshot is authoritative and marks prior rows unavailable. An unreachable service, missing inventory source or known partial response returns an error. Stage retains its last good inventory, reports the inventory error and continues polling linked tasks. The human inventory endpoint distinguishes these states and exposes the last successful read and the latest failure. Selection summaries include eligible catalog rows without paths or discovery diagnostics.
 
@@ -87,8 +100,8 @@ The table follows the adapters' `Workspaces` methods. The import column describe
 | Harness | External ID and path | Origin source | Import policy | Failure or partial inventory |
 | --- | --- | --- | --- | --- |
 | [T3](../server/internal/t3/adapter.go) | T3 project ID and reported workspace root. Locality is unset. | The [repository locator](../server/internal/t3/wire.go) supplies the remote when it names `origin` and a subpath when known. The fork-parent field is ignored. | Live, unarchived T3 projects are eligible. | [Paging](../server/internal/t3/tools.go) discards accumulated rows on call or decode failure, a nonadvancing cursor or a page-limit overrun. A final page without a project array can decode as empty. |
-| [OpenCode](../server/internal/opencode/workspace.go) | Project ID and canonical path from the service. Local only in local-auth mode. Worktrees are a separate inventory. | No origin from the project endpoint. Machine inventory can read a checkout in local-auth mode. | Unarchived VCS projects except `global`. Plain directories can be listed outside legacy import. | Request or decode failure, a null list, or any row missing ID, canonical path or required timestamps fails the inventory. An empty array succeeds. |
-| [Claude Code](../server/internal/claudecode/adapter.go) | Clean absolute paths from the state project map and the current native session list. The path doubles as ID. Local. Claude-managed worktree paths are skipped. | Machine inventory reads the local checkout. | Checkout top only. Other folders are discoverable without automatic import. Claude checks trust on launch. | Missing or malformed state, an unavailable or malformed native roster, or a changed config identity fails the refresh. A valid fresh state may omit the project map. |
+| [OpenCode](../server/internal/opencode/workspace.go) | Project ID and canonical path from the service. Local only in local-auth mode. Worktrees are a separate inventory. Verification reads only the project and worktree lists, never a location. | No origin from the project endpoint. Machine inventory can read a checkout in local-auth mode. | Unarchived VCS projects except `global`. Plain directories can be listed outside legacy import. | Request or decode failure, a null list, or any row missing ID, canonical path or required timestamps fails the inventory. An empty array succeeds. |
+| [Claude Code](../server/internal/claudecode/adapter.go) | Clean absolute paths from the state project map and the current native session list. The path doubles as ID. Local. Claude-managed worktree paths are skipped. | Machine inventory reads the local checkout. | Checkout top only. Other folders are discoverable without automatic import. Folders Claude does not trust stay listed but blocked (Claude's trust rule, settled by machine evidence). | Missing or malformed state, an unavailable or malformed native roster, or a changed config identity fails the refresh. A valid fresh state may omit the project map. |
 | [Codex](../server/internal/codex/adapter.go) | Clean absolute path from trusted `config/read` projects doubles as ID. Local. | Machine inventory reads the local checkout. | Any trusted directory inside a Git checkout. Other trusted directories can be listed outside legacy import. | RPC failure, missing config or malformed projects fails the inventory. Missing or null `projects` in an otherwise valid config yields an empty list. A failed directory stat leaves the workspace listed. |
 
 Claude's default state is `$HOME/.claude.json`. An explicit

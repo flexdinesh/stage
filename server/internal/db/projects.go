@@ -155,7 +155,7 @@ func refreshWorkspaceRows(ctx context.Context, tx store.Tx, connectionID int64, 
 		}
 		row := store.DiscoveredWorkspace{
 			ExternalID: p.ID, Title: p.Title, Workspace: p.WorkspaceRoot, Available: p.DeletedAt == nil,
-			Importable: p.Importable, Archived: p.ArchivedAt != nil, ActiveAt: p.ActiveAt,
+			Importable: p.Importable, Archived: p.ArchivedAt != nil, ActiveAt: p.ActiveAt, BlockedReason: p.BlockedReason,
 		}
 		if e := p.Evidence; e != nil {
 			if e.Gone {

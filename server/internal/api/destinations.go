@@ -64,7 +64,8 @@ func (s *server) destinations(ctx context.Context) ([]db.Destination, error) {
 		out = append(out, db.Destination{
 			ConnectionID: c.ID, WorkspaceID: row.WorkspaceID, ProjectID: row.ProjectID,
 			GroupProjectID: row.GroupProjectID,
-			Title:          key.title, ConnectionLabel: key.connection, MachineLabel: key.machine, Available: true,
+			Title:          key.title, ConnectionLabel: key.connection, MachineLabel: key.machine,
+			Available: row.BlockedReason == "", Reason: row.BlockedReason,
 		})
 	}
 	for i, key := range keys {

@@ -102,6 +102,56 @@ func commonDir(dotGit string, info os.FileInfo) string {
 	return canonicalDirectory(resolve(gitDir, target))
 }
 
+// Main is the main root of the checkout whose top is top: the main working
+// tree of a linked worktree, the common directory of a bare repository's
+// linked worktree, else top itself. Like Claude Code, it trusts a linked
+// worktree only when its admin directory sits under the common directory's
+// worktrees and points back at this checkout.
+func Main(top string) string {
+	b, err := read(filepath.Join(top, ".git"))
+	if err != nil {
+		return top
+	}
+	target, ok := strings.CutPrefix(strings.TrimSpace(string(b)), "gitdir:")
+	target = strings.TrimSpace(target)
+	if !ok || target == "" {
+		return top
+	}
+	admin := resolve(top, target)
+	b, err = read(filepath.Join(admin, "commondir"))
+	common := strings.TrimSpace(string(b))
+	if err != nil || common == "" {
+		return top
+	}
+	common = resolve(admin, common)
+	if filepath.Dir(admin) != filepath.Join(common, "worktrees") {
+		return top
+	}
+	b, err = read(filepath.Join(admin, "gitdir"))
+	back := strings.TrimSpace(string(b))
+	if err != nil || back == "" {
+		return top
+	}
+	self, err := filepath.EvalSymlinks(top)
+	if err != nil {
+		return top
+	}
+	if p, err := filepath.EvalSymlinks(resolve(admin, back)); err != nil || p != filepath.Join(self, ".git") {
+		return top
+	}
+	main := filepath.Dir(common)
+	if filepath.Base(common) != ".git" {
+		if _, err := os.Lstat(filepath.Join(common, ".git")); err == nil {
+			return top
+		}
+		main = common
+	}
+	if p, err := filepath.EvalSymlinks(main); err == nil {
+		return p
+	}
+	return main
+}
+
 func canonicalDirectory(dir string) string {
 	p, err := filepath.EvalSymlinks(dir)
 	if err != nil {

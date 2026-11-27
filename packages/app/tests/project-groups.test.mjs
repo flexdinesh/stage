@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createApi } from "../src/api/client.ts";
 import { hostAccessScope } from "../src/lib/host.ts";
-import { canRunProjectActions, duplicateGroupTitles, groupWorkspaceSummary, isCurrentGroup, requestGroupEdit } from "../src/lib/projectGroups.ts";
+import { canRunProjectActions, duplicateGroupTitles, groupWorkspaceBlocked, groupWorkspaceSummary, isCurrentGroup, requestGroupEdit } from "../src/lib/projectGroups.ts";
 import { createSharedSession } from "../src/lib/sharedSession.ts";
 
 test("same-title current groups remain distinct from each other and from project history", () => {
@@ -26,6 +26,16 @@ test("project actions require a current, available workspace in that exact group
   assert.equal(canRunProjectActions(8, workspace, [{ ...row, available: false }]), false);
   assert.equal(canRunProjectActions(8, { ...workspace, catalogState: "archived" }, [row]), false);
   assert.equal(canRunProjectActions(8, workspace, undefined), false);
+});
+
+test("a listed workspace the harness won't start in carries its reason; other states don't", () => {
+  const reason = "Not trusted in Claude Code. Run claude in this folder once and accept the trust prompt, then refresh.";
+  const workspace = { workspaceId: "ws_lab", connectionId: 5, catalogState: "listed", path: "/lab", title: "Lab", blockedReason: reason };
+  assert.equal(groupWorkspaceBlocked(workspace), reason);
+  assert.equal(groupWorkspaceBlocked({ ...workspace, blockedReason: "" }), null);
+  assert.equal(groupWorkspaceBlocked({ ...workspace, catalogState: "missing" }), null);
+  const row = { ...workspace, available: false, reason, groupProjectId: 8 };
+  assert.equal(canRunProjectActions(8, workspace, [row]), false);
 });
 
 test("project summaries describe the group workspace count when there are several", () => {

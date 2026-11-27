@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceLocation, availableTaskWorkspaces, suggestedTaskWorkspace, workspaceLine } from "../src/lib/taskForm.ts";
+import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceLocation, availableTaskWorkspaces, blockedTaskWorkspaces, suggestedTaskWorkspace, workspaceLine } from "../src/lib/taskForm.ts";
 import { setOption } from "../src/lib/options.ts";
 
 const config = { model: "m", options: [], permission: "", mode: "" };
@@ -121,6 +121,18 @@ test("workspace choices use only ready, eligible rows on the selected connection
   for (const state of ["pending", "refreshing", "stale", "unavailable", "retired"]) {
     assert.deepEqual(availableTaskWorkspaces({ ...inventory, inventory: { state } }, 3, 5), []);
   }
+});
+
+test("workspaces the harness won't start in are listed apart, never chosen or suggested", () => {
+  const reason = "Not trusted in Claude Code. Run claude in this folder once and accept the trust prompt, then refresh.";
+  const open = { workspaceId: "ws_open", connectionId: 3, groupProjectId: 5, title: "Open", workspace: "/open", available: true, blockedReason: "" };
+  const lab = { ...open, workspaceId: "ws_lab", title: "Lab", workspace: "/lab", blockedReason: reason };
+  const archivedLab = { ...lab, workspaceId: "ws_old", harnessArchived: true };
+  const inventory = { workspaces: [lab, open, archivedLab], inventory: { state: "ready" } };
+  assert.deepEqual(availableTaskWorkspaces(inventory, 3, 5), [open]);
+  assert.deepEqual(blockedTaskWorkspaces(inventory, 3, 5), [lab]);
+  assert.equal(suggestedTaskWorkspace(availableTaskWorkspaces({ ...inventory, workspaces: [lab] }, 3, 5), 5), undefined);
+  assert.deepEqual(blockedTaskWorkspaces({ ...inventory, inventory: { state: "stale" } }, 3, 5), []);
 });
 
 test("task workspace display keeps the recorded path or pathless external identity", () => {

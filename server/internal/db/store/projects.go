@@ -47,6 +47,7 @@ type Workspace struct {
 	Available       bool                `json:"available"`
 	Importable      bool                `json:"importable"`
 	HarnessArchived bool                `json:"harnessArchived"`
+	BlockedReason   string              `json:"blockedReason"` // why the harness will not start a session here; "" when nothing stops it
 	ActiveAt        *time.Time          `json:"activeAt"`
 	ProjectID       *int64              `json:"projectId"`
 	GroupProjectID  *int64              `json:"groupProjectId"`
@@ -99,6 +100,7 @@ type WorkspaceDecline struct {
 
 // DiscoveredWorkspace is one discovery row to upsert.
 type DiscoveredWorkspace struct {
+	BlockedReason  string
 	ExternalID     string
 	Title          string
 	Workspace      string
