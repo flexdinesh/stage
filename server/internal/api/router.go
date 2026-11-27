@@ -203,6 +203,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("POST /api/tasks/{id}/launch-link", s.attachLaunchLink)
 	h("GET /api/connections/{connectionId}/projects", removedRoute("GET /api/connections/{connectionId}/workspaces"))
 	h("GET /api/connections/{connectionId}/workspaces", s.workspaces)
+	agent("POST /api/connections/{connectionId}/workspaces", s.addWorkspace)
 	h("POST /api/connections/{connectionId}/resolve", removedRoute("POST /api/sync and GET /api/connections/{connectionId}/workspaces"))
 	h("POST /api/connections/{connectionId}/workspaces/decline", removedRoute("POST /api/project-groups/membership"))
 	h("POST /api/connections/{connectionId}/workspaces/undecline", removedRoute("POST /api/project-groups/membership"))
@@ -425,8 +426,14 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	var unavailable *remote.UnavailableError
 	var uncertain *execution.ActionUncertain
+	var outcome *execution.OutcomeUncertain
+	var notListed *workspaceNotListed
 	var forbidden actionForbidden
 	switch {
+	case errors.As(err, &outcome):
+		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": outcome.Error(), "code": "outcome_uncertain"})
+	case errors.As(err, &notListed):
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": notListed.Error(), "code": "workspace_not_listed"})
 	case errors.As(err, &forbidden):
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error(), "code": "action_forbidden"})
 	case errors.As(err, &uncertain):

@@ -62,6 +62,22 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	46: {{name: "existing workspace has no historical project", seed: seedV0046HistoricalWorkspaceProject, check: checkV0046HistoricalWorkspaceProject}},
 	47: {{name: "backfill proven workspace pins and preserve attempts", seed: seedV0047WorkspacePins, check: checkV0047WorkspacePins}},
 	48: {{name: "proven group memberships and historical work retained", seed: seedProjectGroups, check: checkProjectGroups}},
+	49: {{name: "project events keep history and accept workspace_added", seed: seedV0049ProjectEvents, check: checkV0049ProjectEvents}},
+}
+
+func seedV0049ProjectEvents(t *testing.T, pool *sql.DB) {
+	seedV0032(`INSERT INTO projects(id,title) VALUES(7,'Events')`,
+		`INSERT INTO project_events(project_id,type,text) VALUES(7,'workspace_moved','Moved.'),(7,'project_merged','Merged.')`)(t, pool)
+}
+
+func checkV0049ProjectEvents(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	wantPGRows(t, pool, `SELECT type || '|' || text || '|' || created_by_user_id || '|' || COALESCE(attribution,'NULL')
+ FROM project_events ORDER BY id`, "workspace_moved|Moved.|1|NULL", "project_merged|Merged.|1|NULL")
+	seedV0032(`INSERT INTO project_events(project_id,type,text,attribution) VALUES(7,'workspace_added','Added.','{"actor":{"kind":"agent"}}')`)(t, pool)
+	if _, err := pool.ExecContext(context.Background(), `INSERT INTO project_events(project_id,type,text) VALUES(7,'unknown','x')`); err == nil {
+		t.Fatal("project event type check accepted an unknown type")
+	}
 }
 
 func seedV0046HistoricalWorkspaceProject(t *testing.T, pool *sql.DB) {

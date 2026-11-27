@@ -167,7 +167,7 @@ func (s *Store) moveBinding(ctx context.Context, tx store.Tx, next, old ProjectB
 		label = conn.Harness
 	}
 	text := fmt.Sprintf("Workspace moved from %s to %s on %s.", old.Workspace, next.Workspace, label)
-	return id, pr.AddProjectEvent(ctx, next.ProjectID, "workspace_moved", text, ActingUser(ctx))
+	return id, pr.AddProjectEvent(ctx, next.ProjectID, "workspace_moved", text, ActingUser(ctx), WorkAttribution(ctx))
 }
 
 func (s *Store) BindProject(ctx context.Context, b ProjectBinding) (Project, error) {

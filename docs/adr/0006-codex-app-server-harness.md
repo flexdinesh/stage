@@ -69,7 +69,10 @@ daemon, so a thread Stage starts is the user's thread too.
    "Copy resume command".
 8. **Inventory.** Workspaces are the projects `config/read` reports
    trusted (`projects{path:{trust_level}}`); a Git checkout is importable.
-   Stage never writes Codex's config: trust a project in Codex. Adoption
+   Stage never writes Codex's config: trust a project in Codex.
+   *Superseded by [ADR 0012](0012-harness-workspace-add.md): an explicit
+   add-workspace request may trust a folder through the app server's
+   `config/batchWrite`; Stage still never edits Codex's files.* Adoption
    takes a thread id or a `codex resume <id>` command. It refuses T3 Code's
    threads ("Track it through T3": T3 runs its own app-server and tracks
    them), ephemeral threads and subagent threads. Amended by #420: the

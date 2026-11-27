@@ -113,7 +113,7 @@ func (s *Store) MergeProjects(ctx context.Context, into, from int64, confirm boo
 		m := result.Moves
 		text := fmt.Sprintf("Merged #%d %s: %d tasks, %d schedules, %d snippets, %d workspaces.",
 			src, result.From.Title, m.Tasks, m.Schedules, m.Snippets, m.Workspaces)
-		if err := pr.AddProjectEvent(ctx, dst, "project_merged", text, by); err != nil {
+		if err := pr.AddProjectEvent(ctx, dst, "project_merged", text, by, WorkAttribution(ctx)); err != nil {
 			return MergeResult{}, err
 		}
 		if err := resolveAll(ctx, tx); err != nil {
@@ -247,11 +247,11 @@ func (s *Store) SplitProject(ctx context.Context, project, binding int64, title 
 			label = w.ExternalID
 		}
 		if err := pr.AddProjectEvent(ctx, from, "project_split",
-			fmt.Sprintf("Split workspace %s into #%d %s.", label, into, name), by); err != nil {
+			fmt.Sprintf("Split workspace %s into #%d %s.", label, into, name), by, WorkAttribution(ctx)); err != nil {
 			return SplitResult{}, err
 		}
 		if err := pr.AddProjectEvent(ctx, into, "project_split",
-			fmt.Sprintf("Split workspace %s from #%d %s.", label, from, src.Title), by); err != nil {
+			fmt.Sprintf("Split workspace %s from #%d %s.", label, from, src.Title), by, WorkAttribution(ctx)); err != nil {
 			return SplitResult{}, err
 		}
 		if err := resolveAll(ctx, tx); err != nil {
@@ -309,5 +309,19 @@ func (s *Store) ProjectEvents(ctx context.Context, project int64) ([]ProjectEven
 			return nil, err
 		}
 		return tx.Projects().ProjectEvents(ctx, id)
+	})
+}
+
+// RecordWorkspaceAdded records an add-workspace request on the project
+// group that holds the workspace (ADR 0012), with the admitted actor and a
+// workspace_add cause naming the request and the caller session.
+func (s *Store) RecordWorkspaceAdded(ctx context.Context, project int64, text, requestID string, caller *SessionRef) error {
+	ctx = WithWorkCause(ctx, Cause{Kind: "workspace_add", RequestID: requestID, Session: caller})
+	return s.e.Write(ctx, func(tx store.Tx) error {
+		id, err := projectID(ctx, tx, project)
+		if err != nil {
+			return err
+		}
+		return tx.Projects().AddProjectEvent(ctx, id, "workspace_added", text, ActingUser(ctx), WorkAttribution(ctx))
 	})
 }

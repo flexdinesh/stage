@@ -35,6 +35,9 @@ const (
 	FieldSecret FieldKind = "secret"
 	FieldBool   FieldKind = "bool"
 	FieldChoice FieldKind = "choice"
+	// FieldPath is a filesystem path on the harness's machine: a string,
+	// non-empty when required. The adapter checks that it is absolute.
+	FieldPath FieldKind = "path"
 )
 
 // Field describes one settings field or action input.
@@ -166,7 +169,7 @@ func ValidateFields(fields []Field) error {
 		}
 		seen[f.ID] = true
 		switch f.Kind {
-		case FieldText, FieldURL, FieldSecret, FieldBool:
+		case FieldText, FieldURL, FieldSecret, FieldBool, FieldPath:
 			if len(f.Choices) != 0 {
 				return fmt.Errorf("field %q does not accept choices", f.ID)
 			}
@@ -190,42 +193,48 @@ func ValidateFields(fields []Field) error {
 
 // ValidateInput checks the public schema without exposing submitted values.
 func (a Action) ValidateInput(input json.RawMessage) error {
+	return validateInput(a.Input, "Action", input)
+}
+
+// validateInput checks input against fields; noun names the declaration in
+// errors ("Action").
+func validateInput(fields []Field, noun string, input json.RawMessage) error {
 	d := json.NewDecoder(bytes.NewReader(input))
 	if token, err := d.Token(); err != nil || token != json.Delim('{') {
-		return &Invalid{Reason: "Action input must be a JSON object."}
+		return &Invalid{Reason: noun + " input must be a JSON object."}
 	}
 	seen := make(map[string]bool)
 	for d.More() {
 		key, err := d.Token()
 		if err != nil {
-			return &Invalid{Reason: "Malformed action input."}
+			return &Invalid{Reason: "Malformed " + strings.ToLower(noun) + " input."}
 		}
 		id, ok := key.(string)
 		if !ok {
-			return &Invalid{Reason: "Malformed action input field."}
+			return &Invalid{Reason: "Malformed " + strings.ToLower(noun) + " input field."}
 		}
-		i := slices.IndexFunc(a.Input, func(f Field) bool { return f.ID == id })
+		i := slices.IndexFunc(fields, func(f Field) bool { return f.ID == id })
 		if i < 0 {
-			return &Invalid{Reason: "Action input contains an unknown field."}
+			return &Invalid{Reason: noun + " input contains an unknown field."}
 		}
 		if seen[id] {
-			return &Invalid{Reason: fmt.Sprintf("Action field %q was supplied twice.", id)}
+			return &Invalid{Reason: fmt.Sprintf("%s field %q was supplied twice.", noun, id)}
 		}
 		seen[id] = true
 		var value json.RawMessage
-		if err := d.Decode(&value); err != nil || !a.Input[i].validValue(value) {
-			return &Invalid{Reason: fmt.Sprintf("Invalid value for action field %q.", id)}
+		if err := d.Decode(&value); err != nil || !fields[i].validValue(value) {
+			return &Invalid{Reason: fmt.Sprintf("Invalid value for %s field %q.", strings.ToLower(noun), id)}
 		}
 	}
 	if token, err := d.Token(); err != nil || token != json.Delim('}') {
-		return &Invalid{Reason: "Malformed action input."}
+		return &Invalid{Reason: "Malformed " + strings.ToLower(noun) + " input."}
 	}
 	if _, err := d.Token(); err != io.EOF {
-		return &Invalid{Reason: "Action input must be one JSON object."}
+		return &Invalid{Reason: noun + " input must be one JSON object."}
 	}
-	for _, f := range a.Input {
+	for _, f := range fields {
 		if f.Required && !seen[f.ID] {
-			return &Invalid{Reason: fmt.Sprintf("Action field %q is required.", f.ID)}
+			return &Invalid{Reason: fmt.Sprintf("%s field %q is required.", noun, f.ID)}
 		}
 	}
 	return nil

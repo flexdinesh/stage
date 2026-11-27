@@ -155,6 +155,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 			execution.OpRespond:       {Reason: answerInCodex},
 			execution.OpSend:          {Reason: answerInCodex},
 			execution.OpSessionRename: available,
+			execution.OpWorkspaceAdd:  execution.WorkspaceAddNotSupported(Descriptor.Name),
 		},
 	}
 	for _, p := range permissions {

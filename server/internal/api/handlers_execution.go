@@ -127,6 +127,16 @@ func (s *server) executionCapabilities(w http.ResponseWriter, r *http.Request) e
 			c.Actions = nil
 		}
 	}
+	if a, err := s.Engine.Connections.Catalog(id); err == nil {
+		checked, err := checkWorkspaceAdd(a, c)
+		if err != nil {
+			s.log.Warn("discarded invalid workspace sources", "connection", id, "err", err)
+			checked.WorkspaceSources = nil
+			checked.Operations = cloneOperations(checked.Operations)
+			checked.Operations[execution.OpWorkspaceAdd] = execution.Availability{Reason: "The harness declared invalid workspace sources."}
+		}
+		c = checked
+	}
 	writeJSON(w, 200, c)
 	return nil
 }

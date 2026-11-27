@@ -25,7 +25,8 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 | 404 | resource not found |
 | 409 | conflict: action not allowed in current state, duplicate unique value, T3 setup refused (other T3 environment, auto-pair unavailable) |
 | 415 | write body not `application/json` / `multipart/form-data` |
-| 502 | harness call failed or an action outcome is uncertain |
+| 502 | harness call failed, an action outcome is uncertain, or the harness does not list an added workspace (`workspace_not_listed`) |
+| 504 | the harness did not confirm an add-workspace outcome (`outcome_uncertain`); retry with the same `requestId` |
 | 503 | T3 not connected (no valid token) or DB unavailable |
 | 500 | unexpected |
 
@@ -588,7 +589,7 @@ See [storage](storage.md#project-identity) for persisted values.
 | Route | Request | Result |
 | --- | --- | --- |
 | `GET /api/connections/:connectionId/workspaces` | Live refresh by default, or `?refresh=false` for a cached read | 200 `{workspaces: Workspace[], inventory: {state, refreshedAt, lastError}}`. 404 for unknown or forgotten connections. |
-| `GET /api/projects/:id/events` | Latest project identity events | 200 `{events: [{id, type, text, createdAt, createdBy}]}`, newest first, up to 100. |
+| `GET /api/projects/:id/events` | Latest project identity events | 200 `{events: [{id, type, text, createdAt, createdBy, actor, cause, sourceMachineId}]}`, newest first, up to 100. `type` is `workspace_moved`, `project_merged`, `project_split` or `workspace_added`. `actor` and `cause` follow [work attribution](#work-attribution); events recorded before migration 0049 have a null actor and cause. |
 
 Each `workspaceId` names the exact connection, native ID and reported
 location. It stays stable across refreshes and membership edits. A
@@ -602,6 +603,51 @@ last-known rows with `available: false`. `refreshedAt` records the most
 recent complete refresh and `lastError` records the most recent failure
 until a refresh succeeds. Live refresh can return 409 `connection_retired`
 or `connection_unavailable`, or 502 on a harness inventory failure.
+
+### Add a workspace
+
+`POST /api/connections/:connectionId/workspaces` asks the connection's
+harness to add a workspace ([ADR 0012](adr/0012-harness-workspace-add.md)).
+Humans and scoped agents may call it. The body is
+`{sourceId, input?, requestId, projectId?, confirmed?}`:
+
+- `sourceId` names one of the connection's `workspaceSources` from
+  [capabilities](#get-apiconnectionsconnectionidcapabilities). Each source is
+  `{id, label, help?, input: Field[], confirm?, availability}`, where a field
+  uses the declared action field shape and may have kind `path`.
+- `input` is an object validated against the source's fields (omitted or
+  null: `{}`).
+- `requestId` (required, at most 256 bytes) is the caller's retry key.
+  Reuse it to retry the same request.
+- `projectId` moves the added workspace into that project with the same
+  membership edit as `POST /api/project-groups/membership`.
+- `confirmed: true` is required when the source has `confirm` text.
+
+Stage checks the request before the harness sees it:
+
+| Status | When |
+| --- | --- |
+| 400 | missing `requestId` or `sourceId`, invalid input, missing confirmation, or a harness validation error |
+| 404 | unknown or forgotten connection, unknown source, or unknown `projectId` |
+| 409 | retired or unavailable connection, `workspaceAdd` or the source unavailable (`operation_unavailable` with the reason), or `membership_failed` |
+| 502 | harness failure, or `workspace_not_listed` when the next inventory refresh does not list the returned workspace |
+| 504 | `outcome_uncertain`: a lost worker reply, the 5-minute deadline, or the harness could not confirm |
+
+After the harness answers, Stage refreshes the connection's inventory,
+resolves the row by native ID and root, and groups it like any discovered
+workspace. 201 returns `{workspace, group: {id, title}, existing,
+message?, facts?}`. `workspace` is the destination projection
+(`connectionId`, `workspaceId`, `title`, `connectionLabel`,
+`machineLabel`, `projectId?`, `groupProjectId?`, `available`) plus `path`
+for humans. `existing` is true when the harness already had the target.
+Agent responses omit `path`, `message` and `facts`.
+
+Each success records a `workspace_added` project event on the group with
+the actor and a `workspace_add` cause carrying `requestId` and the caller
+session. A `membership_failed` 409 means the workspace was added but not
+moved; retrying with the same `requestId` is safe. No shipped harness
+supports the operation yet; each declares it unavailable with "Adding
+workspaces from Stage is not supported for <name> yet."
 
 ### Retired workspace routes
 
@@ -629,7 +675,7 @@ connection's session roster. The retired routes keep human admission, so
 
 Scoped agents can read project and group summaries, project events and the
 exact destination projection, create, rename and archive projects, preview
-and apply group membership edits, fetch scoped capabilities, and use the
+and apply group membership edits, add workspaces, fetch scoped capabilities, and use the
 allowed task and schedule operations
 ([ADR 0011](adr/0011-agent-operation-parity.md)). Their project and
 membership responses omit raw paths. Raw inventory, `POST /api/sync` and
@@ -884,7 +930,9 @@ attaches to the unresolved attempt; 409 if it changed. No launch or acceptance.
 Stage-owned operation availability/reasons, models/options, permissions,
 interaction modes and launch options. `operations` maps every operation
 (`launch`, `stop`, `adopt`, `reply`, `opening`, `attention`, `sessionSearch`, `images`,
-`respond`, `send`, `sessionRename`) to `{available, reason?}`; an unavailable one says why.
+`respond`, `send`, `sessionRename`, `workspaceAdd`) to `{available, reason?}`; an unavailable one says why.
+`workspaceSources`, when present, lists the sources for
+[adding a workspace](#add-a-workspace).
 An option (harness-wide in `options`, or a model's) is `{id, kind?, label?,
 values, default, dependsOn?}`: `kind` `choice` (one of `values`),
 `boolean` (`true` or `false`) or `text` (a non-empty string; `values`
@@ -1248,6 +1296,8 @@ The server and workers roll forward together at API v9. Layer 07 raises the inde
 - Session rename (additive, no version bump): the `sessionRename` operation, and a task title change renames the session Stage launched where available (`PATCH /api/tasks/:id`).
 - Agent operation parity (additive, no version bump; [ADR 0011](adr/0011-agent-operation-parity.md)): agent callers may complete, reopen, list and answer requests, send messages, read opening prompts, create, rename and archive projects, read project events, edit group membership, manage snippets and delete attachments. 403 `agent_forbidden` on respond and send is now `self_action_forbidden`, only for the caller's own task. `PATCH /api/projects/:id` keeps omitted fields.
 
+- Workspace add (additive, no version bump; [ADR 0012](adr/0012-harness-workspace-add.md)): `POST /api/connections/:connectionId/workspaces`, capabilities `workspaceSources` and operation `workspaceAdd`, field kind `path`, MCP `list_workspace_sources` and `add_workspace`, CLI `stage workspaces sources|add`. Project events add type `workspace_added` and `actor`, `cause` and `sourceMachineId`. Workers relay `adapter.workspaceAdd` behind the `workspaceAdder` trait without a protocol change.
+
 Task detail and MCP `get_task` omit the former `batch` field. To list tasks created by a session, use `originConnectionId` and `originSessionId` on `GET /api/tasks` or `list_tasks {originSession}` in MCP.
 
 Removed inputs return 400. MCP and CLI surface the same validation text where applicable. The push endpoint checks removed fields in the raw request before strict decoding or ingest. In the message, `i` is the zero-based observation index.
@@ -1578,6 +1628,7 @@ Reply budget per need: `min(4000, max(1000, 8000 / sources))` Unicode characters
 - Session interaction: `list_requests {taskId}` (`{requests}`), `respond_request {taskId, requestId, option?, text?, answers?, callerSession?}` and `send_message {taskId, text, callerSession?}` (both return `Task`). CLI `task requests ID`, `task respond ID RID [--option O] [--text T] [--answers JSON]` and `task send ID --text TEXT`. `get_opening_prompt {taskId, full?}` (CLI `task opening-prompt ID [--full]`).
 - Complete, reopen, respond and send refuse the caller's own task or session (403 `self_action_forbidden`). Each sends the caller session; a call naming none passes.
 - Projects: `create_project {title}` and `update_project {id, title?, archived?}` (omitted keeps its value; at least one) return the project summary; `get_project_events {id}` returns `{events}`. CLI `projects add --title T` and `projects edit ID [--title T] [--archived true|false]`. `preview_membership {connectionId, workspaceId, targetProjectId?}` (omitted: a new group titled after the workspace) returns the preview with `previewToken`, changing nothing; `set_membership` takes the same inputs plus `previewToken` and fails on a changed preview: preview again. Responses omit raw paths.
+- Workspaces ([ADR 0012](adr/0012-harness-workspace-add.md)): `list_workspace_sources {connectionId}` returns `{availability, sources}`. `add_workspace {connectionId, sourceId, input?, requestId, projectId?, confirmed?}` returns the [add result](#add-a-workspace) without paths. CLI `stage workspaces sources --connection ID` and `stage workspaces add --connection ID --source S [--input JSON|-] [--project P] [--request-id KEY] [--confirm]`; without `--request-id` the CLI derives a stable key from the connection, source, input and project, so rerunning the same command retries safely. A 504 `outcome_uncertain` means retry with the same key.
 - Snippets and images: `list_snippets` (`{snippets}`), `get_snippet {id}`, `create_snippet {name, body, projectId?}` (omitted: global), `update_snippet {id, name?, body?, projectId?}` (omitted keeps; `projectId: null` makes it global), `delete_snippet {id}` and `delete_attachment {id}` (a staged upload or a backlog task's image; both `{deleted, id}`). The CLI runs them with `stage call`.
 - `list_actions` and `run_action` take exactly one of `connectionId`, `taskId` or `projectId`. A project also requires `onConnectionId` and `workspaceId`. `run_action` takes `actionId` and optional `input`. Both tools use agent policy with or without caller provenance.
 - CLI `stage action ls|run` takes `--connection ID`, `--task ID` or `--project ID --on-connection ID --workspace-id ID`. For example, `stage action run --task 42 label --input - --json` reads the input JSON from stdin. Use `--confirm` for a user-only destructive action.

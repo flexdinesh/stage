@@ -40,6 +40,7 @@ const (
 	KindRespond              = "adapter.respond"
 	KindSend                 = "adapter.send"
 	KindAct                  = "adapter.act"
+	KindWorkspaceAdd         = "adapter.workspaceAdd"
 	KindInventory            = "ops.inventory"
 )
 

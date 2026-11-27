@@ -572,6 +572,10 @@ and paging. (Thread search was removed with API v3.)
   revision and stamp belong to membership. Catalog-created project IDs
   support the same history, aliases and snippet scopes as other projects.
   Copies carry the membership columns and project IDs without a transform.
+  Paired migration 0049 `project_event_attribution` adds a nullable
+  `attribution` stamp to `project_events` and allows type
+  `workspace_added`. SQLite rebuilds the table to change its CHECK,
+  preserving IDs and the sequence. Existing events keep a null stamp.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -889,8 +893,8 @@ there are active bindings. Tasks and schedule templates store a nullable
 connection. The migration backfills older declines from external IDs and,
 for rows with a path, any known remote and subpath. `project_aliases`
 retains merged IDs and titles, `project_merge_dismissals` stores unordered
-pairs by ascending project ID, and `project_events` records moves, merges
-and splits. Data copy includes these four tables. Migration 0038 drops
+pairs by ascending project ID, and `project_events` records moves, merges,
+splits and added workspaces with an attribution stamp. Data copy includes these four tables. Migration 0038 drops
 `shared_paths`, `projects.archive_owner`, `project_bindings.origin` and
 `external_projects.declined_at`.
 

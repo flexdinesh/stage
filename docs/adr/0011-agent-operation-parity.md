@@ -33,6 +33,7 @@ Agents (MCP, CLI, an agent HTTP credential, a worker agent gateway) may:
 | Session interaction | `GET /api/tasks/{id}/requests`, `POST /api/tasks/{id}/requests/{rid}`, `POST /api/tasks/{id}/messages` | `list_requests`, `respond_request`, `send_message` | `stage task requests\|respond\|send` |
 | Projects | `POST /api/projects`, `PATCH /api/projects/{id}`, `GET /api/projects/{id}/events` | `create_project`, `update_project`, `get_project_events` | `stage projects add\|edit` |
 | Group membership | `POST /api/project-groups/membership` | `preview_membership`, `set_membership` | `stage call` |
+| Workspace add ([ADR 0012](0012-harness-workspace-add.md)) | `GET /api/connections/{id}/capabilities` (`workspaceSources`), `POST /api/connections/{id}/workspaces` | `list_workspace_sources`, `add_workspace` | `stage workspaces sources\|add` |
 | Snippets and attachments | `/api/snippets` CRUD, `DELETE /api/attachments/{id}` | `list_snippets`, `get_snippet`, `create_snippet`, `update_snippet`, `delete_snippet`, `delete_attachment` | `stage call` |
 
 Agent completion runs the same transaction as a person's: it saves the

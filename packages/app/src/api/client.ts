@@ -1,6 +1,6 @@
 import type {
   AccessStatus, Account, AccountRole, AgentCredential, GrantInfo, GrantKind, Invitation, IssuedLink,
-  HarnessAction,
+  AddedWorkspace, AddWorkspaceRequest, HarnessAction,
   Machine, MachinePairing, PairingStatus,
   ActionResult, Harness, HarnessFact, HarnessConnection, HarnessesReply, HarnessStatus, Capabilities, ExecutionConfig, ExecutionLinks, TaskState,
   CompletionPreview,
@@ -248,6 +248,9 @@ export function createApi(transport: Transport) {
     updateProject: (id: number, body: {title: string; archived: boolean}) => apiFetch<Project>(`/projects/${id}`, patch(body)),
     workspaces: (connectionId: number, refresh = true, signal?: AbortSignal) =>
       apiFetch<WorkspaceInventory>(`/connections/${connectionId}/workspaces${refresh ? "" : "?refresh=false"}`, { signal }),
+    /** Asks the connection's harness to add a workspace (ADR 0012): 201, or 409/400/502 `workspace_not_listed`/504 `outcome_uncertain`. */
+    addWorkspace: (connectionId: number, body: AddWorkspaceRequest) =>
+      apiFetch<AddedWorkspace>(`/connections/${connectionId}/workspaces`, post(body)),
     projectEvents: (id: number) => apiFetch<{ events: ProjectEvent[] }>(`/projects/${id}/events`),
     projectActions: (id: number, scope: { connectionId: number; workspaceId: string }, signal?: AbortSignal) =>
       apiFetch<HarnessAction[]>(`/projects/${id}/actions${toQuery(scope)}`, { signal }),

@@ -168,21 +168,21 @@ func (r projects) MergeDismissals(ctx context.Context) ([][2]int64, error) {
 	})
 }
 
-func (r projects) AddProjectEvent(ctx context.Context, project int64, kind, text string, by int64) error {
-	_, err := r.Exec(ctx, `INSERT INTO project_events(project_id,type,text,created_at,created_by_user_id)
- VALUES($1,$2,$3,`+nowSQL+`,$4)`, project, kind, text, by)
+func (r projects) AddProjectEvent(ctx context.Context, project int64, kind, text string, by int64, attribution store.Attribution) error {
+	_, err := r.Exec(ctx, `INSERT INTO project_events(project_id,type,text,created_at,created_by_user_id,attribution)
+ VALUES($1,$2,$3,`+nowSQL+`,$4,$5)`, project, kind, text, by, attribution)
 	return err
 }
 
 func (r projects) ProjectEvents(ctx context.Context, project int64) ([]store.ProjectEvent, error) {
-	rows, err := r.Query(ctx, `SELECT id,project_id,type,text,created_at,created_by_user_id
+	rows, err := r.Query(ctx, `SELECT id,project_id,type,text,created_at,created_by_user_id,`+attributionColumns("project_events.attribution")+`
  FROM project_events WHERE project_id=$1 ORDER BY id DESC LIMIT 100`, project)
 	if err != nil {
 		return nil, err
 	}
 	return collectRows(rows, func(row rowScanner) (store.ProjectEvent, error) {
 		var e store.ProjectEvent
-		err := row.Scan(&e.ID, &e.ProjectID, &e.Type, &e.Text, &e.CreatedAt, &e.CreatedBy)
+		err := row.Scan(&e.ID, &e.ProjectID, &e.Type, &e.Text, &e.CreatedAt, &e.CreatedBy, &e.Attribution, &e.Actor.DisplayName)
 		return e, err
 	})
 }

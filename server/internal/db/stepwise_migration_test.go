@@ -96,6 +96,25 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	46: {{"existing workspace has no historical project", seedV0046HistoricalWorkspaceProject, checkV0046HistoricalWorkspaceProject}},
 	47: {{"backfill proven workspace pins and preserve attempts", seedV0047WorkspacePins, checkV0047WorkspacePins}},
 	48: {{"proven group memberships and historical work retained", seedProjectGroups, checkProjectGroups}},
+	49: {{"project events keep history and accept workspace_added", seedV0049ProjectEvents, checkV0049ProjectEvents}},
+}
+
+func seedV0049ProjectEvents(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	mustExec(t, pool, `INSERT INTO projects(id,title) VALUES(7,'Events')`)
+	mustExec(t, pool, `INSERT INTO project_events(id,project_id,type,text,created_at) VALUES
+ (1,7,'workspace_moved','Moved.','2026-11-01T00:00:00.000000000Z'),(2,7,'project_merged','Merged.','2026-11-02T00:00:00.000000000Z')`)
+}
+
+func checkV0049ProjectEvents(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	wantRows(t, pool, `SELECT id,type,text,created_by_user_id,attribution FROM project_events ORDER BY id`,
+		"1|workspace_moved|Moved.|1|NULL", "2|project_merged|Merged.|1|NULL")
+	mustExec(t, pool, `INSERT INTO project_events(project_id,type,text,attribution) VALUES(7,'workspace_added','Added.','{"actor":{"kind":"agent"}}')`)
+	wantRows(t, pool, `SELECT id,type FROM project_events WHERE id>2`, "3|workspace_added")
+	if _, err := pool.Exec(`INSERT INTO project_events(project_id,type,text) VALUES(7,'unknown','x')`); err == nil {
+		t.Fatal("project event type check accepted an unknown type")
+	}
 }
 
 func seedV0046HistoricalWorkspaceProject(t *testing.T, pool *sqlite.DB) {
