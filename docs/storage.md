@@ -873,6 +873,7 @@ there are active bindings. Tasks and schedule templates store a nullable
 | `project_bindings.rule` | `manual`, `new`, `remote`, `local`, `moved`. Records how the binding was made. |
 | `external_projects.resolution` | Empty for unresolved legacy or unavailable unbound rows, otherwise `bound`, `join`, `new` or `review`. Derived from workspace evidence, bindings and declines. |
 | `external_projects.resolution_reason` | Empty or `ambiguous`, `declined`, `moved`, `suggested`. The resolution also stores the resolver rule and candidate project IDs. |
+| `external_projects.historical_project_id` | Nullable project used when a human tracks a session in this exact workspace without a current binding. Paired migration 0046 adds it. |
 
 `workspace_declines` stores both the identity and external keys per
 connection. The migration backfills older declines from external IDs and,
@@ -890,6 +891,10 @@ Automatic import reads the evidence, plans, applies and updates derived
 resolutions in one write transaction. Confirmation recomputes the plan
 under that lock. Task and schedule creation, edits, duplication and spawning
 use the same lock to serialize the selected workspace with identity changes.
+Session tracking uses the exact workspace's current project when bound.
+Otherwise it reuses its historical project or a unique strong match, and
+creates a project when neither exists. The association survives workspace
+refreshes and project merges. It grants no launch authority.
 Launch claims take it before the task lock and pin the active, available
 chosen binding or primary. Each attempt keeps its pinned path, external
 workspace ID and binding revision. Task readers take the pinned workspace

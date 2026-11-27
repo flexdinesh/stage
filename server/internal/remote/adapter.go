@@ -126,7 +126,7 @@ func (a *Adapter) FeaturesForWorkspace(ctx context.Context, project, directory s
 
 var operationKinds = map[execution.Op][]string{
 	execution.OpLaunch: {KindLaunch, KindWorkspaces}, execution.OpImages: {KindLaunch},
-	execution.OpStop: {KindStop}, execution.OpAdopt: {KindObserve}, execution.OpReply: {KindObserve},
+	execution.OpStop: {KindStop}, execution.OpAdopt: {KindObserve, KindWorkspaces}, execution.OpReply: {KindObserve},
 	execution.OpOpening: {KindOpening}, execution.OpAttention: {KindAttention},
 	execution.OpRespond: {KindRequests, KindRespond}, execution.OpSend: {KindSend},
 }
@@ -176,7 +176,7 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 
 func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execution.Observation, error) {
 	var o execution.Observation
-	err := a.call(ctx, KindObserve, SessionRequest{Session: ref}, &o, CallTimeout, nil)
+	err := a.call(ctx, KindObserve, ObserveRequest{Session: ref, Mode: execution.SessionReadModeFrom(ctx)}, &o, CallTimeout, nil)
 	return o, err
 }
 

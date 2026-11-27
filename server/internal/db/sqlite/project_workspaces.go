@@ -20,6 +20,20 @@ const projectBindingJSON = `json_object('id',b.id,'projectId',b.project_id,'conn
 // SQLite write transactions already serialize identity changes.
 func (r projects) LockIdentity(context.Context) error { return nil }
 
+func (r projects) HistoricalWorkspaceProject(ctx context.Context, b store.ProjectBinding) (int64, error) {
+	var id int64
+	err := r.QueryRow(ctx, `SELECT historical_project_id FROM external_projects
+ WHERE connection_id=$1 AND external_id=$2 AND workspace=$3 AND historical_project_id IS NOT NULL`,
+		b.ConnectionID, b.ExternalProjectID, b.Workspace).Scan(&id)
+	return id, notFound(err)
+}
+
+func (r projects) SetHistoricalWorkspaceProject(ctx context.Context, b store.ProjectBinding, projectID int64) error {
+	_, err := r.Exec(ctx, `UPDATE external_projects SET historical_project_id=$4
+ WHERE connection_id=$1 AND external_id=$2 AND workspace=$3`, b.ConnectionID, b.ExternalProjectID, b.Workspace, projectID)
+	return err
+}
+
 func (r projects) WorkspaceRows(ctx context.Context) ([]store.StoredWorkspace, error) {
 	rows, err := r.Query(ctx, `SELECT e.connection_id,e.external_id,e.title,e.workspace,e.available,e.importable,e.archived,e.active_at,
  b.project_id,b.id,COALESCE(b.is_primary,0),e.file_host,e.canonical_path,e.repo,e.repo_path,e.evidence_at,e.evidence_source,

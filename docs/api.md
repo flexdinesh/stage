@@ -1179,6 +1179,13 @@ Browsing creates no task, observation, subscription or notification.
 
 `POST /api/connections/:connectionId/sessions/:id/adopt` accepts `{title?, initialNote?, treeId?, projectId?, newProjectTitle?}`. Returns Task: 201 new, 200 existing owner. Revalidates current eligibility; never creates a second task for a session. Archived and child sessions cannot be newly adopted. Stage refuses a session another registered harness wraps (its origin among that harness's `wraps`): 409 `session_refused` with where to track it (a Claude Code session T3 started: "This Claude Code session was started by T3. Track it through T3."). Session context lookups and resolving such a session from a pasted link or ID (`GET /api/refs/resolve`) answer the same 409. The UI previews before confirming. See Adopt session below.
 
+For a human tracking a verified workspace with no project selection, Stage
+reuses its existing project or records a stable historical project. This
+creates no launch binding. A preview leaves tasks, notifications and read
+receipts unchanged. Existing named-session adoption and explicit binding
+arguments remain available to scoped callers. Concurrent confirmations
+return one tracked task and record the creation under the winning requester.
+
 ### `GET /api/tasks/:id/opening-prompt`
 
 Adopted tasks only (400 otherwise). Returns `{item: {itemId, runId, text, truncated, updatedAt} | null}` with the first own user message, skipping inherited history. Default 2000-character preview. `full=true` expands only that opening message, bounded to 1,000,000 characters. A missing task or session returns 404. A connection that declares opening prompts unavailable returns 409 `operation_unavailable` with its reason. The task's cached final reply is independent of this live read.

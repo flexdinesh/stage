@@ -8,12 +8,69 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 func init() {
 	register("AdoptSession", caseAdoptSession)
+	register("AdoptWorkspaceHistory", caseAdoptWorkspaceHistory)
 	register("CreateTaskNeedsSession", caseCreateTaskNeedsSession)
+}
+
+func caseAdoptWorkspaceHistory(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
+	connection := int64(dbtest.T3Connection)
+	first := identityWorkspace("First", "/w/first", nil)
+	second := identityWorkspace("Second", "/w/second", nil)
+	unbound := identityWorkspace("Unbound", "/w/unbound", nil)
+	unbound.Importable = false
+	inventory := []execution.WorkspaceInfo{first, second, unbound}
+	binding := func(w execution.WorkspaceInfo) db.ProjectBinding {
+		return db.ProjectBinding{ConnectionID: connection, ExternalProjectID: w.ID, Workspace: w.WorkspaceRoot}
+	}
+	track := func(id string, w execution.WorkspaceInfo) db.Task {
+		t.Helper()
+		o := t3.ThreadDetail{Thread: t3.Thread{ThreadID: id, ProjectID: w.ID, Status: t3.StatusRunning, CreatedAt: time.Now()}}.Observation()
+		task, created, err := s.AdoptSession(ctx, db.AdoptInput{Session: o.Session, TrackUnbound: true,
+			Workspace: &db.AdoptionWorkspace{Binding: binding(w), Inventory: inventory, Observation: o}})
+		if err != nil || !created || task.BindingID != nil {
+			t.Fatalf("track: %+v, created %t, %v", task, created, err)
+		}
+		return task
+	}
+	project, err := s.InsertProject(ctx, db.Project{Title: "First", Bindings: []db.ProjectBinding{binding(first)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := track("strong", unbound)
+	if task.ProjectID != project.ID {
+		t.Fatalf("unique strong match should reuse project %d: %+v", project.ID, task)
+	}
+	if _, err := s.BoundProject(ctx, binding(unbound)); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("strong match granted launch authority: %v", err)
+	}
+	if _, err := s.InsertProject(ctx, db.Project{Title: "Second", Bindings: []db.ProjectBinding{binding(second)}}); err != nil {
+		t.Fatal(err)
+	}
+	if task := track("stable", unbound); task.ProjectID != project.ID {
+		t.Fatalf("exact historical association changed after a second group matched: %+v", task)
+	}
+	third := identityWorkspace("Third", "/w/third", nil)
+	inventory = append(inventory, third)
+	ambiguous := track("ambiguous", third)
+	history, err := s.GetProject(ctx, ambiguous.ProjectID)
+	if err != nil || history.Title != third.Title || len(history.Bindings) != 0 {
+		t.Fatalf("ambiguous evidence should get its own historical project: %+v, %v", history, err)
+	}
+	b := binding(third)
+	b.ProjectID = project.ID
+	if _, err := s.BindProject(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	if task := track("current-group", third); task.ProjectID != project.ID {
+		t.Fatalf("current exact group should win over the earlier historical association: %+v", task)
+	}
 }
 
 func caseAdoptSession(t *testing.T, open Factory) {

@@ -134,6 +134,19 @@ func (r *Resolver) Resolve(c Candidate) Verdict {
 	return verdict
 }
 
+// StrongProject finds a unique group from attested identity evidence. It
+// honors declines and excludes legacy path hints and move heuristics.
+func (r *Resolver) StrongProject(c Candidate) int64 {
+	key := identity(c.Workspace)
+	if c.Declined || key.kind == keyExternal || key.kind == keyCheckout && key.subpath == "" {
+		return 0
+	}
+	if projects := owners(0, r.keys[key]); len(projects) == 1 {
+		return projects[0]
+	}
+	return 0
+}
+
 func (r *Resolver) resolve(c Candidate) (Verdict, *Binding) {
 	key := identity(c.Workspace)
 	exact := r.keys[key]

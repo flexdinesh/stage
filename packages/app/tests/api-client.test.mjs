@@ -29,6 +29,23 @@ test("GET requests carry no body", async () => {
   assert.equal(seen.headers["Content-Type"], undefined);
 });
 
+test("session roster pages stay scoped to the selected connection and can be cancelled", async () => {
+  const signal = new AbortController().signal;
+  const { api } = fakeApi(async (path, init) => {
+    const url = new URL(path, "http://stage");
+    assert.equal(url.pathname, "/connections/23/sessions");
+    assert.equal(url.searchParams.get("q"), "Fix README + docs");
+    assert.equal(url.searchParams.get("cursor"), "opaque+cursor/==");
+    assert.equal(init.method, "GET");
+    assert.equal(init.signal, signal);
+    return Response.json({ sessions: [], nextCursor: "next" });
+  });
+  assert.deepEqual(await api.searchSessions(23, "Fix README + docs", "opaque+cursor/==", signal), {
+    sessions: [],
+    nextCursor: "next",
+  });
+});
+
 test("uploads pass FormData through and leave the multipart boundary to the transport", async () => {
   let seen;
   const { api } = fakeApi(async (path, init) => {

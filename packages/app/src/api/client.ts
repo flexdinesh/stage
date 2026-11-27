@@ -19,7 +19,7 @@ import type {
   TreeListQuery,
   UpdateTreeRequest,
   Attachment,
-  SessionRef, SessionPreview,
+  SessionRef, SessionPreview, SessionSearchPage,
   Badge,
   BindWorkspaceRequest,
   CreateProjectRequest,
@@ -113,7 +113,7 @@ function errorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-type RequestOptions = { method?: string; body?: unknown; actionConfirmed?: boolean };
+type RequestOptions = { method?: string; body?: unknown; actionConfirmed?: boolean; signal?: AbortSignal | undefined };
 
 const post = (body?: unknown): RequestOptions => (body === undefined ? { method: "POST" } : { method: "POST", body });
 const actionPost = (body: Record<string, unknown>, confirmed: boolean): RequestOptions => ({ ...post(body), actionConfirmed: confirmed });
@@ -154,6 +154,7 @@ export function createApi(transport: Transport) {
     const headers: Record<string, string> = { Accept: "application/json" };
     if (init.actionConfirmed) headers["Stage-Action-Confirmed"] = "1";
     const req: RequestInit = { method: init.method ?? "GET", headers };
+    if (init.signal !== undefined) req.signal = init.signal;
     if (init.body instanceof FormData) {
       req.body = init.body; // the transport sets the multipart boundary
     } else if (init.body !== undefined) {
@@ -332,13 +333,16 @@ export function createApi(transport: Transport) {
     },
     deleteAttachment: (id: number) => apiSend(`/attachments/${id}`, del),
 
+    searchSessions: (connectionId: number, q: string, cursor?: string, signal?: AbortSignal) =>
+      apiFetch<SessionSearchPage>(`/connections/${connectionId}/sessions${toQuery({ q, cursor })}`, { signal }),
+    sessionContext: (ref: SessionRef, signal?: AbortSignal) =>
+      apiFetch<SessionPreview>(`/connections/${ref.connectionId}/sessions/${encodeURIComponent(ref.externalSessionId)}/context`, { signal }),
     /** Tracks a top-level session as a task (201 new, 200 when a task already owns it). */
-    sessionContext: (ref: SessionRef) => apiFetch<SessionPreview>(`/connections/${ref.connectionId}/sessions/${encodeURIComponent(ref.externalSessionId)}/context`),
-    adoptSession: (ref: SessionRef, body: AdoptSessionRequest = {}) =>
-      apiFetch<Task>(`/connections/${ref.connectionId}/sessions/${encodeURIComponent(ref.externalSessionId)}/adopt`, post(body)),
+    adoptSession: (ref: SessionRef, body: AdoptSessionRequest = {}, signal?: AbortSignal) =>
+      apiFetch<Task>(`/connections/${ref.connectionId}/sessions/${encodeURIComponent(ref.externalSessionId)}/adopt`, { ...post(body), signal }),
     openingPrompt: (taskId: number, full = false) =>
       apiFetch<OpeningPromptResponse>(`/tasks/${taskId}/opening-prompt${full ? "?full=true" : ""}`),
-    resolveRef: (ref: string, connectionId?: number, cached?: boolean) => apiFetch<{ kind: string; taskId: number | null; session: SessionRef | null; links: ExecutionLinks; state?: TaskState; sessionTitle?: string }>(`/refs/resolve${toQuery({ ref, connectionId,cached })}`),
+    resolveRef: (ref: string, connectionId?: number, cached?: boolean, signal?: AbortSignal) => apiFetch<{ kind: string; taskId: number | null; session: SessionRef | null; links: ExecutionLinks; state?: TaskState; sessionTitle?: string }>(`/refs/resolve${toQuery({ ref, connectionId, cached })}`, { signal }),
 
     snippets: () => apiFetch<SnippetList>("/snippets"),
     createSnippet: (body: CreateSnippetRequest) => apiFetch<Snippet>("/snippets", post(body)),

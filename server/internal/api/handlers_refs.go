@@ -111,7 +111,9 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 		}
 		obs, err := s.Store.Observation(ctx, target)
 		if errors.Is(err, db.ErrNotFound) && r.URL.Query().Get("cached") != "true" {
-			if err = s.Engine.Coordinator.RefreshScopedSession(ctx, target); err == nil {
+			if humanTracking(r) {
+				obs, err = s.Engine.Coordinator.ReadScopedSession(execution.WithSessionReadMode(ctx, execution.SessionReadPreview), target)
+			} else if err = s.Engine.Coordinator.RefreshScopedSession(ctx, target); err == nil {
 				obs, err = s.Store.Observation(ctx, target)
 			}
 		}

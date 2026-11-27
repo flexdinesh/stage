@@ -141,9 +141,12 @@ func (h *Host) Handlers() map[string]workerchan.WorkerHandler {
 			return ws, err
 		}),
 		KindObserve: h.with(func(ctx context.Context, a execution.Adapter, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
-			var r SessionRequest
+			var r ObserveRequest
 			if err := decode(env, &r); err != nil {
 				return nil, err
+			}
+			if r.Mode != "" {
+				ctx = execution.WithSessionReadMode(ctx, r.Mode)
 			}
 			return a.Observe(ctx, r.Session)
 		}),

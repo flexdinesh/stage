@@ -8,6 +8,7 @@ import type { Project, Task } from "../api/types.ts";
 import { IconPlus } from "../components/icons.tsx";
 import { WorkspaceDisplay, useWorkspaceConnections } from "../components/WorkspaceDisplay.tsx";
 import { DiscoveryReview, useDiscoveryReview } from "../components/DiscoveryReview.tsx";
+import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import {
   Button,
   Chip,
@@ -174,6 +175,7 @@ export function ProjectsPage() {
           <>
             <Segmented label="Projects filter" options={filterOptions} value={filter} onChange={setFilter} />
             {reviewing ? null : <Segmented label="Sort projects" options={SORT_OPTIONS} value={sort} onChange={changeSort} />}
+            <TrackSessionButton />
             <Button variant="primary" onClick={() => setCreating(true)}>
               <IconPlus /> New project
             </Button>

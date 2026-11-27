@@ -82,6 +82,9 @@ test("launch parts show labelled choices and explicit boolean overrides in decla
   ], "an explicit Off survives even when Off is the harness default");
   assert.deepEqual(launchParts({ model: "", options: [], permission: "", mode: "" }, caps), []);
   assert.deepEqual(launchParts(null, caps), []);
+  assert.deepEqual(launchParts({ model: "adopted", options: null, permission: "", mode: "" }, caps), [
+    { label: "Model", value: "adopted" },
+  ]);
   assert.deepEqual(launchParts({ model: "gone", options: [], permission: "auto", mode: "" }, undefined), [
     { label: "Model", value: "gone" },
     { label: "Permission", value: "auto" },

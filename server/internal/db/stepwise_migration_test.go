@@ -92,6 +92,16 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	},
 	44: {{"work attribution leaves old evidence untouched", seedV0044Attribution, checkV0044Attribution}},
 	45: {{"existing connection has unknown workspace freshness", seedV0037ConnectionFacts, checkV0045WorkspaceRefresh}},
+	46: {{"existing workspace has no historical project", seedV0046HistoricalWorkspaceProject, checkV0046HistoricalWorkspaceProject}},
+}
+
+func seedV0046HistoricalWorkspaceProject(t *testing.T, pool *sqlite.DB) {
+	seedV0037ConnectionFacts(t, pool)
+	mustExec(t, pool, `INSERT INTO external_projects(connection_id,external_id,title,workspace,available) VALUES(42,'ext','Workspace','/w',true)`)
+}
+
+func checkV0046HistoricalWorkspaceProject(t *testing.T, pool *sqlite.DB) {
+	wantRows(t, pool, `SELECT external_id,workspace,historical_project_id FROM external_projects WHERE connection_id=42`, "ext|/w|NULL")
 }
 
 func checkV0045WorkspaceRefresh(t *testing.T, pool *sqlite.DB) {

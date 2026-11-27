@@ -1,269 +1,234 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { useConnections, useHarnesses, useInvalidateWork, useMachines, useProjects } from "../../api/queries.ts";
-import { connectionOptions } from "../../lib/machines.ts";
+import { ApiError } from "../../api/client.ts";
+import { useConnections, useHarnesses, useInvalidateWork, useMachines } from "../../api/queries.ts";
 import type { AdoptSessionRequest, SessionPreview, SessionRef, Task, TreeDetail } from "../../api/types.ts";
+import { connectionOptions } from "../../lib/machines.ts";
 import { useApi } from "../../platform/context.tsx";
-
-import { ProjectCombobox } from "../ProjectSelect.tsx";
+import { BlockedReason } from "../LaunchGate.tsx";
 import { SnippetTextarea } from "../SnippetPicker.tsx";
-import { Button, Drawer, ErrorText, Field, InlineError, Input, Meta, Muted, Panel, Combobox } from "../ui.tsx";
-import { BlockedReason, LaunchBlockAlert, useOperationGate } from "../LaunchGate.tsx";
+import { Button, Combobox, Drawer, ErrorText, Field, InlineError, Input, Meta, Muted } from "../ui.tsx";
+import { SessionRoster } from "./SessionRoster.tsx";
 
 export function useTrackSessionBlock(): string | null {
   const connections = useConnections();
-  const gate = useOperationGate();
   if (connections.data === undefined) return connections.error?.message ?? "Checking harness connections.";
-  const blocks = connections.data.connections.filter((c) => c.active).map((c) => gate(c.id, "adopt"));
-  return blocks.includes(null) ? null : blocks[0]?.reason ?? "Connect a harness in Settings to track sessions.";
+  return connections.data.connections.some((c) => c.active && c.configured)
+    ? null : "Connect a harness in Settings to track sessions.";
 }
 
-/**
- * Explicit lookup only. Preview never adopts a session. `initial` (a waiting session from the inbox) fills the
- * harness and session and previews it at once; tracking still waits for the user's confirmation.
- */
-export function AdoptSessionDrawer({
-  tree,
-  initial,
-  onClose,
-  onAdopted,
-}: {
+type PreviewTarget = SessionRef | { link: string; connectionId: number };
+
+export function AdoptSessionDrawer({ tree, initial, initialConnectionId, onClose }: {
   tree?: TreeDetail;
   initial?: SessionRef;
+  initialConnectionId?: number;
   onClose: () => void;
-  onAdopted?: (task: Task) => void;
 }) {
   const api = useApi();
-  const projects = useProjects();
   const connections = useConnections();
-  const harnessNames = useHarnesses();
-  const gate = useOperationGate();
+  const harnesses = useHarnesses();
   const { machines } = useMachines();
-  const [chosen, setConnection] = useState(initial === undefined ? "" : String(initial.connectionId));
-  const available = connections.data?.connections.filter((c) => c.active) ?? [];
-  const connection = chosen || (available.length === 1 ? String(available[0]?.id) : "");
-  const block = connection === "" ? null : gate(Number(connection), "adopt");
-  const sessionHint = harnessNames.descriptor(harnessNames.harness(Number(connection)) ?? "")?.sessionHint;
-  const [projectId, setProjectId] = useState("");
-  const [projectTitle, setProjectTitle] = useState("");
   const invalidate = useInvalidateWork();
   const navigate = useNavigate();
-  const [ref, setRef] = useState(initial?.externalSessionId ?? "");
+  const [chosen, setConnection] = useState(initial?.connectionId ?? initialConnectionId);
+  const [direct, setDirect] = useState(false);
+  const [link, setLink] = useState(initial?.externalSessionId ?? "");
   const [picked, setPicked] = useState<SessionPreview | null>(null);
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
+  const available = connections.data?.connections.filter((c) => c.active && c.configured) ?? [];
+  const connection = chosen ?? (available.length === 1 ? available[0]?.id : undefined);
+  const sessionHint = harnesses.descriptor(harnesses.harness(connection ?? 0) ?? "")?.sessionHint;
+  const picker = useRef<HTMLDivElement>(null);
+  const previewHeading = useRef<HTMLHeadingElement>(null);
+  const refocusPicker = useRef(false);
+  const inFlight = useRef<AbortController | null>(null);
+
+  const startRequest = useCallback(() => {
+    inFlight.current?.abort();
+    const controller = new AbortController();
+    inFlight.current = controller;
+    return controller.signal;
+  }, []);
+  useEffect(() => () => inFlight.current?.abort(), []);
+  useEffect(() => {
+    if (picked !== null) previewHeading.current?.focus();
+    else if (refocusPicker.current && connection !== undefined) {
+      refocusPicker.current = false;
+      picker.current?.querySelector<HTMLElement>(direct ? "[data-session-reference]" : "input[type=search]")?.focus();
+    }
+  }, [picked, direct, connection]);
+
   const preview = useMutation({
-    mutationFn: async () => {
-      if (block !== null) throw new Error(block.reason);
-      if (connection === "" || ref.trim() === "") throw new Error("Choose a harness and enter a session link or ID.");
-      const resolved = await api.resolveRef(ref.trim(), Number(connection));
-      if (resolved.session?.connectionId !== Number(connection))
-        throw new Error("Paste a session link or ID from the selected harness.");
-      return api.sessionContext(resolved.session);
+    mutationFn: async ({ target, signal }: { target: PreviewTarget; signal: AbortSignal }) => {
+      const ref = "link" in target
+        ? (await api.resolveRef(target.link, target.connectionId, undefined, signal)).session
+        : target;
+      signal.throwIfAborted();
+      if (ref?.connectionId !== target.connectionId) {
+        throw new Error("Choose a session link or ID from this connection.");
+      }
+      return api.sessionContext(ref, signal);
     },
-    onSuccess: (session) => {
+    onSuccess: (session, { signal }) => {
+      if (signal.aborted) return;
       setPicked(session);
       setTitle(session.title);
+      setNote("");
     },
   });
+  const previewMutate = preview.mutate;
+  useEffect(() => {
+    if (initial !== undefined) previewMutate({ target: initial, signal: startRequest() });
+  }, [initial, previewMutate, startRequest]);
+
+  function openTask(task: Task) {
+    onClose();
+    void navigate(`/tasks/${task.id}`);
+  }
   const adopt = useMutation({
-    mutationFn: (session: SessionPreview) => {
-      const adoptionBlock = gate(session.session.connectionId, "adopt");
-      if (adoptionBlock !== null) throw new Error(adoptionBlock.reason);
-      if (session.unavailableReason) throw new Error(session.unavailableReason);
+    mutationFn: ({ session, signal }: { session: SessionPreview; signal: AbortSignal }) => {
       const body: AdoptSessionRequest = tree === undefined ? {} : { treeId: tree.id };
       if (session.task === null) {
-        if (session.project === null) {
-          if (projectId !== "") body.projectId = Number(projectId);
-          else body.newProjectTitle = projectTitle.trim();
-        }
         if (title.trim() !== "") body.title = title.trim();
         if (note.trim() !== "") body.initialNote = note;
       }
-      return api.adoptSession(session.session, body);
+      return api.adoptSession(session.session, body, signal);
     },
-    onSuccess: async (task) => {
+    onSuccess: async (task, { signal }) => {
+      if (signal.aborted) return;
       await invalidate();
-      onClose();
-      if (onAdopted !== undefined) onAdopted(task);
-      else await navigate(`/tasks/${task.id}`);
+      if (!signal.aborted) openTask(task);
     },
   });
-  // Preview the handed-over session once, on open.
-  const previewMutate = preview.mutate;
-  const prefilled = useRef(initial !== undefined);
-  const canPreview = block === null && connection !== "" && ref.trim() !== "";
-  useEffect(() => {
-    if (!prefilled.current || !canPreview) return;
-    prefilled.current = false;
-    previewMutate();
-  }, [canPreview, previewMutate]);
-  const eligible = picked !== null && !picked.unavailableReason;
+
+  function previewTarget(target: PreviewTarget) {
+    preview.mutate({ target, signal: startRequest() });
+  }
+
+  function switchMode(next: boolean) {
+    refocusPicker.current = true;
+    setDirect(next);
+    preview.reset();
+  }
+
+  const tracked = picked?.task ?? null;
+  const changesTree = tree !== undefined && tracked?.treeId !== tree.id;
+  const moving = tracked?.treeId != null && changesTree;
+  const canConfirm = picked !== null && !picked.unavailableReason;
+
   return (
     <Drawer
       title={tree === undefined ? "Track session" : "Add session"}
       onClose={onClose}
-      footer={
-        <Button
-          variant="primary"
-          disabled={
-            block !== null || !eligible ||
-            (picked?.project === null && projectId === "" && projectTitle.trim() === "")
-          }
-          busy={adopt.isPending}
-          onClick={() => {
-            if (picked !== null && block === null) adopt.mutate(picked);
-          }}
-        >
-          {tree !== undefined
-            ? "Add to tree"
-            : picked?.task != null
-              ? "Open task"
-              : "Track as task"}
-        </Button>
-      }
+      footer={picked === null ? undefined : (
+        <>
+          <Button disabled={adopt.isPending} onClick={() => {
+            refocusPicker.current = true;
+            setPicked(null);
+            adopt.reset();
+          }}>Back</Button>
+          {tracked === null ? null : (
+            <Button variant={changesTree ? "secondary" : "primary"} disabled={adopt.isPending} onClick={() => openTask(tracked)}>Open task</Button>
+          )}
+          {tracked !== null && !changesTree ? null : (
+            <Button
+              variant="primary"
+              disabled={!canConfirm}
+              busy={adopt.isPending}
+              onClick={() => adopt.mutate({ session: picked, signal: startRequest() })}
+            >
+              {tree === undefined ? "Track as task"
+                : tracked === null ? "Track and add to tree" : moving ? "Move to this tree" : "Add to this tree"}
+            </Button>
+          )}
+        </>
+      )}
     >
-      <div className="flex flex-col gap-3.5">
-        <Muted>Choose a harness and paste the session you want to track.</Muted>
-        <form
-          className="flex flex-col gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (canPreview && !preview.isPending && !adopt.isPending) preview.mutate();
-          }}
-        >
-          <Field label="Harness">
+      <div ref={picker} hidden={picked !== null}>
+        <div className="flex min-w-0 flex-col gap-3.5">
+          <Field label="Connection">
             {(id) => (
               <Combobox
                 id={id}
-                value={connection}
-                disabled={preview.isPending || adopt.isPending}
+                value={connection === undefined ? "" : String(connection)}
+                disabled={preview.isPending}
+                autoFocus={connection === undefined}
                 onChange={(next) => {
-                  prefilled.current = false;
-                  setConnection(next);
-                  setPicked(null);
+                  refocusPicker.current = true;
+                  setConnection(Number(next));
+                  setLink("");
                   preview.reset();
-                  adopt.reset();
                 }}
-                listLabel="Harnesses"
+                listLabel="Connections"
                 showTag
-                options={[
-                  { value: "", label: "Choose harness" },
-                  ...connectionOptions(available, machines, harnessNames.kindName).map((option) => ({
-                    ...option,
-                    detail: gate(Number(option.value), "adopt")?.reason,
-                  })),
-                ]}
+                options={connectionOptions(available, machines, harnesses.kindName)}
+                placeholder="Choose a connection"
               />
             )}
           </Field>
-          <Field label="Session link or ID" {...(sessionHint === undefined || sessionHint === "" ? {} : { hint: sessionHint })}>
-            {(id) => (
-              <Input
-                id={id}
-                data-autofocus
-                value={ref}
-                disabled={preview.isPending || adopt.isPending}
-                onChange={(event) => {
-                  prefilled.current = false;
-                  setRef(event.target.value);
-                  setPicked(null);
-                  preview.reset();
-                  adopt.reset();
-                }}
-              />
-            )}
-          </Field>
-          <Button
-            type="submit"
-            disabled={!canPreview || adopt.isPending}
-            busy={preview.isPending}
-          >
-            Preview session
-          </Button>
-        </form>
-        {block === null ? null : <LaunchBlockAlert block={block} tone="plain" />}
-        <ErrorText error={preview.error ?? adopt.error} />
-        {picked === null ? null : (
-          <>
-            <Panel title="Session">
-              <div className="flex flex-col gap-2">
-                <p className="text-small font-medium break-words">{picked.title}</p>
-                <p className="font-mono text-meta break-words">
-                  {picked.project?.title ?? picked.workspace}
-                </p>
-                <Meta className="break-all">{picked.session.externalSessionId}</Meta>
-                {!eligible ? <InlineError>{picked.unavailableReason}</InlineError> : null}
-                {picked.task === null ? null : (
-                  <Muted>
-                    Already tracked as task #{picked.task.id}.
-                    {tree === undefined ? "" : " Confirm to move that task into this tree."}
-                  </Muted>
+          {connection === undefined ? null : direct ? (
+            <form className="flex flex-col gap-2" onSubmit={(event) => {
+              event.preventDefault();
+              if (!preview.isPending && link.trim() !== "") previewTarget({ link: link.trim(), connectionId: connection });
+            }}>
+              <Field label="Session link or ID" hint={sessionHint || undefined}>
+                {(id) => (
+                  <Input id={id} data-session-reference autoComplete="off" value={link} readOnly={preview.isPending}
+                    onChange={(event) => { setLink(event.target.value); preview.reset(); }} />
                 )}
+              </Field>
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" disabled={link.trim() === ""} busy={preview.isPending}>Preview session</Button>
+                <Button disabled={preview.isPending} onClick={() => switchMode(false)}>Browse sessions</Button>
               </div>
-            </Panel>
-            {picked.project !== null || !eligible ? null : (
-              <Panel title="Stage project">
-                <div className="flex flex-col gap-3">
-                  <Muted>
-                    This workspace is not bound. Choose a Stage project or create one while
-                    adopting.
-                  </Muted>
-                  <Field label="Project">
-                    {(id) => (
-                      <ProjectCombobox
-                        id={id}
-                        projects={projects.data?.projects ?? []}
-                        value={projectId}
-                        onChange={setProjectId}
-                        pinned="Create new project"
-                        className="w-full"
-                      />
-                    )}
-                  </Field>
-                  {projectId !== "" ? null : (
-                    <Field label="New project title">
-                      {(id) => (
-                        <Input
-                          id={id}
-                          value={projectTitle}
-                          onChange={(event) => setProjectTitle(event.target.value)}
-                        />
-                      )}
-                    </Field>
-                  )}
-                  <Muted>Confirmation binds the session's workspace. Future launches use this binding.</Muted>
-                </div>
-              </Panel>
-            )}
-            {picked.task !== null || !eligible ? null : (
-              <>
-                <Field label="Title">
-                  {(id) => (
-                    <Input
-                      id={id}
-                      value={title}
-                      onChange={(event) => setTitle(event.target.value)}
-                    />
-                  )}
-                </Field>
-                <Field label="Initial note">
-                  {(id) => (
-                    <SnippetTextarea
-                      id={id}
-                      rows={3}
-                      value={note}
-                      onValueChange={setNote}
-                      projectId={picked.project?.id ?? null}
-                    />
-                  )}
-                </Field>
-              </>
-            )}
-          </>
-        )}
+            </form>
+          ) : (
+            <SessionRoster key={connection} connectionId={connection} busy={preview.isPending}
+              onPick={previewTarget} onEnterReference={() => switchMode(true)} />
+          )}
+          {preview.isPending && !direct ? <p role="status" className="text-small text-muted">Opening session preview…</p> : null}
+          <ErrorText error={preview.error instanceof ApiError && preview.error.status === 404
+            ? "This session is unavailable. Check the link or ID, or choose another session."
+            : preview.error} />
+        </div>
       </div>
+      {picked === null ? null : (
+        <div className="flex flex-col gap-3.5">
+          <section aria-labelledby="session-preview-heading" className="flex min-w-0 flex-col gap-1.5 border-b border-line pb-3.5">
+            <h3 id="session-preview-heading" ref={previewHeading} tabIndex={-1} className="text-title font-semibold wrap-anywhere focus:outline-none">
+              {picked.title || "Untitled session"}
+            </h3>
+            {picked.project === null ? null : <p className="text-small wrap-anywhere">{picked.project.title}</p>}
+            {picked.workspace ? <Meta className="wrap-anywhere">{picked.workspace}</Meta> : null}
+            <Meta className="break-all">{picked.session.externalSessionId}</Meta>
+            {picked.unavailableReason ? <InlineError>{picked.unavailableReason}</InlineError> : null}
+            {tracked === null ? null : (
+              <Muted>
+                Tracked as task #{tracked.id}.
+                {moving ? ` Moving it here removes it from ${tracked.treeTitle || "its current tree"}.` : ""}
+              </Muted>
+            )}
+          </section>
+          {tracked !== null || !canConfirm ? null : (
+            <>
+              <Field label="Task title">
+                {(id) => <Input id={id} value={title} readOnly={adopt.isPending} onChange={(event) => setTitle(event.target.value)} />}
+              </Field>
+              <Field label="Initial note (optional)">
+                {(id) => (
+                  <SnippetTextarea id={id} rows={3} value={note} onValueChange={setNote} projectId={picked.project?.id ?? null} />
+                )}
+              </Field>
+            </>
+          )}
+          <ErrorText error={adopt.error instanceof ApiError && adopt.error.status === 404
+            ? "This session is no longer available. Go back to choose another session."
+            : adopt.error} />
+        </div>
+      )}
     </Drawer>
   );
 }

@@ -23,29 +23,31 @@ func (s *Store) PutObservationAt(ctx context.Context, o execution.Observation, c
 		return err
 	}
 	return s.e.Write(ctx, func(tx store.Tx) error {
-		// Write may rerun fn (Postgres retry): start each run from scratch.
-		o := o
 		id, err := ensureSession(ctx, tx, o.Session)
 		if err != nil {
 			return err
 		}
-		previous, err := tx.Observations().Get(ctx, id)
-		if err != nil && !errors.Is(err, ErrNotFound) {
-			return err
-		}
-		if previous.UpdatedAt.After(o.UpdatedAt) {
-			return nil
-		}
-		if o.Reply == nil && o.ExecutionID == previous.ExecutionID {
-			o.Reply = previous.Reply
-		}
-		// Usage is cumulative per session: a read without it (an unreadable
-		// transcript) keeps the last one.
-		if o.Usage == nil {
-			o.Usage = previous.Usage
-		}
-		return tx.Observations().Put(ctx, id, store.ObservationSnapshot{Observation: o, CapturedAt: capturedAt})
+		return putObservation(ctx, tx, id, o, capturedAt)
 	})
+}
+
+func putObservation(ctx context.Context, tx store.Tx, id int64, o execution.Observation, capturedAt time.Time) error {
+	previous, err := tx.Observations().Get(ctx, id)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if previous.UpdatedAt.After(o.UpdatedAt) {
+		return nil
+	}
+	if o.Reply == nil && o.ExecutionID == previous.ExecutionID {
+		o.Reply = previous.Reply
+	}
+	// Usage is cumulative per session: a read without it (an unreadable
+	// transcript) keeps the last one.
+	if o.Usage == nil {
+		o.Usage = previous.Usage
+	}
+	return tx.Observations().Put(ctx, id, store.ObservationSnapshot{Observation: o, CapturedAt: capturedAt})
 }
 func (s *Store) Observation(ctx context.Context, ref execution.SessionRef) (execution.Observation, error) {
 	o, err := s.ObservationSnapshot(ctx, ref)

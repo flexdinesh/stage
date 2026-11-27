@@ -9,6 +9,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/principal"
 )
 
 // ---- explicit session lookup and adoption ----
@@ -50,6 +51,7 @@ func (s *server) adoptSession(w http.ResponseWriter, r *http.Request) error {
 	task, created, err := s.Store.AdoptSession(ctx, db.AdoptInput{
 		ProjectID: req.ProjectID, NewProjectTitle: req.NewProjectTitle, Workspace: workspace,
 		Session: ref, CallerSession: req.CallerSession, Title: req.Title, InitialNote: req.InitialNote, TreeID: req.TreeID,
+		TrackUnbound: humanTracking(r), RequireLive: true,
 	})
 	if err != nil {
 		return err
@@ -74,34 +76,34 @@ func requestSession(r *http.Request) (db.SessionRef, error) {
 	return ref, nil
 }
 
-// A session's directory can be a worktree. Verify its external project's workspace with the adapter.
-func (s *server) workspaceFor(r *http.Request, o execution.Observation) (*db.ProjectBinding, error) {
-	a, err := s.Engine.Connections.Inventory(o.Session.ConnectionID)
-	if err != nil {
-		return nil, err
-	}
-	ps, err := a.Workspaces(r.Context())
-	if err != nil {
-		return nil, &db.HarnessError{Err: err}
-	}
-	return adoptionBinding(o, ps)
+func humanTracking(r *http.Request) bool {
+	actor, _ := principal.From(r.Context())
+	return actor.IsHuman() || actor.Kind == principal.Personal && r.Header.Get(principal.ToolTransportHeader) != "mcp"
 }
 
-func adoptionBinding(o execution.Observation, ps []execution.WorkspaceInfo) (*db.ProjectBinding, error) {
-	var binding *db.ProjectBinding
+// A session's directory can be a worktree. Use it to disambiguate native
+// roots only when the adapter reported an exact match.
+func adoptionWorkspace(o execution.Observation, ps []execution.WorkspaceInfo) (execution.WorkspaceInfo, error) {
+	var matches, exact []execution.WorkspaceInfo
 	for _, p := range ps {
-		if p.ID != o.Project || p.DeletedAt != nil || p.ArchivedAt != nil || p.Evidence != nil && p.Evidence.Gone {
-			continue
+		if p.ID == o.Project {
+			matches = append(matches, p)
+			if o.Directory != "" && p.WorkspaceRoot == o.Directory {
+				exact = append(exact, p)
+			}
 		}
-		if binding != nil {
-			return nil, db.Conflict("session workspace is ambiguous; confirm its project binding")
+	}
+	if len(matches) > 1 {
+		if len(exact) != 1 {
+			return execution.WorkspaceInfo{}, db.Conflict("session workspace is ambiguous in this harness")
 		}
-		binding = &db.ProjectBinding{ConnectionID: o.Session.ConnectionID, ExternalProjectID: p.ID, Workspace: p.WorkspaceRoot}
+		matches = exact
 	}
-	if binding == nil {
-		return nil, db.Conflict("session workspace is unavailable; restore its project before adoption")
+	if len(matches) == 0 || matches[0].DeletedAt != nil || matches[0].ArchivedAt != nil ||
+		matches[0].Evidence != nil && matches[0].Evidence.Gone {
+		return execution.WorkspaceInfo{}, db.Conflict("session workspace is unavailable; restore it in its harness before adoption")
 	}
-	return binding, nil
+	return matches[0], nil
 }
 
 func (s *server) prepareAdoption(ctx context.Context, ref db.SessionRef) (*db.AdoptionWorkspace, error) {
@@ -112,33 +114,70 @@ func (s *server) prepareAdoption(ctx context.Context, ref db.SessionRef) (*db.Ad
 	if !errors.Is(err, db.ErrNotFound) {
 		return nil, err
 	}
-	a, err := s.Engine.Connections.Catalog(ref.ConnectionID)
+	_, workspace, err := s.verifyAdoption(ctx, ref, execution.SessionReadConfirm, true)
+	return workspace, err
+}
+
+func (s *server) verifyAdoption(ctx context.Context, ref db.SessionRef, mode execution.SessionReadMode, checkOperation bool) (execution.Observation, *db.AdoptionWorkspace, error) {
+	var o execution.Observation
+	c, err := s.Store.GetHarnessConnection(ctx, ref.ConnectionID)
 	if err != nil {
-		return nil, err
+		return o, nil, err
+	}
+	active, identity, err := s.Store.ActiveConnectionIdentity(ctx, c.MachineID, c.Harness)
+	if err != nil {
+		return o, nil, err
+	}
+	if active != ref.ConnectionID {
+		return o, nil, db.ConnectionRetired()
+	}
+	if checkOperation {
+		if err := s.adoptionAvailable(ctx, ref.ConnectionID); err != nil {
+			return o, nil, err
+		}
+	}
+	// Inventory refreshes an adapter's roster when its polling observations
+	// can be cached, including on older workers.
+	inventory, inventoryErr := s.Engine.Discovery.Inventory(ctx, ref.ConnectionID)
+	o, err = s.Engine.Coordinator.ReadScopedSession(execution.WithSessionReadMode(ctx, mode), ref)
+	if err != nil {
+		return o, nil, err
+	}
+	if err := db.CheckAdoptableSession(o); err != nil {
+		return o, nil, err
+	}
+	if inventoryErr != nil {
+		return o, nil, &db.HarnessError{Err: inventoryErr}
+	}
+	p, err := adoptionWorkspace(o, inventory)
+	if err != nil {
+		return o, nil, err
+	}
+	return o, &db.AdoptionWorkspace{
+		Binding:            db.ProjectBinding{ConnectionID: ref.ConnectionID, ExternalProjectID: p.ID, Workspace: p.WorkspaceRoot},
+		Inventory:          inventory,
+		Observation:        o,
+		ConnectionIdentity: &identity,
+	}, nil
+}
+
+func (s *server) adoptionAvailable(ctx context.Context, connection int64) error {
+	a, err := s.Engine.Connections.Catalog(connection)
+	if err != nil {
+		return err
 	}
 	f, err := a.Features(ctx)
 	if err != nil {
-		return nil, &db.HarnessError{Err: err}
+		return &db.HarnessError{Err: err}
 	}
 	if op := f.Operations[execution.OpAdopt]; !op.Available {
-		return nil, db.Conflict("adoption unavailable on this connection: %s", op.Reason)
+		reason := op.Reason
+		if reason == "" {
+			reason = "This connection does not support tracking sessions."
+		}
+		return &db.ConflictError{Code: "operation_unavailable", Msg: reason}
 	}
-	if err := s.Engine.Coordinator.RefreshScopedSession(ctx, ref); err != nil {
-		return nil, err
-	}
-	o, err := s.Store.Observation(ctx, ref)
-	if err != nil {
-		return nil, err
-	}
-	inventory, err := s.Engine.Discovery.Inventory(ctx, ref.ConnectionID)
-	if err != nil {
-		return nil, &db.HarnessError{Err: err}
-	}
-	binding, err := adoptionBinding(o, inventory)
-	if err != nil {
-		return nil, err
-	}
-	return &db.AdoptionWorkspace{Binding: *binding, Inventory: inventory}, nil
+	return nil
 }
 
 // Resolve an owner entirely from Stage. Observe only an explicitly named unowned session.
@@ -178,26 +217,21 @@ func (s *server) sessionContext(w http.ResponseWriter, r *http.Request) error {
 		if !errors.Is(err, db.ErrNotFound) {
 			return err
 		}
-		if err = s.Engine.Coordinator.RefreshScopedSession(ctx, ref); err != nil {
-			return err
-		}
-		o, e := s.Store.Observation(ctx, ref)
-		if e != nil {
-			return e
-		}
+		human := humanTracking(r)
+		o, workspace, e := s.verifyAdoption(ctx, ref, execution.SessionReadPreview, human)
 		out.Title = o.Title
 		out.Links = o.Links
-		if o.Archived || o.Child {
-			out.UnavailableReason = "Choose a top-level, unarchived session."
+		if e != nil {
+			var conflict *db.ConflictError
+			if !errors.As(e, &conflict) || o.Session != ref && conflict.Code != "operation_unavailable" {
+				return e
+			}
+			out.UnavailableReason = conflict.Msg
 			writeJSON(w, 200, out)
 			return nil
 		}
-		b, e := s.workspaceFor(r, o)
-		if e != nil {
-			return e
-		}
-		out.Workspace = b.Workspace
-		p, e := s.Store.BoundProject(ctx, *b)
+		out.Workspace = workspace.Binding.Workspace
+		p, e := s.Store.AdoptionPreviewProject(ctx, workspace.Binding, human)
 		if e == nil {
 			out.Project = &p
 		} else if !errors.Is(e, db.ErrNotFound) {
