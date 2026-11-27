@@ -3,7 +3,7 @@ import { useState } from "react";
 import { keys, useHarnesses, useMachines } from "../api/queries.ts";
 import type { HarnessConnection, Workspace } from "../api/types.ts";
 import { POLL } from "../lib/polling.ts";
-import { availableTaskWorkspaces, suggestedTaskWorkspace } from "../lib/taskForm.ts";
+import { availableTaskWorkspaces, suggestedTaskWorkspace, workspaceLine } from "../lib/taskForm.ts";
 import { useApi } from "../platform/context.tsx";
 import { IconClose, IconRefresh } from "./icons.tsx";
 import { Combobox, ErrorText, Field, IconButton, TextLink, type ComboboxOption } from "./ui.tsx";
@@ -123,19 +123,24 @@ export function useTaskDestination({ initialConnection, initialWorkspace, allowP
   };
 }
 
-export function TaskDestinationFields({ destination: d, readOnly, canClear, onConnection, onWorkspace }: {
+export function TaskDestinationFields({ destination: d, readOnly, canClear, checkingLaunch, backlogNeedsWorkspace, onConnection, onWorkspace }: {
   destination: ReturnType<typeof useTaskDestination>;
   readOnly: boolean;
   canClear: boolean;
+  /** The chosen workspace's launch support is still being read. */
+  checkingLaunch: boolean;
+  /** A backlog task with no workspace yet. */
+  backlogNeedsWorkspace: boolean;
   onConnection: (id: number) => void;
   onWorkspace: (id: string) => void;
 }) {
-  const path = d.selected === undefined ? null : (
-    <span className="font-mono wrap-anywhere">{d.selected.workspace || d.selected.externalId}</span>
-  );
-  // Read-only shows the path alone. Editable always keeps one line under the workspace (status, else path, else a
-  // blank line) and fixed refresh/clear buttons, so picking a connection or workspace never moves the form.
-  const workspaceHint = readOnly ? path ?? undefined : <span role="status">{d.status ?? path ?? " "}</span>;
+  const pathText = d.selected === undefined ? null : d.selected.workspace || d.selected.externalId;
+  // Read-only shows the path alone. Editable always keeps one line under the workspace (see workspaceLine) and fixed
+  // refresh/clear buttons, so picking a connection or workspace never moves the form.
+  const line = workspaceLine({ status: d.status, path: pathText, checkingLaunch, backlogNeedsWorkspace, hasConnection: d.connection > 0 });
+  const workspaceHint = readOnly
+    ? pathText === null ? undefined : <span className="font-mono wrap-anywhere">{pathText}</span>
+    : <span role="status" className={line.isPath ? "font-mono wrap-anywhere" : undefined}>{line.text}</span>;
   const noHarness = !readOnly && d.connectionOptions.length === 0 && d.harnesses.loaded;
   return (
     <div className="flex flex-col gap-2">

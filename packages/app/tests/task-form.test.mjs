@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceLocation, availableTaskWorkspaces, suggestedTaskWorkspace } from "../src/lib/taskForm.ts";
+import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceLocation, availableTaskWorkspaces, suggestedTaskWorkspace, workspaceLine } from "../src/lib/taskForm.ts";
 import { setOption } from "../src/lib/options.ts";
 
 const config = { model: "m", options: [], permission: "", mode: "" };
@@ -128,6 +128,21 @@ test("task workspace display keeps the recorded path or pathless external identi
   assert.equal(taskWorkspaceLocation(workspace), "/original");
   assert.equal(taskWorkspaceLocation({ ...workspace, path: "" }), "checkout-2");
   assert.equal(taskWorkspaceLocation({ bindingId: 42, path: "", source: "pinned" }), "Binding #42");
+});
+
+test("the workspace line reads status, then the launch check, then the path, then what is missing", () => {
+  const none = { status: null, path: null, checkingLaunch: false, backlogNeedsWorkspace: false, hasConnection: false };
+  assert.deepEqual(workspaceLine(none), { text: "No connection selected", isPath: false });
+  assert.deepEqual(workspaceLine({ ...none, hasConnection: true }), { text: "No workspace selected", isPath: false });
+  assert.deepEqual(workspaceLine({ ...none, hasConnection: true, backlogNeedsWorkspace: true }),
+    { text: "Choose a workspace before starting this backlog task.", isPath: false });
+  const chosen = { ...none, hasConnection: true, path: "/home/dee/stage" };
+  assert.deepEqual(workspaceLine(chosen), { text: "/home/dee/stage", isPath: true });
+  assert.deepEqual(workspaceLine({ ...chosen, checkingLaunch: true }), { text: "Checking launch support…", isPath: false });
+  assert.deepEqual(workspaceLine({ ...chosen, checkingLaunch: true, status: "Discovering workspaces…" }),
+    { text: "Discovering workspaces…", isPath: false });
+  assert.deepEqual(workspaceLine({ ...none, status: "Connection unavailable.", backlogNeedsWorkspace: true }),
+    { text: "Connection unavailable.", isPath: false });
 });
 
 test("task creation sends explicit Off and omits the option after choosing Harness default", () => {

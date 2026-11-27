@@ -29,6 +29,24 @@ export function suggestedTaskWorkspace(rows: readonly SelectableWorkspace[], pro
   return candidates.length === 1 ? candidates[0] : undefined;
 }
 
+/**
+ * The one line always kept under an editable Workspace field, so the form never moves: the destination status, else
+ * the launch check, else the path (set in mono), else what is missing.
+ */
+export function workspaceLine(s: {
+  status: string | null;
+  path: string | null;
+  checkingLaunch: boolean;
+  backlogNeedsWorkspace: boolean;
+  hasConnection: boolean;
+}): { text: string; isPath: boolean } {
+  if (s.status !== null) return { text: s.status, isPath: false };
+  if (s.checkingLaunch) return { text: "Checking launch support…", isPath: false };
+  if (s.path !== null) return { text: s.path, isPath: true };
+  if (s.backlogNeedsWorkspace) return { text: "Choose a workspace before starting this backlog task.", isPath: false };
+  return { text: s.hasConnection ? "No workspace selected" : "No connection selected", isPath: false };
+}
+
 /** Display the assignment from the task itself, including pathless destinations. */
 export function taskWorkspaceLocation(workspace: TaskWorkspace): string {
   return workspace.path || workspace.externalId || `Binding #${workspace.bindingId}`;
