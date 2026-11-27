@@ -603,7 +603,11 @@ Picking a connection or workspace never moves the form: square secondary
 icon buttons sit right of the Workspace combobox (Refresh workspaces, always
 shown, disabled without an active connection, the busy spinner while it
 runs; Clear workspace in backlog only, disabled with none picked), and one
-line under it is always kept, reading the status, else the path, else blank.
+line under it is always kept, reading the status, else "Checking launch
+support…" while the chosen workspace's launch check runs, else the path
+(mono), else "Choose a workspace before starting this backlog task." in
+backlog, else "No connection selected" / "No workspace selected" (Geist, so it
+never reads as a path). A final launch refusal still takes its own hint row.
 Only a long status may wrap. "Connect a harness in Settings." sits under
 Connection when there is none.
 

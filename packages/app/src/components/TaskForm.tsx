@@ -282,6 +282,9 @@ function TaskFormDrawer({
   const block = bound && full ? operationGate(connection, "launch") : null;
   const scopedBlock = bound && full ? operationReason("launch", caps.data, caps.error) : null;
   const launchable = bound && block === null && scopedBlock === null;
+  // Still reading the chosen workspace's launch support: the Workspace line says so, so the form does not move. Only
+  // a final answer (unsupported or an error) takes a Hint row of its own.
+  const checkingLaunch = block === null && scopedBlock !== null && caps.data === undefined && caps.error === null;
   const mode = s.mode;
   const timingUnchanged = opened !== null && mode === "at" && opened.state.mode === "at"
     && s.startLocal === opened.state.startLocal && s.tz === opened.state.tz;
@@ -448,6 +451,8 @@ function TaskFormDrawer({
           destination={destination}
           readOnly={!full}
           canClear={mode === "backlog"}
+          checkingLaunch={checkingLaunch}
+          backlogNeedsWorkspace={planning && workspaceId === null}
           onConnection={(id) => {
             destination.chooseConnection(id);
             resetConfig();
@@ -457,7 +462,6 @@ function TaskFormDrawer({
             resetConfig();
           }}
         />
-        {planning && workspaceId === null ? <Hint>Choose a workspace before starting this backlog task.</Hint> : null}
         {showPlanningProject ? (
           <Field label="Project">
             {(id) => <ProjectCombobox id={id} value={s.projectId} projects={projects.data?.projects ?? []}
@@ -466,7 +470,7 @@ function TaskFormDrawer({
         ) : null}
         {showPlanningProject ? <ErrorText error={projects.error} /> : null}
         {block === null ? null : <LaunchBlockAlert block={block} />}
-        {bound && block === null && scopedBlock !== null ? <Hint>{scopedBlock}</Hint> : null}
+        {bound && block === null && scopedBlock !== null && !checkingLaunch ? <Hint>{scopedBlock}</Hint> : null}
         <Field label="Title">
           {(id) => <Input id={id} data-autofocus={full ? undefined : true} value={s.title} onChange={(e) => set({ title: e.target.value })} />}
         </Field>
