@@ -196,6 +196,9 @@ func TestDesktopAgainstRealServer(t *testing.T) {
 		if status != 200 || img != string(pngBytes) || hdr.Get("Content-Type") != "image/png" {
 			t.Fatalf("attachment: %d %q, %d bytes", status, hdr.Get("Content-Type"), len(img))
 		}
+		if hdr.Get("Cache-Control") != "private, no-store" {
+			t.Fatal("attachment could be cached across desktop targets")
+		}
 	})
 
 	var tk task
@@ -335,7 +338,7 @@ func TestLauncherDevAgainstRealServer(t *testing.T) {
 	l := launch.New(launch.Config{
 		CLI: bin, AppName: "Stage Test", AppVersion: "itest",
 		Dev: true, DevSocket: e.sock, TempDirs: []string{},
-		OnTarget: func(t target.Target) { sockets <- t.Socket },
+		OnTarget: func(t target.Target, _ launch.Health) { sockets <- t.Socket },
 		Logf:     t.Logf,
 	})
 	t.Cleanup(l.Close)

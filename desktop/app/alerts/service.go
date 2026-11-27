@@ -93,6 +93,8 @@ type Config struct {
 	// The credential owner should clear its stored session only if the exact
 	// target and session ID still match. It must not block. Nil means no-op.
 	AccessEnded func(t target.Target, sessionID string)
+	// RestoreSession supplies a saved sign-in before its target starts streaming.
+	RestoreSession func(target.Target) Session
 	// Now is the clock (default time.Now).
 	Now func() time.Time
 	// Logf logs (default log.Printf).
@@ -324,8 +326,9 @@ func (s *Service) upsertLocked(t target.Target, force bool) (countChanged, clear
 		st = &stream{id: t.ID, t: t, ctx: ctx, stop: stop, wake: make(chan struct{}, 1), shown: map[string]shownNote{}}
 		st.delivery, st.cancelDelivery = context.WithCancel(ctx)
 		s.streams[t.ID] = st
+		countChanged, cleared = s.restoreSessionLocked(st)
 		s.startLoopLocked(st)
-		return false, false
+		return countChanged, cleared
 	}
 	if t.Kind == target.KindLocal && t.Socket == "" {
 		t.Socket = st.t.Socket
@@ -336,9 +339,25 @@ func (s *Service) upsertLocked(t target.Target, force bool) (countChanged, clear
 		st.awaitingAccess = false
 	}
 	st.t = t
+	if moved {
+		count, dropped := s.restoreSessionLocked(st)
+		countChanged, cleared = countChanged || count, cleared || dropped
+	}
 	if force || moved {
 		s.reconnectLocked(st)
 	}
+	return countChanged, cleared
+}
+
+func (s *Service) restoreSessionLocked(st *stream) (countChanged, cleared bool) {
+	if s.cfg.RestoreSession == nil || (!st.t.Remote() && st.t.Socket == "") {
+		return false, false
+	}
+	session := s.cfg.RestoreSession(st.t)
+	if sp := s.prefs.Servers[st.id]; sp != nil && sp.SessionScope != session.scope(st.t) {
+		countChanged, cleared = s.clearAccessLocked(st)
+	}
+	st.session = session
 	return countChanged, cleared
 }
 
@@ -1126,11 +1145,11 @@ func (s *Service) onUnread(st *stream, gen uint64, u wireUnread) {
 	closes := s.reconcileLocked(st)
 	setBadge := s.badgeLocked()
 	s.mu.Unlock()
-	if setBadge {
-		s.publishBadge()
-	}
 	for _, id := range closes {
 		s.cfg.Sink.Close(id)
+	}
+	if setBadge {
+		s.publishBadge()
 	}
 	if countChanged {
 		s.changed()

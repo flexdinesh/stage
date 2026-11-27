@@ -140,6 +140,7 @@ export interface HostProblem {
 
 /** The last Stage server the host reached. */
 export interface HostServer {
+  sharedAccess?: boolean;
   /** The target (saved server) id it belongs to: `local` or a remote's. */
   id: string;
   version: string;
@@ -220,6 +221,8 @@ export interface HostState {
   epoch: number;
   /** Readies of the active server; a switch resets it to 0 (the app was never ready on the new server yet). */
   serverEpoch: number;
+  /** Changes when the active server's native session changes. */
+  accountEpoch?: number;
   /** A retry, start or restart is running. */
   busy: boolean;
   /** Development run against a foreground dev server. */

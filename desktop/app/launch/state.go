@@ -64,10 +64,11 @@ type AppInfo struct {
 type Server struct {
 	// ID is the target (saved server) id it belongs to: "local" or a
 	// remote's.
-	ID         string `json:"id"`
-	Version    string `json:"version"`
-	APIVersion int    `json:"apiVersion"`
-	Identity   string `json:"identity"`
+	ID           string `json:"id"`
+	Version      string `json:"version"`
+	APIVersion   int    `json:"apiVersion"`
+	Identity     string `json:"identity"`
+	SharedAccess bool   `json:"sharedAccess"`
 	// PublicURL is the server's STAGE_PUBLIC_URL, null when unset.
 	PublicURL *string `json:"publicUrl"`
 	// Socket is the Unix socket path the app talks to, "" for a remote.
@@ -110,6 +111,8 @@ type State struct {
 	// ServerEpoch counts the readies of the active server; a switch resets
 	// it to 0 (the app was never ready on the new server yet).
 	ServerEpoch int `json:"serverEpoch"`
+	// AccountEpoch changes when the active server's session changes.
+	AccountEpoch int `json:"accountEpoch"`
 	// Busy: a retry, start or restart is running.
 	Busy bool `json:"busy"`
 	// Dev: development run against a foreground dev server.

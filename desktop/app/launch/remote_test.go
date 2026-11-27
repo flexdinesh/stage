@@ -123,7 +123,7 @@ func withServers(t *testing.T, remoteURL string, active bool, tg *targets) (func
 	}
 	return func(c *Config) {
 		c.Servers = store
-		c.OnTarget = tg.onTarget
+		c.OnTarget = func(t target.Target, _ Health) { tg.onTarget(t) }
 		c.OnServer = tg.onServer
 	}, store, rt
 }

@@ -68,11 +68,12 @@ export interface SyncResult {
 
 // ---- Users ----
 
-/** GET /api/me: the acting user. No sign-in yet: always the default user (id 1). */
+/** GET /api/me: the acting user, with an email in shared access. */
 export interface User {
   id: number;
   displayName: string;
   createdAt: string;
+  email?: string;
 }
 
 // ---- Projects ----

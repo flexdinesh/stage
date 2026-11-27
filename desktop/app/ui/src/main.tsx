@@ -60,13 +60,13 @@ const nativeWorker: NativeWorker = {
 
 const host = desktopHost(native, nativeServers, nativeWorker);
 const platform: Platform = {
-  transport: desktopTransport(),
+  transport: desktopTransport(undefined, host.current),
   clipboard: desktopClipboard(native),
   links: desktopLinks(native, host.current),
   notifications: desktopNotifications(nativeNotifications),
   // The Go process sets the badge from the notification stream (one writer, also while the window is closed).
   attention: { setNeedsInput: () => {} },
-  storage: desktopStorage(),
+  storage: desktopStorage(host.current),
   host,
 };
 

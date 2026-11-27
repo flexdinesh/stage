@@ -72,7 +72,7 @@ func TestWorkerLocalTarget(t *testing.T) {
 	cli := newFakeCLI(t)
 	joinedTo(cli, "https://stage.example.com", false)
 	bridged := 0
-	h := newLauncher(t, cli, func(c *Config) { c.OnTarget = func(target.Target) { bridged++ } })
+	h := newLauncher(t, cli, func(c *Config) { c.OnTarget = func(target.Target, Health) { bridged++ } })
 	s := h.start(t)
 	if s.Phase != PhaseWorker || s.Title != "This machine is a worker of stage.example.com" || s.Worker == nil {
 		t.Fatalf("state %+v", s)

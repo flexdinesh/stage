@@ -28,6 +28,7 @@ import { useHostState } from "../lib/hostState.ts";
 import type { HostServices, HostState, HostWorker, HostWorkerControl } from "../platform/index.ts";
 import { usePlatform } from "../platform/context.tsx";
 import { Step, Steps } from "./Steps.tsx";
+import { DesktopAccessGate } from "./DesktopAccess.tsx";
 import {
   Alert,
   Button,
@@ -84,7 +85,12 @@ export function HostGate({ children }: { children: ReactNode }) {
   }, [startingTarget]);
 
   const view = host === undefined ? "app" : gateView(state, late);
-  if (view === "app" || host === undefined || state === null) return children;
+  if (view === "app" || host === undefined || state === null) {
+    if (state?.server?.sharedAccess === true) {
+      return <DesktopAccessGate key={state.accountEpoch} state={state} brand={<BrandMark />}>{children}</DesktopAccessGate>;
+    }
+    return children;
+  }
   if (view === "blank") return <div className="min-h-dvh bg-bg" aria-busy="true" />;
   if (state.phase === "worker" && state.worker !== null) return <WorkerScreen state={state} worker={state.worker} host={host} />;
   return <ConnectionScreen state={state} host={host} />;

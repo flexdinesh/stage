@@ -24,10 +24,11 @@ export function StageApp({ platform }: { platform: Platform }) {
     let last = connection.current();
     return connection.subscribe((next) => {
       const switched = isServerSwitch(last, next);
+      const accountChanged = last.accountEpoch !== next.accountEpoch ||
+        (last.server !== null && next.server !== null && last.server.sharedAccess !== next.server.sharedAccess);
       last = next;
-      if (!switched) return;
-      queryClient.clear();
-      void router.navigate("/");
+      if (switched || accountChanged) queryClient.clear();
+      if (switched) void router.navigate("/");
     });
   }, [platform, queryClient]);
   return (

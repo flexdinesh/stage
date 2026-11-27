@@ -4,6 +4,8 @@ import { desktopHost } from "../src/platform/host.ts";
 import { desktopLinks } from "../src/platform/links.ts";
 import { INITIAL_STATE } from "../src/platform/native.ts";
 import { desktopNotifications, toPushState } from "../src/platform/notifications.ts";
+import { desktopStorage } from "../src/platform/storage.ts";
+import { desktopTransport } from "../src/platform/transport.ts";
 
 function fakeNative(over = {}) {
   const stateListeners = new Set();
@@ -29,6 +31,42 @@ function fakeNative(over = {}) {
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
+
+test("desktop preferences isolate saved targets and shared accounts", () => {
+  const data = new Map();
+  const backing = { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => data.set(k, v), removeItem: (k) => data.delete(k) };
+  let state = INITIAL_STATE;
+  const storage = desktopStorage(() => state, () => backing);
+  storage.set("stage-theme", "dark");
+  storage.set("project", "7");
+  const remote = { id: "s-studio", name: "Studio", kind: "remote", url: "https://studio.example" };
+  state = { ...state, target: remote };
+  assert.equal(storage.get("project"), null);
+  storage.set("project", "7");
+  state = { ...state, server: { sharedAccess: true }, accountEpoch: 1 };
+  assert.equal(storage.get("project"), null);
+  storage.set("project", "7");
+  assert.equal(storage.get("project"), "7");
+  state = { ...state, accountEpoch: 2 };
+  assert.equal(storage.get("project"), null);
+  assert.equal(storage.get("stage-theme"), "dark");
+  state = INITIAL_STATE;
+  assert.equal(storage.get("project"), "7");
+});
+
+test("attachment URLs change on an address edit and an account change", () => {
+  let state = INITIAL_STATE;
+  const transport = desktopTransport(undefined, () => state);
+  const path = "/attachments/7";
+  assert.equal(transport.assetUrl(path), "/api/attachments/7?stage-target=local%7C%7C0");
+  state = { ...state, target: { id: "s-studio", kind: "remote", name: "Studio", url: "https://one.example" } };
+  const original = transport.assetUrl(path);
+  state = { ...state, target: { ...state.target, url: "https://two.example" } };
+  const edited = transport.assetUrl(path);
+  assert.notEqual(original, edited);
+  state = { ...state, accountEpoch: 1 };
+  assert.notEqual(edited, transport.assetUrl(path));
+});
 
 test("host: starts in starting, takes the snapshot, then follows events", async () => {
   const f = fakeNative();

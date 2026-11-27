@@ -9,6 +9,8 @@ import { invalidateWork, keys, useHarnesses, useMachines, useMe, usePreferences 
 import { type NotificationEvent, type Preferences } from "../api/types.ts";
 import { harnessStatusKeys } from "../harnesses/index.ts";
 import { InfoPanel } from "../components/InfoPanel.tsx";
+import { DesktopSignOut } from "../components/DesktopAccess.tsx";
+import { useHostState } from "../lib/hostState.ts";
 import { AddMachineDrawer, MachinesPanel } from "../components/Machines.tsx";
 import { notificationEventTone } from "../components/StateBadge.tsx";
 import { useStatusAlert } from "../components/StatusRow.tsx";
@@ -41,24 +43,26 @@ import { SETTINGS_TABS, settingsTabLabel, type SettingsTab } from "../lib/settin
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { dateTime, shortDate } from "../lib/format.ts";
 
-/** The acting user (GET /api/me). No sign-in: everything is attributed to the default user. */
+/** The acting user (GET /api/me). */
 function UserCard() {
   const me = useMe();
+  const shared = useHostState()?.server?.sharedAccess === true;
   return (
-    <Panel title="User" meta="no sign-in">
+    <Panel title="User" meta={shared ? undefined : "no sign-in"}>
       <QueryState isPending={me.isPending} error={me.error} hasData={me.data !== undefined}>
         {me.data === undefined ? null : (
           <div className="flex flex-col gap-3">
             <div className="min-w-0">
               <p className="truncate text-small font-medium text-fg">{me.data.displayName}</p>
               <MetaLine>
+                {shared && me.data.email !== undefined ? <span>{me.data.email}</span> : null}
                 <span>
                   user #<span className="tabular">{me.data.id}</span>
                 </span>
                 <span>since {shortDate(me.data.createdAt)}</span>
               </MetaLine>
             </div>
-            <Muted>Stage has no sign-in. Everything created here is attributed to this user.</Muted>
+            {shared ? <DesktopSignOut /> : <Muted>Stage has no sign-in. Everything created here is attributed to this user.</Muted>}
           </div>
         )}
       </QueryState>

@@ -3,7 +3,7 @@
 The desktop app (`desktop/app`) is a MyGo shell for Linux and macOS that
 shows the shared React app (`@stage/app`) in a webview and talks to one
 Stage server at a time: this machine's over its Unix socket (the default),
-or a saved remote server on a trusted network over TCP ([Servers](#servers)).
+or a saved remote server over HTTP(S) ([Servers](#servers)).
 Each server stays the sole owner of its SQLite, T3 connection, scheduling
 and business rules; this machine's per-user service supervises the local
 one ([service.md](service.md)). With a remote active, the desktop can make
@@ -24,6 +24,7 @@ Decisions: [ADR 0001](adr/0001-desktop-shell.md).
 | `desktop/app/` | Go module `github.com/flexdinesh/stage/desktop/app` (MyGo v0.9.0). Never imports `server/internal` or the fixture. |
 | `bridge/` | Bridge B: the `mygo://localhost` scheme serves the embedded UI (`dist/`, with a CSP header) and reverse-proxies `/api/*` to the active server (socket or TCP). Request bodies without a `Content-Length` (macOS WKWebView sends none) are forwarded with unknown length. |
 | `target/` | The servers: the local target (implicit) and saved remotes (`servers.json`), each one's transport (no HTTP proxy), Host and base URL. No MyGo import. |
+| `session/` | Native session storage and HTTP authorization for a shared Stage server. No MyGo import. |
 | `launch/` | Launcher and monitor: ensures the local service through the bundled CLI, checks readiness and API version (socket or TCP), watches health, switches servers, tests a server URL, and runs this machine's worker (`worker.go`: join, leave, restart, state). No MyGo import. |
 | `nav/` | URL policy: what the webview may load, what goes to the OS, deep links, notification click paths. |
 | `alerts/` | Native notifications: every saved server's notification stream, catch-up and foreground policy, device preferences (`notifications.json`), cleanup, badge, the OS settings opener. No MyGo import. |
@@ -82,7 +83,7 @@ Not offered in the UI today (see the introduction): the page assumes this machin
 The desktop connects to one Stage server at a time. Each server is bound to its own T3 backend; the desktop never manages a server's T3 beyond showing that server's onboarding.
 
 - **This machine** (`local`): implicit, always first, labeled "This machine", never edited or removed. Reached over its Unix socket; its service is ensured as in the [launch sequence](#launch-sequence).
-- **Remote servers**: saved by name and URL (`http(s)://host[:port]`, no path, credentials, query or fragment), on a **trusted network with no authentication** (as a browser on that network would be). Names and URLs are unique; "This machine" is reserved. The desktop never starts, stops or configures a remote.
+- **Remote servers**: saved by name and URL (`http(s)://host[:port]`, no path, credentials, query or fragment). Personal servers use the existing trusted-network connection. Shared servers use their configured canonical URL and require [sign-in](#shared-access). Names and URLs are unique. "This machine" is reserved. The desktop never starts, stops or configures a remote.
 - **Remote server setup** (on that machine): it must listen on TCP (`stage serve --listen 0.0.0.0:7380`, or `STAGE_LISTEN` in its `service.env`). A URL with an IP literal or `localhost` passes its Host check; a hostname must be in its `STAGE_ALLOWED_ORIGINS` (or be its `STAGE_PUBLIC_URL`), else it answers 403 ([runtime.md](runtime.md#request-origin-policy)). Test connection and the `unreachable` screen name the setting: `STAGE_ALLOWED_ORIGINS=<url>`.
 
 ### Saved list
@@ -108,7 +109,7 @@ Missing: local only. Corrupt or another version: logged, local only, replaced on
 1. The choice is saved as `active`.
 2. The bridge is unset at once: every open request and stream to the old server ends (in-flight JSON gets 503 `unavailable`, streams end and EventSource reconnects into the wait), so nothing of the old server reaches the page afterwards.
 3. The state starts over for the new server: `starting` (local: steps service / server / api; remote: server / api), `target` set, `server` null, `serverEpoch` 0. A start still running for the old server is cancelled, and its late outcome is dropped.
-4. The page sees `target.id` change with that first state: when the app had run on the old server it drops its cached data (`queryClient.clear()`) and opens `/`; a navigation that triggered the switch (a notification click) arrives after it and wins. Until the new server answers the page shows the blank ground, then the connection screen.
+4. The page sees `target.id` or `target.url` change with that first state. When the app had run on the old target it drops its cached data (`queryClient.clear()`) and opens `/`. A navigation that triggered the switch (a notification click) arrives after it and wins. Until the new server answers the page shows the blank ground, then the connection screen.
 5. On ready, the bridge points at the new server, `epoch` and `serverEpoch` increment, and the app mounts.
 
 Switching to the active server only refreshes its name. Editing the active server's URL reconnects it; removing it switches to this machine first.
@@ -118,13 +119,50 @@ Switching to the active server only refreshes its name. Editing the active serve
 - No service commands: Start/Restart server, "Open Stage at login" and the server logs are this machine's only (`ErrRemote` from the shell; the page hides them for a remote). While this machine is a worker, "Open Stage at login" stays available and acts on the worker service ([Worker](#worker)). Diagnostics name the remote and skip `service status` and logs.
 - Phases: `starting` (server, api), `ready`, `reconnecting`, `unreachable`, `incompatible`. Never `stopped`, `failed`, `unsupported`, `misconfigured` or `conflict`; no foreground banner and no version-skew banner.
 - For T3, the local target opens its native link and a remote target opens its web link. OpenCode uses its configured web client for both targets.
-- Bridge requests carry the remote's Host and no `Cookie`, `Origin` or `Sec-Fetch-*`: the server sees a non-browser client, so its cross-origin checks pass over TCP; the bridge enforces the page origin itself first (a cross-site request, or an unsafe method from another origin, gets 403 without reaching any server).
+- The bridge checks the page origin before forwarding; a cross-site request or an unsafe method from another origin gets 403. Personal requests use the target's Host and carry no `Cookie`, `Origin` or `Sec-Fetch-*`.
 - `desktop:dev` loads the page from Vite, whose `/api` proxy goes to the dev socket: switching there changes the launcher and notifications, not the page's `/api`. Use a packaged build to try remotes in the UI.
 - Settings, General, Info shows a remote's URL instead of the socket and no "per-user service" line.
 
 ### Test connection
 
 `TestServer(url)` before saving: `GET /api/health` as the bridge would (8 s bound), returning `{reachable, apiVersion, identity, version, error, hint, command}`. A 403 from the server's origin policy is `reachable` with `command: "STAGE_ALLOWED_ORIGINS=<url>"`; no answer explains `--listen`; another API version is an `error`.
+
+### Shared access
+
+Personal is the default. Its embedded service starts over the existing
+product socket and opens directly to the workspace. Shared setups still
+run the desktop's health and version checks. A reachable shared server
+with a 401 from `/api/me` shows **Sign in to Stage**. During first setup
+the desktop asks the user to finish in a browser. Open private setup,
+invite and reset links at the canonical browser URL. A remote shared server
+uses HTTPS. HTTP is available on loopback for local testing. Then sign in to
+the same account with email and password in the desktop app. Sign out
+from Settings, General, User.
+
+The `mygo://localhost` origin serves the app. Go drops webview cookie and
+authorization headers on shared requests and strips every upstream
+`Set-Cookie`. It captures the upstream `stage_session` only from successful
+explicit sign-in. Before using it, Go checks `/api/auth/status` and matches
+the saved server ID, exact canonical target and installation ID. A local
+shared server uses the canonical HTTP Host while Go dials its Unix socket.
+Go sets the verified canonical `Origin` on writes. The bridge and native HTTP
+clients reject upstream redirects. The same session authorizes webview API
+calls, attachments, event streams and that server's native notifications.
+
+Desktop attachment URLs include the active target and account generation.
+The bridge serves them with `no-store`. Switching targets or accounts closes
+attachment windows and invalidates old attachment URLs on the shared scheme.
+
+Go stores only the opaque session, its expiry and binding metadata. Each
+file is written atomically with mode `0600` in the owner-only `sessions/`
+directory under the desktop app's user data. A restart reuses a still-valid
+session. A 401, expiry, sign-out, password change, replacement installation,
+server removal or URL edit clears the affected credential and ends requests
+using it. Native alert badges, shown notifications and cursors reset for
+that server. On the active server the page drops its query, mutation and
+shared view state and remounts the account gate. Other saved servers retain their own sessions
+and alert state. Switching targets ends webview requests and resets the page,
+and each saved server can continue its own native notification stream.
 
 ## Worker
 
@@ -302,6 +340,7 @@ App identifiers end in `.desktop` because `io.github.flexdinesh.<id>` is the ser
 
 - `mise run desktop:dev`: builds a `stage-dev` CLI into `.scratch/dev/<branch>/bin`, runs a foreground `stage serve` on a short socket under `$XDG_RUNTIME_DIR/stage-desktopdev/` with data in `.scratch/dev/<branch>/desktop` (`.env.dev`, `T3_FAKE=1` to work without T3), and `go tool mygo dev` with the UI's Vite server on `localhost:5174`, which proxies `/api` to that socket. The dev-only `STAGE_DESKTOP_SOCKET` override skips the bundled CLI and the service (identity and API version come from the dev server's health) and is ignored by `mygo build` builds. No OS service is touched.
 - Preview of every connection state in a browser: `pnpm --filter @stage/desktop dev`, then `http://localhost:5174/preview.html?state=failed` (states: `starting-service`, `starting-api`, `failed`, `stopped`, `unsupported`, `misconfigured`, `location`, `conflict`, `incompatible`, `ready`, `ready-skew`, `ready-foreground`, `reconnecting`, `stopped-after`, and for a remote `remote-starting`, `unreachable`, `unreachable-refused`, `remote-ready`, `remote-reconnecting`, and for the worker `worker-join`, `worker-online`, `worker-offline`, `worker-failed`, `worker-removed`, `local-worker`; the fake shell saves this machine, "Studio" and "Lab": switching plays a short connect (Lab stays unreachable) and Test connection of a `.lan` URL answers like a refused hostname).
+- Preview the shared account gate with `state=shared-sign-in` and `state=shared-setup`. The Vite proxy is for the personal dev socket. Use the packaged `mygo://localhost` bridge to exercise real desktop sign-in.
 - `mise run dist [TARGETS=host|all]`: a `stage-dev` developer build ([release.md](release.md)). It builds the CLI/server (web UI embedded) per target, copies it to `desktop/app/resources/<os>-<arch>/bin/stage` with `LICENSE` (MyGo merges the darwin pair into a universal binary), runs `go tool mygo build` (the `desktop/app/build/` outputs: per Linux arch a tarball with `install.sh`, a `.deb`, an `.rpm`, a `PKGBUILD` and a `.desktop` file (scheme handler); `<Name>.app` with `CFBundleURLTypes` and `LSMinimumSystemVersion 12.0`), then assembles and verifies the assets in `.scratch/dist/<version>`. `mise run release` is the `stage` build of a clean HEAD. The `.dmg` needs macOS. The app icon ships (see [App icon](#app-icon)); the tray uses a generated ink square. Installing and updating: [install.md](install.md) (Stage Dev from a checkout: [development.md](development.md)).
 - `STAGE_DESKTOP_SELFCHECK=1 <app executable>` prints how the packaged app resolves its bundled CLI (`<resources>/bin/stage`, its `version --json`) and exits before the single-instance lock, windows or the service; release verification runs it.
 - `mise run check` includes `check:desktop` (Go vet, unit tests, the headless integration test); the UI package's tests, typecheck and lint run in `check:web`.
@@ -321,6 +360,11 @@ python3 -c 'import struct,subprocess as s,sys; e=b"".join(t.encode()+struct.pack
 See the PR and the plan's execution notes for the latest run. Covered without a webview: bridge policy and streaming (incl. a remote over TCP: Host, stripped `Cookie`/`Origin`/`Sec-Fetch-*`, the bridge's own page-origin check, switch cancels open streams, 503 mapping), the saved server list, launcher remote phases, switching and per-server epochs, launcher states against fake CLIs, URL policy (incl. notification click paths), the `alerts` unit tests against a scripted stream on a temp socket (preferences, first run, cursor and reset, reconnect and backoff, 404, catch-up, replace, foreground, off with badge, denial and recovery, cleanup, click targets, Linux settings command), a full local workflow through the bridge against a real `stage serve` with fake T3 and isolated data (create, start, read, stop, upload, attachment, notification stream, reconnect after a server restart, cancellation, deep link parsing by the CLI, zero TCP listeners), the notification stream integration test (`itest/notifications_test.go`: a real `stage serve`, the real `alerts` service and a recording sink; first run silent, live show and target, foreground, read elsewhere closes, global filter, reopen catch-up, 15 min window, server restart, database reset), multi-server notifications (two servers, badge sum, id collisions, version 1 migration), and `itest/remote_test.go` (`TestDesktopRemote`: a real `stage serve --listen 127.0.0.1:<port>` on its own temp data dir next to a local one; switching both ways, unsafe methods over TCP through the bridge, a stream cut by a switch, notifications from both, Test connection incl. a refused hostname, remote down and back), the worker launcher against fake CLIs (`launch/worker_test.go`: the worker phase without any local socket or service call, no local probe with a remote active, public URL match, join and its undo paths, leave incl. `--local` and the local server starting again, restart, login startup, status mapping), and `itest/worker_test.go` (`TestDesktopWorker`: a real `stage serve --listen 127.0.0.1:<port>` with `STAGE_PUBLIC_URL` as the remote, a real pairing, `stage worker join`, a real foreground `stage worker run` standing in for the worker service (no systemd in the isolated environment), online, offline, restart, the main server's view of the machine, and `stage worker leave` removing it). Not verified here: the webview e2e, real systemd or launchd from the desktop, tray, Dock, Wayland vs X11, real OS notifications, and a real Mac.
 
 ### Manual notification checks
+
+The headless `itest/shared_test.go` drives the bridge against a real isolated
+shared Stage server, including its authenticated notification stream.
+`itest/shared_stream_test.go` uses a scripted upstream to verify expiry,
+per-server cursor cleanup and badge isolation at deterministic session boundaries.
 
 Build with `mise run dist` (`TARGETS=all` for every platform) and install or open the result from `desktop/app/build/` (or the assets in `.scratch/dist/<version>`). A fresh profile means Quit Stage Dev, then delete `notifications.json` from `~/.config/io.github.flexdinesh.stage-dev.desktop/` (Linux) or `~/Library/Application Support/io.github.flexdinesh.stage-dev.desktop/` (macOS); macOS keeps its permission answer per bundle id. Empty cells: not run.
 

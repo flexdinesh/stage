@@ -118,6 +118,9 @@ test("a remote lists only server and api steps, and offers only Retry", () => {
 test("a server switch is a target change after the app ran on the old one", () => {
   const ranLocal = state({ phase: "ready", epoch: 1, serverEpoch: 1 });
   assert.equal(isServerSwitch(ranLocal, remote({ epoch: 1, serverEpoch: 0 })), true);
+  const ranRemote = remote({ phase: "ready", epoch: 2, serverEpoch: 1 });
+  assert.equal(isServerSwitch(ranRemote, remote({ target: { ...ranRemote.target, url: "https://new.example.test" } })), true);
+  assert.equal(isServerSwitch(ranRemote, remote({ target: { ...ranRemote.target, name: "Renamed" } })), false);
   // The host's first state replacing the placeholder is not a switch (a launch deep link survives).
   assert.equal(isServerSwitch(state({}), remote({})), false);
   // Same server: readies and outages are not switches.

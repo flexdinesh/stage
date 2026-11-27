@@ -97,6 +97,14 @@ func (h *host) listChanged() {
 	h.serversChanged()
 }
 
+func (h *host) accountChanged(t target.Target) {
+	if h.api.Target().Same(t) {
+		h.closeAttachments()
+	}
+	h.l.AccountChanged(t)
+	h.alerts.SetSession(t, h.api.Sessions.AlertSession(t))
+}
+
 // switchTo makes server id active. The new state is broadcast before
 // switchTo returns, so a navigation that follows (a notification click)
 // reaches the page after the server change.
@@ -148,6 +156,7 @@ func (d *Desktop) UpdateServer(id string, input ServerInput) (ServerEntry, error
 	if d.h.servers == nil {
 		return ServerEntry{}, errNotRunning
 	}
+	old, _ := d.h.servers.Get(id)
 	t, err := d.h.servers.Update(id, input.Name, input.URL)
 	if err != nil {
 		return ServerEntry{}, err
@@ -158,6 +167,11 @@ func (d *Desktop) UpdateServer(id string, input ServerInput) (ServerEntry, error
 		}
 	}
 	d.h.listChanged()
+	if !old.Same(t) && d.h.api.Sessions != nil {
+		if err := d.h.api.Sessions.Forget(old); err != nil {
+			return d.h.entry(t.ID), err
+		}
+	}
 	return d.h.entry(t.ID), nil
 }
 
@@ -171,7 +185,8 @@ func (d *Desktop) RemoveServer(id string) error {
 	if id == target.LocalID {
 		return target.ErrLocal
 	}
-	if _, ok := d.h.servers.Get(id); !ok {
+	t, ok := d.h.servers.Get(id)
+	if !ok {
 		return target.ErrNotFound
 	}
 	if id == d.h.activeID() {
@@ -183,6 +198,9 @@ func (d *Desktop) RemoveServer(id string) error {
 		return err
 	}
 	d.h.listChanged()
+	if d.h.api.Sessions != nil {
+		return d.h.api.Sessions.Forget(t)
+	}
 	return nil
 }
 

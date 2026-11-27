@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
 // AppOrigin is the origin of the app's own pages (bridge B).
@@ -103,7 +105,9 @@ func (p Policy) Open(raw string) Decision {
 		return Decision{Action: Deny, URL: raw, Reason: "unparseable URL"}
 	}
 	if p.own(u) {
-		if attachmentPath.MatchString(u.Path) && u.RawQuery == "" {
+		q := u.Query()
+		scoped := len(q) == 1 && len(q[target.AttachmentTarget]) == 1 && q.Get(target.AttachmentTarget) != ""
+		if attachmentPath.MatchString(u.Path) && (u.RawQuery == "" || scoped) {
 			return Decision{Action: Child, URL: raw}
 		}
 		return Decision{Action: InApp, Path: appPath(u), URL: raw}

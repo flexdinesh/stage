@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -41,6 +42,10 @@ const LocalName = "This machine"
 // (bridge.Host); the server's origin policy accepts it on Unix listeners
 // only (docs/runtime.md). The .invalid TLD (RFC 2606) never resolves.
 const SocketHost = "stage.invalid"
+
+// AttachmentTarget is the bridge-only query parameter that namespaces
+// attachment URLs on the webview's single origin.
+const AttachmentTarget = "stage-target"
 
 // Target is one Stage server.
 type Target struct {
@@ -70,6 +75,10 @@ func (t Target) Remote() bool { return t.Kind == KindRemote }
 // changes do not count).
 func (t Target) Same(o Target) bool {
 	return t.ID == o.ID && t.Kind == o.Kind && t.URL == o.URL && t.Socket == o.Socket
+}
+
+func (t Target) AttachmentScope(accountEpoch int) string {
+	return t.ID + "|" + t.URL + "|" + strconv.Itoa(accountEpoch)
 }
 
 // Host is the Host header of requests to t: the remote URL's host (with

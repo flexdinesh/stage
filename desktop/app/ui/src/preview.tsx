@@ -42,6 +42,7 @@ const studioWorker: HostWorker = {
   fix: "",
 };
 const remoteReady: HostState = { ...remote, phase: "ready", step: null, title: "Connected", server: remoteServer, epoch: 2, serverEpoch: 1 };
+const sharedReady: HostState = { ...remoteReady, server: { ...remoteServer, sharedAccess: true } };
 const log = [
   "level=INFO msg=\"listening\" addr=unix:///run/user/1000/stage-dev/stage.sock",
   "level=ERROR msg=\"open database\" err=\"disk I/O error\"",
@@ -125,6 +126,8 @@ const STATES: Record<string, HostState> = {
     command: "STAGE_ALLOWED_ORIGINS=http://studio.lan:7380",
   },
   "remote-ready": remoteReady,
+  "shared-sign-in": sharedReady,
+  "shared-setup": sharedReady,
   "worker-join": remoteReady,
   "worker-online": { ...remoteReady, worker: studioWorker },
   "worker-offline": {
@@ -279,12 +282,18 @@ const worker: NativeWorker = {
 };
 
 const host = desktopHost(native, servers, worker);
+const transport = desktopTransport();
 const platform: Platform = {
-  transport: desktopTransport(),
+  transport: name === "shared-sign-in" || name === "shared-setup" ? {
+    ...transport,
+    request: async (path) => path === "/auth/status"
+      ? Response.json({ mode: name === "shared-setup" ? "setup_pending" : "claimed", canonicalUrl: box.url })
+      : Response.json({ error: path === "/auth/login" ? "Check your email and password." : "Sign in to continue." }, { status: 401 }),
+  } : transport,
   clipboard: { writeText: (text) => native.copyText(text) },
   links: desktopLinks(native, host.current),
   attention: { setNeedsInput: () => {} },
-  storage: desktopStorage(),
+  storage: desktopStorage(host.current),
   host,
 };
 

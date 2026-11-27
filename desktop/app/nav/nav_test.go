@@ -55,6 +55,7 @@ func TestOpen(t *testing.T) {
 		path string
 	}{
 		{p, "mygo://localhost/api/attachments/12", Child, ""},
+		{p, "mygo://localhost/api/attachments/12?stage-target=local%7C%7C0", Child, ""},
 		{dev, "http://localhost:5174/api/attachments/12", Child, ""},
 		{p, "mygo://localhost/api/attachments/12?download=1", InApp, "/api/attachments/12?download=1"},
 		{p, "mygo://localhost/api/attachments/x", InApp, "/api/attachments/x"},

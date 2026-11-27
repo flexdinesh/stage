@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/flexdinesh/stage/desktop/app/session"
 	"github.com/flexdinesh/stage/desktop/app/target"
 )
 
@@ -46,6 +47,8 @@ const PageOrigin = "mygo://localhost"
 
 // APIPrefix is the only path prefix the bridge forwards.
 const APIPrefix = "/api/"
+
+const attachmentPrefix = APIPrefix + "attachments/"
 
 // CSP is the Content-Security-Policy of every static response. Both
 // 'self' and mygo://localhost are listed: WebKit does not always treat a
@@ -108,6 +111,7 @@ const DefaultStreamWait = 25 * time.Second
 // request to it when the target changes.
 type conn struct {
 	t      target.Target
+	shared bool
 	tr     *http.Transport
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -126,10 +130,10 @@ type reqInfo struct {
 // server of the current target. It applies Permit and the page-origin
 // check, flushes every write at once (SSE), forwards cancellation (the
 // scheme request's context ends when the webview drops it), refuses
-// redirects with 502 rather than letting the webview follow them, and
-// drops cookies.
+// redirects with 502 rather than letting the webview follow them. The
+// shared-session transport applies its credential after stripping page headers.
 //
-// Requests reach the server as a non-browser client: Host is the target's
+// Personal requests reach the server as a non-browser client: Host is the target's
 // (stage.invalid on the socket, the remote's host over TCP) and Cookie,
 // Origin and Sec-Fetch-* are stripped, so the server's cross-origin checks
 // pass for a remote too (its hostname still needs STAGE_ALLOWED_ORIGINS
@@ -151,6 +155,10 @@ type reqInfo struct {
 type APIProxy struct {
 	cur atomic.Pointer[conn]
 	rp  *httputil.ReverseProxy
+	// Sessions is set once before the proxy starts handling requests.
+	Sessions *session.Store
+	// AccountEpoch is the active page's account generation, for attachment URLs.
+	AccountEpoch func() int
 	// StreamWait bounds an event stream's wait for the target (default
 	// DefaultStreamWait).
 	StreamWait time.Duration
@@ -160,7 +168,7 @@ type APIProxy struct {
 // SetTarget.
 func NewAPIProxy(t target.Target) *APIProxy {
 	p := &APIProxy{StreamWait: DefaultStreamWait}
-	p.cur.Store(newConn(t))
+	p.cur.Store(newConn(t, false))
 	p.rp = &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			c := infoOf(pr.In).c
@@ -175,14 +183,22 @@ func NewAPIProxy(t target.Target) *APIProxy {
 			}
 			pr.Out.Header.Del("Cookie")
 			pr.Out.Header.Del("Origin")
+			if strings.HasPrefix(pr.Out.URL.Path, attachmentPrefix) && pr.Out.URL.Query().Has(target.AttachmentTarget) {
+				q := pr.Out.URL.Query()
+				q.Del(target.AttachmentTarget)
+				pr.Out.URL.RawQuery = q.Encode()
+			}
 		},
-		Transport:     roundTripper{},
+		Transport:     roundTripper{p},
 		FlushInterval: -1,
 		ModifyResponse: func(res *http.Response) error {
 			if res.StatusCode >= 300 && res.StatusCode < 400 && res.StatusCode != http.StatusNotModified {
 				return ErrRedirect
 			}
 			res.Header.Del("Set-Cookie")
+			if res.Request != nil && (infoOf(res.Request).c.shared || strings.HasPrefix(res.Request.URL.Path, attachmentPrefix)) {
+				res.Header.Set("Cache-Control", "private, no-store")
+			}
 			return nil
 		},
 		ErrorHandler: p.proxyError,
@@ -194,9 +210,9 @@ func NewAPIProxy(t target.Target) *APIProxy {
 	return p
 }
 
-func newConn(t target.Target) *conn {
+func newConn(t target.Target, shared bool) *conn {
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &conn{t: t, ctx: ctx, cancel: cancel}
+	c := &conn{t: t, shared: shared, ctx: ctx, cancel: cancel}
 	if !t.IsZero() {
 		c.tr = t.Transport()
 	}
@@ -204,12 +220,18 @@ func newConn(t target.Target) *conn {
 }
 
 // roundTripper sends each request over its conn's transport.
-type roundTripper struct{}
+type roundTripper struct{ proxy *APIProxy }
 
-func (roundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+func (rt roundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	c := infoOf(r).c
 	if c.tr == nil {
 		return nil, &target.DialError{Err: target.ErrNoSocket}
+	}
+	if c.shared {
+		if rt.proxy.Sessions == nil {
+			return nil, errors.New("Stage session storage is unavailable")
+		}
+		return rt.proxy.Sessions.RoundTrip(c.t, c.tr, r)
 	}
 	return c.tr.RoundTrip(r)
 }
@@ -226,10 +248,15 @@ func infoOf(r *http.Request) reqInfo {
 // and stream to the previous one and drops its idle connections; the same
 // target again changes nothing.
 func (p *APIProxy) SetTarget(t target.Target) {
-	if old := p.cur.Load(); old != nil && old.t.Same(t) {
+	p.SetServer(t, false)
+}
+
+// SetServer sets the active target and its access mode after health checks.
+func (p *APIProxy) SetServer(t target.Target, shared bool) {
+	if old := p.cur.Load(); old != nil && old.t.Same(t) && old.shared == shared {
 		return
 	}
-	old := p.cur.Swap(newConn(t))
+	old := p.cur.Swap(newConn(t, shared))
 	if old != nil {
 		old.cancel()
 		if old.tr != nil {
@@ -296,10 +323,21 @@ func (p *APIProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	c := p.cur.Load()
 	if isEventStream(r) {
-		if c = p.waitTarget(r.Context()); c == nil {
+		if c = p.waitTarget(r.Context(), c); c == nil {
 			if r.Context().Err() == nil {
 				writeRetry(w)
 			}
+			return
+		}
+	}
+	if scopes, ok := r.URL.Query()[target.AttachmentTarget]; strings.HasPrefix(r.URL.Path, attachmentPrefix) && ok {
+		epoch := 0
+		if p.AccountEpoch != nil {
+			epoch = p.AccountEpoch()
+		}
+		if len(scopes) != 1 || scopes[0] != c.t.AttachmentScope(epoch) {
+			w.Header().Set("Cache-Control", "private, no-store")
+			WriteError(w, http.StatusGone, "Reopen this attachment from the current Stage session.", "target_changed")
 			return
 		}
 	}
@@ -341,9 +379,8 @@ func crossOrigin(r *http.Request) string {
 }
 
 // waitTarget returns the current target once it accepts connections,
-// waiting up to StreamWait for it (following target changes); nil when
-// the wait runs out or ctx ends.
-func (p *APIProxy) waitTarget(ctx context.Context) *conn {
+// waiting up to StreamWait. Shared streams keep their original target.
+func (p *APIProxy) waitTarget(ctx context.Context, original *conn) *conn {
 	wait := p.StreamWait
 	if wait <= 0 {
 		wait = DefaultStreamWait
@@ -353,6 +390,9 @@ func (p *APIProxy) waitTarget(ctx context.Context) *conn {
 	delay := 100 * time.Millisecond
 	for {
 		c := p.cur.Load()
+		if original.shared && c != original {
+			return nil
+		}
 		if !c.t.IsZero() {
 			dctx, cancel := context.WithTimeout(ctx, max(wait/2, time.Second))
 			conn, err := c.t.Dial(dctx)
