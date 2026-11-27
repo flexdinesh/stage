@@ -11,6 +11,7 @@ import (
 
 func init() {
 	register("SharedAccess", caseSharedAccess)
+	register("AccountManagement", caseAccountManagement)
 }
 
 func caseSharedAccess(t *testing.T, open Factory) {
@@ -217,6 +218,143 @@ func caseSharedAccess(t *testing.T, open Factory) {
 		v, err := r.LocalVerifier(ctx, ownerID)
 		if err != nil || v != verifier {
 			t.Fatal("restore removed or changed verifier")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func caseAccountManagement(t *testing.T, open Factory) {
+	e := open(t)
+	s := db.NewStore(e)
+	ctx := t.Context()
+	now := time.Date(2026, 11, 27, 0, 0, 0, 0, time.UTC)
+	ownerID := db.DefaultUser
+	owner := store.AccountInput{DisplayName: "Owner", Email: "Owner@Example.test"}
+	member := store.AccountInput{DisplayName: "Member", Email: "Member@Example.test"}
+	setup := store.TokenDigest{1}
+	invited := "Invite@Example.test"
+	var memberID, oldInviteID, newInviteID int64
+	if err := s.WriteAccess(ctx, func(r store.Access) error {
+		if _, err := db.ConfigureAccessTx(ctx, r, ptr(true)); err != nil {
+			return err
+		}
+		setupID, err := r.InsertGrant(ctx, setup, store.AuthGrant{
+			Purpose: store.GrantSetup, CreatedAt: now, ExpiresAt: now.Add(time.Minute),
+		})
+		if err != nil {
+			return err
+		}
+		a, err := db.ClaimInstallationTx(ctx, r, setup, owner, "initial verifier", now)
+		if err != nil {
+			return err
+		}
+		if err := r.InsertAccessAudit(ctx, store.AccessAudit{
+			Action: "setup_claimed", ActorUserID: &a.ID, TargetUserID: &a.ID, GrantID: &setupID, CreatedAt: now,
+		}); err != nil {
+			return err
+		}
+		memberID, err = r.InsertMember(ctx, member)
+		if err != nil {
+			return err
+		}
+		if err := r.InsertLocalCredential(ctx, memberID, "initial member verifier"); err != nil {
+			return err
+		}
+		invite := store.AuthGrant{
+			Purpose: store.GrantInvite, IssuerUserID: &ownerID, Email: &invited,
+			CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Minute),
+		}
+		oldInviteID, err = r.InsertGrant(ctx, store.TokenDigest{2}, invite)
+		if err != nil {
+			return err
+		}
+		got, err := r.OpenGrant(ctx, store.GrantInvite, " invite@EXAMPLE.test ", 0)
+		if err != nil || got.ID != oldInviteID || !got.ExpiresAt.Before(now) {
+			t.Fatalf("expired but open invite: %+v %v", got, err)
+		}
+		if err := r.RevokeGrant(ctx, oldInviteID, now); err != nil {
+			return err
+		}
+		invite.CreatedAt, invite.ExpiresAt = now, now.Add(time.Hour)
+		newInviteID, err = r.InsertGrant(ctx, store.TokenDigest{3}, invite)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteAccess(ctx, func(r store.Access) error {
+		if err := r.SetAccountRole(ctx, memberID, store.RoleAdmin); err != nil {
+			return err
+		}
+		if count, err := r.CountActiveAdmins(ctx); err != nil || count != 2 {
+			t.Fatalf("promoted admins: %d, %v", count, err)
+		}
+		if err := r.UpdateDisplayName(ctx, memberID, " Renamed member "); err != nil {
+			return err
+		}
+		if err := r.UpdateLocalVerifier(ctx, memberID, "replacement verifier"); err != nil {
+			return err
+		}
+		if err := r.DisableAccount(ctx, memberID); err != nil {
+			return err
+		}
+		count, err := r.CountActiveAdmins(ctx)
+		if err != nil || count != 1 {
+			t.Fatalf("remaining active admins: %d, %v", count, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reset := store.AuthGrant{
+		Purpose: store.GrantPasswordReset, TargetUserID: &ownerID, CreatedAt: now, ExpiresAt: now.Add(time.Minute),
+	}
+	winners := 0
+	for _, err := range race(2, func(i int) error {
+		return s.WriteAccess(ctx, func(r store.Access) error {
+			_, err := r.InsertGrant(ctx, store.TokenDigest{4 + byte(i)}, reset)
+			return err
+		})
+	}) {
+		if err == nil {
+			winners++
+		} else if !e.Errors().IsUniqueViolation(err) {
+			t.Fatal(err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("reset insertion winners %d, want 1", winners)
+	}
+	if err := s.ReadAccess(ctx, func(r store.Access) error {
+		accounts, err := r.ListAccounts(ctx, 0, 1)
+		if err != nil || len(accounts) != 1 || accounts[0].ID != memberID ||
+			accounts[0].DisplayName != "Renamed member" || accounts[0].Role != store.RoleAdmin || accounts[0].Status != store.AccountDisabled {
+			t.Fatalf("first account page: %+v %v", accounts, err)
+		}
+		accounts, err = r.ListAccounts(ctx, memberID, 1)
+		if err != nil || len(accounts) != 1 || accounts[0].ID != ownerID {
+			t.Fatalf("next account page: %+v %v", accounts, err)
+		}
+		if v, err := r.LocalVerifier(ctx, memberID); err != nil || v != "replacement verifier" {
+			t.Fatal("updated verifier missing")
+		}
+		invites, err := r.ListInvites(ctx, 0, 1)
+		if err != nil || len(invites) != 1 || invites[0].ID != newInviteID || invites[0].RevokedAt != nil {
+			t.Fatalf("first invite page: %+v %v", invites, err)
+		}
+		invites, err = r.ListInvites(ctx, newInviteID, 1)
+		if err != nil || len(invites) != 1 || invites[0].ID != oldInviteID || invites[0].RevokedAt == nil {
+			t.Fatalf("next invite page: %+v %v", invites, err)
+		}
+		grant, err := r.GrantByID(ctx, oldInviteID)
+		if err != nil || grant.ID != oldInviteID || grant.RevokedAt == nil {
+			t.Fatalf("revoked invitation history: %+v %v", grant, err)
+		}
+		grant, err = r.OpenGrant(ctx, store.GrantPasswordReset, "", ownerID)
+		if err != nil || grant.TargetUserID == nil || *grant.TargetUserID != ownerID {
+			t.Fatalf("open password reset: %+v %v", grant, err)
 		}
 		return nil
 	}); err != nil {

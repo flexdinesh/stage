@@ -152,6 +152,11 @@ template (`STAGE_LISTEN=unix`) and never overwrites it. Apply edits with
   Connections.
 - `STAGE_LISTEN` must include `unix` (the socket desktop and CLI use); add
   TCP for a browser with `unix,127.0.0.1:7380`.
+- For shared browser access behind an HTTPS proxy, set `STAGE_PUBLIC_URL`
+  to its browser origin and route the proxy to a protected Stage product
+  listener. For local HTTP testing, use `STAGE_LISTEN=unix,127.0.0.1:7380`
+  with `STAGE_PUBLIC_URL=http://127.0.0.1:7380`. See
+  [shared setup and owner recovery](runtime.md#shared-setup-and-owner-recovery).
 - A file readable or writable by group or others is refused (it may hold
   secrets).
 - `--managed` ignores those keys, `STAGE_DATA_DIR`, `STAGE_ENV` and
@@ -380,6 +385,10 @@ The unit adds `[X-Stage] Role=worker`. Golden copies:
   opened only after it holds the data-dir lock (a losing process never
   rotates the live log). launchd's stdout/stderr (panics only) go to
   `launchd.stderr.log`, which the server truncates at start when over 1 MiB.
+- The first shared setup link goes to the private `owner/bootstrap.txt`
+  file under the service's data dir. Only the file location appears in
+  managed output. Setup and recovery links stay out of journald, launchd
+  logs, service status and desktop Copy Diagnostics.
 
 ## Verification
 

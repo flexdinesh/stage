@@ -100,6 +100,17 @@ type AuthGrant struct {
 	RevokedAt    *time.Time
 }
 
+// AccessAudit records a committed access-management action. A nil actor is
+// the local installation owner. Grant IDs remain meaningful after a copy
+// discards the grants themselves.
+type AccessAudit struct {
+	Action       string
+	ActorUserID  *int64
+	TargetUserID *int64
+	GrantID      *int64
+	CreatedAt    time.Time
+}
+
 // Access is the transactional storage contract for installation and sign-in
 // state. Take InstallationForUpdate before changing installation mode or
 // making account changes that depend on shared invariants.
@@ -111,10 +122,18 @@ type Access interface {
 
 	Account(context.Context, int64) (Account, error)
 	AccountByEmail(context.Context, string) (Account, error)
+	// ListAccounts includes disabled sign-in accounts, newest ID first.
+	// Pass beforeID zero for the first page.
+	ListAccounts(ctx context.Context, beforeID int64, limit int) ([]Account, error)
 	ClaimOwner(context.Context, AccountInput) error
 	InsertMember(context.Context, AccountInput) (int64, error)
 	InsertLocalCredential(context.Context, int64, string) error
 	LocalVerifier(context.Context, int64) (string, error)
+	UpdateLocalVerifier(context.Context, int64, string) error
+	UpdateDisplayName(context.Context, int64, string) error
+	CountActiveAdmins(context.Context) (int, error)
+	SetAccountRole(context.Context, int64, AccountRole) error
+	DisableAccount(context.Context, int64) error
 
 	InsertSession(context.Context, TokenDigest, AuthSession) (int64, error)
 	// ActiveSession matches the exact audience and an active user. Both
@@ -128,10 +147,18 @@ type Access interface {
 
 	InsertGrant(context.Context, TokenDigest, AuthGrant) (int64, error)
 	Grant(context.Context, TokenDigest, GrantPurpose) (AuthGrant, error)
+	GrantByID(context.Context, int64) (AuthGrant, error)
+	// OpenGrant selects the unconsumed, unrevoked row, including expired
+	// rows. Use email for invitations and targetUserID for password resets.
+	OpenGrant(ctx context.Context, purpose GrantPurpose, email string, targetUserID int64) (AuthGrant, error)
+	// ListInvites includes invite history, newest ID first. Pass beforeID
+	// zero for the first page.
+	ListInvites(ctx context.Context, beforeID int64, limit int) ([]AuthGrant, error)
 	// ConsumeGrant succeeds once and returns ErrNotFound for an unusable
 	// grant. Call in the same write transaction as the operation it grants.
 	ConsumeGrant(context.Context, TokenDigest, GrantPurpose, time.Time) (AuthGrant, error)
 	RevokeGrant(context.Context, int64, time.Time) error
 
+	InsertAccessAudit(context.Context, AccessAudit) error
 	DiscardTransientAccess(context.Context) error
 }
