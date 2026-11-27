@@ -38,6 +38,7 @@ func (c *Connector) Run(ctx context.Context, action string, input json.RawMessag
 		return harness.Result{}, err
 	}
 	if action == claudecode.ActionCheck {
+		c.svc.probed.Forget() // an explicit check probes the facts again
 		return c.svc.Status(ctx, true).CheckResult(), nil
 	}
 	res, err := c.svc.Connect(ctx)

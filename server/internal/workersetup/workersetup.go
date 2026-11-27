@@ -32,6 +32,8 @@ type Options struct {
 	Overrides map[string]any
 	StateDir  string
 	Logger    *slog.Logger
+	// CLI is the Stage CLI on this machine's PATH (harness.Ports.CLI).
+	CLI string
 	// CacheIdentity is a non-secret fingerprint of this join. Empty disables
 	// the offline setup cache.
 	CacheIdentity string
@@ -177,7 +179,7 @@ func (s *Setup) install(ctx context.Context, mod harness.Module, input remote.Se
 		Settings: ports, Secrets: ports.Creds, Identity: ports, SetLastError: ports.SetLastError,
 		Install:   func(old, next int64, a execution.Adapter) { state.install(local, old, next, a) },
 		OnChanged: s.o.Host.Notify, Profile: local.Profile(),
-		DataDir: s.o.StateDir, Logger: s.log, Getenv: s.o.Getenv, LookupPath: exec.LookPath, Overrides: s.o.Overrides,
+		DataDir: s.o.StateDir, Logger: s.log, Getenv: s.o.Getenv, LookupPath: exec.LookPath, Overrides: s.o.Overrides, CLI: s.o.CLI,
 	}
 	if offline {
 		cached := cachedPorts{input}

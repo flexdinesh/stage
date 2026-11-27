@@ -29,7 +29,8 @@ func (c *Connector) Summary(context.Context) harness.Summary {
 }
 
 // Status probes the active service (bounded) whatever refresh says: the
-// OpenCode panel always shows a fresh health check.
+// OpenCode panel always shows a fresh health check. Display probes (Stage
+// MCP) are reused harness.FactsTTL; the check action probes them again.
 func (c *Connector) Status(ctx context.Context, _ bool) (harness.Status, error) {
 	st := c.svc.Status(ctx)
 	sum := c.Summary(ctx)
@@ -71,12 +72,20 @@ func (c *Connector) Status(ctx context.Context, _ bool) (harness.Status, error) 
 		phase = harness.PhaseUnavailable
 		fix = &harness.Fix{Text: "Check that the OpenCode service is running and that its address is correct."}
 	}
+	facts := statusFacts(st)
+	if st.State == "connected" {
+		extra := c.svc.extras(ctx)
+		facts = append(facts, extra.Facts...)
+		if fix == nil {
+			fix = extra.Fix
+		}
+	}
 	return harness.Status{
 		Summary: sum,
 		State:   st.State,
 		Reason:  st.Reason,
 		Phase:   phase,
-		Facts:   statusFacts(st),
+		Facts:   facts,
 		Fix:     fix,
 		Fields: []harness.FieldState{
 			field("endpoint", st.Endpoint),
@@ -170,6 +179,7 @@ func (c *Connector) Run(ctx context.Context, action string, input json.RawMessag
 		if err := db.DecodeStrict(input, &struct{}{}); err != nil {
 			return harness.Result{}, err
 		}
+		c.svc.probed.Forget() // an explicit check probes the facts again
 		status, err := c.Status(ctx, true)
 		return status.CheckResult(), err
 	default:

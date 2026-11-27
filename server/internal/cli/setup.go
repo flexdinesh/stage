@@ -12,6 +12,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db/store"
+	"github.com/flexdinesh/stage/server/internal/harness"
 )
 
 // Instruction block markers (setup instructions replaces between them).
@@ -20,8 +21,9 @@ const (
 	blockEnd   = "<!-- stage:end -->"
 )
 
-// mcpName is the MCP server name registered with agents.
-const mcpName = "stage"
+// mcpName is the MCP server name registered with agents (the harness
+// setups probe it for their Stage MCP facts).
+const mcpName = harness.StageMCPName
 
 func runSetup(ctx context.Context, env Env, args []string) error {
 	v, rest := verb(args, "")

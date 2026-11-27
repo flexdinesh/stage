@@ -19,13 +19,13 @@ type localMachine struct {
 	cleanup []func()
 }
 
-func (m *localMachine) compose(ctx context.Context, store *db.Store, cfg config.Config, reg *harness.Registry, overrides map[string]any, changed func(), logger *slog.Logger) error {
+func (m *localMachine) compose(ctx context.Context, store *db.Store, cfg config.Config, reg *harness.Registry, overrides map[string]any, changed func(), cli string, logger *slog.Logger) error {
 	p := machine.NewStorePorts(store.OnMachine(m.ID()), reg)
 	ports := harness.Ports{
 		Settings: p.Settings(), Secrets: p.Secrets(), Identity: p, Install: m.Install,
 		SaveSettingsWithSecret: p.SaveSettingsWithSecret, SetLastError: p.SetLastError,
 		DataDir: cfg.DataDir, Profile: m.Profile(), Logger: logger, Getenv: cfg.Getenv,
-		LookupPath: exec.LookPath, Overrides: overrides, OnChanged: changed,
+		LookupPath: exec.LookPath, Overrides: overrides, OnChanged: changed, CLI: cli,
 	}
 	for _, module := range harnesses.Modules() {
 		d := module.Descriptor

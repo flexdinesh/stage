@@ -317,7 +317,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	eng.Observe.RecordNotification = notifier.RecordObservation
 	eng.Coordinator.OnAccepted = kickTrees
-	if err := local.compose(ctx, store, cfg, registry, o.HarnessOverrides, eng.Kick, logger); err != nil {
+	if err := local.compose(ctx, store, cfg, registry, o.HarnessOverrides, eng.Kick, cliName, logger); err != nil {
 		return err
 	}
 	// Worker channels end with ctx, so Shutdown does not wait on their

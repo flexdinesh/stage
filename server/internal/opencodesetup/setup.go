@@ -60,6 +60,12 @@ type Service struct {
 	localMu    sync.Mutex
 	localAt    time.Time
 	localState LocalStatus
+
+	// cli names the Stage CLI in fix commands; probed caches the display
+	// probes (extras), each bounded by probeTimeout.
+	cli          string
+	probeTimeout time.Duration
+	probed       harness.Cached[harness.Probed]
 }
 
 type pairing struct {
@@ -99,7 +105,7 @@ func newService(ctx context.Context, p harness.Ports, local Local) (*Service, er
 	if log == nil {
 		log = slog.Default()
 	}
-	s := &Service{ctx: ctx, log: log, id: id, store: store, identity: p.Identity, local: local, saved: saved, verified: verified, install: p.Install, now: time.Now}
+	s := &Service{ctx: ctx, log: log, id: id, store: store, identity: p.Identity, local: local, saved: saved, verified: verified, install: p.Install, now: time.Now, cli: p.CLIName(), probeTimeout: probeTimeout}
 	cfg := resolve(saved)
 	switch {
 	case cfg.Endpoint == "":
@@ -173,6 +179,7 @@ func (s *Service) activate(old int64, a *opencode.Adapter, cfg settings) {
 	a.OnHealth(s.checked)
 	s.active, s.current = a, cfg
 	s.install(old, s.id, a)
+	s.probed.Forget()
 }
 
 func localCredentials(reg opencode.Registration) (string, string) {
@@ -495,6 +502,7 @@ func (s *Service) Disconnect(ctx context.Context) error {
 	if s.active != nil {
 		s.active, s.current = nil, settings{}
 		s.install(s.id, s.id, nil)
+		s.probed.Forget()
 	}
 	return nil
 }

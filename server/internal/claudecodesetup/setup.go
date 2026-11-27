@@ -42,6 +42,10 @@ const (
 // checkTimeout bounds each CLI check (--version, auth status).
 const checkTimeout = 20 * time.Second
 
+// mcpTimeout bounds the Stage MCP probe (`claude mcp get`), which runs
+// beside the checks.
+const mcpTimeout = 10 * time.Second
+
 // Ports are the machine's setup dependencies.
 type Ports = harness.Ports
 
@@ -58,6 +62,8 @@ type Options struct {
 	Scope bool
 	// CheckTimeout bounds each CLI check (default 20s).
 	CheckTimeout time.Duration
+	// MCPTimeout bounds the Stage MCP probe (default 10s).
+	MCPTimeout time.Duration
 	// StateDir holds the hook settings file Claude sessions Stage launches
 	// read (claudecode.HooksFile) and, in images/, the launches' images:
 	// <data dir>/claude. Empty: no push, polling alone follows sessions, and
@@ -96,6 +102,10 @@ type Service struct {
 	state   string
 	reason  string
 	details Details
+	// extra is the last check's display probes (Stage MCP); probed caches
+	// them harness.FactsTTL across checks.
+	extra  harness.Probed
+	probed harness.Cached[harness.Probed]
 	// life is the server's (or worker's) lifetime: the hook listener closes
 	// with it.
 	life context.Context
@@ -115,6 +125,9 @@ func New(ctx context.Context, p Ports, o Options) (*Service, error) {
 	}
 	if o.CheckTimeout == 0 {
 		o.CheckTimeout = checkTimeout
+	}
+	if o.MCPTimeout == 0 {
+		o.MCPTimeout = mcpTimeout
 	}
 	if o.Logger == nil {
 		o.Logger = slog.Default()
@@ -308,6 +321,7 @@ func (s *Service) Connect(ctx context.Context) (harness.Result, error) {
 		return res, err
 	}
 	s.active, s.state, s.reason = true, StateConnected, ""
+	s.probed.Forget()
 	return res, nil
 }
 
@@ -327,6 +341,7 @@ func (s *Service) Disconnect(ctx context.Context) error {
 		s.uninstall()
 	}
 	s.active, s.state, s.reason = false, StateDisconnected, ""
+	s.probed.Forget()
 	return nil
 }
 
@@ -353,6 +368,7 @@ func (s *Service) Configure(ctx context.Context, raw json.RawMessage) error {
 		return err
 	}
 	s.saved, s.checked = next, false
+	s.probed.Forget()
 	if s.active || (s.id != 0 && !s.saved.Disconnected) {
 		if bin := s.find(); bin != "" {
 			s.install(bin, s.saved.ConfigDir)
@@ -387,6 +403,7 @@ func (s *Service) Status(ctx context.Context, refresh bool) harness.Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if refresh || !s.checked {
+		probe := s.probeExtras(ctx)
 		state, reason, d, au := s.check(ctx)
 		s.checked, s.details = true, d
 		switch {
@@ -396,6 +413,12 @@ func (s *Service) Status(ctx context.Context, refresh bool) harness.Status {
 			s.state, s.reason = StateError, fmt.Sprintf("Claude Code now uses %s instead of %s. Connect again to use it.", au.ConfigDirectory, s.saved.ConfigDir)
 		default:
 			s.state, s.reason = StateConnected, ""
+		}
+		s.extra = harness.Probed{}
+		if probe != nil {
+			if extra := <-probe; s.state == StateConnected {
+				s.extra = extra
+			}
 		}
 	}
 	sum := s.summary()
@@ -431,12 +454,19 @@ func (s *Service) Status(ctx context.Context, refresh bool) harness.Status {
 			phase = harness.PhaseDegraded
 		}
 	}
+	facts := statusFacts(details)
+	if sum.Connected {
+		facts = append(facts, s.extra.Facts...)
+		if fix == nil {
+			fix = s.extra.Fix
+		}
+	}
 	return harness.Status{
 		Summary: sum,
 		State:   state,
 		Reason:  reason,
 		Phase:   phase,
-		Facts:   statusFacts(details),
+		Facts:   facts,
 		Fix:     fix,
 		Fields:  []harness.FieldState{{ID: "binary", Value: s.saved.Binary, Set: s.saved.Binary != "", Source: src}},
 		Actions: []harness.ActionState{{ID: claudecode.ActionConnect, Available: true}, {ID: claudecode.ActionCheck, Available: true}},

@@ -63,7 +63,8 @@ type Fake struct {
 	Workspace string
 }
 
-// New sets up a fake: logged in, version 2.1.332, Workspace trusted.
+// New sets up a fake: logged in, version 2.1.332, Workspace trusted, the
+// Stage MCP server connected.
 func New(t testing.TB) *Fake {
 	t.Helper()
 	// Short paths: transcript folder names encode the full cwd.
@@ -84,6 +85,7 @@ func New(t testing.TB) *Fake {
 		s.Version, s.LoggedIn = "2.1.332", true
 		s.ConfigDir, s.ProjectsDir = filepath.Join(home, ".claude"), filepath.Join(home, ".claude", "projects")
 		s.Trusted = []string{f.Workspace}
+		s.MCP = map[string]fakestate.MCPServer{"stage": {Status: "✔ Connected"}}
 	})
 	f.WriteClaudeJSON(f.Workspace)
 	return f

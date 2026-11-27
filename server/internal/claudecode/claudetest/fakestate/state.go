@@ -66,8 +66,20 @@ type State struct {
 	CopyOnResume bool `json:"copyOnResume,omitempty"`
 	// FailResume: `--bg --resume` exits 1 without waking the session.
 	FailResume bool      `json:"failResume,omitempty"`
+	// MCP is the configured MCP servers `mcp get` reports, by name.
+	MCP map[string]MCPServer `json:"mcp,omitempty"`
+	// HangMCP: `mcp get` answers, then does not exit for a minute.
+	HangMCP bool `json:"hangMcp,omitempty"`
 	Sessions   []Session `json:"sessions"`
 	Calls       []Call    `json:"calls"`
+}
+
+// MCPServer is one `mcp get` answer: Status is the line after the mark
+// ("✔ Connected"); Raw replaces the whole output when set.
+type MCPServer struct {
+	Status string `json:"status"`
+	Issue  string `json:"issue,omitempty"`
+	Raw    string `json:"raw,omitempty"`
 }
 
 // Trusts reports whether dir or a parent is trusted.

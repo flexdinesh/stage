@@ -96,4 +96,7 @@ type Ports struct {
 	LookupPath             func(string) (string, error)
 	Overrides              map[string]any
 	OnChanged              func()
+	// CLI is the Stage CLI on this machine's PATH, named in fix commands
+	// ("": DefaultCLI; see CLIName).
+	CLI string
 }
