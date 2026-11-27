@@ -50,13 +50,13 @@ When a session Stage started stops for a permission prompt or a question, the ta
 
 A task row or inbox row with one permission prompt shows it on one line with **Allow** and **Deny**; anything else offers **Answer**, which opens the task. Claude keeps its own prompt open the whole time: whichever answer comes first wins, and an answer Claude already got shows "Already answered in Claude Code or expired".
 
-Only you answer: an agent calling Stage cannot approve a session's prompt. Sessions you track and sessions started before this version have no requests in Stage; answer them in Claude.
+An agent calling Stage can answer another session's prompt, never its own. Sessions you track and sessions started before this version have no requests in Stage; answer them in Claude.
 
 ### Follow up in Stage
 
 When a session finishes, task detail shows a **Follow up** box under the last reply: type a message and **Send** (Ctrl or Cmd + Enter). Claude continues the same session with your message and the task runs again. When a turn ends with Claude asking you something, the box leads the page as **Reply**, under "Claude Code is waiting for your reply.".
 
-While Claude works, the box keeps your draft and **Send** waits. A session that can't take a message says why: it is working, waits on a permission prompt or question (answer that first), was stopped or removed, or runs in a terminal. Messages are text only. Only you send: an agent calling Stage cannot. The task's timeline records each follow-up; the message itself stays in Claude's transcript.
+While Claude works, the box keeps your draft and **Send** waits. A session that can't take a message says why: it is working, waits on a permission prompt or question (answer that first), was stopped or removed, or runs in a terminal. Messages are text only. An agent calling Stage can message another session, never its own. The task's timeline records each follow-up; the message itself stays in Claude's transcript.
 
 To deliver a message, Stage briefly stops the finished session's idle process and wakes it with the message and the session's own options, so Claude never starts a copy.
 

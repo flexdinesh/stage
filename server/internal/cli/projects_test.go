@@ -175,3 +175,39 @@ func TestExactWorkspaceFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectAddAndEdit(t *testing.T) {
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, r.Method+" "+r.URL.RequestURI()+" "+strings.TrimSpace(string(body)))
+		switch r.Method + " " + r.URL.RequestURI() {
+		case "POST /api/projects?view=destinations":
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{"id":4,"title":"Atlas","archivedAt":null,"aliases":[]}`)
+		case "PATCH /api/projects/4?view=destinations":
+			io.WriteString(w, `{"id":4,"title":"Atlas","archivedAt":"2026-01-01T00:00:00Z","aliases":[]}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	h := &harness{t: t, url: srv.URL}
+	if code, out, stderr := h.run("", "projects", "add", "--title", "Atlas"); code != 0 || !strings.Contains(out, "#4  Atlas") {
+		t.Fatalf("projects add = %d, %s, %s", code, out, stderr)
+	}
+	if code, out, stderr := h.run("", "projects", "edit", "4", "--archived", "true"); code != 0 || !strings.Contains(out, "(archived)") {
+		t.Fatalf("projects edit = %d, %s, %s", code, out, stderr)
+	}
+	want := []string{
+		`POST /api/projects?view=destinations {"title":"Atlas"}`,
+		`PATCH /api/projects/4?view=destinations {"archived":true}`,
+	}
+	if strings.Join(bodies, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests\n%s\nwant\n%s", strings.Join(bodies, "\n"), strings.Join(want, "\n"))
+	}
+	if code, _, stderr := h.run("", "projects", "edit", "4", "--archived", "maybe"); code != 2 || !strings.Contains(stderr, "--archived") {
+		t.Fatalf("bad --archived = %d, %s", code, stderr)
+	}
+}

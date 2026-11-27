@@ -158,7 +158,8 @@ func TestConnectionInventoryAccessAndProjection(t *testing.T) {
 	for _, route := range retiredProjectRoutes {
 		request(route.method, route.path, 403)
 	}
-	request("POST", "/api/project-groups/membership", 403)
+	// Agents may edit membership; an empty body is invalid.
+	request("POST", "/api/project-groups/membership", 400)
 	body := request("GET", "/api/projects", 200)
 	var projection client.ProjectSummaries
 	if err := json.Unmarshal([]byte(body), &projection); err != nil {

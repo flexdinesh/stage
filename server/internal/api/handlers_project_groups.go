@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -56,6 +57,17 @@ func (s *server) editProjectGroup(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	edit, err := s.Store.EditProjectGroup(r.Context(), in)
+	if projectSummaryRequest(r) {
+		// Agent surfaces omit raw paths (ADR 0010), also in a fresh preview.
+		edit.Workspace.Path = ""
+		var changed *db.PreviewChangedError
+		if errors.As(err, &changed) {
+			if fresh, ok := changed.Fresh.(db.GroupEdit); ok {
+				fresh.Workspace.Path = ""
+				changed.Fresh = fresh
+			}
+		}
+	}
 	if err != nil {
 		return err
 	}

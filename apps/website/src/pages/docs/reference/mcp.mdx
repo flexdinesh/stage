@@ -6,7 +6,7 @@ showAskAi: false
 
 # MCP tools
 
-Stage exposes its agent operations as MCP tools, over the server's REST API. The same tools run from the CLI with `stage call TOOL JSON` ([CLI](/docs/reference/cli)). Agents can create work, read accepted results and contribute journal notes; only the user can complete a task in Stage.
+Stage exposes its agent operations as MCP tools, over the server's REST API. The same tools run from the CLI with `stage call TOOL JSON` ([CLI](/docs/reference/cli)). Agents can create work, read accepted results, contribute journal notes, and complete, answer or message other tasks. Stage refuses those on the agent's own task.
 
 ## Front ends
 
@@ -78,13 +78,16 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 | Area | Tools |
 |---|---|
 | Context | `get_context`, `list_projects`, `list_models`, `get_preferences` |
-| Projects | `get_project`, `list_project_groups`, `get_project_group` |
+| Projects | `get_project`, `list_project_groups`, `get_project_group`, `get_project_events`, `create_project`, `update_project`, `preview_membership`, `set_membership` |
 | Connections and machines | `list_connections`, `list_machines`, `get_machine`, `list_harnesses`, `get_harness_status` |
 | Harness actions | `list_actions`, `run_action` |
 | Journals | `read_journal`, `get_journal_entry`, `append_note` |
-| Tasks | `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `archive_task`, `start_task`, `stop_task`, `duplicate_task`, `wait_task` |
+| Tasks | `list_tasks`, `get_task`, `create_task`, `update_task`, `delete_task`, `archive_task`, `start_task`, `stop_task`, `duplicate_task`, `wait_task`, `get_opening_prompt` |
+| Acceptance | `get_completion_preview`, `complete_task`, `reopen_task` |
+| Interaction | `list_requests`, `respond_request`, `send_message` |
 | Trees | `list_trees`, `get_tree`, `create_tree`, `update_tree`, `delete_tree`, `dissolve_tree`, `add_to_tree`, `remove_from_tree`, `set_needs`, `start_tree` |
 | Schedules | `list_schedules`, `get_schedule`, `create_schedule`, `update_schedule`, `delete_schedule`, `run_schedule`, `preview_schedule` |
+| Snippets | `list_snippets`, `get_snippet`, `create_snippet`, `update_snippet`, `delete_snippet`, `delete_attachment` |
 | Sessions | `adopt_session`, `read_ref` |
 
 `stage tools` lists them; `stage tools NAME` prints one tool's description and input schema.
@@ -102,6 +105,21 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 - `wait_task` polls the task every 3s until its state is in `until` (default `needs_input done failed interrupted cancelled`) or `timeoutSeconds` passes (default 600, max 3600). CLI `task wait` defaults to `--timeout 10m` and exits 3 on timeout.
 - `preview_schedule` returns the next three fire times of a cron in a zone.
 
+## Acceptance and interaction
+
+| Tool | Details |
+|---|---|
+| `get_completion_preview` | the evidence Stage would accept, `blockedReason`, the dependents it releases, and `revision` and `evidenceVersion` |
+| `complete_task` | `taskId`, `revision` and `evidenceVersion` from the preview, `requestId`, optional `note`. A changed preview fails: preview again. Releases dependents; auto ones launch |
+| `reopen_task` | `taskId`, `revision`, `requestId`; unclaimed dependents wait again |
+| `list_requests` | what a task's session waits on: approvals, questions, input, with options |
+| `respond_request` | `taskId`, `requestId`, and `option`, `text` or `answers` |
+| `send_message` | `taskId`, `text`: a follow-up to the task's session |
+
+- Stage refuses complete, reopen, respond and send on your own task or session (403 `self_action_forbidden`). Report your own outcome with `append_note`.
+- Leave acceptance to the user unless asked. An agent's completion is recorded as the agent's, with its caller session.
+- CLI: `stage task preview|complete|reopen|requests|respond|send|opening-prompt` ([CLI](/docs/reference/cli#tasks)).
+
 ## Context and destination
 
 - `get_context` returns your session, cwd, resolved Stage project, owning task and current tree. It includes `workspaceId` when the task has a pin or saved workspace. A named external session may have no tracked task.
@@ -109,7 +127,7 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 - `list_models` takes `connectionId` and optional `workspaceId`. Use the same pair to load workspace-specific options and send the advertised values in `executionConfig`.
 - `list_actions` and `run_action` target one connection, task or project. A project target also requires `onConnectionId` and `workspaceId`. The action must allow the caller.
 - Older clients should refresh the tool schemas and replace binding selectors with exact workspace selectors from `list_projects`. Select the replacement explicitly if a saved pin needs repair.
-- With shared access, MCP uses scoped agent access. Project membership edits, raw inventory and roster search are human operations. Named session lookup and adoption remain available under their eligibility rules.
+- With shared access, MCP uses scoped agent access. Agents can create, rename and archive projects and move a workspace between groups (`preview_membership`, then `set_membership` with its `previewToken`); responses omit raw paths. Sync, raw inventory, roster search, connection settings and harness setup are human operations. Named session lookup and adoption remain available under their eligibility rules.
 - Launch options go in `executionConfig.options` like any other option: a worktree (`{"id":"worktree","value":true}`), and on T3 its `baseRef` and `branch`. `list_models` lists them with their `kind` (`choice`, `boolean` or `text`) and `dependsOn` (T3's `baseRef` and `branch` apply only with `worktree` true). Claude Code and OpenCode pick the worktree's base and branch; Codex has none. The old `workspaceType`, `baseRef`, `branch`, `base` and `baseTaskId` arguments were removed.
 - `startLocal` with `startTz` schedules a one-shot start.
 
@@ -133,7 +151,7 @@ Every launch, including standalone tasks and handoff off, includes a journal ins
 
 ## Trees
 
-Trees are the only way to express dependencies. A task's needs are tasks in the same tree that the user must complete in Stage before it starts; execution outcomes alone keep dependents blocked.
+Trees are the only way to express dependencies. A task's needs are tasks in the same tree that must be completed in Stage before it starts; execution outcomes alone keep dependents blocked.
 
 | Parameter or tool | Effect |
 |---|---|
@@ -147,8 +165,8 @@ Trees are the only way to express dependencies. A task's needs are tasks in the 
 | `start_tree` | start every ready member |
 | `status` on `update_tree` | `done`, `archived` or `open` (reopen) |
 
-- New trees default to auto. Roots never start on their own; other members launch only once the user completes their needs.
-- `start_task` on a blocked task returns a conflict naming the prerequisites that need user completion.
+- New trees default to auto. Roots never start on their own; other members launch only once their needs are completed.
+- `start_task` on a blocked task returns a conflict naming the prerequisites that need completion.
 - `archive_task` closes a standalone task; a tree member closes with its tree. Neither works while a task is launching, running or needs input.
 - `delete_task` and `delete_tree` only delete work that never started and has no recorded work.
 
@@ -165,7 +183,7 @@ A dependent's worktree starts where its own launch options say, never from a nee
 
 ## Run after me
 
-`afterMe` on `create_task` (CLI `--after-me`) adopts the calling session as a task (Stage never starts it) and makes it the new task's first need, so the task starts after the user completes the adopted task in Stage. It errors without a calling session.
+`afterMe` on `create_task` (CLI `--after-me`) adopts the calling session as a task (Stage never starts it) and makes it the new task's first need, so the task starts after the adopted task is completed in Stage. It errors without a calling session.
 
 `adopt_session` tracks your own session, or pass `session` to select a target (CLI `stage sessions adopt --target-connection ID --target-session ID`). It returns the existing task when one owns the session. If verified workspace evidence needs a project assignment, choose one (`projectId`, CLI `--project ID`) or enter a new title (`newProjectTitle`, CLI `--new-project TITLE`). An initial note records the caller who wrote it.
 

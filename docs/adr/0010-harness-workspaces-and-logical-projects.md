@@ -7,6 +7,8 @@ routing rules of [ADR 0007](0007-harness-boundary.md) and
 It extends [ADR 0009](0009-shared-access.md) using the shared-access router
 merged through `09609a6c`. The delivery table records the transition.
 [Current API contract for retired routes and caller repair](../api.md#retired-workspace-routes)
+[ADR 0011](0011-agent-operation-parity.md) lets scoped agents create, rename and archive
+projects and edit group membership.
 
 ## Ownership and exact destinations
 

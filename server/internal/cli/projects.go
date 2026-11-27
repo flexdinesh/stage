@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/flexdinesh/stage/server/internal/agenttools"
+	"github.com/flexdinesh/stage/server/internal/db"
 )
 
 func runProjects(ctx context.Context, env Env, args []string) error {
@@ -47,6 +48,50 @@ func runProjects(ctx context.Context, env Env, args []string) error {
 					}
 				})
 			}
+		})
+	case "add", "edit":
+		var title, archived string
+		c.fs.StringVar(&title, "title", "", "project title")
+		if v == "edit" {
+			c.fs.StringVar(&archived, "archived", "", "true archives, false unarchives (omitted keeps it)")
+		}
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		var res db.ProjectSummary
+		var err error
+		if v == "add" {
+			if len(c.pos) != 0 {
+				return usagef("projects add: takes --title, not an id")
+			}
+			res, err = c.ops().CreateProject(ctx, agenttools.CreateProjectArgs{Title: title})
+		} else {
+			id, idErr := c.oneID()
+			if idErr != nil {
+				return idErr
+			}
+			a := agenttools.UpdateProjectArgs{ID: id}
+			if c.set("title") {
+				a.Title = &title
+			}
+			if c.set("archived") {
+				on, parseErr := strconv.ParseBool(archived)
+				if parseErr != nil {
+					return usagef("--archived: want true or false")
+				}
+				a.Archived = &on
+			}
+			res, err = c.ops().UpdateProject(ctx, a)
+		}
+		if err != nil {
+			return err
+		}
+		return c.out(res, func(w io.Writer) {
+			state := ""
+			if res.ArchivedAt != nil {
+				state = "  (archived)"
+			}
+			fmt.Fprintf(w, "#%d  %s%s\n", res.ID, res.Title, state)
 		})
 	case "workspaces":
 		return usagef("projects workspaces was retired. Use projects ls for exact destinations or open Projects for workspace history.")

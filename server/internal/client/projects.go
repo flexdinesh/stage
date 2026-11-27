@@ -92,3 +92,39 @@ func (c *Client) Workspaces(ctx context.Context, connectionID int64) ([]db.Works
 	err := c.do(ctx, http.MethodGet, fmt.Sprintf("/api/connections/%d/workspaces", connectionID), nil, &out)
 	return out.Workspaces, err
 }
+
+// summaryView asks for the agent projection whatever the principal.
+var summaryView = url.Values{"view": {"destinations"}}
+
+// CreateProject creates an empty logical project group.
+func (c *Client) CreateProject(ctx context.Context, title string) (db.ProjectSummary, error) {
+	var out db.ProjectSummary
+	err := c.do(ctx, http.MethodPost, withQuery("/api/projects", summaryView), map[string]string{"title": title}, &out)
+	return out, err
+}
+
+// UpdateProject renames or archives a project (title, archived; an omitted
+// field keeps its value).
+func (c *Client) UpdateProject(ctx context.Context, id int64, p Patch) (db.ProjectSummary, error) {
+	var out db.ProjectSummary
+	err := c.do(ctx, http.MethodPatch, withQuery(projectPath(id), summaryView), p, &out)
+	return out, err
+}
+
+// ProjectEvents reads a project's lifecycle events (merges, splits).
+func (c *Client) ProjectEvents(ctx context.Context, id int64) ([]db.ProjectEvent, error) {
+	var out struct {
+		Events []db.ProjectEvent `json:"events"`
+	}
+	err := c.do(ctx, http.MethodGet, projectPath(id)+"/events", nil, &out)
+	return out.Events, err
+}
+
+// EditProjectGroup previews (no previewToken) or applies (the preview's
+// token) moving one exact workspace into a group, or into a new group when
+// TargetProjectID is nil. Raw paths are omitted.
+func (c *Client) EditProjectGroup(ctx context.Context, in db.GroupEditInput) (db.GroupEdit, error) {
+	var out db.GroupEdit
+	err := c.do(ctx, http.MethodPost, withQuery("/api/project-groups/membership", summaryView), in, &out)
+	return out, err
+}

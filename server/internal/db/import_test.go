@@ -176,7 +176,7 @@ func TestHarnessArchiveIsEvidenceAndStageArchiveSticks(t *testing.T) {
 	s, ctx := importStore(t)
 	refreshImport(t, s, ctx, oc, ws("live", "/w/live"), ws("mine", "/w/mine"))
 	mine, _ := byTitle(t, s, ctx, "mine")
-	if _, err := s.UpdateProject(ctx, mine.ID, "mine", true); err != nil {
+	if _, err := s.UpdateProject(ctx, mine.ID, nil, new(true)); err != nil {
 		t.Fatal(err)
 	}
 	at := time.Now()

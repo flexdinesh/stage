@@ -24,6 +24,15 @@ Coding agents with a shell use the CLI by default: it costs no context until use
 | `stage task archive ID [--undo]` | archive a standalone task (`--undo` unarchives) |
 | `stage task wait ID [--until S,..] [--timeout 10m]` | wait for a state; exit 3 on timeout |
 | `stage task notes ID ...` | the task's journal ([Journals](#journals)) |
+| `stage task preview ID` | completion preview: revision, evidence version, dependents |
+| `stage task complete ID --revision N --evidence-version V [--note TEXT] [--request-id KEY]` | complete another task with the preview's values |
+| `stage task reopen ID --revision N [--request-id KEY]` | reopen a completed task |
+| `stage task requests ID` | what the task's session waits on |
+| `stage task respond ID RID [--option O] [--text T] [--answers JSON]` | answer one request |
+| `stage task send ID --text TEXT` | message the task's session |
+| `stage task opening-prompt ID [--full]` | an adopted task's opening prompt |
+
+`complete`, `reopen`, `respond` and `send` refuse your own task or session.
 
 ### Task flags
 
@@ -35,7 +44,7 @@ Coding agents with a shell use the CLI by default: it costs no context until use
 | `--execution-config JSON` | harness options advertised by `stage models ls`, launch options included (a worktree, and on T3 its `baseRef` and `branch`). `--workspace`, `--base-ref`, `--branch`, `--base` and `--base-task` were removed |
 | `--prompt-file PATH`, `--prompt -` | read the prompt from a file or stdin |
 | `--image PATH...` | attach local images (PNG, JPEG, GIF, WebP, up to 8) |
-| `--needs ID,..` | wait for user completion of those tasks (joins their tree, or starts one) |
+| `--needs ID,..` | wait for completion of those tasks (joins their tree, or starts one) |
 | `--after-me` | adopt the calling session as a task and make it the first need |
 | `--tree ID` | join a tree (a parallel root unless `--needs`) |
 | `--start-mode auto\|manual\|inherit` | per-task exception to the tree's start mode; `inherit` clears it |
@@ -97,6 +106,8 @@ Categories are optional: `finding`, `decision`, `blocker`, `outcome`. The CLI ge
 | `stage show REF` | what a Stage link, a harness session link, `#ID` or a scoped session path names; `--target-connection ID --target-session ID` names a session by id |
 | `stage context` | your session, cwd, resolved project, owning task and tree |
 | `stage projects ls [--json]` | logical projects, connections and exact workspace selectors |
+| `stage projects add --title T` | create an empty project |
+| `stage projects edit ID [--title T] [--archived true\|false]` | rename, archive or unarchive; omitted flags keep their value |
 | `stage models ls --connection ID [--workspace-id ID]` | models, agents and options for a connection or an exact workspace |
 | `stage action ls\|run` | declared harness actions. For a project workspace, pass `--project ID --on-connection ID --workspace-id ID` |
 
@@ -267,7 +278,7 @@ echo "..." | stage task add --title "Refactor" --prompt - --connection 2 --works
 stage task ls --state backlog --json
 stage task wait 42 --until done --timeout 30m                          # exit 3 on timeout
 stage tree new --title "Auth" 41 43:41 42:43                                   # 43 needs 41, 42 needs 43
-stage task add --title "Docs" --prompt "..." --connection 2 --workspace-id "$WORKSPACE_ID" --needs 42 --start-mode manual    # ready (not launched) once the user completes 42
+stage task add --title "Docs" --prompt "..." --connection 2 --workspace-id "$WORKSPACE_ID" --needs 42 --start-mode manual    # ready (not launched) once 42 is completed
 stage tree start 7                                                             # start every ready member
 stage task notes 42 add --text "Chose cookie sessions" --category decision
 stage task ls --origin-connection 1 --origin-session "$T3CODE_THREAD_ID"        # tasks a T3 session created (connection 1)

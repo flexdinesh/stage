@@ -2,6 +2,8 @@
 
 Stage task #452 establishes the identity and storage foundation. This ADR also specifies the target contracts for tasks #453–460. Task #460 enables public opt-in after integration.
 
+[ADR 0011](0011-agent-operation-parity.md) supersedes the agent limits here for acceptance, session interaction, project lifecycle, group membership, snippets and attachment deletion.
+
 ## Installation and trust
 
 Personal is the default for desktop, foreground servers and trusted home LANs with workers. Existing bind defaults and desktop's private-socket startup apply. A reachable personal product listener grants implicit operator access as user 1. Keep personal listeners within the intended trust boundary.
@@ -77,7 +79,7 @@ Apply one server policy across REST, HTTP MCP (including in-process dispatch), S
 | Static shell and assets, minimal health/version/readiness and setup state | Public. Harness errors and operational metadata require authentication. Preserve compatibility probes. |
 | Sign-in and setup/invite/reset redemption | Public entry points with exact browser origin and CSRF controls for writes. Sign-in checks password; redemption checks its purpose-bound grant. |
 | `/api/me`, own account, sign-out, inbox, preferences, push and device bindings | Active human with the appropriate browser or CLI session. Access and delivery are scoped to that account. |
-| Shared projects, tasks, trees, schedules, journals, work streams and attachments | Active human. Agents get the existing scoped agent operations where explicitly allowed. Human-only actions such as answering an approval keep their existing restriction. |
+| Shared projects, tasks, trees, schedules, journals, work streams and attachments | Active human. Agents get the scoped agent operations where explicitly allowed ([ADR 0011](0011-agent-operation-parity.md)), never on their own task. Human-only actions keep their restriction. |
 | Worker registry, pairing, default execution connection and harness management | Active human, including members. Agent and worker gateway reads remain limited by existing policy. |
 | Invitations, role changes, disable and member reset | Active admin. Admins retain member permissions. Enforce the last-active-admin rule transactionally. |
 | HTTP/stdio MCP and agent API paths | Trusted agent via its scoped bearer, the main machine's private agent socket, or a verified worker gateway. MCP retains agent operation limits, including when a signed-in browser invokes it. The general-purpose Unix socket requires the corresponding credential. Interactive CLI sign-in never silently supplies credentials to agent integrations. |

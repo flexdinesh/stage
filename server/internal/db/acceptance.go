@@ -119,6 +119,9 @@ type AcceptanceRequest struct {
 	Revision        int64  `json:"revision"`
 	EvidenceVersion string `json:"evidenceVersion"`
 	Note            string `json:"note"`
+	// CallerSession is the agent session that asked (attribution only; not
+	// part of the request body or its requestId replay check).
+	CallerSession *SessionRef `json:"-"`
 }
 
 func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceRequest, reopen bool) (AcceptanceResult, error) {
@@ -132,7 +135,11 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 	if reopen && (in.Note != "" || in.EvidenceVersion != "") {
 		return result, Invalid("reopen accepts requestId and revision only")
 	}
-	ctx = WithWorkCause(ctx, Cause{Kind: "acceptance_request", RequestID: in.RequestID})
+	ctx = WithWorkCause(ctx, Cause{Kind: "acceptance_request", RequestID: in.RequestID, Session: in.CallerSession})
+	by := "user"
+	if WorkAttribution(ctx).Actor.Kind == "agent" {
+		by = "agent"
+	}
 	raw, _ := json.Marshal(struct {
 		AcceptanceRequest
 		Reopen bool
@@ -167,7 +174,7 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 		if err != nil {
 			return err
 		}
-		event, detail := "task_reopened", "Reopened by user; unclaimed dependents wait for acceptance again."
+		event, detail := "task_reopened", "Reopened by "+by+"; unclaimed dependents wait for acceptance again."
 		if reopen {
 			if current == nil {
 				return Conflict("Task is already open. Refresh its acceptance.")
@@ -188,7 +195,7 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 				return err
 			}
 			result.AcceptanceID = &acceptanceID
-			event, detail = "task_completed", "Completed by user; accepted evidence saved in Stage."
+			event, detail = "task_completed", "Completed by "+by+"; accepted evidence saved in Stage."
 			if strings.TrimSpace(in.Note) != "" {
 				if _, err = appendNote(ctx, tx, JournalOwner{TaskID: &id}, AppendNoteInput{Text: in.Note, Category: "outcome", RequestID: "acceptance:" + in.RequestID}); err != nil {
 					return err

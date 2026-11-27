@@ -237,9 +237,9 @@ FROM external_projects e JOIN projects p ON p.id=e.group_project_id WHERE e.exte
 	}
 	agent, err := accounts.RotateAgent(ctx, b.Token.Reveal(), store.SessionBrowser)
 	agent = mustValue(t, agent, err)
-	agentRequest := func(method, route string, want int) string {
+	agentRequest := func(method, route string, want int, body ...string) string {
 		t.Helper()
-		req := httptest.NewRequest(method, notificationOrigin+route, nil)
+		req := httptest.NewRequest(method, notificationOrigin+route, strings.NewReader(strings.Join(body, "")))
 		req.RemoteAddr = "127.0.0.1:32101"
 		req.Header.Set("Authorization", "Bearer "+principal.AgentTokenPrefix+agent.Token.Reveal())
 		rec := httptest.NewRecorder()
@@ -249,7 +249,30 @@ FROM external_projects e JOIN projects p ON p.id=e.group_project_id WHERE e.exte
 		}
 		return rec.Body.String()
 	}
-	agentRequest("POST", editRoute, 403)
+	// Agents preview and apply membership through the agent projection: no
+	// raw paths.
+	agentPreview, err := json.Marshal(db.GroupEditInput{ConnectionID: connection, WorkspaceID: selector})
+	previewBody := agentRequest("POST", editRoute, 200, string(mustValue(t, agentPreview, err)))
+	var preview db.GroupEdit
+	if err := json.Unmarshal([]byte(previewBody), &preview); err != nil || preview.PreviewToken == "" || preview.Workspace.WorkspaceID != selector ||
+		strings.Contains(previewBody, "/private/") {
+		t.Fatalf("agent preview %s: %v", previewBody, err)
+	}
+	stalePreview, err := json.Marshal(db.GroupEditInput{ConnectionID: connection, WorkspaceID: selector, PreviewToken: "stale"})
+	if body := agentRequest("POST", editRoute, 409, string(mustValue(t, stalePreview, err))); !strings.Contains(body, "preview_changed") || strings.Contains(body, "/private/") {
+		t.Fatalf("agent stale preview %s", body)
+	}
+	// Project lifecycle, snippets and attachment cleanup are agent routes too.
+	var created db.ProjectSummary
+	if err := json.Unmarshal([]byte(agentRequest("POST", "/api/projects", 201, `{"title":"Agent group"}`)), &created); err != nil || created.Title != "Agent group" {
+		t.Fatalf("agent create project %+v: %v", created, err)
+	}
+	if body := agentRequest("PATCH", fmt.Sprintf("/api/projects/%d", created.ID), 200, `{"archived":true}`); strings.Contains(body, "bindings") || !strings.Contains(body, `"title":"Agent group"`) {
+		t.Fatalf("agent archive project %s", body)
+	}
+	agentRequest("GET", fmt.Sprintf("/api/projects/%d/events", created.ID), 200)
+	agentRequest("GET", "/api/snippets", 200)
+	agentRequest("DELETE", "/api/attachments/999999", 404)
 	for _, route := range []string{"/api/project-groups", fmt.Sprintf("/api/project-groups/%d", separated.Target.ID), "/api/projects?view=destinations"} {
 		body := agentRequest("GET", route, 200)
 		for _, private := range []string{"members", "/private/", "native-first", "fresh-native", "relatedProjectIds"} {
