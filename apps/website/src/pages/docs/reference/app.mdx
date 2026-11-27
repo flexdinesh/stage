@@ -114,22 +114,21 @@ Each connection keeps its own new-task defaults in its Manage drawer (Settings >
 | ready | a manual tree task can start; the notification offers Start |
 | done | a run finished |
 
-Each event is toggleable in Settings > Notifications, with one filter for every device. Notifications cover tasks and supported external sessions (subagents excluded). Completing a task in Stage sends no notification.
+Each event is toggleable in Settings > Notifications. On a shared server your filter and read state follow your account across devices. Notifications cover tasks and supported external sessions (subagents excluded). Completing a task in Stage sends no notification.
 
 - **Inbox and toasts**: every notification lands in an in-app inbox and a toast. A needs-input toast clears once the question is resolved.
 - **Silent rows**: pre-existing external sessions waiting for input appear as silent current-state rows in the inbox when they have no recorded notification group. They add no unread event, push, toast or synthetic history. A recorded group replaces the silent row. Local Claude Code sessions waiting for input always appear this way and never notify; a row offers Open, Copy resume command or "Answer in Claude Code", and Track fills in Track session for you to confirm.
-- **Browser**: Web Push from the installable PWA. The app icon badge counts what needs input. It needs a secure context, `http://localhost` or HTTPS ([HTTPS and push notifications](/docs/usage/server#https-and-push-notifications), [Phone](/docs/guides/phone)); Settings > Notifications says "needs https" otherwise. **Send test** checks the device.
+- **Browser**: Web Push from the installable PWA. The app icon badge counts unread events on a shared server and what needs input on a personal server. Delivery needs a secure context, `http://localhost` or HTTPS ([HTTPS and push notifications](/docs/usage/server#https-and-push-notifications), [Phone](/docs/guides/phone)). **Send test** checks the device.
 - **Desktop app**: native OS notifications, also while the window is closed ([Desktop](/docs/usage/desktop)).
 
 ## Settings
 
-Three tabs.
-
 ### General
 
-- **User**: the current user, read-only. Stage has no sign-in: everything is attributed to one default user.
+- **User**: the default user on a personal server.
 - **Theme**.
 - **Info**: the running server's version, how it runs, start time, identity, socket or URL, the desktop app's state and Open Stage at login, and copy diagnostics.
+- **Servers** on desktop: add a saved Stage server, test its URL and switch between servers. [Desktop app](/docs/usage/desktop#other-machines)
 
 ### Connections
 
@@ -145,7 +144,15 @@ No harness setting comes from the environment.
 
 The per-event filter and this device's delivery: Enable, Send test, Disable (the desktop app adds System settings).
 
-### Completion and recovery
+### Account
+
+On a [shared server](/docs/usage/server#enable-shared-access), open **Settings > Account** to edit your display name, change your password, manage your agent credential or sign out. Changing the password ends your existing sessions. Use the same email and password when signing in on another device.
+
+## Admin
+
+Admins open **Admin** from the sidebar or the phone's **More** menu. **Invitations** issues, replaces and revokes single-use links. **People** lists accounts and their roles, with actions to change roles, disable access and issue a member reset link. Disabling an account ends its sessions and keeps its work history. At least one active admin must remain. [Recover admin access](/docs/usage/server#recover-access)
+
+## Completion and recovery
 
 - **User completion** is separate from execution. A task's State picker shows its status and the one manual change it allows. Picking Completed (or Review on a row) opens a review of cached evidence and dependent impact, with an optional acceptance note. Active work must stop first.
 - **Change state**: moving a completed task back preserves accepted-result history and already claimed attempts, while blocking unclaimed dependents. Later harness activity never revokes acceptance. Agents report outcomes but have no completion or reopening tool.

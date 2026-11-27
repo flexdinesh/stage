@@ -12,23 +12,30 @@ configured listener. The listeners are not separate instances.
 
 Personal is the default, including desktop and trusted home LANs with
 workers. Anyone who can reach a personal product listener has implicit
-operator access. Current bind defaults still apply. The [shared access
-ADR](adr/0009-shared-access.md) defines opt-in named access for one trusted
-workspace. Members can run code through configured harnesses. The
-installation owner's OS account protects secrets and recovery.
+operator access. Shared access adds named accounts to one trusted workspace
+across all projects, machines and harnesses. Members can run code wherever
+configured harnesses permit. Use separate OS accounts or hosts when work
+requires stronger isolation. The installation owner's OS account protects
+secrets and recovery. See [ADR 0009](adr/0009-shared-access.md).
+
+Set `STAGE_MULTI_USER=1` (`true` also works) or pass `stage serve --multi-user`
+to opt in. An explicit foreground flag takes precedence over the environment.
+The per-user service reads `STAGE_MULTI_USER` from `service.env` and rejects
+the flag with `--managed`. Use the environment for container deployments.
 
 Migration 0040 introduces a durable installation ID distinct from the
 process `instanceId` and the build identity (`stage` or `stage-dev`). Stage
 resolves the database's mode after migration and before starting the
 runtime. Shared state is sticky across restarts, including when the opt-in is
-omitted. An explicit false setting requires restarting with shared
-configuration. Internal shared startup serves static files, setup, health
+omitted. Explicit `0`, `false` or `--multi-user=false` fails with exit 78
+against shared data. Remove the false setting or enable shared access to start
+again. Claiming a personal database keeps user 1, existing work and paired
+workers. Shared startup serves static files, setup, health
 and authenticated worker liveness while the first admin claim is pending.
 Product requests return `403 setup_pending`. Work-producing observation,
 discovery, release, and schedule runners start after claim. Recurring fires
 due before the claim are recorded as missed. Existing one-shot tasks and
-dependent work resume through their existing claim and launch fences. The
-public opt-in ships with the integrated feature.
+dependent work resume through their existing claim and launch fences.
 
 `STAGE_LISTEN` takes a comma list; `--listen` can be repeated (or take a
 comma list), and when given it replaces `STAGE_LISTEN` entirely. Each item is:
@@ -54,7 +61,14 @@ HTTPS proxy for access from other machines. Bind Stage to loopback TCP or
 give the proxy access to a protected Stage product socket. Shared startup
 rejects non-loopback TCP listeners, including wildcard binds. For a
 container using loopback, the proxy needs access to the same network
-namespace. Preserve the canonical public `Host` and browser `Origin` at the
+namespace. Override the image's default listener with
+`STAGE_LISTEN=127.0.0.1:7380` and publish only the proxy's HTTPS port. The
+bundled personal Compose configuration fixes a wildcard listener inside
+the container and needs a topology change before it can run in shared mode.
+For a reused Docker volume or bind mount, ensure the mounted data directory
+is owned by the Stage runtime user (UID 65532 in the image) and has mode
+`0700` before enabling shared access.
+Preserve the canonical public `Host` and browser `Origin` at the
 proxy, including the port when it is non-default. Forwarding headers carry
 no authority. For local HTTP testing, set
 `STAGE_PUBLIC_URL=http://127.0.0.1:7380` and include `127.0.0.1:7380` in
@@ -292,8 +306,8 @@ SQLite's; Postgres backups are the operator's ([storage.md](storage.md#backups))
 
 `GET /api/health` (contract in [api.md](api.md#health)):
 
-- It answers 200 with build and instance metadata whenever the server and its
-  database work.
+- It answers 200 whenever the server and its database work. Personal and
+  authenticated human requests receive build and instance metadata.
 - A harness being offline is still 200 (`harnesses[].connected: false`).
   "Stage is live and ready" is therefore separate from "a harness is
   reachable".
@@ -304,8 +318,8 @@ SQLite's; Postgres backups are the operator's ([storage.md](storage.md#backups))
   `GET /api/harnesses/t3/status` ([api.md](api.md#t3-details)), which refreshes a
   stale probe for at most 3s.
 - 503 means the database query failed.
-- `engine` is `sqlite` or `postgres`; `stage status` shows it next to the
-  database state.
+- Detailed responses show `engine` as `sqlite` or `postgres`. `stage status`
+  shows the engine next to the database state when available.
 - It does not expose paths, the pid or the database URL.
 - Shared public health reports database readiness, service and API versions,
   and whether setup is pending. The local service probe on the product Unix
@@ -336,11 +350,11 @@ Go's embedded VCS info when it is available. The Docker image reports `dev`.
 
 ## Request origin policy
 
-`/api/` and `/mcp` pass through `guard.Policy`. Static UI routes do not. This
-is request-origin hygiene and **not authentication**: any process that can
-reach a listener directly has full access, and CORS is not a security
-boundary. For remote use, the deployment boundary remains an authenticating
-HTTPS reverse proxy, with Stage itself unreachable except through it.
+`/api/` and `/mcp` pass through `guard.Policy`. Static UI routes do not.
+The policy checks Host and browser origin. Reaching a personal listener
+grants full control. Keep personal listeners on a trusted network or use
+an authenticating HTTPS reverse proxy with a private upstream. Shared
+listeners also enforce [principal and credential policy](api.md#shared-access-transport).
 
 Checks, in order:
 
@@ -358,14 +372,14 @@ Checks, in order:
 
 Trusted origins are `STAGE_ALLOWED_ORIGINS` (a comma list of
 `http(s)://host[:port]`; invalid entries stop startup) plus the origin of
-`STAGE_PUBLIC_URL`. `X-Forwarded-*` headers are never trusted. A proxy that
-rewrites Host to loopback still works, because the browser's Origin is
-trusted.
+`STAGE_PUBLIC_URL`. `X-Forwarded-*` headers carry no authority. A personal
+proxy can rewrite Host to loopback when the browser's Origin is trusted.
+Shared browser requests must use the canonical public Host and Origin.
 
 | Client | Why it passes |
 | --- | --- |
 | CLI / stdio MCP over a socket | Host `stage` on a Unix listener; no Origin |
-| CLI over TCP, HTTP MCP clients | loopback IP Host; no Origin. `/mcp` also keeps the MCP SDK's own localhost check, so HTTP MCP through a proxy still gets 403. |
+| CLI over TCP, HTTP MCP clients | no browser Origin. Personal `/mcp` keeps the MCP SDK's localhost check. Shared `/mcp` accepts its canonical proxy Host with an agent credential. |
 | Browser / PWA, same origin | `Sec-Fetch-Site: same-origin` |
 | Vite dev proxy | Host `localhost:5173`; same origin |
 | Desktop webview (bridge B), this machine | Host `stage.invalid` on the socket; the bridge strips `Origin` and `Sec-Fetch-*` after checking them itself (a cross-site request or another page origin never reaches the server) |
@@ -377,12 +391,11 @@ nor listed in `STAGE_ALLOWED_ORIGINS` now gets 403. Add it before upgrading.
 
 ## Worker routes
 
-`/api/worker/*` is the one place Stage authenticates requests itself
+`/api/worker/*` uses independent worker credentials
 ([ADR 0002](adr/0002-machines-and-workers.md#5-security-model),
 [api.md](api.md#worker-routes-apiworker)). A remote machine's `stage worker`
 calls it: join with a one-time pairing code, then every other route with its
-machine token. Everything else stays unauthenticated behind the deployment
-boundary.
+machine token. Account sign-in and sign-out do not affect a paired worker.
 
 Order for a worker request:
 
@@ -410,10 +423,11 @@ credentials. Pairing codes and tokens are stored only as
 SHA-256 (high-entropy secrets need no slow hash) and compared in constant
 time; the id prefix selects the row.
 
-**Behind an authenticating reverse proxy:** the proxy keeps user auth on the
+**Personal behind an authenticating reverse proxy:** the proxy keeps user auth on the
 UI, `/api` and `/mcp`, and passes `/api/worker/*` through without it,
 forwarding the `Authorization` header unchanged. Creating a pairing code
-(`POST /api/machines/pairings`) stays behind user auth. Pairing requires
+(`POST /api/machines/pairings`) stays behind user auth. In shared access,
+Stage requires an active human for pairing creation. Both modes require
 `STAGE_PUBLIC_URL` (409 `public_url_required`), the address workers reach.
 The full proxy rules: [Remote main server and workers](#remote-main-server-and-workers).
 On a personal server, any process that reaches the product listener has
@@ -688,8 +702,8 @@ User guide: website `/docs/usage/workers` (Multiple machines).
 - **Local volume (SQLite).** `stage.db`, its backups and `stage.lock` live on
   a local (block-backed) filesystem. `flock` and SQLite locking are unreliable
   on NFS and other network filesystems, so they are not supported. On
-  Postgres the data dir holds only `stage.lock` and sockets and needs no
-  volume; backups are the operator's ([storage.md](storage.md#backups)).
+  Postgres the data dir holds process locks, sockets and any pending private
+  setup output. The operator backs up Postgres. [Storage](storage.md#backups)
 - **Shutdown.** Allow more than the 100s drain ([Shutdown](#shutdown)) before
   a forced kill (Kubernetes `terminationGracePeriodSeconds: 120`, compose
   `stop_grace_period: 2m`).
@@ -707,16 +721,15 @@ User guide: website `/docs/usage/workers` (Multiple machines).
   build version `dev`. Workers need a compatible channel protocol for the
   channel and the same API version for the remaining worker routes.
 
-**Proxy.** In front of every listener a network can reach:
+**Proxy.** Use a private upstream for both deployment modes:
 
-- User authentication on the UI, `/api` and `/mcp`, including
-  `POST /api/machines/pairings`.
-- `/api/worker/*` passes through without user authentication, with
-  `Authorization` forwarded unchanged ([Worker routes](#worker-routes)). It
-  is the only bypass: the channel, join, leave and the agent gateway route.
-- Keep the request's Host, or rewrite it to an IP literal or a host in
-  `STAGE_ALLOWED_ORIGINS`. Workers send no `Origin`, so a rewrite to any other
-  hostname is 403.
+- For personal access through an authenticating proxy, protect the UI,
+  `/api` and `/mcp`, including `POST /api/machines/pairings`. Pass only
+  `/api/worker/*` through without proxy user authentication, preserving its
+  `Authorization` header. A trusted personal LAN can connect directly.
+- For shared access, preserve the canonical Host, browser Origin, cookie
+  and Authorization headers so Stage can admit people, agents and workers.
+  See [Shared setup and owner recovery](#shared-setup-and-owner-recovery).
 - No response buffering on `GET /api/worker/channel` and
   `/api/notifications/stream` (both send `X-Accel-Buffering: no`), and an
   idle timeout above 15s: the channel's keepalive and heartbeat run every

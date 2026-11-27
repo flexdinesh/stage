@@ -1,5 +1,5 @@
-// Server switching on desktop (platform.host.servers): a SERVERS panel and its Add/Edit drawer, a top-bar server
-// menu and a Switch server drawer. Kept, but not mounted anywhere: the UI assumes one server, this machine's.
+// Server switching on desktop (platform.host.servers): the Settings panel,
+// Add/Edit drawer, and the picker for screens outside the main app.
 // A host without server switching (the browser) renders none of it. Logic: lib/host.ts.
 import { useCallback, useId, useState, type FormEvent } from "react";
 import { Link } from "react-router";
@@ -12,7 +12,6 @@ import { Step, Steps } from "./Steps.tsx";
 import {
   Alert,
   Button,
-  Chip,
   ConfirmInline,
   Drawer,
   ErrorText,
@@ -36,18 +35,7 @@ import {
   CommandBox,
 } from "./ui.tsx";
 
-/** Needs-input count of a server, in the Dashboard tab's count chip. */
-function NeedCount({ n }: { n: number | null }) {
-  if (n === null || n === 0) return null;
-  return (
-    <Chip tone="need" title={`${n} need input`} className="tabular px-1.5 text-meta-sm leading-4">
-      {n}
-      <span className="sr-only"> need input</span>
-    </Chip>
-  );
-}
-
-/** Ruled list of servers to pick from: marker, name, where, needs-input count, a check on the active one. */
+/** Ruled list of servers, with the address and a check on the active one. */
 function ServerChoices({ servers, state, onPick }: { servers: HostServerEntry[]; state: HostState | null; onPick: (entry: HostServerEntry) => void }) {
   return (
     <RowList>
@@ -64,7 +52,6 @@ function ServerChoices({ servers, state, onPick }: { servers: HostServerEntry[];
                   {status.note === "" || status.tone === "ok" ? null : <span className={status.tone === "bad" ? "text-bad" : undefined}> · {status.note}</span>}
                 </span>
               </span>
-              <NeedCount n={s.needsInput} />
               <span className="flex size-4 shrink-0 items-center justify-center text-fg">
                 {s.active ? (
                   <>
@@ -89,9 +76,16 @@ function useSwitchable(): { api: HostServers; servers: HostServerEntry[] } | nul
   return { api, servers };
 }
 
-/** Whether the host can switch to another saved server (connection screen, banner). */
-export function useCanSwitchServer(): boolean {
-  return useSwitchable() !== null;
+export function ServerSwitchButton() {
+  const canSwitch = useSwitchable() !== null;
+  const [open, setOpen] = useState(false);
+  if (!canSwitch) return null;
+  return (
+    <>
+      <Button className="self-start" onClick={() => setOpen(true)}>Switch server</Button>
+      {open ? <ServerPicker onClose={() => setOpen(false)} /> : null}
+    </>
+  );
 }
 
 /** Drawer listing the saved servers; picking one switches to it. */
@@ -111,7 +105,6 @@ export function ServerPicker({ onClose }: { onClose: () => void }) {
   return (
     <Drawer title="Switch server" onClose={onClose}>
       <div className="flex flex-col gap-3">
-        <Muted>Stage shows one server at a time. Notifications cover every saved server.</Muted>
         {servers === null ? null : (
           <div className="border border-line">
             <ServerChoices servers={servers} state={state} onPick={pick} />
@@ -208,7 +201,6 @@ export function ServersCard() {
             ))}
           </RowList>
         )}
-        <Hint className="border-t border-line px-3 py-2">One server at a time. Remotes: trusted network, no sign-in.</Hint>
       </Panel>
       {drawer === null ? null : (
         <ServerDrawer api={api} entry={drawer.mode === "edit" ? drawer.entry : null} onClose={() => setDrawer(null)} />
@@ -230,7 +222,6 @@ function ServerRow({ api, entry, state, onEdit }: { api: HostServers; entry: Hos
       .catch((err: unknown) => setError(err))
       .finally(() => setBusy(null));
   };
-  const needs = entry.needsInput ?? 0;
   return (
     <Row className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -239,11 +230,6 @@ function ServerRow({ api, entry, state, onEdit }: { api: HostServers; entry: Hos
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="min-w-0 truncate text-body font-medium text-fg">{entry.name}</span>
             {entry.active ? <Meta>active</Meta> : null}
-            {needs > 0 ? (
-              <Chip tone="need" dot className="tabular">
-                {needs} need input
-              </Chip>
-            ) : null}
           </div>
           <p className="truncate font-mono text-meta text-muted" title={serverWhere(entry, state)}>
             {serverWhere(entry, state)}
@@ -252,7 +238,7 @@ function ServerRow({ api, entry, state, onEdit }: { api: HostServers; entry: Hos
         </div>
         <div className="flex flex-wrap items-center gap-1.5 max-md:w-full max-md:pl-[18px]">
           {entry.active ? null : (
-            <Button small busy={busy === "switch"} disabled={busy !== null} onClick={() => run("switch", () => api.switch(entry.id))}>
+            <Button small aria-label={`Switch to ${entry.name}`} busy={busy === "switch"} disabled={busy !== null} onClick={() => run("switch", () => api.switch(entry.id))}>
               Switch
             </Button>
           )}
@@ -338,10 +324,7 @@ function ServerDrawer({ api, entry, onClose }: { api: HostServers; entry: HostSe
       }
     >
       <form id={formId} onSubmit={submit} className="flex flex-col gap-3.5">
-        <Muted>
-          A Stage server on another machine of a trusted network: no sign-in, plain HTTP. On that machine it listens on TCP, for example{" "}
-          <code className="font-mono text-detail text-fg">stage serve --listen 0.0.0.0:7380</code>.
-        </Muted>
+        <Muted>Use the address you open in your browser. For shared access, use the server’s configured public URL.</Muted>
         <Field label="Name">
           {(id) => <Input id={id} data-autofocus value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="Studio" autoComplete="off" />}
         </Field>
@@ -351,7 +334,7 @@ function ServerDrawer({ api, entry, onClose }: { api: HostServers; entry: HostSe
               id={id}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              placeholder="http://192.168.1.20:7380"
+              placeholder="https://stage.example.com"
               inputMode="url"
               autoComplete="off"
               autoCapitalize="off"

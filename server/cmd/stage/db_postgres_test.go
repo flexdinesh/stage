@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,59 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/instance"
 )
+
+func TestDBInvalidateAccessPostgres(t *testing.T) {
+	ctx := t.Context()
+	sourceName := pgtest.CreateDatabase(t, pgtest.Locale)
+	sourceURL := pgtest.DatabaseURL(t, sourceName)
+	pool, err := sql.Open("pgx", sourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = postgres.MigrateTo(ctx, pool, restoredVersion)
+	_ = pool.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := postgres.Open(ctx, sourceURL, postgres.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = source.Close() })
+	fixture := seedRestoredAccess(t, source)
+	if err := source.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restoredURL := pgtest.DatabaseURL(t, pgtest.CreateDatabase(t, "TEMPLATE "+sourceName))
+	restored, err := postgres.Open(ctx, restoredURL, postgres.Options{ApplicationName: "stage test owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	lease, err := restored.Ownership().Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, environ := env(t)
+	environ = append(environ, "STAGE_DATA_DIR="+t.TempDir(), "STAGE_DATABASE_URL="+restoredURL)
+	code, stderr := runMain(t, environ, "db", "invalidate-access")
+	if err := lease.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if code != 75 || !strings.Contains(stderr, "database is owned by another stage server") {
+		t.Fatalf("held Postgres database: %d %s", code, stderr)
+	}
+	fixture.verify(t, restored, false)
+	code, stderr = runMain(t, environ, "db", "invalidate-access")
+	if code != 0 || strings.Contains(stderr, restoredURL) {
+		t.Fatalf("invalidate restored Postgres access: %d %s", code, stderr)
+	}
+	version, err := restored.Migrator().Current(ctx)
+	if err != nil || version != restored.Migrator().Max() {
+		t.Fatalf("restored schema version: %d %v", version, err)
+	}
+	fixture.verify(t, restored, true)
+}
 
 // copySource writes a migrated SQLite database (at version) into its own
 // data dir and returns its path.

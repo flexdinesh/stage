@@ -12,6 +12,7 @@ import { InfoPanel } from "../components/InfoPanel.tsx";
 import { AddMachineDrawer, MachinesPanel } from "../components/Machines.tsx";
 import { notificationEventTone } from "../components/StateBadge.tsx";
 import { useStatusAlert } from "../components/StatusRow.tsx";
+import { ServersCard } from "../components/Servers.tsx";
 import {
   Alert,
   Button,
@@ -61,7 +62,7 @@ function UserCard() {
                 <span>since {shortDate(me.data.createdAt)}</span>
               </MetaLine>
             </div>
-            <Muted>Stage has no sign-in. Everything created here is attributed to this user.</Muted>
+            <Muted>This server uses personal access. Anyone who can reach it can operate the workspace.</Muted>
           </div>
         )}
       </QueryState>
@@ -317,6 +318,7 @@ export function SettingsGeneralPage() {
       <div className="flex max-w-[720px] flex-col gap-3.5">
         {shared === null ? <UserCard /> : null}
         <ThemeCard />
+        <ServersCard />
         <InfoPanel />
       </div>
     </>

@@ -26,8 +26,8 @@ func TestSharedCLICredentialDelivery(t *testing.T) {
 	c := cfg(t, filepath.Join(short, "data"), addr)
 	c.PublicURL = "http://" + addr
 	output := &syncBuffer{}
-	on := true
-	i, _ := startSharedOwner(t, serve.Options{Config: c, SharedAccess: &on, BootstrapOutput: output})
+	c.MultiUser = new(true)
+	i, _ := startSharedOwner(t, serve.Options{Config: c, BootstrapOutput: output})
 	agent := client.New(i.ready.AgentURL)
 	assertMode(t, filepath.Dir(strings.TrimPrefix(i.ready.AgentURL, "unix://")), 0o700)
 	if status, err := agent.AccessStatus(t.Context()); err != nil || !status.AgentOnly || status.Mode != "setup_pending" {
@@ -107,7 +107,8 @@ func TestSharedCLICredentialDelivery(t *testing.T) {
 	secondAddr := freePort(t)
 	secondCfg := cfg(t, filepath.Join(short, "other"), secondAddr)
 	secondCfg.PublicURL = "http://" + secondAddr
-	other, _ := startSharedOwner(t, serve.Options{Config: secondCfg, SharedAccess: &on, BootstrapOutput: &syncBuffer{}})
+	secondCfg.MultiUser = new(true)
+	other, _ := startSharedOwner(t, serve.Options{Config: secondCfg, BootstrapOutput: &syncBuffer{}})
 	if other.ready.AgentURL == i.ready.AgentURL {
 		t.Fatal("shared installations must have distinct agent sockets")
 	}

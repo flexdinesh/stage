@@ -28,6 +28,9 @@ type Config struct {
 	// DataDir).
 	Database  Database
 	PublicURL string // STAGE_PUBLIC_URL, optional (PWA URL; VAPID subject when https)
+	// MultiUser is the STAGE_MULTI_USER startup intent. Nil preserves the
+	// stored access mode, including on already-shared installations.
+	MultiUser *bool
 	// AllowedOrigins are the browser origins trusted besides loopback ones
 	// (normalized scheme://host[:port]): STAGE_ALLOWED_ORIGINS plus the
 	// origin of STAGE_PUBLIC_URL. Their hosts pass the Host check.
@@ -48,6 +51,15 @@ func Load(listenFlags []string, env harness.EnvOptions) (Config, error) {
 // LoadFrom is Load over getenv.
 func LoadFrom(getenv func(string) string, listenFlags []string, env harness.EnvOptions) (Config, error) {
 	cfg := Config{getenv: getenv, PublicURL: getenv("STAGE_PUBLIC_URL")}
+	switch getenv("STAGE_MULTI_USER") {
+	case "":
+	case "1", "true":
+		cfg.MultiUser = new(true)
+	case "0", "false":
+		cfg.MultiUser = new(false)
+	default:
+		return Config{}, errors.New("STAGE_MULTI_USER must be 1, 0, true or false")
+	}
 	for _, k := range env.Removed {
 		if getenv(k) != "" {
 			cfg.RemovedEnv = append(cfg.RemovedEnv, k)

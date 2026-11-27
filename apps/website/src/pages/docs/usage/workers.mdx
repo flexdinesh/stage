@@ -10,8 +10,7 @@ Pick this setup when your harnesses run on more than one machine, or when Stage 
 
 ```txt
                  +-------------------------------+
-  Browser ---->  | HTTPS proxy with auth         |
-                 |   /api/worker/* passes through|
+  Browser ---->  | HTTPS proxy                   |
                  +---------------+---------------+
                                  |
                          +-------v-------+
@@ -30,8 +29,8 @@ A worker always dials out to the main server, so laptops need no open ports and 
 
 ## Main server
 
-- Run it as a [self-hosted server](/docs/usage/server), with Docker ([`compose.yaml`](https://github.com/flexdinesh/stage/blob/main/compose.yaml) builds the image, keeps the database in a volume and publishes port 7380 on the host's loopback), or on [Kubernetes](#kubernetes). Put it behind HTTPS.
-- Set `STAGE_PUBLIC_URL` to the HTTPS URL users and workers reach. Pairing needs it: pairing links are built from it and workers dial it.
+- Run it as a [self-hosted server](/docs/usage/server), in Docker, or on [Kubernetes](#kubernetes). The bundled Compose file publishes a personal server on host loopback. Follow [shared container setup](/docs/usage/server#shared-access-in-a-container) when enabling shared access.
+- Set `STAGE_PUBLIC_URL` to the URL users and workers reach. Pairing links use it and workers dial it. A trusted personal LAN can use its private HTTP address. Shared access uses HTTPS.
 - One server per data dir, on a local disk.
 - The database is SQLite in the data dir by default. A main server run from the Docker image can use [Postgres](#postgres) instead.
 - The Docker image never runs harnesses as local processes. T3 and OpenCode on your workers do the work.
@@ -39,13 +38,11 @@ A worker always dials out to the main server, so laptops need no open ports and 
 
 ## Auth proxy
 
-Stage has no user sign-in, so a main server on a network sits behind an authenticating HTTPS reverse proxy ([Security reference](/docs/reference/security)). Configure it to:
+When a personal server needs access from outside its trusted network, use an authenticating HTTPS proxy. The proxy protects the UI, `/api` and `/mcp`, including pairing link creation. Let only `/api/worker/*` use its pairing code or machine token without proxy user authentication. Shared Stage handles human sign-in itself and requires a private upstream. [Security reference](/docs/reference/security)
 
-1. **Require user authentication for everything**: the UI, `/api` and `/mcp`, including creating pairing links.
-2. **Pass `/api/worker/*` through without user authentication**, forwarding the `Authorization` header unchanged. Workers use it to join, for their channel and for the agent gateway. The pairing code or machine token is the authentication there; every other route refuses machine tokens.
-3. **Keep the request's Host header**, or rewrite it to an IP address or a host in `STAGE_ALLOWED_ORIGINS`. Workers send no `Origin`, so any other hostname gets 403.
-4. **Not buffer responses, and keep idle connections open past 15s**. The worker channel is a long-lived Server-Sent Events stream with a keepalive every 15s ([Reverse proxy and SSE](/docs/usage/server#https-and-push-notifications)).
-5. **Accept request bodies up to 32 MiB**. One message from a worker can be that large.
+- Preserve Host, Origin, cookies and Authorization headers. The worker uses the same URL, with its machine credential, independently of human sign-in.
+- Disable response buffering and keep idle connections open past 15 seconds. The worker channel and notifications use long-lived streams. [Reverse proxy and SSE](/docs/usage/server#https-and-push-notifications)
+- Accept request bodies of at least 32 MiB for worker channel messages.
 
 ## Add a worker
 
@@ -61,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/insta
 
 ### Create a pairing link
 
-In Settings > Connections, click **Add machine**, or run `stage machine pair --label NAME` where the CLI reaches the main server (such as its host). It shows a one-time link, valid for 10 minutes, and the command to run.
+In Settings > Connections, click **Add machine**, or run `stage machine pair --label NAME` where the CLI reaches the main server. For a shared server, sign in first and pass `--human` to the CLI. The command shows a one-time link, valid for 10 minutes, and the command to run. [CLI sign-in](/docs/reference/cli#sign-in-to-shared-stage)
 
 ### Join
 
@@ -111,14 +108,14 @@ Agents on a worker's machine use Stage as usual: the `stage` CLI, `stage mcp` an
   STAGE_WORKER_LISTEN=unix,127.0.0.1:7381
   ```
 
-  Avoid a wildcard host: anything that reaches the gateway has agent access to the main server.
+  This TCP option is for personal mode. Shared access requires the owner-private default worker socket. Anyone who reaches a personal TCP gateway has agent access to the main server.
 - The gateway cannot manage machines or change any machine's harness setup (403). If the main server is unreachable, it answers 502.
 
 Setting up agents: [Agents that queue work](/docs/guides/agents).
 
 ## Kubernetes
 
-A minimal example lives in [`examples/kubernetes`](https://github.com/flexdinesh/stage/tree/main/examples/kubernetes): a Deployment, a ClusterIP Service and a PersistentVolumeClaim for `stage.db`. There is no published image: build one from the repository `Dockerfile` at the release your workers run and push it to your registry. Then set the image and `STAGE_PUBLIC_URL`, apply the files, and put your [auth proxy](#auth-proxy) or ingress in front of the Service.
+A minimal personal example lives in [`examples/kubernetes`](https://github.com/flexdinesh/stage/tree/main/examples/kubernetes): a Deployment, a ClusterIP Service and a PersistentVolumeClaim for `stage.db`. Build the image from the release your workers run, push it to your registry and put your [auth proxy](#auth-proxy) in front of the Service. For shared access, use a proxy sidecar that can reach Stage on loopback and expose only the proxy through the Service.
 
 The example uses SQLite. On [Postgres](#postgres), set `STAGE_DATABASE_URL` in the Deployment; the volume and its backup notes below then no longer apply.
 
@@ -144,7 +141,7 @@ docker compose up -d --build
 
 - **Still one server**: it holds a lock on the database for its lifetime, and a second server on the same database exits at startup. Run one replica.
 - **Back up the database yourself** with `pg_dump` or your provider's snapshots, ideally before every update. The server takes no backup; it logs a warning before it migrates.
-- **No volume for Stage**: on Postgres the data dir holds only the lock and sockets.
+- **Stage data dir**: on Postgres it holds process locks, sockets and any pending private setup output. Postgres holds the durable data.
 - **Moving an existing `stage.db`**: the example starts with an empty database. To bring SQLite data over, stop the server and run `stage db copy --from <data dir>/stage.db --to <postgres url>` from the image: it copies every table into the empty database and verifies it, and leaves `stage.db` untouched so you can switch back. Steps: [cutover and rollback](https://github.com/flexdinesh/stage/blob/main/docs/storage.md#cutover).
 
 ## Remove and update

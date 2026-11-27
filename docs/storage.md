@@ -46,10 +46,12 @@ One engine per process, chosen at startup.
   Backup ports and the migration guard. On Postgres, opening and taking
   ownership are bounded at 30 s; an unreachable database exits 1
   ([runtime.md](runtime.md#ownership-and-locks)).
-- The data dir stays required on both engines: it holds `stage.lock`,
-  sockets and logs. On SQLite it also holds `stage.db` and `backups/`.
-- Health (`engine`), `stage status` and startup logs report the running
-  engine (`sqlite` or `postgres`); `stage version` reports the engines built
+- The data dir stays required on both engines for `stage.lock`, sockets,
+  logs and pending private setup output. On SQLite it also holds `stage.db`
+  and `backups/`.
+- Detailed health (`engine`), `stage status` and startup logs report the running
+  engine (`sqlite` or `postgres`). Shared public health omits it.
+  `stage version` reports the engines built
   in (`engines`). Never the URL or its password: `config.DatabaseURL` prints
   `[redacted]` (fmt, slog, JSON), and no log line or error prints the URL.
   pgx connection errors may name the user, database and host.
@@ -74,8 +76,8 @@ One engine per process, chosen at startup.
     `pgdata`, no published port;
   - an `app` service started once Postgres is healthy, with
     `STAGE_DATABASE_URL` from the required `STAGE_PG_PASSWORD`, a
-    `/stage status` healthcheck, and no volume (on Postgres the data dir holds
-    only the lock and sockets).
+    `/stage status` healthcheck and no Stage data volume. Postgres
+    holds the durable data.
 - Backups in the example are the operator's ([Backups](#backups)).
 
 ## Layout and ownership
@@ -531,6 +533,11 @@ and paging. (Thread search was removed with API v3.)
   retained. The receipts are included in `db copy`. Update the main server
   and workers together.
   See [Worker observation receipts](#worker-observation-receipts).
+  Paired migration 0040 adds durable installation and shared account state.
+  Existing installations start personal unless opted in. First-admin claim
+  binds a local identity to user 1 and keeps existing creator references,
+  accepted evidence and worker pairings. The persisted mode advances from
+  personal through setup pending to claimed.
   Paired migration 0041 `access_audit` adds durable access-management events
   on SQLite and Postgres. An event records an action, the account or local
   installation owner who performed it, the affected account or grant ID
@@ -790,12 +797,21 @@ from the Docker image; any other binary exits 78 before touching anything.
   dir, owned target, old source). Coordinator rules run against fakes in
   `check:go`.
 
-Treat database backups and copies as secrets. For an explicit offline
-restore or import, keep the installation offline while clearing restored
-sessions and grants. The shared-access storage contract provides
-`InvalidateRestoredAccess` for the restore tooling. Ordinary restart keeps
-credentials. A restored installation in `setup_pending` needs a fresh
-local-owner setup link. See [ADR 0009](adr/0009-shared-access.md).
+Treat database backups and copies as secrets. After restoring a backup,
+keep the server stopped and run `stage db invalidate-access` as the
+installation owner. Set `STAGE_DATA_DIR` explicitly to the restored server's
+data directory, including for a managed installation. For the Postgres
+image, also set `STAGE_DATABASE_URL` to the restored database. The command
+requires an existing database and applies pending supported migrations
+under the usual backup policy. It clears restored browser, CLI and agent
+sessions, session-bound push subscriptions and outstanding setup, invite
+and reset links. It preserves the installation ID, account identities,
+passwords, roles, shared mode and worker pairings. Resume service once
+invalidation succeeds. A restored installation in `setup_pending` needs a
+[fresh local-owner setup link](runtime.md#shared-setup-and-owner-recovery).
+`stage db copy` invalidates transient credentials in the target during the
+copy. Ordinary restart keeps valid credentials. See
+[ADR 0009](adr/0009-shared-access.md).
 
 ### Cutover
 

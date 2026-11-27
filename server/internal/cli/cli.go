@@ -120,10 +120,13 @@ Usage:
   stage serve [--listen ADDR]...      run the server (also: stage with no args); ADDR host:port,
                                       unix:/abs/path.sock or unix (private default socket); repeat or
                                       comma-separate for several (env STAGE_LISTEN, default 127.0.0.1:7380)
+  stage serve --multi-user           enable shared access for this server (env STAGE_MULTI_USER=1)
   stage serve --managed               run as the per-user service (what "stage service" registers):
                                       config from service.env only, default data dir, unix required
   stage db copy --from PATH --to URL  copy a stopped server's SQLite stage.db into an empty Postgres
                                       database and verify it (Docker image only; stage db help)
+  stage db invalidate-access         clear restored sessions and account links before startup
+                                      (set STAGE_DATA_DIR explicitly; see stage db help)
   stage status [--wait DUR]          the server this CLI reaches: version, readiness, harness states
                                       (exit 1 unreachable or API mismatch, 3 --wait timeout)
   stage auth login --email EMAIL     sign in to the selected shared Stage server

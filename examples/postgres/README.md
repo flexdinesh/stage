@@ -37,8 +37,8 @@ Stop with `docker compose down`. `docker compose down -v` also deletes the
 
 ## What differs from SQLite
 
-- **Data dir.** Stage still needs one, but on Postgres it holds only
-  `stage.lock` and sockets, so the `app` service has no volume.
+- **Data dir.** Stage still needs one for `stage.lock`, sockets and any
+  pending private setup output. The example's `app` service has no volume.
 - **One server per database.** The server holds a Postgres advisory lock for
   its lifetime. A second server on the same database exits 75, whatever its
   data dir. Run one replica and stop the old one before starting a new one.
@@ -65,6 +65,12 @@ empty): [cutover and rollback](../../docs/storage.md#cutover).
 
 ## In front of it
 
-Stage has no user authentication. Keep the port on loopback and put an
-authenticating HTTPS proxy in front, as for any main server: see
-[Auth proxy](https://stage.hoplabs.dev/docs/usage/workers#auth-proxy).
+This example runs personal Stage, published on host loopback. To reach it
+outside a trusted network, put an authenticating HTTPS proxy in front.
+[Proxy settings](https://stage.hoplabs.dev/docs/usage/workers#auth-proxy)
+
+For shared access, change the Stage listener inside its container to
+loopback, put the proxy in the same network namespace and publish only
+the proxy. Enable `STAGE_MULTI_USER=1` and set the canonical HTTPS
+`STAGE_PUBLIC_URL`. The Postgres connection remains on a private network.
+[Shared container setup](https://stage.hoplabs.dev/docs/usage/server#shared-access-in-a-container)

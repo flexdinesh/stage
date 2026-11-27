@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -25,12 +26,6 @@ import (
 
 func sharedServer(t *testing.T) (string, string, string) {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "stage-shared-fixture")
-	build := exec.CommandContext(t.Context(), "go", "test", "-c", "-o", bin, "./internal/serve")
-	build.Dir = filepath.Join("..", "..", "..", "server")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build shared Stage fixture: %v\n%s", err, out)
-	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -38,8 +33,16 @@ func sharedServer(t *testing.T) (string, string, string) {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 	e := newEnv(t)
-	cmd := exec.Command(bin, "-test.run=^TestDesktopSharedServerProcess$")
-	cmd.Env = append(e.vars, "STAGE_DESKTOP_TEST_ADDR="+addr)
+	short, err := os.MkdirTemp("/tmp", "sd-shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(short) })
+	socket, dataDir := filepath.Join(short, "s.sock"), filepath.Join(short, "data")
+	base := "http://" + addr
+	cmd := exec.Command(stage(t), "serve", "--multi-user", "--listen", addr, "--listen", "unix:"+socket)
+	// macOS also derives its agent socket from HOME. Keep every socket short.
+	cmd.Env = append(e.vars, "HOME="+filepath.Join(short, "h"), "XDG_RUNTIME_DIR="+short, "STAGE_DATA_DIR="+dataDir, "STAGE_PUBLIC_URL="+base)
 	s := &server{cmd: cmd, done: make(chan struct{}), out: &syncBuffer{}}
 	cmd.Stdout, cmd.Stderr = s.out, s.out
 	if err := cmd.Start(); err != nil {
@@ -47,20 +50,26 @@ func sharedServer(t *testing.T) (string, string, string) {
 	}
 	go func() { _ = cmd.Wait(); close(s.done) }()
 	t.Cleanup(func() { s.kill(syscall.SIGTERM) })
-	ready := regexp.MustCompile(`(?m)^DESKTOP_TEST_SOCKET=(.+)$`)
 	setup := regexp.MustCompile(`/auth/setup#token=([^\s]+)`)
-	var socket, token []string
-	waitUntil(t, "shared Stage fixture readiness", 30*time.Second, func() bool {
+	bootstrap := filepath.Join(dataDir, "owner", "bootstrap.txt")
+	var match [][]byte
+	waitUntil(t, "shared Stage readiness", 30*time.Second, func() bool {
 		select {
 		case <-s.done:
-			t.Fatal("shared Stage fixture exited before readiness")
+			t.Fatalf("shared Stage exited before readiness: %s", s.out.String())
 		default:
 		}
-		out := s.out.String()
-		socket, token = ready.FindStringSubmatch(out), setup.FindStringSubmatch(out)
-		return len(socket) == 2 && len(token) == 2
+		data, err := os.ReadFile(bootstrap)
+		if err != nil {
+			return false
+		}
+		match = setup.FindSubmatch(data)
+		return len(match) == 2
 	})
-	return "http://" + addr, socket[1], token[1]
+	if setup.MatchString(s.out.String()) {
+		t.Fatal("shared setup grant must appear only in the private bootstrap file")
+	}
+	return base, socket, string(match[1])
 }
 
 func TestDesktopSharedServer(t *testing.T) {

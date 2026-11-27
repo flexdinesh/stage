@@ -49,6 +49,10 @@ curl -fsSL https://raw.githubusercontent.com/flexdinesh/stage/main/scripts/insta
 
 Then open Settings and connect an existing T3 service, an OpenCode 2.3.0 service, or both. `stage update` installs the latest release, `stage update --check` compares versions, and `stage uninstall` removes stage and keeps your data. Headless: `stage service start` runs the server as a per-user service. Guide: [Install and update](https://stage.hoplabs.dev/docs/reference/install).
 
+## Share a Stage server
+
+Stage starts in personal mode. Anyone who can reach a personal listener on your trusted network can operate it. To share one workspace with named accounts, set `STAGE_MULTI_USER=1` and put Stage behind HTTPS with a private upstream. The first admin claims the installation, then copies single-use invites for trusted members. Members can run code wherever the workspace's harnesses permit. [Set up shared access](https://stage.hoplabs.dev/docs/usage/server#enable-shared-access)
+
 ## For agents
 
 Set up your agents once per machine:

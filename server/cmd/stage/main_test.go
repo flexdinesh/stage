@@ -56,7 +56,7 @@ func TestExitCode(t *testing.T) {
 // env is an isolated environment: never the user's data, config or runtime dir.
 func env(t *testing.T) (string, []string) {
 	t.Helper()
-	short, err := os.MkdirTemp("", "mn")
+	short, err := os.MkdirTemp("/tmp", "mn")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,6 +147,31 @@ func TestServeInvalidDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestServeMultiUserOptions(t *testing.T) {
+	short, environ := env(t)
+	environ = append(environ, "STAGE_DATA_DIR="+filepath.Join(short, "data"))
+	listen := "unix:" + filepath.Join(short, "product.sock")
+	for _, tc := range []struct {
+		value string
+		args  []string
+		want  string
+	}{
+		{"invalid-secret", nil, "STAGE_MULTI_USER must be"},
+		{"1", nil, "STAGE_PUBLIC_URL"},
+		{"false", []string{"--multi-user"}, "STAGE_PUBLIC_URL"},
+		{"invalid-secret", []string{"--multi-user"}, "STAGE_PUBLIC_URL"},
+	} {
+		args := append([]string{"serve", "--listen", listen}, tc.args...)
+		code, stderr := runMain(t, append(environ, "STAGE_MULTI_USER="+tc.value), args...)
+		if code != 78 || !strings.Contains(stderr, tc.want) || strings.Contains(stderr, "invalid-secret") {
+			t.Errorf("%s %v: %d %s", tc.value, tc.args, code, stderr)
+		}
+	}
+	if code, stderr := runMain(t, environ, "serve", "--managed", "--multi-user=false"); code != 2 || !strings.Contains(stderr, "service.env") {
+		t.Fatalf("managed flag: %d %s", code, stderr)
+	}
+}
+
 // A database migrated by a newer Stage: exit 78 with the recovery hint.
 func TestServeNewerSchema(t *testing.T) {
 	short, environ := env(t)
@@ -185,10 +210,10 @@ func TestManagedServe(t *testing.T) {
 		data = cfgDir
 	}
 	_ = os.MkdirAll(cfgDir, 0o700)
-	_ = os.WriteFile(filepath.Join(cfgDir, "service.env"), []byte("STAGE_LISTEN=unix\nT3_FAKE=1\n"), 0o600)
-	// An inherited STAGE_DATA_DIR is ignored in managed mode.
+	_ = os.WriteFile(filepath.Join(cfgDir, "service.env"), []byte("STAGE_LISTEN=unix\nSTAGE_MULTI_USER=1\nSTAGE_PUBLIC_URL=https://stage.example.test\nT3_FAKE=1\n"), 0o600)
+	// The managed server gets the opt-in and listener from service.env.
 	cmd := exec.Command(os.Args[0])
-	cmd.Env = append(environ, helperArgs+"=serve\t--managed", "STAGE_DATA_DIR="+filepath.Join(short, "ignored"))
+	cmd.Env = append(environ, helperArgs+"=serve\t--managed", "STAGE_DATA_DIR="+filepath.Join(short, "ignored"), "STAGE_MULTI_USER=0")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
@@ -214,12 +239,18 @@ func TestManagedServe(t *testing.T) {
 	for {
 		health, err := api.Health(ctx)
 		if err == nil && health.Status == "ok" {
+			if !health.SharedAccess || !health.SetupPending {
+				t.Fatal("managed service did not start in shared setup mode")
+			}
 			break
 		}
 		if ctx.Err() != nil {
 			t.Fatalf("managed readiness: %v %+v", err, health)
 		}
 		time.Sleep(25 * time.Millisecond)
+	}
+	if code, stderr := runMain(t, environ, "owner", "reissue-setup"); code != 0 {
+		t.Fatalf("managed owner recovery: %d %s", code, stderr)
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
 	if err := cmd.Wait(); err != nil {

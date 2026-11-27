@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	_ "time/tzdata" // IANA zones for /api/stats tz even without system zoneinfo
@@ -96,13 +97,14 @@ type listenFlags []string
 func (l *listenFlags) String() string     { return strings.Join(*l, ",") }
 func (l *listenFlags) Set(v string) error { *l = append(*l, v); return nil }
 
-// run is `stage` or `stage serve [--listen ADDR]... | --managed`.
+// run is `stage` or `stage serve [--listen ADDR]... [--multi-user] | --managed`.
 func run(args []string) (bool, error) {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	var listens listenFlags
 	fs.Var(&listens, "listen", "listen address, repeatable or comma-separated: host:port, unix:/abs/path.sock, or unix (the private default socket); overrides STAGE_LISTEN; default "+listen.Default)
 	managed := fs.Bool("managed", false, "run as the per-user service (`stage service`): config from service.env only, the default data dir, unix listener required")
 	localHarnesses := fs.Bool("local-harnesses", false, "let this foreground server run harnesses that are local processes (the managed service always may; a container never); also "+harness.LocalHarnessesEnv+"=1")
+	multiUser := fs.Bool("multi-user", false, "enable shared access with email and password; overrides STAGE_MULTI_USER (managed services use service.env)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return false, err
@@ -114,6 +116,15 @@ func run(args []string) (bool, error) {
 	}
 	if *managed && len(listens) > 0 {
 		return true, errUsage{"serve: --managed takes its listeners from service.env (STAGE_LISTEN); drop --listen"}
+	}
+	multiUserSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "multi-user" {
+			multiUserSet = true
+		}
+	})
+	if *managed && multiUserSet {
+		return true, errUsage{"serve: --managed takes its access mode from service.env (STAGE_MULTI_USER); drop --multi-user"}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -129,7 +140,13 @@ func run(args []string) (bool, error) {
 			opts.OnLocked = managedLog
 		}
 	} else {
-		opts.Config, err = config.Load(listens, harnesses.Env())
+		getenv := func(key string) string {
+			if key == "STAGE_MULTI_USER" && multiUserSet {
+				return strconv.FormatBool(*multiUser)
+			}
+			return os.Getenv(key)
+		}
+		opts.Config, err = config.LoadFrom(getenv, listens, harnesses.Env())
 	}
 	if err != nil {
 		return *managed, config.Invalid(err)

@@ -27,6 +27,7 @@ func TestDBUsage(t *testing.T) {
 		{[]string{"copy", "--from", src}, "--to is required"},
 		{[]string{"copy", "--from", src, "--to", "postgres://h/d", "extra"}, `unexpected argument "extra"`},
 		{[]string{"copy", "--bogus"}, "flag provided but not defined"},
+		{[]string{"invalidate-access", "extra"}, "invalidate-access takes no arguments"},
 	}
 	for _, c := range cases {
 		code, _, stderr := runDBArgs(c.args...)
@@ -34,8 +35,8 @@ func TestDBUsage(t *testing.T) {
 			t.Errorf("%v: %d %s", c.args, code, stderr)
 		}
 	}
-	for _, args := range [][]string{{"help"}, {"copy", "--help"}} {
-		if code, out, _ := runDBArgs(args...); code != 0 || !strings.Contains(out, "stage db copy") {
+	for _, args := range [][]string{{"help"}, {"copy", "--help"}, {"invalidate-access", "--help"}} {
+		if code, out, _ := runDBArgs(args...); code != 0 || !strings.Contains(out, "stage db copy") || !strings.Contains(out, "stage db invalidate-access") {
 			t.Errorf("%v: %d %s", args, code, out)
 		}
 	}
