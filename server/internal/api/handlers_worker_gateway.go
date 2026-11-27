@@ -39,6 +39,7 @@ var gatewayForbidden = func() *http.ServeMux {
 		"POST /api/connections/{connectionId}/workspaces/undecline",
 		"POST /api/connections/{connectionId}/resolve",
 		"GET /api/workspaces/review",
+		"POST /api/project-groups/membership",
 		"POST /api/sync",
 	} {
 		m.HandleFunc(p, func(http.ResponseWriter, *http.Request) {})

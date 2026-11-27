@@ -104,6 +104,29 @@ func Key(w Workspace) string {
 	return identity(w).String()
 }
 
+// GroupingKey returns only evidence strong enough to organize two distinct
+// catalog rows. Legacy and native identifiers can hint at a move, but cannot
+// establish equivalence.
+func GroupingKey(w Workspace) string {
+	if w.Legacy {
+		return ""
+	}
+	if w.Remote != "" && w.Subpath != "" {
+		return (identityKey{kind: keyRemote, value: w.Remote, subpath: w.Subpath}).String()
+	}
+	switch k := identity(w); k.kind {
+	case keyCheckout:
+		if w.Subpath != "" {
+			return k.String()
+		}
+	case keyDirectory:
+		if w.Remote == "" && w.Subpath == "" {
+			return k.String()
+		}
+	}
+	return ""
+}
+
 func ExternalKey(w Workspace) string {
 	return externalIdentity(w).String()
 }

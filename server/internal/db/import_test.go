@@ -126,9 +126,8 @@ func TestImportReviewsAmbiguousPathsAndJoinsAnOccupiedProject(t *testing.T) {
 	if r != (ImportResult{Bound: 1}) {
 		t.Fatalf("result %+v", r)
 	}
-	var n int
-	if err = pool.QueryRow(`SELECT count(*) FROM projects`).Scan(&n); err != nil || n != 3 {
-		t.Fatalf("projects %d %v", n, err)
+	if n := projectCount(t, pool); n != 3 {
+		t.Fatalf("legacy projects %d", n)
 	}
 }
 

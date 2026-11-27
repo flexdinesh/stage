@@ -49,14 +49,21 @@ func (r projects) Exists(ctx context.Context, id int64) (bool, error) {
 	return true, nil
 }
 
-func (r projects) List(ctx context.Context, archive store.ProjectArchive) ([]store.Project, error) {
-	q := `SELECT ` + projectCols + ` FROM projects`
+func (r projects) List(ctx context.Context, archive store.ProjectArchive, includeCatalogGroups bool) ([]store.Project, error) {
+	q := `SELECT ` + projectCols + ` FROM projects WHERE true`
+	if !includeCatalogGroups {
+		q += ` AND (NOT catalog_group
+ OR EXISTS (SELECT 1 FROM project_bindings WHERE project_id=projects.id AND active)
+ OR EXISTS (SELECT 1 FROM tasks WHERE project_id=projects.id)
+ OR EXISTS (SELECT 1 FROM schedules WHERE project_id=projects.id)
+ OR EXISTS (SELECT 1 FROM snippets WHERE project_id=projects.id))`
+	}
 	switch archive {
 	case store.ProjectsArchived:
-		q += ` WHERE archived_at IS NOT NULL`
+		q += ` AND archived_at IS NOT NULL`
 	case store.ProjectsAll:
 	default:
-		q += ` WHERE archived_at IS NULL`
+		q += ` AND archived_at IS NULL`
 	}
 	q += ` ORDER BY lower(title),id`
 	rows, err := r.Query(ctx, q)
@@ -79,6 +86,13 @@ func (r projects) Get(ctx context.Context, id int64) (store.Project, error) {
 func (r projects) Insert(ctx context.Context, title string, createdBy int64, sourceMachine *int64) (int64, error) {
 	var id int64
 	err := r.QueryRow(ctx, `INSERT INTO projects(title,created_by_user_id,source_machine_id) VALUES($1,$2,$3) RETURNING id`, title, createdBy, sourceMachine).Scan(&id)
+	return id, err
+}
+
+func (r projects) InsertCatalogGroup(ctx context.Context, title string, createdBy int64, sourceMachine *int64) (int64, error) {
+	var id int64
+	err := r.QueryRow(ctx, `INSERT INTO projects(title,created_by_user_id,source_machine_id,catalog_group)
+ VALUES($1,$2,$3,true) RETURNING id`, title, createdBy, sourceMachine).Scan(&id)
 	return id, err
 }
 

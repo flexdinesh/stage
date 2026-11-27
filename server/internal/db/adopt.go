@@ -110,7 +110,7 @@ func (s *Store) adoptSession(ctx context.Context, tx store.Tx, in AdoptInput) (i
 		return 0, false, err
 	}
 	if in.Workspace != nil {
-		if err := resolveAll(ctx, tx); err != nil {
+		if err := resolveCatalog(ctx, tx, ref.ConnectionID); err != nil {
 			return 0, false, err
 		}
 		if err := putObservation(ctx, tx, sid, o, time.Time{}); err != nil {
@@ -227,9 +227,12 @@ func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput,
 }
 
 func historicalWorkspaceProject(ctx context.Context, pr store.Projects, b ProjectBinding, title string) (int64, error) {
-	id, err := pr.HistoricalWorkspaceProject(ctx, b)
-	if !errors.Is(err, ErrNotFound) {
-		return id, err
+	historical, group, err := pr.WorkspaceProjectReferences(ctx, b)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return 0, err
+	}
+	if historical != nil {
+		return *historical, nil
 	}
 	state, err := loadIdentity(ctx, pr)
 	if err != nil {
@@ -240,7 +243,12 @@ func historicalWorkspaceProject(ctx context.Context, pr store.Projects, b Projec
 		return 0, Conflict("session workspace is unavailable; refresh and retry adoption")
 	}
 	row := state.rows[i]
-	id = projectmatch.NewResolver(state.input).StrongProject(state.input.Workspaces[i])
+	var id int64
+	if group != nil {
+		id = *group
+	} else {
+		id = projectmatch.NewResolver(state.input).StrongProject(state.input.Workspaces[i])
+	}
 	if id == 0 {
 		title := splitProjectTitle(title, store.ProjectSplitWorkspace{
 			Title: row.Title, Workspace: row.Workspace.Workspace, ExternalID: row.ExternalID,
@@ -268,10 +276,16 @@ func (s *Store) AdoptionPreviewProject(ctx context.Context, b ProjectBinding, in
 		if !errors.Is(err, ErrNotFound) {
 			return Project{}, err
 		}
-		id, err := pr.HistoricalWorkspaceProject(ctx, b)
+		historical, group, err := pr.WorkspaceProjectReferences(ctx, b)
 		if err != nil {
 			return Project{}, err
 		}
-		return pr.Get(ctx, id)
+		if historical != nil {
+			return pr.Get(ctx, *historical)
+		}
+		if group != nil {
+			return pr.Get(ctx, *group)
+		}
+		return Project{}, ErrNotFound
 	})
 }

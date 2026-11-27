@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -127,7 +128,7 @@ func TestConnectionInventoryAccessAndProjection(t *testing.T) {
 	}
 	notifyRequest(t, e, auth.SignInResult{}, "GET", inventory, "", 401, nil)
 	notifyRequest(t, e, auth.SignInResult{}, "GET", "/api/projects", "", 401, nil)
-	for _, route := range []string{inventory, "/api/projects"} {
+	for _, route := range []string{inventory, "/api/projects", "/api/project-groups"} {
 		rec := raw(t, pending, "GET", route, nil, nil, nil)
 		if rec.Code != 403 || !strings.Contains(rec.Body.String(), "setup_pending") {
 			t.Fatalf("pending GET %s: %d %s", route, rec.Code, rec.Body)
@@ -155,6 +156,7 @@ func TestConnectionInventoryAccessAndProjection(t *testing.T) {
 	request("GET", inventory, 403)
 	request("POST", "/api/sync", 403)
 	request("POST", "/api/connections/1/resolve", 403)
+	request("POST", "/api/project-groups/membership", 403)
 	body := request("GET", "/api/projects", 200)
 	var projection client.ProjectSummaries
 	if err := json.Unmarshal([]byte(body), &projection); err != nil {
@@ -164,6 +166,11 @@ func TestConnectionInventoryAccessAndProjection(t *testing.T) {
 		t.Fatalf("agent selection: %+v", projection)
 	}
 	for _, dest := range projection.Destinations {
+		if dest.GroupProjectID == nil || !slices.ContainsFunc(projection.Groups, func(group db.ProjectGroupSummary) bool {
+			return group.ID == *dest.GroupProjectID
+		}) {
+			t.Fatalf("agent cannot resolve destination's group: %+v", dest)
+		}
 		if !dest.Available || dest.MachineLabel == "" || dest.ConnectionID != 1 {
 			t.Fatalf("invalid destination %+v", dest)
 		}

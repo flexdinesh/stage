@@ -118,6 +118,12 @@ func workspaceResolution(v projectmatch.Verdict) store.WorkspaceResolution {
 // resolveAll updates derived state from a single indexed view of the inventory.
 // The writer must hold the identity lock.
 func resolveAll(ctx context.Context, tx store.Tx) error {
+	return resolveCatalog(ctx, tx, 0)
+}
+
+// resolveCatalog also places new logical memberships when a connection's
+// inventory was refreshed, using the same snapshot as the legacy resolver.
+func resolveCatalog(ctx context.Context, tx store.Tx, connection int64) error {
 	pr := tx.Projects()
 	state, err := loadIdentity(ctx, pr)
 	if err != nil {
@@ -137,6 +143,9 @@ func resolveAll(ctx context.Context, tx store.Tx) error {
 		if err := pr.SetWorkspaceResolution(ctx, c.Connection, c.ExternalID, c.Path, v); err != nil {
 			return err
 		}
+	}
+	if connection != 0 {
+		return organizeWorkspaces(ctx, pr, state, connection)
 	}
 	return nil
 }

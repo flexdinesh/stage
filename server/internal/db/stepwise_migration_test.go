@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flexdinesh/stage/server/internal/db/dbtest/migrationfixture"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 )
 
@@ -94,6 +95,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	45: {{"existing connection has unknown workspace freshness", seedV0037ConnectionFacts, checkV0045WorkspaceRefresh}},
 	46: {{"existing workspace has no historical project", seedV0046HistoricalWorkspaceProject, checkV0046HistoricalWorkspaceProject}},
 	47: {{"backfill proven workspace pins and preserve attempts", seedV0047WorkspacePins, checkV0047WorkspacePins}},
+	48: {{"proven group memberships and historical work retained", seedProjectGroups, checkProjectGroups}},
 }
 
 func seedV0046HistoricalWorkspaceProject(t *testing.T, pool *sqlite.DB) {
@@ -171,6 +173,21 @@ func checkV0047WorkspacePins(t *testing.T, pool *sqlite.DB) {
 		 VALUES (13,2,2,'unbound','/unbound',0)`)
 	wantRows(t, pool, `SELECT task_id,attempt,connection_id,external_project_id,workspace,binding_id,binding_revision
 	FROM task_launch_destinations ORDER BY attempt`, "13|1|2|historic|/historic|1|7", "13|2|2|unbound|/unbound|NULL|0")
+}
+
+func seedProjectGroups(t *testing.T, pool *sqlite.DB) {
+	migrationfixture.SeedProjectGroups(t, func(query string) error {
+		_, err := pool.ExecContext(t.Context(), query)
+		return err
+	})
+}
+
+func checkProjectGroups(t *testing.T, pool *sqlite.DB) {
+	migrationfixture.CheckProjectGroups(t, func(query string) (int, error) {
+		var count int
+		err := pool.QueryRowContext(t.Context(), query).Scan(&count)
+		return count, err
+	})
 }
 
 func checkV0045WorkspaceRefresh(t *testing.T, pool *sqlite.DB) {

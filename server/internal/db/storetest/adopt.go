@@ -71,6 +71,30 @@ func caseAdoptWorkspaceHistory(t *testing.T, open Factory) {
 	if task := track("current-group", third); task.ProjectID != project.ID {
 		t.Fatalf("current exact group should win over the earlier historical association: %+v", task)
 	}
+
+	grouped := execution.WorkspaceInfo{ID: "folder", Title: "Organized folder", WorkspaceRoot: "/w/folder"}
+	inventory = append(inventory, grouped)
+	groupID := refreshGroupWorkspaces(t, s, ctx, connection, inventory...)[grouped.ID]
+	if shown, err := s.AdoptionPreviewProject(ctx, binding(grouped), true); err != nil || shown.ID != groupID {
+		t.Fatalf("preview should use the current group for a first track: %+v, %v", shown, err)
+	}
+	tracked := track("grouped-folder", grouped)
+	if tracked.ProjectID != groupID {
+		t.Fatalf("first track did not record the current group: %+v", tracked)
+	}
+	edit := db.GroupEditInput{ConnectionID: connection, WorkspaceID: db.WorkspaceID(connection, grouped.ID, grouped.WorkspaceRoot)}
+	preview, err := s.EditProjectGroup(ctx, edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edit.PreviewToken = preview.PreviewToken
+	separated, err := s.EditProjectGroup(ctx, edit)
+	if err != nil || separated.Target == nil || separated.Target.ID == groupID {
+		t.Fatalf("separate workspace: %+v, %v", separated, err)
+	}
+	if task := track("grouped-folder-follow-up", grouped); task.ProjectID != groupID {
+		t.Fatalf("regrouping changed the recorded historical project: %+v", task)
+	}
 }
 
 func caseAdoptSession(t *testing.T, open Factory) {

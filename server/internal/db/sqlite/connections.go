@@ -160,6 +160,7 @@ func (r connections) Revive(ctx context.Context, id int64, label, identity strin
 func (r connections) HasRelations(ctx context.Context, id int64) (bool, error) {
 	var related bool
 	err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_bindings WHERE connection_id=$1)
+ OR EXISTS(SELECT 1 FROM external_projects WHERE connection_id=$1 AND group_project_id IS NOT NULL)
  OR EXISTS(SELECT 1 FROM session_identities WHERE connection_id=$1)
  OR EXISTS(SELECT 1 FROM task_launch_destinations WHERE connection_id=$1)
  OR EXISTS(SELECT 1 FROM tasks WHERE connection_id=$1 AND NOT (state='backlog' AND session_id IS NULL))`, id).Scan(&related)
@@ -175,6 +176,7 @@ func (r connections) HasWork(ctx context.Context, id int64) (bool, error) {
 func (r connections) Referenced(ctx context.Context, id int64) (bool, error) {
 	var referenced bool
 	err := r.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE connection_id=$1)
+ OR EXISTS(SELECT 1 FROM external_projects WHERE connection_id=$1 AND group_project_id IS NOT NULL)
  OR EXISTS(SELECT 1 FROM schedules WHERE connection_id=$1)
  OR EXISTS(SELECT 1 FROM session_identities WHERE connection_id=$1)
  OR EXISTS(SELECT 1 FROM task_launch_destinations WHERE connection_id=$1)
@@ -236,7 +238,8 @@ func (r connections) Forget(ctx context.Context, id int64) error {
 	return r.execAll(ctx, id,
 		`UPDATE harness_connections SET identity='',forgotten_at=stage_now() WHERE id=$1`,
 		`UPDATE project_bindings SET active=0 WHERE connection_id=$1`,
-		`DELETE FROM external_projects WHERE connection_id=$1`,
+		`DELETE FROM external_projects WHERE connection_id=$1 AND group_project_id IS NULL`,
+		`UPDATE external_projects SET available=false WHERE connection_id=$1`,
 		`DELETE FROM workspace_declines WHERE connection_id=$1`)
 }
 

@@ -16,8 +16,9 @@ type ProjectList struct {
 }
 
 type ProjectSummaries struct {
-	Projects     []db.ProjectSummary `json:"projects"`
-	Destinations []db.Destination    `json:"destinations"`
+	Projects     []db.ProjectSummary      `json:"projects"`
+	Groups       []db.ProjectGroupSummary `json:"groups"`
+	Destinations []db.Destination         `json:"destinations"`
 }
 
 // ProjectSummaries reads the selection projection without refreshing a harness.

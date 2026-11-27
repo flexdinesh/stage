@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/machine"
 )
 
@@ -190,15 +191,17 @@ func (s *Service) syncConnection(ctx context.Context, id int64, freshSessions bo
 	defer func() { st.progress.Store(&Progress{}); st.running.Store(false) }()
 	r := Result{}
 	var errs []error
-	_, projects, err := s.RefreshInventory(ctx, id)
-	r.Projects = projects
+	var imported db.ImportResult
+	err := s.WithInventory(ctx, id, func(rows []execution.WorkspaceInfo) error {
+		count, result, err := s.store.SyncWorkspaceInventory(ctx, id, rows)
+		r.Projects, imported = count, result
+		return err
+	})
 	if err != nil {
 		errs = append(errs, err)
 	} else {
 		st.progress.Store(&Progress{Running: true, StartedAt: &now, Projects: r.Projects})
-		if imported, err := s.store.ImportWorkspaces(ctx, id); err != nil {
-			errs = append(errs, err)
-		} else if imported != (db.ImportResult{}) {
+		if imported != (db.ImportResult{}) {
 			s.log.Info("project import", "connection", id, "created", imported.Created, "bound", imported.Bound, "moved", imported.Moved)
 		}
 	}

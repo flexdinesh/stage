@@ -98,6 +98,7 @@ func (r projects) ApplyMerge(ctx context.Context, into, from, by int64) error {
  AND target.connection_id=source.connection_id AND target.active AND target.is_primary)`,
 		`UPDATE project_bindings SET project_id=$2 WHERE project_id=$1`,
 		`UPDATE external_projects SET historical_project_id=$2 WHERE historical_project_id=$1`,
+		`UPDATE external_projects SET group_project_id=$2,group_revision=group_revision+1 WHERE group_project_id=$1`,
 		`UPDATE tasks SET project_id=$2 WHERE project_id=$1`,
 		`UPDATE schedules SET project_id=$2 WHERE project_id=$1`,
 		`UPDATE snippets SET project_id=$2 WHERE project_id=$1`,

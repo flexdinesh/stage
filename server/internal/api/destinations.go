@@ -63,7 +63,8 @@ func (s *server) destinations(ctx context.Context) ([]db.Destination, error) {
 		keys = append(keys, key)
 		out = append(out, db.Destination{
 			ConnectionID: c.ID, WorkspaceID: row.WorkspaceID, ProjectID: row.ProjectID,
-			Title: key.title, ConnectionLabel: key.connection, MachineLabel: key.machine, Available: true,
+			GroupProjectID: row.GroupProjectID,
+			Title:          key.title, ConnectionLabel: key.connection, MachineLabel: key.machine, Available: true,
 		})
 	}
 	for i, key := range keys {

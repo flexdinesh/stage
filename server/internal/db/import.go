@@ -91,7 +91,7 @@ func (s *Store) resolveWorkspaces(ctx context.Context, connection int64, apply b
 		if err := s.applyPlacements(ctx, tx, state, plan, &result); err != nil {
 			return ResolveResult{}, err
 		}
-		if err := resolveAll(ctx, tx); err != nil {
+		if err := resolveCatalog(ctx, tx, connection); err != nil {
 			return ResolveResult{}, err
 		}
 		result.Applied = true
@@ -226,12 +226,34 @@ func (s *Store) applyPlacements(ctx context.Context, tx store.Tx, state identity
 }
 
 func (s *Store) ImportWorkspaces(ctx context.Context, connection int64) (ImportResult, error) {
+	ctx = WithUser(withoutMachine(ctx), DefaultUser)
 	result, err := s.ResolveWorkspaces(ctx, connection, true)
 	var conflict *ConflictError
 	if errors.As(err, &conflict) && conflict.Code == "connection_retired" {
 		return ImportResult{}, nil
 	}
 	return ImportResult{Created: result.Created, Bound: result.Joined, Moved: result.Moved}, err
+}
+
+// SyncWorkspaceInventory commits the catalog before running legacy imports.
+// Imports can supply a group anchor for a new row. If they fail, the same
+// catalog still supports independent group placement.
+func (s *Store) SyncWorkspaceInventory(ctx context.Context, connection int64, inventory []execution.WorkspaceInfo) (int, ImportResult, error) {
+	count, err := s.refreshWorkspaces(ctx, connection, inventory, false)
+	if err != nil {
+		return 0, ImportResult{}, err
+	}
+	result, err := s.ImportWorkspaces(ctx, connection)
+	if err == nil {
+		return count, result, nil
+	}
+	groupErr := s.e.Write(ctx, func(tx store.Tx) error {
+		if err := tx.Projects().LockIdentity(ctx); err != nil {
+			return err
+		}
+		return resolveCatalog(ctx, tx, connection)
+	})
+	return count, result, errors.Join(err, groupErr)
 }
 
 // ImportSummaries reports each connection's recent project creation.

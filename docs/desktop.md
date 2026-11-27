@@ -399,8 +399,8 @@ Task completion uses the shared app review drawer (full width on phones), with c
 Project planning remains available without T3. The shared project form creates
 Stage metadata offline. Bind the selected harness workspace before launch.
 The bridge integration tests discover the demo binding through
-`GET /api/connections/{connectionId}/workspaces` and launch through its primary
-workspace against isolated fake T3.
+`GET /api/connections/{connectionId}/workspaces`, waiting for the asynchronous
+inventory and import to finish before launching against isolated fake T3.
 
 Harness navigation uses `Links.executionDestination`. The desktop host chooses native links for a local Stage connection and web links for a remote connection. A resume command (`ExecutionLinks.command`) is never opened; the shared task page offers to copy it. Shared product code does not inspect browser location or choose the platform.
 

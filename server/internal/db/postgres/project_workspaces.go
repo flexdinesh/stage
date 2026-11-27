@@ -25,12 +25,11 @@ func (r projects) LockIdentity(ctx context.Context) error {
 	return err
 }
 
-func (r projects) HistoricalWorkspaceProject(ctx context.Context, b store.ProjectBinding) (int64, error) {
-	var id int64
-	err := r.QueryRow(ctx, `SELECT historical_project_id FROM external_projects
- WHERE connection_id=$1 AND external_id=$2 AND workspace=$3 AND historical_project_id IS NOT NULL`,
-		b.ConnectionID, b.ExternalProjectID, b.Workspace).Scan(&id)
-	return id, notFound(err)
+func (r projects) WorkspaceProjectReferences(ctx context.Context, b store.ProjectBinding) (historical, group *int64, err error) {
+	err = r.QueryRow(ctx, `SELECT historical_project_id,group_project_id FROM external_projects
+ WHERE connection_id=$1 AND external_id=$2 AND workspace=$3`,
+		b.ConnectionID, b.ExternalProjectID, b.Workspace).Scan(&historical, &group)
+	return historical, group, notFound(err)
 }
 
 func (r projects) SetHistoricalWorkspaceProject(ctx context.Context, b store.ProjectBinding, projectID int64) error {
@@ -42,7 +41,8 @@ func (r projects) SetHistoricalWorkspaceProject(ctx context.Context, b store.Pro
 func (r projects) WorkspaceRows(ctx context.Context) ([]store.StoredWorkspace, error) {
 	rows, err := r.Query(ctx, `SELECT e.connection_id,e.external_id,e.title,e.workspace,e.available,e.importable,e.archived,e.active_at,
  b.project_id,b.id,COALESCE(b.is_primary,false),e.file_host,e.canonical_path,e.repo,e.repo_path,e.evidence_at,e.evidence_source,
- e.resolution,e.resolution_reason,e.resolution_rule,e.candidates,c.machine_id,c.active,e.checkout_key,e.inode_hint
+ e.resolution,e.resolution_reason,e.resolution_rule,e.candidates,c.machine_id,c.active,e.checkout_key,e.inode_hint,
+ e.group_project_id,e.group_revision,e.historical_project_id
  FROM external_projects e
  JOIN harness_connections c ON c.id=e.connection_id
  LEFT JOIN project_bindings b ON b.connection_id=e.connection_id AND b.external_project_id=e.external_id AND b.workspace=e.workspace AND b.active
@@ -55,9 +55,15 @@ func (r projects) WorkspaceRows(ctx context.Context) ([]store.StoredWorkspace, e
 		err := row.Scan(&w.ConnectionID, &w.ExternalID, &w.Title, &w.Workspace.Workspace, &w.Available, &w.Importable, &w.HarnessArchived, &w.ActiveAt,
 			&w.ProjectID, &w.BindingID, &w.Primary, &w.FileHost, &w.CanonicalPath, &w.Remote, &w.Subpath, &w.EvidenceAt, &w.EvidenceSource,
 			&w.Resolution.Outcome, &w.Resolution.Reason, &w.Resolution.Rule, &w.Resolution.Candidates,
-			&w.MachineID, &w.ConnectionActive, &w.CheckoutKey, &w.InodeHint)
+			&w.MachineID, &w.ConnectionActive, &w.CheckoutKey, &w.InodeHint, &w.GroupProjectID, &w.GroupRevision, &w.HistoricalProjectID)
 		return w, err
 	})
+}
+
+func (r projects) SetWorkspaceGroup(ctx context.Context, w store.StoredWorkspace, group int64, attribution store.Attribution) error {
+	_, err := r.Exec(ctx, `UPDATE external_projects SET group_project_id=$4,group_revision=group_revision+1,group_attribution=$5
+ WHERE connection_id=$1 AND external_id=$2 AND workspace=$3`, w.ConnectionID, w.ExternalID, w.Workspace.Workspace, group, attribution)
+	return err
 }
 
 func (r projects) IdentityBindings(ctx context.Context) ([]store.IdentityBinding, error) {
