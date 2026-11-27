@@ -5,7 +5,8 @@ import type { HarnessConnection, Workspace } from "../api/types.ts";
 import { POLL } from "../lib/polling.ts";
 import { availableTaskWorkspaces, suggestedTaskWorkspace } from "../lib/taskForm.ts";
 import { useApi } from "../platform/context.tsx";
-import { Button, Combobox, ErrorText, Field, Hint, TextLink, type ComboboxOption } from "./ui.tsx";
+import { IconClose, IconRefresh } from "./icons.tsx";
+import { Combobox, ErrorText, Field, IconButton, TextLink, type ComboboxOption } from "./ui.tsx";
 
 interface WorkspaceChoice {
   id: string;
@@ -129,30 +130,40 @@ export function TaskDestinationFields({ destination: d, readOnly, canClear, onCo
   onConnection: (id: number) => void;
   onWorkspace: (id: string) => void;
 }) {
+  const path = d.selected === undefined ? null : (
+    <span className="font-mono wrap-anywhere">{d.selected.workspace || d.selected.externalId}</span>
+  );
+  // Read-only shows the path alone. Editable always keeps one line under the workspace (status, else path, else a
+  // blank line) and fixed refresh/clear buttons, so picking a connection or workspace never moves the form.
+  const workspaceHint = readOnly ? path ?? undefined : <span role="status">{d.status ?? path ?? " "}</span>;
+  const noHarness = !readOnly && d.connectionOptions.length === 0 && d.harnesses.loaded;
   return (
     <div className="flex flex-col gap-2">
       <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
-        <Field label="Connection">
+        <Field label="Connection" hint={noHarness ? <>Connect a harness in <TextLink to="/settings/connections" variant="rest">Settings</TextLink>.</> : undefined}>
           {(id) => <Combobox id={id} value={d.connection === 0 ? "" : String(d.connection)} options={d.connectionOptions}
             onChange={(next) => onConnection(Number(next))} listLabel="Connections" placeholder="Choose a connection…"
             searchable={false} showTag autoFocus={!readOnly} disabled={readOnly || d.connectionOptions.length === 0} />}
         </Field>
-        <Field label="Workspace" hint={d.selected === undefined ? undefined : (
-          <span className="font-mono wrap-anywhere">{d.selected.workspace || d.selected.externalId}</span>
-        )}>
-          {(id) => <Combobox key={d.connection} id={id} value={d.workspaceId ?? ""} options={d.workspaceOptions}
-            onChange={onWorkspace} listLabel="Workspaces" placeholder={d.workspacePlaceholder} searchable
-            disabled={readOnly || d.selected === undefined && d.workspaceOptions.every((o) => o.disabled === true)} />}
+        <Field label="Workspace" hint={workspaceHint}>
+          {(id) => (
+            <div className="flex min-w-0 gap-1.5">
+              <Combobox key={d.connection} id={id} value={d.workspaceId ?? ""} options={d.workspaceOptions}
+                onChange={onWorkspace} listLabel="Workspaces" placeholder={d.workspacePlaceholder} searchable
+                className="min-w-0 flex-1"
+                disabled={readOnly || d.selected === undefined && d.workspaceOptions.every((o) => o.disabled === true)} />
+              {readOnly ? null : (
+                <IconButton variant="secondary" icon={IconRefresh} label="Refresh workspaces" busy={d.refreshing}
+                  disabled={!d.canRefresh} onClick={d.refresh} />
+              )}
+              {readOnly || !canClear ? null : (
+                <IconButton variant="secondary" icon={IconClose} label="Clear workspace"
+                  disabled={d.workspaceId === null} onClick={() => onWorkspace("")} />
+              )}
+            </div>
+          )}
         </Field>
       </div>
-      {readOnly ? null : (
-        <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
-          <div role="status" className="min-w-0 grow">{d.status === null ? null : <Hint>{d.status}</Hint>}</div>
-          {d.canRefresh ? <Button small variant="ghost" busy={d.refreshing} onClick={d.refresh}>Refresh workspaces</Button> : null}
-          {canClear && d.workspaceId !== null ? <Button small variant="ghost" onClick={() => onWorkspace("")}>Clear workspace</Button> : null}
-          {d.connectionOptions.length === 0 && d.harnesses.loaded ? <Hint>Connect a harness in <TextLink to="/settings/connections" variant="rest">Settings</TextLink>.</Hint> : null}
-        </div>
-      )}
       <ErrorText error={d.harnesses.error} />
     </div>
   );

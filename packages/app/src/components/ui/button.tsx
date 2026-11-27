@@ -49,13 +49,23 @@ type IconButtonProps = Omit<ComponentProps<"button">, "children" | "aria-label">
   icon: IconComponent;
   variant?: Variant;
   small?: boolean;
+  /** Disables it and swaps the icon for Button's busy spinner. */
+  busy?: boolean;
 };
 
 /** Square icon-only button. Icons draw at 16px (14px small); the label names it for screen readers and the tooltip. */
-export function IconButton({ label, icon: Icon, variant, small = false, className, title, type, ...rest }: IconButtonProps) {
+export function IconButton({ label, icon: Icon, variant, small = false, busy = false, className, title, type, disabled, ...rest }: IconButtonProps) {
   return (
-    <button type={type ?? "button"} aria-label={label} title={title ?? label} className={cx(iconButtonClass(variant, small), className)} {...rest}>
-      <Icon size={small ? 14 : 16} />
+    <button
+      type={type ?? "button"}
+      aria-label={label}
+      title={title ?? label}
+      disabled={disabled === true || busy}
+      aria-busy={busy || undefined}
+      className={cx(iconButtonClass(variant, small), className)}
+      {...rest}
+    >
+      {busy ? <span className="size-3 animate-spin border-[1.5px] border-current border-t-transparent" /> : <Icon size={small ? 14 : 16} />}
     </button>
   );
 }
