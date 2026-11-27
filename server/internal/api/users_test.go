@@ -42,7 +42,7 @@ func TestMeAndCreatedBy(t *testing.T) {
 	e.must("POST", fmt.Sprintf("/api/tasks/%d/journal", tk.ID), map[string]any{"text": "n", "requestId": "me-1"}, 201, &note)
 	check("journal entry", note)
 	var sc created
-	e.must("POST", "/api/schedules", map[string]any{"projectId": p.ID, "title": "s", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC"}, 201, &sc)
+	e.must("POST", "/api/schedules", e.taskBody(p.ID, "s", map[string]any{"prompt": "go", "cron": "0 2 * * *", "tz": "UTC"}), 201, &sc)
 	check("schedule", sc)
 	var hs struct {
 		Machine created `json:"machine"`

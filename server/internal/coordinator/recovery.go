@@ -78,7 +78,7 @@ func (s *Service) previewExisting(ctx context.Context, id int64, link string) (L
 		}
 	}
 	if !verified {
-		return p, db.Conflict("The original workspace cannot be verified. Restore its binding before linking.")
+		return p, db.Conflict("The original workspace cannot be verified. Restore that exact workspace on the original connection before linking.")
 	}
 	if o.Child || o.Archived {
 		return p, db.Conflict("Choose an active top-level session.")

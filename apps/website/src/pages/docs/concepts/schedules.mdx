@@ -15,19 +15,19 @@ Stage can start work for you at a time you choose. In the New task drawer, **Sta
 
 ## At time
 
-A one-shot start is not a schedule: it is a start time on an ordinary backlog task. When the time comes, Stage starts the task. If the server was down at that time, the task starts late rather than being skipped. Starting it by hand clears the start time.
+A one-shot start saves a start time and an exact workspace on a backlog task. When the time comes, Stage starts the task. If the server was down at that time, the task starts when Stage returns. Starting it by hand clears the start time.
 
 ## Repeat
 
-A schedule holds a task's config (project, connection, prompt, options, optional workspace binding and images), a note template and a timing rule:
+A schedule holds a task's config (project, connection, exact workspace, prompt, options and images), a note template and a timing rule:
 
 - a preset: Hourly, Daily, Weekdays or Weekly, or
 - a raw 5-field cron expression.
 
 Times are evaluated in the schedule's IANA zone, so daylight saving follows the zone.
 
-Choose **Primary** to use the project's primary workspace on the selected
-connection at each fire. Choosing a specific workspace pins the schedule to it.
+Choose a connection and a workspace to pin the schedule's destination.
+Each fire uses that pair, even if the workspace moves to a different project group.
 
 **Each fire spawns a new task** with the schedule's config, images and note template, and starts it. Spawned tasks are standalone: they join no tree and have no needs.
 
@@ -35,7 +35,7 @@ connection at each fire. Choosing a specific workspace pins the schedule to it.
 
 - A fire is **skipped** while the previous spawned task is still pending, running or needs input. A previous task that is done but not yet completed does not block.
 - Fires missed while the server was down are **skipped**, recorded once as missed. Nothing runs late.
-- If a fire cannot launch because its workspace binding or connection is unavailable, it becomes one backlog task with the error to repair. Later fires are held back while it waits. Start it by hand once fixed.
+- A fire with an unavailable workspace pin is skipped and recorded with a repair reason. Edit the schedule and select an exact workspace for future fires.
 
 Scheduled starts and skips do not notify. A failed launch notifies as usual.
 

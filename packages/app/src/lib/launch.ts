@@ -1,8 +1,7 @@
-import type { Capabilities, Destination, HarnessConnection, Machine, ProjectBinding, Task } from "../api/types.ts";
+import type { Capabilities, Destination, HarnessConnection, Machine, Task } from "../api/types.ts";
 import type { HarnessSummary } from "./connections.ts";
 import { relativeTime } from "./format.ts";
 import { machineSetupState } from "./machines.ts";
-import { workspaceBinding } from "./projects.ts";
 import { canStart } from "./tasks.ts";
 
 /** Copy for the task detail banner of a launch Stage has not confirmed; `name` is the harness's name. */
@@ -66,16 +65,12 @@ export interface LaunchBlock {
   fix: { label: string; to: string } | null;
 }
 
-/** What `launchBlock` reads about a task's connection; undefined parts are not loaded yet and block nothing. */
-export interface LaunchContext {
+/** Connection status used to gate session operations. */
+interface ConnectionContext {
   connection: Pick<HarnessConnection, "active" | "configured"> | undefined;
   machine: Pick<Machine, "kind" | "status" | "label" | "statusReason"> | undefined;
   /** Its live status on its machine; undefined until read (checking blocks nothing). */
   live: Pick<HarnessSummary, "tone" | "label"> | undefined;
-  /** The task's project bindings; undefined until projects load. */
-  bindings: readonly ProjectBinding[] | undefined;
-  destinations?: readonly Destination[];
-  destinationError?: boolean;
   /** The connection's display name ("T3", or "T3 · desk" with two or more machines). */
   name: string;
   /** "on desk" with two or more machines, else "". */
@@ -84,13 +79,15 @@ export interface LaunchContext {
   settings: string;
 }
 
+export interface LaunchContext extends ConnectionContext {
+  destinations?: readonly Destination[];
+  destinationError?: boolean;
+}
+
 /**
- * Why Start cannot launch the task on its connection now, or null when it can (as far as Stage knows; the server
- * checks again). In order: disconnected, its machine unavailable, the harness not answering (unreachable,
- * unpaired, expired, rejected), the project without an available workspace there. A replaced connection is not a
- * block here: it never launches again (isRetired).
+ * A connection problem that blocks the requested operation. Callers handle retired connections separately.
  */
-export function connectionBlock(c: Omit<LaunchContext, "bindings">, op: SessionOperation): LaunchBlock | null {
+export function connectionBlock(c: ConnectionContext, op: SessionOperation): LaunchBlock | null {
   const { connection, machine, live, name, where, settings } = c;
   const target = operationTarget[op];
   const action = target.charAt(0).toUpperCase() + target.slice(1);
@@ -118,36 +115,22 @@ export function connectionBlock(c: Omit<LaunchContext, "bindings">, op: SessionO
   return null;
 }
 
-export type LaunchTarget = Pick<Task, "connectionId" | "projectId" | "projectTitle" | "bindingId" | "workspaceId"> & { id?: number };
+export type LaunchTarget = Pick<Task, "connectionId" | "workspaceId">;
 
 export function launchBlock(t: LaunchTarget, c: LaunchContext): LaunchBlock | null {
   const block = connectionBlock(c, "launch");
   if (block !== null) return block;
-  const { connection, bindings, name } = c;
-  if (t.id !== undefined || t.workspaceId !== undefined) {
-    if (!t.workspaceId) return { kind: "unbound", reason: "Choose a workspace in Edit before starting.", fix: null };
-    if (c.destinations === undefined) {
-      const reason = c.destinationError ? "Stage could not check the saved workspace." : "Checking the saved workspace…";
-      return { kind: "unbound", reason, fix: null };
-    }
-    const row = c.destinations.find((d) => d.connectionId === t.connectionId && d.workspaceId === t.workspaceId);
-    return row?.available === true ? null : {
-      kind: "unbound",
-      reason: row?.reason || "The saved workspace is unavailable. Choose another workspace in Edit.",
-      fix: null,
-    };
+  if (!t.workspaceId) return { kind: "unbound", reason: "Choose a workspace in Edit before starting.", fix: null };
+  if (c.destinations === undefined) {
+    const reason = c.destinationError ? "Stage could not check the saved workspace." : "Checking the saved workspace…";
+    return { kind: "unbound", reason, fix: null };
   }
-  if (connection === undefined || !connection.active) return null;
-  if (bindings !== undefined && workspaceBinding(bindings, t.connectionId, t.bindingId)?.status !== "available") {
-    return {
-      kind: "unbound",
-      reason: t.bindingId === null
-        ? `${t.projectTitle} has no available primary workspace on ${name}.`
-        : `This task's selected workspace on ${name} is unavailable.`,
-      fix: null,
-    };
-  }
-  return null;
+  const row = c.destinations.find((d) => d.connectionId === t.connectionId && d.workspaceId === t.workspaceId);
+  return row?.available === true ? null : {
+    kind: "unbound",
+    reason: row?.reason || "The saved workspace is unavailable. Choose another workspace in Edit.",
+    fix: null,
+  };
 }
 
 /** Start ready includes ready members only, even though an individual Start can also retry a task. */

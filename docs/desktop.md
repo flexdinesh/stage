@@ -397,10 +397,10 @@ Build with `mise run dist` (`TARGETS=all` for every platform) and install or ope
 Task completion uses the shared app review drawer (full width on phones), with cached evidence, dependent impact and optional acceptance note. Accepted history stays available without T3. Moving a completed task back (the State picker's "Change state") preserves history and never reopens a closed tree. A completed task shows one "completed" chip; its execution chip joins only once execution moves on (running again, needs input, failed), and a finished run not completed yet reads "to review". Notifications stay live beside acceptance; API v4 separates these contracts.
 
 Project planning remains available without T3. The shared project form creates
-Stage metadata offline. Bind the selected harness workspace before launch.
-The bridge integration tests discover the demo binding through
-`GET /api/connections/{connectionId}/workspaces`, waiting for the asynchronous
-inventory and import to finish before launching against isolated fake T3.
+Stage metadata offline. Before launch, select an exact workspace on the
+chosen connection. The bridge integration tests read the demo workspace
+selector through `GET /api/connections/{connectionId}/workspaces` after
+inventory refresh and launch against isolated fake T3.
 
 Harness navigation uses `Links.executionDestination`. The desktop host chooses native links for a local Stage connection and web links for a remote connection. A resume command (`ExecutionLinks.command`) is never opened; the shared task page offers to copy it. Shared product code does not inspect browser location or choose the platform.
 

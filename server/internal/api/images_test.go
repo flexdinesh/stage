@@ -97,7 +97,7 @@ func (e *env) refused(method, path string, body any, want int) string {
 func TestImagesFollowTheImagesOperation(t *testing.T) {
 	e, _, imageConn, textConn, projectID := imagesEnv(t)
 	body := func(conn int64, extra map[string]any) map[string]any {
-		b := map[string]any{"projectId": projectID, "connectionId": conn, "title": "Look", "prompt": "Describe it", "executionConfig": map[string]any{"model": "m"}}
+		b := map[string]any{"projectId": projectID, "connectionId": conn, "workspaceId": db.WorkspaceID(conn, "repo", hostedWorkspace), "title": "Look", "prompt": "Describe it", "executionConfig": map[string]any{"model": "m"}}
 		for k, v := range extra {
 			b[k] = v
 		}
@@ -130,7 +130,7 @@ func TestImagesFollowTheImagesOperation(t *testing.T) {
 	// Moving images to a connection without the operation is refused; moving
 	// without them is not.
 	path := fmt.Sprintf("/api/tasks/%d", tk.ID)
-	move := map[string]any{"connectionId": textConn, "executionConfig": map[string]any{"model": "m"}}
+	move := map[string]any{"connectionId": textConn, "workspaceId": db.WorkspaceID(textConn, "repo", hostedWorkspace), "executionConfig": map[string]any{"model": "m"}}
 	refusal(e.refused("PATCH", path, move, 400))
 	refusal(e.refused("PATCH", fmt.Sprintf("/api/schedules/%d", sc.ID), move, 400))
 	move["attachmentIds"] = []int64{}

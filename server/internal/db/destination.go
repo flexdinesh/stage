@@ -10,17 +10,6 @@ import (
 // ErrInvalidBinding is the validation error for an invalid explicit workspace choice.
 var ErrInvalidBinding = Invalid("bindingId must be an active workspace of this project on the chosen connection")
 
-// ValidateBinding checks an explicit choice before the API reads capabilities.
-// Writes check it again while holding the project identity lock.
-func (s *Store) ValidateBinding(ctx context.Context, project, connection int64, id *int64) error {
-	if id == nil {
-		return nil
-	}
-	return s.e.Read(ctx, func(tx store.Tx) error {
-		return validateBinding(ctx, tx, project, connection, id)
-	})
-}
-
 func validateBinding(ctx context.Context, tx store.Tx, project, connection int64, id *int64) error {
 	if id == nil {
 		return nil

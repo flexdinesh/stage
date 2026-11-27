@@ -353,24 +353,45 @@ type attachment struct {
 	SizeBytes int    `json:"sizeBytes"`
 }
 
+func (p project) workspaceID() string {
+	return db.WorkspaceID(dbtest.T3Connection, p.T3ProjectID, p.WorkspaceRoot)
+}
+
 func (e *env) project(root string) project {
 	e.t.Helper()
-	var p project
-	e.must("POST", "/api/projects", map[string]any{"title": "P " + root}, 201, &p)
-	ext := e.fake.AddProject(p.Title, root)
-	e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", p.ID), map[string]any{"connectionId": 1, "externalProjectId": ext.ID, "workspace": root}, 200, &p)
-	p.T3ProjectID, p.WorkspaceRoot, p.Source = ext.ID, root, "app"
-	return p
+	title := "P " + root
+	ext := e.fake.AddProject(title, root)
+	row, err := e.store.InsertProject(e.t.Context(), db.Project{
+		Title:    title,
+		Bindings: []db.ProjectBinding{{ConnectionID: dbtest.T3Connection, ExternalProjectID: ext.ID, Workspace: root}},
+	})
+	row = mustValue(e.t, row, err)
+	e.must("GET", fmt.Sprintf("/api/connections/%d/workspaces", dbtest.T3Connection), nil, 200, nil)
+	return project{ID: row.ID, Title: title, T3ProjectID: ext.ID, WorkspaceRoot: root, Source: "app", Bindings: row.Bindings}
+}
+
+func (e *env) taskBody(projectID int64, title string, extra map[string]any) map[string]any {
+	e.t.Helper()
+	p, err := e.store.GetProject(e.t.Context(), projectID)
+	p = mustValue(e.t, p, err)
+	if len(p.Bindings) != 1 {
+		e.t.Fatalf("task fixture needs a single workspace: %+v", p)
+	}
+	b := p.Bindings[0]
+	body := map[string]any{
+		"projectId": projectID, "connectionId": b.ConnectionID, "workspaceId": db.WorkspaceID(b.ConnectionID, b.ExternalProjectID, b.Workspace),
+		"title": title, "prompt": "reply OK",
+	}
+	for k, v := range extra {
+		body[k] = v
+	}
+	return body
 }
 
 func (e *env) task(projectID int64, title string, extra map[string]any) task {
 	e.t.Helper()
-	body := map[string]any{"projectId": projectID, "title": title, "prompt": "reply OK"}
-	for k, v := range extra {
-		body[k] = v
-	}
 	var out task
-	e.must("POST", "/api/tasks", body, 201, &out)
+	e.must("POST", "/api/tasks", e.taskBody(projectID, title, extra), 201, &out)
 	return out
 }
 
@@ -605,9 +626,9 @@ func TestTaskActions(t *testing.T) {
 	e.must("GET", fmt.Sprintf("/api/tasks/%d", dup.ID), nil, 404, nil)
 
 	// Validation.
-	e.must("POST", "/api/tasks", map[string]any{"title": "x", "prompt": "y"}, 400, nil)
+	e.must("POST", "/api/tasks", map[string]any{"connectionId": dbtest.T3Connection, "title": "x", "prompt": "y"}, 400, nil)
 	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "model": "m"}, 400, nil)
-	e.must("POST", "/api/tasks", map[string]any{"projectId": 999, "title": "x", "prompt": "y"}, 404, nil)
+	e.must("POST", "/api/tasks", map[string]any{"projectId": 999, "connectionId": dbtest.T3Connection, "title": "x", "prompt": "y"}, 404, nil)
 	e.must("POST", "/api/tasks", "not an object", 400, nil)
 
 	// Filters.
@@ -716,7 +737,11 @@ func TestBindingChangeDoesNotRedirectUncertainLaunch(t *testing.T) {
 	endpoint := fmt.Sprintf("/api/tasks/%d/start", pending.ID)
 	e.must("POST", endpoint, nil, 502, nil)
 	replacement := e.fake.AddProject("Replacement", "/w/replacement")
-	e.must("PUT", fmt.Sprintf("/api/projects/%d/binding", p.ID), map[string]any{"connectionId": 1, "externalProjectId": replacement.ID, "workspace": replacement.WorkspaceRoot, "primary": true}, 200, nil)
+	_, err := e.store.BindProject(t.Context(), db.ProjectBinding{
+		ProjectID: p.ID, ConnectionID: dbtest.T3Connection, ExternalProjectID: replacement.ID,
+		Workspace: replacement.WorkspaceRoot, Primary: true,
+	})
+	mustValue(t, struct{}{}, err)
 	// A moved original path is unsafe even with a valid replacement binding.
 	if err := e.fake.SetProject(p.T3ProjectID, func(p *t3.Project) { p.WorkspaceRoot = "/w/moved" }); err != nil {
 		t.Fatal(err)
@@ -749,20 +774,6 @@ func TestBindingChangeDoesNotRedirectUncertainLaunch(t *testing.T) {
 func TestRegisterWorkspaceRouteRemoved(t *testing.T) {
 	e := newEnv(t)
 	e.must("POST", "/api/connections/t3/projects", map[string]any{"title": "P", "workspace": "/w"}, 404, nil)
-}
-
-func TestSaveAndStartWithoutBindingRetainsActionableBacklog(t *testing.T) {
-	e := newEnv(t)
-	var p project
-	e.must("POST", "/api/projects", map[string]any{"title": "Offline"}, 201, &p)
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "Plan", "prompt": "p"}, 409, nil)
-	task := e.task(p.ID, "Plan", map[string]any{"start": true, "connectionId": dbtest.T3Connection})
-	if task.State != "backlog" || task.LaunchAttempt != 0 || task.LastError == nil || !strings.Contains(*task.LastError, "Choose a connection and workspace") {
-		t.Fatalf("silent launch refusal %+v", task)
-	}
-	if len(e.t3.launchRequestIDs()) != 0 {
-		t.Fatal("unbound launch reached T3")
-	}
 }
 
 // validRequestID: "task-<id>-<uuid>", unique per attempt and database.
@@ -1244,12 +1255,12 @@ func TestTaskImagesLaunchAndEdit(t *testing.T) {
 		t.Fatalf("attachments = %+v", tk.Attachments)
 	}
 	// An attached image can't be reused by another task.
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "steal", "prompt": "x", "attachmentIds": []int64{a1.ID}}, 400, nil)
+	e.must("POST", "/api/tasks", e.taskBody(p.ID, "steal", map[string]any{"attachmentIds": []int64{a1.ID}}), 400, nil)
 	nine := make([]int64, 9)
 	for i := range nine {
 		nine[i] = int64(i + 1)
 	}
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "many", "prompt": "x", "attachmentIds": nine}, 400, nil)
+	e.must("POST", "/api/tasks", e.taskBody(p.ID, "many", map[string]any{"attachmentIds": nine}), 400, nil)
 
 	// Backlog edit sets the exact set: drop a1, add a3.
 	var got task

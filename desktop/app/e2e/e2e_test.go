@@ -274,16 +274,18 @@ func TestDesktop(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = res.Body.Close()
-	var projects struct {
-		Projects []struct {
-			ID int64 `json:"id"`
-		} `json:"projects"`
+	var catalog struct {
+		Destinations []struct {
+			ConnectionID int64  `json:"connectionId"`
+			WorkspaceID  string `json:"workspaceId"`
+		} `json:"destinations"`
 	}
-	getJSON(t, client, "/api/projects", &projects)
-	if len(projects.Projects) == 0 {
-		t.Fatal("no project")
+	getJSON(t, client, "/api/projects?view=destinations", &catalog)
+	if len(catalog.Destinations) == 0 {
+		t.Fatal("no workspace")
 	}
-	body := fmt.Sprintf(`{"projectId":%d,"title":"E2E deep link","prompt":"x"}`, projects.Projects[0].ID)
+	destination := catalog.Destinations[0]
+	body := fmt.Sprintf(`{"connectionId":%d,"workspaceId":%q,"title":"E2E deep link","prompt":"x"}`, destination.ConnectionID, destination.WorkspaceID)
 	req, _ := http.NewRequest("POST", "http://stage.invalid/api/tasks", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	res, err = client.Do(req)

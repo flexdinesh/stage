@@ -82,34 +82,24 @@ export function machineTag(machines: readonly Pick<Machine, "id" | "label">[], m
 
 /**
  * Options for a connection picker: each connection by its harness name, its machine as the tag when more than one
- * machine exists, ordered by machine (local first). `bound` (a chosen project's active bindings) lists those
- * connections first and marks the rest "not bound"; null leaves the order and adds no chip. `defaultId` (the default
- * connection) is marked "default".
+ * machine exists, ordered by machine (local first).
  */
 export function connectionOptions(
   connections: readonly Pick<HarnessConnection, "id" | "harness" | "machineId">[],
   machines: readonly Pick<Machine, "id" | "label">[],
   kindName: (k: Harness) => string,
-  bound: ReadonlySet<number> | null = null,
-  defaultId: number | null = null,
 ): ComboboxOption[] {
   const rank = (machineId: number) => {
     const i = machines.findIndex((m) => m.id === machineId);
     return i < 0 ? machines.length : i;
   };
-  const group = (id: number) => (bound === null || bound.has(id) ? 0 : 1);
-  const chip = (id: number) => {
-    const chips = [id === defaultId ? "default" : null, bound === null || bound.has(id) ? null : "not bound"].filter((c) => c !== null);
-    return chips.length === 0 ? undefined : chips.join(" · ");
-  };
   return connections
     .map((c, i) => ({ c, i }))
-    .toSorted((a, b) => group(a.c.id) - group(b.c.id) || rank(a.c.machineId) - rank(b.c.machineId) || a.i - b.i)
+    .toSorted((a, b) => rank(a.c.machineId) - rank(b.c.machineId) || a.i - b.i)
     .map(({ c }) => ({
       value: String(c.id),
       label: kindName(c.harness),
       tag: machineTag(machines, c.machineId),
-      chip: chip(c.id),
     }));
 }
 

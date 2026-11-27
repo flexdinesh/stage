@@ -1,10 +1,10 @@
-import { projectWorkspace } from "../lib/projects.ts";
+import { groupWorkspaceSummary } from "../lib/projectGroups.ts";
 import { useMutation } from "@tanstack/react-query";
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
-import { useInvalidateWork, useProjects, useTasks, useTrees } from "../api/queries.ts";
+import { useInvalidateWork, useProjectGroups, useTasks, useTrees } from "../api/queries.ts";
 import { THEMES, useTheme } from "../lib/theme.ts";
 import { paletteHits } from "../lib/palette.ts";
 import { taskClosedLabel, treeMeta } from "../lib/trees.ts";
@@ -80,7 +80,7 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
 
   const q = query.trim().toLowerCase();
   const tasks = useTasks({ closed: "all" }, { live: false });
-  const projects = useProjects();
+  const projects = useProjectGroups();
   const trees = useTrees({ status: "all" }, { live: false });
   const items = useMemo<Item[]>(() => {
     const go = (to: string) => () => {
@@ -112,8 +112,8 @@ export function CommandPalette({ onClose, onNewTask }: { onClose: () => void; on
           run: go(`/trees/${tr.id}`),
           link: { kind: "tree", id: tr.id, title: tr.title },
         });
-      for (const p of (projects.data?.projects ?? []).filter((proj) => has(proj.title, q)).slice(0, 4))
-        out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: projectWorkspace(p), run: go(`/projects/${p.id}`) });
+      for (const p of (projects.data?.groups ?? []).filter((proj) => proj.archivedAt === null && has(proj.title, q)).slice(0, 4))
+        out.push({ key: `project-${p.id}`, group: "Projects", label: p.title, hint: groupWorkspaceSummary(p), run: go(`/projects/${p.id}`) });
     }
     const actions: Item[] = [
       { key: "new", group: "Actions", label: "New task", hint: "N", run: () => {

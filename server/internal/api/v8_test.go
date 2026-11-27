@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
@@ -16,7 +17,7 @@ func TestRemovedModelFieldsNameTheReplacement(t *testing.T) {
 	p := e.project("/w/v8")
 	tk := e.task(p.ID, "A", nil)
 	var sc schedule
-	e.must("POST", "/api/schedules", map[string]any{"projectId": p.ID, "title": "s", "prompt": "p", "cron": "0 2 * * *", "tz": "UTC"}, 201, &sc)
+	e.must("POST", "/api/schedules", e.taskBody(p.ID, "s", map[string]any{"prompt": "p", "cron": "0 2 * * *", "tz": "UTC"}), 201, &sc)
 	for _, field := range []string{"providerInstanceId", "model", "modelOptions", "runtimeMode", "interactionMode"} {
 		want := field + " was removed in API v8; send executionConfig with connectionId"
 		for _, req := range []struct {
@@ -43,7 +44,7 @@ func TestRemovedWorkspaceFieldNamesLaunchOptions(t *testing.T) {
 	p := e.project("/w/v8-ws")
 	tk := e.task(p.ID, "A", nil)
 	var sc schedule
-	e.must("POST", "/api/schedules", map[string]any{"projectId": p.ID, "title": "s", "prompt": "p", "cron": "0 2 * * *", "tz": "UTC"}, 201, &sc)
+	e.must("POST", "/api/schedules", e.taskBody(p.ID, "s", map[string]any{"prompt": "p", "cron": "0 2 * * *", "tz": "UTC"}), 201, &sc)
 	for _, req := range []struct {
 		method, path string
 		body         map[string]any
@@ -97,7 +98,7 @@ func TestConnectionAndExecutionConfigOnT3(t *testing.T) {
 		task
 		ConnectionID int64 `json:"connectionId"`
 	}
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "A", "prompt": "p", "connectionId": dbtest.T3Connection, "executionConfig": cfg}, 201, &tk)
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "A", "prompt": "p", "connectionId": dbtest.T3Connection, "workspaceId": p.workspaceID(), "executionConfig": cfg}, 201, &tk)
 	if tk.ConnectionID != dbtest.T3Connection || tk.Config == nil || tk.Config.Model != t3.ModelKey("claude", "claude-haiku-5-5") || len(tk.Config.Options) != 1 {
 		t.Fatalf("task %+v", tk)
 	}
@@ -112,7 +113,7 @@ func TestConnectionAndExecutionConfigOnT3(t *testing.T) {
 		ConnectionID int64       `json:"connectionId"`
 		Config       *execConfig `json:"executionConfig"`
 	}
-	e.must("POST", "/api/schedules", map[string]any{"projectId": p.ID, "title": "s", "prompt": "p", "cron": "0 2 * * *", "tz": "UTC", "connectionId": dbtest.T3Connection, "executionConfig": cfg}, 201, &sc)
+	e.must("POST", "/api/schedules", map[string]any{"projectId": p.ID, "title": "s", "prompt": "p", "cron": "0 2 * * *", "tz": "UTC", "connectionId": dbtest.T3Connection, "workspaceId": p.workspaceID(), "executionConfig": cfg}, 201, &sc)
 	if sc.ConnectionID != dbtest.T3Connection || sc.Config == nil || sc.Config.Model != t3.ModelKey("claude", "claude-haiku-5-5") {
 		t.Fatalf("schedule %+v", sc)
 	}
@@ -126,7 +127,7 @@ func TestConnectionAndExecutionConfigOnAnotherHarness(t *testing.T) {
 		task
 		ConnectionID int64 `json:"connectionId"`
 	}
-	e.must("POST", "/api/tasks", map[string]any{"projectId": projectID, "title": "A", "prompt": "p", "connectionId": textConn, "executionConfig": cfg}, 201, &tk)
+	e.must("POST", "/api/tasks", map[string]any{"projectId": projectID, "title": "A", "prompt": "p", "connectionId": textConn, "workspaceId": db.WorkspaceID(textConn, "repo", hostedWorkspace), "executionConfig": cfg}, 201, &tk)
 	if tk.ConnectionID != textConn || tk.Config == nil || tk.Config.Model != "m" {
 		t.Fatalf("task %+v", tk)
 	}
@@ -134,7 +135,7 @@ func TestConnectionAndExecutionConfigOnAnotherHarness(t *testing.T) {
 		ConnectionID int64       `json:"connectionId"`
 		Config       *execConfig `json:"executionConfig"`
 	}
-	e.must("POST", "/api/schedules", map[string]any{"projectId": projectID, "title": "s", "prompt": "p", "cron": "0 2 * * *", "tz": "UTC", "connectionId": textConn, "executionConfig": cfg}, 201, &sc)
+	e.must("POST", "/api/schedules", map[string]any{"projectId": projectID, "title": "s", "prompt": "p", "cron": "0 2 * * *", "tz": "UTC", "connectionId": textConn, "workspaceId": db.WorkspaceID(textConn, "repo", hostedWorkspace), "executionConfig": cfg}, 201, &sc)
 	if sc.ConnectionID != textConn || sc.Config == nil || sc.Config.Model != "m" {
 		t.Fatalf("schedule %+v", sc)
 	}

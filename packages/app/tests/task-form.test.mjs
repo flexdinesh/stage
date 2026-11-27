@@ -100,8 +100,8 @@ test("a schedule edit preserves the saved workspace and repeat until changed", (
 });
 
 test("workspace choices use only ready, eligible rows on the selected connection", () => {
-  const linked = { workspaceId: "ws_linked", connectionId: 3, projectId: 5, title: "Linked", workspace: "/linked", available: true };
-  const unbound = { ...linked, projectId: null, workspaceId: "ws_unbound", title: "Alone" };
+  const linked = { workspaceId: "ws_linked", connectionId: 3, projectId: 5, groupProjectId: 5, title: "Linked", workspace: "/linked", available: true };
+  const unbound = { ...linked, groupProjectId: null, workspaceId: "ws_unbound", title: "Alone" };
   const foreign = { ...linked, connectionId: 4 };
   const archived = { ...linked, workspaceId: "ws_archived", harnessArchived: true };
   const missing = { ...linked, workspaceId: "ws_missing", available: false };
@@ -113,6 +113,7 @@ test("workspace choices use only ready, eligible rows on the selected connection
   assert.equal(suggestedTaskWorkspace(choices, 6), undefined);
   assert.equal(suggestedTaskWorkspace(choices, undefined), undefined);
   assert.equal(suggestedTaskWorkspace([unbound], undefined), unbound);
+  assert.equal(suggestedTaskWorkspace([unbound], 5), undefined);
   const regrouped = { ...linked, groupProjectId: 6 };
   assert.equal(suggestedTaskWorkspace([regrouped], 5), undefined);
   assert.equal(suggestedTaskWorkspace([regrouped], 6), regrouped);

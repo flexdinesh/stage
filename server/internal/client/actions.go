@@ -14,13 +14,13 @@ import (
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-// ActionScope names a Stage object. Project actions also select a connection.
+// ActionScope names a Stage object. Project actions also select an exact destination.
 type ActionScope struct {
 	ConnectionID   *int64 `json:"connectionId,omitempty" jsonschema:"target connection ID"`
 	TaskID         *int64 `json:"taskId,omitempty" jsonschema:"target task ID"`
 	ProjectID      *int64 `json:"projectId,omitempty" jsonschema:"target project ID"`
 	OnConnectionID *int64 `json:"onConnectionId,omitempty" jsonschema:"required for projectId; connection on which to target the project"`
-	BindingID      *int64 `json:"bindingId,omitempty" jsonschema:"workspace binding for a project action; defaults to the primary on the selected connection"`
+	WorkspaceID    string `json:"workspaceId,omitempty" jsonschema:"exact workspace on the selected connection; required for project actions"`
 }
 
 func (s ActionScope) Validate() error {
@@ -40,11 +40,11 @@ func (s ActionScope) Validate() error {
 		if s.OnConnectionID == nil || *s.OnConnectionID <= 0 {
 			return errors.New("a project action requires a positive on-connection ID")
 		}
-	} else if s.OnConnectionID != nil {
-		return errors.New("on-connection is only for project actions")
-	}
-	if s.BindingID != nil && (s.ProjectID == nil || *s.BindingID <= 0) {
-		return errors.New("bindingId requires a project action and a positive binding ID")
+		if strings.TrimSpace(s.WorkspaceID) == "" {
+			return errors.New("a project action requires workspaceId from list_projects or projects ls")
+		}
+	} else if s.OnConnectionID != nil || s.WorkspaceID != "" {
+		return errors.New("on-connection and workspaceId are only for project actions")
 	}
 	return nil
 }
@@ -64,7 +64,9 @@ func (s ActionScope) endpoint(action string) string {
 	}
 	q := url.Values{}
 	setID(q, "connectionId", s.OnConnectionID)
-	setID(q, "bindingId", s.BindingID)
+	if s.WorkspaceID != "" {
+		q.Set("workspaceId", s.WorkspaceID)
+	}
 	return withQuery(path, q)
 }
 

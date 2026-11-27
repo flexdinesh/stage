@@ -46,7 +46,7 @@ func printContext(w io.Writer, c agenttools.ContextOut) {
 	}
 	fmt.Fprintf(w, "session  %s\ncwd      %s\napi      %s\n", dash(session), dash(c.Cwd), c.APIURL)
 	if c.Project != nil {
-		fmt.Fprintf(w, "project  %d %s (%s, from %s)\n", c.Project.ID, c.Project.Title, projectWorkspace(*c.Project), c.ProjectSource)
+		fmt.Fprintf(w, "project  %d %s (from %s)\n", c.Project.ID, c.Project.Title, c.ProjectSource)
 	} else {
 		fmt.Fprintf(w, "project  - (%s)\n", c.ProjectError)
 	}
@@ -69,14 +69,6 @@ func dash(s string) string {
 		return "-"
 	}
 	return s
-}
-
-func printProjects(w io.Writer, ps []db.ProjectSummary) {
-	table(w, "ID\tTITLE", func(tw io.Writer) {
-		for _, p := range ps {
-			fmt.Fprintf(tw, "%d\t%s\n", p.ID, p.Title)
-		}
-	})
 }
 
 func printCapabilities(w io.Writer, c execution.Capabilities) {
@@ -443,19 +435,6 @@ func compactCount(n int64) string {
 	default:
 		return strings.TrimSuffix(fmt.Sprintf("%.1f", float64(n)/1e6), ".0") + "M"
 	}
-}
-
-func projectWorkspace(p db.Project) string {
-	var bindings []string
-	for _, b := range p.Bindings {
-		if b.Primary {
-			bindings = append(bindings, fmt.Sprintf("%s %d: %s", b.Harness, b.ConnectionID, dash(orFirst(b.Workspace, b.ExternalProjectID))))
-		}
-	}
-	if len(bindings) == 0 {
-		return "workspace not bound"
-	}
-	return strings.Join(bindings, ", ")
 }
 
 // orFirst is the first nonempty value.

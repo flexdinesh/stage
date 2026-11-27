@@ -44,14 +44,21 @@ func TestMCPExactDestinations(t *testing.T) {
 		if d.ConnectionID != 7 {
 			continue
 		}
-		if !d.Available || d.ProjectID != nil || d.WorkspaceID == "" {
-			t.Fatalf("expected an unbound destination, got %+v", d)
+		if !d.Available || d.WorkspaceID == "" {
+			t.Fatalf("expected an available exact destination, got %+v", d)
 		}
 		workspace[d.Title] = d.WorkspaceID
 	}
 	one, two := workspace["Root one"], workspace["Root two"]
 	if one == "" || two == "" || one == two {
 		t.Fatalf("same native ID needs distinct exact selectors: %+v", workspace)
+	}
+	var connectionModels agenttools.ModelsOut
+	mustCall(t, cs, "list_models", map[string]any{"connectionId": 7}, &connectionModels)
+	if connectionModels.Capabilities == nil || !slices.ContainsFunc(connectionModels.Capabilities.Models, func(m execution.Model) bool {
+		return m.ID == "remote-model"
+	}) {
+		t.Fatalf("connection-wide models: %+v", connectionModels.Capabilities)
 	}
 	for selector, want := range map[string]string{one: "one", two: "two"} {
 		var models agenttools.ModelsOut
@@ -62,7 +69,13 @@ func TestMCPExactDestinations(t *testing.T) {
 	}
 
 	var root client.Task
-	mustCall(t, cs, "create_task", map[string]any{"project": fmt.Sprint(p.ID), "title": "Root", "prompt": "plan"}, &root)
+	mustCall(t, cs, "create_task", map[string]any{"project": fmt.Sprint(p.ID), "connectionId": 1, "title": "Root", "prompt": "plan"}, &root)
+	if root.ProjectID != p.ID || root.ConnectionID != 1 || root.WorkspaceID != "" || root.State != db.StateBacklog {
+		t.Fatalf("unresolved backlog: %+v", root)
+	}
+	if msg := call(t, cs, "start_task", map[string]any{"id": root.ID}, nil); !strings.Contains(msg, "Choose a connection and workspace before launching") {
+		t.Fatalf("unresolved backlog launch: %q", msg)
+	}
 	var tree client.TreeDetail
 	mustCall(t, cs, "create_tree", map[string]any{"title": "Plan", "tasks": []map[string]any{{"id": root.ID}}}, &tree)
 	args := map[string]any{
@@ -72,7 +85,7 @@ func TestMCPExactDestinations(t *testing.T) {
 		t.Fatalf("an empty selector fell back to caller context: %s", msg)
 	}
 	args["workspaceId"] = one
-	if msg := call(t, cs, "create_task", args, nil); !strings.Contains(msg, "workspaceId requires a positive connectionId") {
+	if msg := call(t, cs, "create_task", args, nil); !strings.Contains(msg, "connectionId is required") {
 		t.Fatalf("a workspace selector used the caller's connection: %s", msg)
 	}
 	args["connectionId"] = 1
@@ -115,8 +128,15 @@ func TestMCPExactDestinations(t *testing.T) {
 		if updated.WorkspaceID != two {
 			t.Fatalf("%s lost the pin on an unrelated edit: %+v", tool, updated)
 		}
+		clear := map[string]any{"id": id, "workspaceId": nil, "executionConfig": map[string]any{}}
+		if tool == "update_schedule" {
+			if msg := call(t, cs, tool, clear, nil); !strings.Contains(msg, "Choose a connection and workspace before launching") {
+				t.Fatalf("schedule accepted a cleared workspace: %q", msg)
+			}
+			continue
+		}
 		updated.WorkspaceID = ""
-		mustCall(t, cs, tool, map[string]any{"id": id, "workspaceId": nil, "executionConfig": map[string]any{}}, &updated)
+		mustCall(t, cs, tool, clear, &updated)
 		if updated.WorkspaceID != "" || updated.ProjectID != task.ProjectID {
 			t.Fatalf("%s clear: %+v", tool, updated)
 		}

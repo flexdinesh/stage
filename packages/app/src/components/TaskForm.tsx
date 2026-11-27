@@ -30,7 +30,7 @@ import {
 } from "../lib/schedules.ts";
 import { handoffHint } from "../lib/handoff.ts";
 import { isFullyEditable } from "../lib/tasks.ts";
-import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceLocation, workspaceGroupId, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
+import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceLocation, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
 import { operationReason } from "../lib/launch.ts";
 import { HandoffToggle } from "./Handoff.tsx";
 import { LaunchBlockAlert, useOperationGate } from "./LaunchGate.tsx";
@@ -290,7 +290,7 @@ function TaskFormDrawer({
   const offModes = blockedStartModes(modes, !launchable, mode);
   const planning = full && mode === "backlog" && !bound;
   const chosenProject = s.projectId === "" ? undefined : Number(s.projectId);
-  const workspaceProject = selected === undefined ? undefined : workspaceGroupId(selected) ?? undefined;
+  const workspaceProject = selected?.groupProjectId ?? undefined;
   const projectId = existing?.projectId ?? (planning || (copySource !== undefined && !destinationChanged) ? chosenProject
     : workspaceProject);
   const snippetProject = projectId ?? null;

@@ -12,7 +12,7 @@ import { CompleteAllActions, CompleteAllFailures, CompletionLinger, useCompleteA
 import { ATTENTION_GROUPS, awaitingReview, dashboardProblems, harnessNotice, inGroup, type GroupKey } from "../lib/dashboard.ts";
 import { scopedPageName } from "../lib/history.ts";
 import { SETTINGS_PATH } from "../lib/settings.ts";
-import { projectWorkspace } from "../lib/projects.ts";
+import { groupWorkspaceSummary } from "../lib/projectGroups.ts";
 import { LIVE_STATES } from "../lib/scope.ts";
 import { Alert, AppButton, PageHeader, QueryState, SectionHeading, Skeleton, SkeletonBar, TextLink, buttonClass, type ChipTone } from "../components/ui.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
@@ -118,7 +118,7 @@ function Dashboard() {
   const projectCount = projects.data?.projects.length;
   const where =
     scope.project !== null
-      ? projectWorkspace(scope.project)
+      ? groupWorkspaceSummary(scope.project)
       : projectCount === undefined
         ? null
         : `${projectCount} project${projectCount === 1 ? "" : "s"}`;

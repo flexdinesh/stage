@@ -33,7 +33,7 @@ export interface ApiErrorBody {
   error: string;
   /** Machine-readable reason on some 409s (e.g. already_answered, request_stale). */
   code?: string;
-  preview?: WorkspaceResolveResult | ProjectMergeResult;
+  preview?: GroupEdit;
 }
 
 /** T3 ProviderOptionSelection, e.g. { id: "effort", value: "low" }. */
@@ -192,6 +192,7 @@ export interface Destination {
   connectionId: number;
   workspaceId: string;
   projectId?: number;
+  groupProjectId?: number;
   title: string;
   connectionLabel: string;
   machineLabel: string;
@@ -201,12 +202,7 @@ export interface Destination {
 }
 
 export interface DestinationCatalog {
-  projects: (Pick<Project, "id" | "title" | "archivedAt" | "aliases"> & {
-    bindings: (Pick<ProjectBinding, "id" | "connectionId" | "connectionActive" | "title" | "primary"> & {
-      workspaceId: string;
-      status: string;
-    })[];
-  })[];
+  projects: Pick<Project, "id" | "title" | "archivedAt" | "aliases">[];
   connections?: Pick<HarnessConnection, "id" | "machineId" | "harness" | "label" | "active" | "configured">[];
   destinations: Destination[];
 }
@@ -219,18 +215,6 @@ export interface ProjectAlias {
 
 export interface CreateProjectRequest {
   title: string;
-  bindings?: WorkspaceBindingInput[];
-}
-
-interface WorkspaceBindingInput {
-  connectionId: number;
-  externalProjectId: string;
-  workspace: string;
-}
-
-export interface BindWorkspaceRequest extends WorkspaceBindingInput {
-  primary?: boolean;
-  replaces?: number;
 }
 
 export interface ProjectBinding {
@@ -302,37 +286,6 @@ export interface WorkspaceInventory {
     refreshedAt: string | null;
     lastError: string | null;
   };
-}
-
-export interface WorkspaceResolveResult {
-  applied: boolean;
-  previewToken: string;
-  placements: (WorkspaceResolution & {
-    workspace: Workspace;
-    projectId: number | null;
-    newProjectTitle: string;
-    acts: boolean;
-  })[];
-  created: number;
-  joined: number;
-  moved: number;
-  review: number;
-}
-
-export interface WorkspaceReview {
-  workspaces: (Workspace & { reason: WorkspaceReviewReason | "new" })[];
-  merges: { identityKey: string; projectIds: number[]; pairs: [number, number][] }[];
-  counts: Record<WorkspaceReviewReason | "new" | "merges", number>;
-  attention: number;
-}
-
-export interface ProjectMergeResult {
-  preview: boolean;
-  project: Project;
-  from: Pick<Project, "id" | "title">;
-  moves: { tasks: number; schedules: number; snippets: number; workspaces: number };
-  blocked: { code: string; reason: string } | null;
-  previewToken: string;
 }
 
 export interface ProjectEvent {
@@ -994,7 +947,6 @@ export interface TaskList {
 
 export interface CreateTaskRequest {
   connectionId?: number;
-  bindingId?: number | null;
   /** Null saves an explicitly unresolved backlog item. */
   workspaceId?: string | null;
   executionConfig?: ExecutionConfig;
@@ -1027,7 +979,6 @@ export type DuplicateTaskRequest = Pick<CreateTaskRequest, "projectId" | "title"
 
 export interface UpdateTaskRequest {
   connectionId?: number;
-  bindingId?: number | null;
   workspaceId?: string | null;
   executionConfig?: ExecutionConfig;
   projectId?: number;
@@ -1159,7 +1110,6 @@ export interface ScheduleListQuery {
 
 export interface CreateScheduleRequest {
   connectionId?: number;
-  bindingId?: number | null;
   workspaceId?: string;
   executionConfig?: ExecutionConfig;
   projectId?: number;
@@ -1255,7 +1205,7 @@ export type UpdateSnippetRequest = Partial<CreateSnippetRequest>;
 // ---- Preferences ----
 
 /**
- * defaultConnectionId: the connection new tasks start on (null = none: the project's only binding). Each connection
+ * defaultConnectionId: the preferred connection in the new task form (null = no preference). Each connection
  * pins its own new-task model (HarnessConnection.newTaskConfig).
  * notifyEvents: events that notify on every device. Shared mode keeps muted events in history as read.
  */

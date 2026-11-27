@@ -68,15 +68,17 @@ Shows the calling session, its working directory and the Stage project it resolv
 ### Add a task
 
 ```sh
-stage task add --title "Fix flaky test" --prompt "..."
+stage projects ls --json
+stage task add --title "Fix flaky test" --prompt "..." --connection 2 --workspace-id "$WORKSPACE_ID"
 ```
 
-The task lands in the backlog of the resolved project. Add `--start` to start it right away.
+Set `WORKSPACE_ID` to the selector for the intended workspace on connection 2.
+The task lands in the backlog. Add `--start` to launch it right away.
 
 ### Run it after this session
 
 ```sh
-stage task add --title "Deploy" --prompt-file deploy.md --after-me
+stage task add --title "Deploy" --prompt-file deploy.md --connection 2 --workspace-id "$WORKSPACE_ID" --after-me
 ```
 
 `--after-me` tracks the calling session as a task and makes it the new task's first need, so the new task waits until you complete this session's task.
@@ -85,7 +87,7 @@ stage task add --title "Deploy" --prompt-file deploy.md --after-me
 
 ```sh
 stage tree new --title "Auth" 41 43:41 42:43           # 43 needs 41, 42 needs 43
-stage task add --title "Docs" --prompt "..." --needs 42 --start-mode manual
+stage task add --title "Docs" --prompt "..." --connection 2 --workspace-id "$WORKSPACE_ID" --needs 42 --start-mode manual
 ```
 
 `ID:NEED,NEED` lists what each task needs. `--needs` adds a new task to the tree of the tasks it needs.

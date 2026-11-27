@@ -36,31 +36,29 @@ test("launchNotice names an untitled session by its id", () => {
   assert.equal(launchNotice({ launch: launch({ session }), stateSince: null }, "T3", NOW).session, "thread-1 · running");
 });
 
-const subject = { connectionId: 4, projectId: 7, projectTitle: "stage", bindingId: null };
-const binding = (status, extra = {}) => ({ id: 42, connectionId: 4, connectionActive: true, primary: true, status, ...extra });
+const subject = { connectionId: 4, workspaceId: "ws_exact" };
+const row = { ...subject, groupProjectId: 8, available: true };
 const ctx = (over = {}) => ({
   connection: { active: true, configured: true },
   machine: { kind: "remote", status: "online", label: "desk" },
   live: { tone: "ok", label: "T3 connected" },
-  bindings: [binding("available")],
+  destinations: [row],
   name: "T3 · desk",
   where: "on desk",
   settings: "/settings/connections",
   ...over,
 });
 
-test("launchBlock lets a live, bound connection launch", () => {
+test("launchBlock allows a saved workspace after its project membership changes", () => {
   assert.equal(launchBlock(subject, ctx()), null);
 });
 
-test("a saved task checks its exact workspace independently of legacy bindings", () => {
-  const task = { ...subject, id: 10, workspaceId: "ws_exact" };
-  const row = { connectionId: task.connectionId, workspaceId: task.workspaceId, available: true };
-  assert.equal(launchBlock(task, ctx({ bindings: [], destinations: [row] })), null);
-  assert.match(launchBlock(task, ctx({ destinations: [{ ...row, connectionId: 9 }] }))?.reason, /unavailable/);
-  assert.match(launchBlock(task, ctx({ destinations: [{ ...row, workspaceId: "ws_other" }] }))?.reason, /unavailable/);
-  assert.match(launchBlock(task, ctx())?.reason, /Checking the saved workspace/);
-  assert.match(launchBlock({ ...subject, id: 10 }, ctx())?.reason, /Choose a workspace/);
+test("launchBlock checks the exact connection and workspace and requires an explicit selection", () => {
+  assert.match(launchBlock(subject, ctx({ destinations: [{ ...row, connectionId: 9 }] }))?.reason, /unavailable/);
+  assert.match(launchBlock(subject, ctx({ destinations: [{ ...row, workspaceId: "ws_other" }] }))?.reason, /unavailable/);
+  assert.match(launchBlock(subject, ctx({ destinations: undefined }))?.reason, /Checking the saved workspace/);
+  assert.match(launchBlock(subject, ctx({ destinations: undefined, destinationError: true }))?.reason, /could not check/);
+  assert.match(launchBlock({ connectionId: subject.connectionId, bindingId: 42 }, ctx())?.reason, /Choose a workspace/);
 });
 
 test("launchBlock refuses a disconnected connection and links to Settings", () => {
@@ -94,27 +92,15 @@ test("launchBlock refuses a harness whose live status is a problem, never one st
   assert.equal(launchBlock(subject, ctx({ live: undefined })), null);
 });
 
-test("launchBlock refuses a project without an available workspace on the connection", () => {
-  for (const bindings of [[], [binding("missing")], [binding("available", { connectionId: 9 })]]) {
-    const b = launchBlock(subject, ctx({ bindings }));
-    assert.equal(b?.kind, "unbound");
-    assert.equal(b?.reason, "stage has no available primary workspace on T3 · desk.");
-    assert.equal(b?.fix, null);
-  }
-  // Projects not loaded yet block nothing.
-  assert.equal(launchBlock(subject, ctx({ bindings: undefined })), null);
-});
-
-test("launchBlock checks the primary by default and never substitutes for an explicit binding", () => {
-  const bindings = [binding("missing"), binding("available", { id: 53, primary: false })];
-  assert.equal(launchBlock(subject, ctx({ bindings }))?.kind, "unbound");
-  assert.equal(launchBlock({ ...subject, bindingId: 53 }, ctx({ bindings })), null);
-  assert.equal(launchBlock({ ...subject, bindingId: 42 }, ctx({ bindings }))?.kind, "unbound");
-  assert.equal(launchBlock({ ...subject, bindingId: 999 }, ctx())?.kind, "unbound");
+test("launchBlock keeps the saved workspace unavailable when another workspace is available", () => {
+  const destinations = [{ ...row, available: false, reason: "The saved checkout moved." }, { ...row, workspaceId: "ws_other" }];
+  assert.deepEqual(launchBlock(subject, ctx({ destinations })), {
+    kind: "unbound", reason: "The saved checkout moved.", fix: null,
+  });
 });
 
 test("launchBlock checks in order: disconnected, machine, live status, workspace", () => {
-  const all = { connection: { active: true, configured: false }, machine: { kind: "remote", status: "offline", label: "desk" }, live: { tone: "bad", label: "T3 unreachable" }, bindings: [] };
+  const all = { connection: { active: true, configured: false }, machine: { kind: "remote", status: "offline", label: "desk" }, live: { tone: "bad", label: "T3 unreachable" }, destinations: [] };
   assert.equal(launchBlock(subject, ctx(all))?.kind, "disconnected");
   assert.equal(launchBlock(subject, ctx({ ...all, connection: { active: true, configured: true } }))?.kind, "offline");
   assert.equal(launchBlock(subject, ctx({ ...all, connection: { active: true, configured: true }, machine: undefined }))?.kind, "unreachable");
@@ -137,7 +123,7 @@ test("Start, Stop and Track require their own available declaration", () => {
 });
 
 test("Stop and Track check connection readiness independently of the task workspace", () => {
-  const unbound = ctx({ bindings: [] });
+  const unbound = ctx({ destinations: [] });
   assert.equal(launchBlock(subject, unbound)?.kind, "unbound");
   assert.equal(connectionBlock(unbound, "stop"), null);
   assert.equal(connectionBlock(unbound, "adopt"), null);

@@ -174,6 +174,7 @@ WHERE (t.session_id IS NOT NULL OR t.state='launching') AND (
   OR (t.state IN ('failed', 'interrupted', 'cancelled') AND (
     t.updated_at > `+nowPlusSQL("-10 minutes")+`
     OR COALESCE((SELECT observation->'active' IN ('true'::jsonb, '1'::jsonb) FROM execution_observations WHERE session_id=t.session_id), false)))
+)
 ORDER BY t.id`, includeStale)
 	return collectTasks(rows, err)
 }

@@ -11,7 +11,7 @@ translate their native protocols, options and session state.
   connection owns its workspace catalog and sessions. The harness also owns
   worktrees, branches, archive, models, UI and processes. Stage uses read-only
   evidence to group workspaces for navigation. [Harness boundary](adr/0007-harness-boundary.md)
-  · [Workspace ownership and transition](adr/0010-harness-workspaces-and-logical-projects.md)
+  · [Workspace ownership and routing](adr/0010-harness-workspaces-and-logical-projects.md)
 - **Use generic code and declared policy.** Stage reads descriptors and
   capabilities to make its decisions. Each adapter validates and translates its
   own options. Harness-specific operations and display data use declared actions
@@ -20,11 +20,10 @@ translate their native protocols, options and session state.
 - **Scope every session.** A session is `{connectionId, externalSessionId}`.
   Parents, adoption, task events and journal provenance use the connection of
   the session they describe. A bare external ID carries no connection identity.
-- **Pin exact destinations.** The [target contract](adr/0010-harness-workspaces-and-logical-projects.md#ownership-and-exact-destinations)
-  pins a workspace on the selected connection and validates it before
-  launch. Grouping cannot supply a launch destination. During the
-  transition, [shipped bindings](discovery.md#bindings-and-review-07-backend-08-ui)
-  can still supply the primary workspace under the legacy selection rules.
+- **Pin exact destinations.** Select a connection and one exact workspace
+  under [ADR 0010](adr/0010-harness-workspaces-and-logical-projects.md#ownership-and-exact-destinations).
+  Stage revalidates the pair before launch. Planning backlog can omit the
+  workspace. Group membership supplies project context and navigation.
 - **Attribute the caller independently of the destination.** Agent tools
   accept `callerSession`. A harness can declare a native per-call metadata
   key (OpenCode supplies its session ID in MCP metadata) or a session
@@ -110,7 +109,7 @@ stored evidence and selects the connection to revive. A stable-identity
 module may also declare a moved-retire predicate. Stage evaluates it using
 both connector summaries when the old machine is reachable.
 
-Replacing an instance retires its connection. Tasks, sessions and bindings
+Replacing an instance retires its connection. Tasks, sessions and workspace records
 remain on it as history. Edit a backlog task or schedule and select an
 exact workspace on the new connection to run future work there. Serve
 follows connection changes and runs release and schedule runners per
@@ -130,7 +129,7 @@ time. It is independent of session outcomes. `Features` describes models,
 options, permissions, modes and supported operations with reasons when
 unavailable. `ModeLabel` names the mode selector in the harness's words.
 A workspace-scoped catalog uses `WorkspaceFeatures` with the selected
-binding's external project and directory.
+catalog row's native workspace ID and directory.
 [Capabilities API](api.md#get-apiconnectionsconnectionidcapabilities)
 
 ### Inventory
@@ -138,7 +137,7 @@ binding's external project and directory.
 `Workspaces` reports harness project IDs, directories, timestamps,
 availability and import evidence. The adapter marks paths on its machine's
 filesystem. Discovery uses that machine's `Ops.Inventory` to enrich those
-paths, refreshes stored workspaces and runs project import. Failed inventory
+paths, refreshes stored workspaces and organizes new rows into project groups. Failed inventory
 reads leave the last stored inventory in place. Full sync guards against
 concurrent runs per connection, reports progress and records successful sync
 for the active connection. [Workspace discovery](discovery.md)
@@ -447,7 +446,7 @@ A declared action is a harness-owned operation Stage relays. `execution.Action`
 carries the target, stable ID, caller policy, availability, confirmation
 and input schema. Connectors own connection actions, including setup.
 `Capabilities.Actions` describes session and project actions. Project
-actions use the selected binding's connection and workspace. Stage resolves
+actions use the exact workspace on the selected connection. Stage resolves
 that scope, checks caller policy and schema, and reaches the owner through
 `execution.As[execution.Actor]`. The owner validates semantic input.
 Workers advertise the `actor` trait and receive `adapter.act`.
@@ -586,9 +585,9 @@ those requirements can connect. The live suite below records the tested
 binary and should run again when a release changes behavior Stage relies on.
 
 OpenCode owns project inventory, workspace strategy, model selection and agent policy.
-An empty selection uses its defaults. A bound directory provides the model catalog,
-variants and visible primary agents. The capabilities endpoint accepts an optional
-Stage `projectId` to resolve that binding. Its launch option `worktree`
+An empty execution config uses its defaults. An exact workspace provides the model
+catalog, variants and visible primary agents. Pass `workspaceId` to scope the
+capabilities endpoint on that connection. Its launch option `worktree`
 (boolean, default off) asks OpenCode to create the worktree using its
 default base. Stage verifies the resulting inventory entry, project and
 directory. Permission overrides and image delivery report a reason when

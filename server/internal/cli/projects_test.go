@@ -2,81 +2,25 @@ package cli_test
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 
-	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/agenttools"
 )
 
-func TestProjectWorkspaceCommands(t *testing.T) {
-	const project = `{"id":1,"title":"Current","aliases":[{"id":2,"title":"Former"}],"bindings":[
-		{"id":40,"machineId":3,"connectionId":7,"harness":"codex","workspace":"/primary","status":"available","primary":true,"remote":"example.test/Org/Repo"},
-		{"id":41,"machineId":3,"connectionId":7,"harness":"codex","workspace":"/secondary","status":"available","primary":false}
-	]}`
-	const review = `{"workspaces":[
-		{"reason":"suggested","connectionId":7,"workspace":"/candidate","resolution":{"candidates":[1,3]}},
-		{"reason":"new","connectionId":8,"workspace":"/unrelated","resolution":{"candidates":[]}}
-	],"merges":[],"counts":{"new":1,"suggested":1},"attention":1}`
-	var previewCalls, confirmCalls, splitCalls atomic.Int32
+func TestProjectDestinations(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method + " " + r.URL.Path {
-		case "GET /api/projects":
-			if r.URL.Query().Get("view") == "destinations" {
-				io.WriteString(w, `{"projects":[{"id":1,"title":"Current"}],"destinations":[
-					{"connectionId":7,"workspaceId":"ws_bound","title":"Build","connectionLabel":"Codex","machineLabel":"Laptop","discriminator":"4ab2","projectId":1,"available":true},
-					{"connectionId":8,"workspaceId":"ws_unbound","title":"Build","connectionLabel":"Codex","machineLabel":"Laptop","discriminator":"5nd9","available":true}
-				]}`)
-				return
-			}
-			io.WriteString(w, `{"projects":[`+project+`],"imports":[]}`)
-		case "GET /api/projects/2":
-			io.WriteString(w, project)
+		switch r.Method + " " + r.URL.RequestURI() {
+		case "GET /api/projects?view=destinations":
+			io.WriteString(w, `{"groups":[{"id":1,"title":"Current"}],"destinations":[
+				{"connectionId":7,"workspaceId":"ws_grouped","title":"Build","connectionLabel":"Codex","machineLabel":"Laptop","discriminator":"4ab2","groupProjectId":1,"available":true},
+				{"connectionId":8,"workspaceId":"ws_ungrouped","title":"Build","connectionLabel":"Codex","machineLabel":"Laptop","discriminator":"5nd9","available":true}
+			]}`)
 		case "GET /api/connections":
 			io.WriteString(w, `{"connections":[]}`)
-		case "GET /api/workspaces/review":
-			io.WriteString(w, review)
-		case "POST /api/projects/1/merge":
-			var in struct {
-				From         int64  `json:"from"`
-				Confirm      bool   `json:"confirm"`
-				PreviewToken string `json:"previewToken"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-				t.Errorf("decode merge: %v", err)
-			}
-			if in.From != 3 {
-				t.Errorf("merge from %d, want 3", in.From)
-			}
-			if in.Confirm {
-				if want := "preview-for-current-merge-2"; in.PreviewToken != want || previewCalls.Load() != 2 {
-					t.Errorf("confirmation token %q, want %q after the second preview", in.PreviewToken, want)
-				}
-				confirmCalls.Add(1)
-				io.WriteString(w, `{"preview":false,"project":`+project+`}`)
-				return
-			}
-			if in.PreviewToken != "" {
-				t.Errorf("preview request sent token %q", in.PreviewToken)
-			}
-			fmt.Fprintf(w, `{"preview":true,"project":%s,"from":{"id":3,"title":"Source"},
-				"moves":{"tasks":7,"schedules":2,"snippets":4,"workspaces":3},"previewToken":"preview-for-current-merge-%d"}`,
-				project, previewCalls.Add(1))
-		case "POST /api/projects/1/split":
-			splitCalls.Add(1)
-			var in struct {
-				BindingID int64  `json:"bindingId"`
-				Title     string `json:"title"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.BindingID != 41 || in.Title != "Split" {
-				t.Errorf("split request = %+v, %v", in, err)
-			}
-			w.WriteHeader(http.StatusCreated)
-			io.WriteString(w, `{"project":{"id":5,"title":"Split"},"source":`+project+`}`)
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
 			http.NotFound(w, r)
@@ -84,104 +28,75 @@ func TestProjectWorkspaceCommands(t *testing.T) {
 	}))
 	defer srv.Close()
 	h := &harness{t: t, url: srv.URL}
-	run := func(args ...string) string {
-		t.Helper()
-		code, out, stderr := h.run("", append([]string{"projects"}, args...)...)
-		if code != 0 || stderr != "" {
-			t.Fatalf("projects %v = %d, %s, %s", args, code, out, stderr)
-		}
-		return out
+	code, out, stderr := h.run("", "projects", "ls")
+	if code != 0 || stderr != "" {
+		t.Fatalf("projects ls = %d, %s, %s", code, out, stderr)
 	}
-
-	list := run("ls")
-	for _, want := range []string{"Current", "ws_bound", "ws_unbound", "Build (4ab2)", "Build (5nd9)", "unbound", "available"} {
-		if !strings.Contains(list, want) {
-			t.Errorf("project list lacks %q: %s", want, list)
+	for _, want := range []string{"#1  Current", "ws_grouped", "ws_ungrouped", "Build (4ab2)", "Build (5nd9)", "available"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("project list lacks %q: %s", want, out)
 		}
 	}
-	for _, ref := range [][]string{nil, {"2"}} {
-		out := run(append([]string{"workspaces"}, ref...)...)
-		for _, want := range []string{"PROJECT", "BINDING", "MACHINE", "HARNESS", "PATH", "STATE", "PRIMARY", "REMOTE", "/primary", "/secondary"} {
-			if !strings.Contains(out, want) {
-				t.Errorf("workspace output lacks %q: %s", want, out)
-			}
-		}
+	code, out, stderr = h.run("", "projects", "ls", "--json")
+	if code != 0 || stderr != "" {
+		t.Fatalf("projects ls --json = %d, %s, %s", code, out, stderr)
 	}
-	if out := decode[db.Project](t, run("workspaces", "2", "--json")); out.ID != 1 || len(out.Bindings) != 2 {
-		t.Errorf("workspace alias JSON: %+v", out)
-	}
-	if out := run("workspaces", "--review"); !strings.Contains(out, "/candidate") || !strings.Contains(out, "/unrelated") {
-		t.Errorf("review output: %s", out)
-	}
-	if out := run("workspaces", "2", "--review"); !strings.Contains(out, "/candidate") || strings.Contains(out, "/unrelated") {
-		t.Errorf("project review output: %s", out)
-	}
-	if out := decode[db.WorkspaceReview](t, run("workspaces", "--review", "--json")); out.Attention != 1 || len(out.Workspaces) != 2 {
-		t.Errorf("review JSON: %+v", out)
-	}
-
-	if out := run("merge", "3", "Former"); !strings.Contains(out, "7 tasks, 2 schedules, 4 snippets, 3 workspaces") ||
-		!strings.Contains(out, "Run again with --yes to merge.") || confirmCalls.Load() != 0 {
-		t.Errorf("merge preview: %s", out)
-	}
-	if out := decode[db.MergeResult](t, run("merge", "3", "1", "--yes", "--json")); out.Project.ID != 1 || out.Preview || confirmCalls.Load() != 1 {
-		t.Errorf("merge confirmation: %+v", out)
-	}
-	if code, _, stderr := h.run("", "projects", "split", "1", "--binding", "41"); code != 2 ||
-		!strings.Contains(stderr, "split needs --yes") || splitCalls.Load() != 0 {
-		t.Errorf("unconfirmed split = %d, %s", code, stderr)
-	}
-	if out := decode[db.SplitResult](t, run("split", "1", "--binding", "41", "--title", "Split", "--yes", "--json")); out.Project.ID != 5 || out.Source.ID != 1 {
-		t.Errorf("split JSON: %+v", out)
+	catalog := decode[agenttools.ProjectsOut](t, out)
+	if len(catalog.Groups) != 1 || catalog.Groups[0].ID != 1 || len(catalog.Destinations) != 2 ||
+		catalog.Destinations[0].GroupProjectID == nil || *catalog.Destinations[0].GroupProjectID != 1 ||
+		catalog.Destinations[1].GroupProjectID != nil {
+		t.Fatalf("project destinations: %+v", catalog)
 	}
 }
 
-func TestTaskAndScheduleBindingFlag(t *testing.T) {
+func TestRetiredDestinationCommandsAndSelectors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method + " " + r.URL.Path {
-		case "GET /api/harnesses":
-			io.WriteString(w, `{"harnesses":[]}`)
-		case "GET /api/connections":
-			io.WriteString(w, `{"connections":[{"id":7,"active":true}]}`)
-		case "GET /api/projects":
-			io.WriteString(w, `{"projects":[{"id":1,"title":"Project","bindings":[
-				{"id":40,"connectionId":7,"connectionActive":true,"status":"available","primary":true},
-				{"id":41,"connectionId":7,"connectionActive":true,"status":"available","primary":false}
-			]}]}`)
-		case "POST /api/tasks", "POST /api/schedules", "PATCH /api/tasks/5", "PATCH /api/schedules/5":
-			var in struct {
-				Title     string          `json:"title"`
-				BindingID json.RawMessage `json:"bindingId"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-				t.Errorf("decode request: %v", err)
-			}
-			want := map[string]string{"chosen": "41", "cleared": "null", "unchanged": ""}[in.Title]
-			if string(in.BindingID) != want {
-				t.Errorf("%s %s bindingId = %q, want %q", r.Method, r.URL.Path, in.BindingID, want)
-			}
-			io.WriteString(w, `{"id":5}`)
-		default:
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
-			http.NotFound(w, r)
-		}
+		t.Errorf("retired command reached API: %s %s", r.Method, r.URL)
+		http.NotFound(w, r)
 	}))
 	defer srv.Close()
 	h := &harness{t: t, url: srv.URL}
-	for _, kind := range []string{"task", "schedule"} {
-		create := []string{kind, "add", "--project", "1", "--title", "chosen", "--prompt", "Build it", "--binding", "41"}
-		if kind == "schedule" {
-			create = append(create, "--cron", "@daily", "--tz", "UTC")
+	for _, tc := range []struct {
+		args   []string
+		repair string
+	}{
+		{[]string{"projects", "workspaces", "1", "--review"}, "Use projects ls for exact destinations"},
+		{[]string{"projects", "merge", "1", "2", "--yes"}, "Use Projects to move or separate an exact workspace"},
+		{[]string{"projects", "split", "1", "--binding", "41", "--yes"}, "Use Projects to move or separate an exact workspace"},
+		{[]string{"models", "ls", "--connection", "7", "--project", "1"}, "Choose the connection and --workspace-id from projects ls"},
+		{[]string{"models", "ls", "--connection", "7", "--binding", "41"}, "Choose the connection and --workspace-id from projects ls"},
+		{[]string{"task", "add", "--project", "1", "--title", "T", "--prompt", "P", "--binding", "41"}, "Choose the connection and --workspace-id from projects ls"},
+		{[]string{"task", "edit", "5", "--binding="}, "Choose the connection and --workspace-id from projects ls"},
+		{[]string{"schedule", "add", "--title", "S", "--prompt", "P", "--cron", "@daily", "--tz", "UTC", "--binding", "41"}, "Choose the connection and --workspace-id from projects ls"},
+		{[]string{"schedule", "edit", "5", "--binding="}, "Choose the connection and --workspace-id from projects ls"},
+		{[]string{"action", "ls", "--project", "1", "--on-connection", "7", "--binding", "41"}, "Choose the connection and --workspace-id from projects ls"},
+		{[]string{"action", "run", "inspect", "--project", "1", "--on-connection", "7", "--binding", "41"}, "Choose the connection and --workspace-id from projects ls"},
+	} {
+		if code, _, stderr := h.run("", tc.args...); code != 2 || !strings.Contains(stderr, "was retired") || !strings.Contains(stderr, tc.repair) {
+			t.Errorf("%v = %d, %s", tc.args, code, stderr)
 		}
-		for _, args := range [][]string{
-			create,
-			{kind, "edit", "5", "--title", "chosen", "--binding", "41"},
-			{kind, "edit", "5", "--title", "cleared", "--binding", ""},
-			{kind, "edit", "5", "--title", "unchanged"},
-		} {
-			if code, out, stderr := h.run("", args...); code != 0 || stderr != "" {
-				t.Errorf("%v = %d, %s, %s", args, code, out, stderr)
-			}
+	}
+}
+
+func TestLaunchCommandsRequireExactWorkspace(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/harnesses" {
+			io.WriteString(w, `{"harnesses":[]}`)
+			return
+		}
+		t.Errorf("incomplete launch destination reached API: %s %s", r.Method, r.URL)
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	h := &harness{t: t, url: srv.URL}
+	for _, args := range [][]string{
+		{"task", "add", "--start"},
+		{"task", "add", "--start-at", "2027-01-01T09:00", "--tz", "UTC"},
+		{"schedule", "add", "--cron", "@daily", "--tz", "UTC"},
+	} {
+		args = append(args, "--project", "1", "--connection", "8", "--title", "Work", "--prompt", "Do it")
+		if code, _, stderr := h.run("", args...); code != 1 || !strings.Contains(stderr, "select connectionId and workspaceId from list_projects") {
+			t.Errorf("%v = %d, %s", args, code, stderr)
 		}
 	}
 }
@@ -195,11 +110,14 @@ func TestExactWorkspaceFlags(t *testing.T) {
 		case "GET /api/connections":
 			io.WriteString(w, `{"connections":[{"id":7,"active":true},{"id":8,"active":true}]}`)
 		case "GET /api/connections/8/capabilities":
-			q := r.URL.Query()
-			if q.Get("workspaceId") != workspace || len(q) != 1 {
+			switch r.URL.RawQuery {
+			case "":
+				io.WriteString(w, `{"models":[{"id":"connection-model","available":true}]}`)
+			case "workspaceId=" + workspace:
+				io.WriteString(w, `{"models":[{"id":"selected-model","label":"Selected model","available":true}]}`)
+			default:
 				t.Errorf("capabilities scope = %s", r.URL.RawQuery)
 			}
-			io.WriteString(w, `{"models":[{"id":"selected-model","label":"Selected model","available":true}]}`)
 		case "POST /api/tasks", "POST /api/schedules", "PATCH /api/tasks/5", "PATCH /api/schedules/5":
 			var in struct {
 				Title        string          `json:"title"`
@@ -229,6 +147,9 @@ func TestExactWorkspaceFlags(t *testing.T) {
 	}))
 	defer srv.Close()
 	h := &harness{t: t, url: srv.URL}
+	if code, out, stderr := h.run("", "models", "ls", "--connection", "8"); code != 0 || !strings.Contains(out, "connection-model") {
+		t.Fatalf("connection models ls = %d, %s, %s", code, out, stderr)
+	}
 	if code, out, stderr := h.run("", "models", "ls", "--connection", "8", "--workspace-id", workspace); code != 0 || !strings.Contains(out, "selected-model") {
 		t.Fatalf("models ls = %d, %s, %s", code, out, stderr)
 	}
@@ -239,12 +160,15 @@ func TestExactWorkspaceFlags(t *testing.T) {
 		} else {
 			create = append(create, "--cron", "@daily", "--tz", "UTC")
 		}
-		for _, args := range [][]string{
+		commands := [][]string{
 			create,
 			{kind, "edit", "5", "--title", "reselect", "--connection", "8", "--workspace-id", workspace},
-			{kind, "edit", "5", "--title", "clear", "--workspace-id", ""},
 			{kind, "edit", "5", "--title", "unchanged"},
-		} {
+		}
+		if kind == "task" {
+			commands = append(commands, []string{kind, "edit", "5", "--title", "clear", "--workspace-id", ""})
+		}
+		for _, args := range commands {
 			if code, out, stderr := h.run("", args...); code != 0 || stderr != "" {
 				t.Errorf("%v = %d, %s, %s", args, code, out, stderr)
 			}

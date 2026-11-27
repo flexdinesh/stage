@@ -52,7 +52,7 @@ func TestWorkerGatewayRecordsForwardingMachine(t *testing.T) {
 	p := e.project("/w/gw")
 
 	var created sourced
-	if rec := e.gw(j.Token, "POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "via gateway", "prompt": "p"}, &created); rec.Code != 201 {
+	if rec := e.gw(j.Token, "POST", "/api/tasks", e.taskBody(p.ID, "via gateway", map[string]any{"prompt": "p"}), &created); rec.Code != 201 {
 		t.Fatalf("create task: %d %s", rec.Code, rec.Body)
 	}
 	if !machineIs(created.SourceMachineID, j.MachineID) || created.CreatedBy != 1 {

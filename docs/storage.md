@@ -613,8 +613,10 @@ and paging. (Thread search was removed with API v3.)
   holds one or more scenarios per version, a seed and a check; a version
   without an entry fails. Checks query that version's schema directly; where
   a migration's result is also read through `db.Store`, a separate test
-  reuses the seed and reads it at the head. No releases exist yet, so this
-  is the upgrade coverage.
+  reuses the seed and reads it at the head. The legacy project upgrade tests
+  exercise a personal installation from 0046 through workspace pin and group
+  backfill, then claim the owner and verify historical links, frozen attempts,
+  unresolved work and the existing worker pairing on both engines.
 - `TestSchemaParity` (`internal/db/postgres`, `check:postgres`): both engines
   migrated to their heads hold the same tables, columns, nullability,
   primary, foreign and unique keys, with types compared by class (`int`:

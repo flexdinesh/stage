@@ -39,7 +39,6 @@ func csv(s string) []string {
 type configFlags struct {
 	connection                         int64
 	workspace                          string
-	binding                            db.Optional[int64]
 	executionConfig                    *agenttools.ConfigInput
 	project, title, prompt, promptFile string
 	images                             list
@@ -81,18 +80,7 @@ func (f *configFlags) register(c *cmd) {
 	f.configInputFlag(c)
 	c.fs.Int64Var(&f.connection, "connection", 0, "destination connection ID")
 	c.fs.StringVar(&f.workspace, "workspace-id", "", "exact workspace ID from projects ls (empty clears it on edit)")
-	c.fs.Func("binding", "legacy workspace binding ID (empty restores the primary)", func(raw string) error {
-		if raw == "" {
-			f.binding = db.Optional[int64]{Set: true, Null: true}
-			return nil
-		}
-		id, err := parseID(raw)
-		if err != nil {
-			return err
-		}
-		f.binding = db.Optional[int64]{Set: true, V: id}
-		return nil
-	})
+	retireDestinationFlag(c, "binding")
 	c.fs.StringVar(&f.project, "project", "", "project id or title")
 	c.fs.StringVar(&f.title, "title", "", "title")
 	c.fs.StringVar(&f.prompt, "prompt", "", "prompt text (- = stdin)")
@@ -133,7 +121,7 @@ func (f *configFlags) create(c *cmd) (agenttools.ConfigArgs, error) {
 		return agenttools.ConfigArgs{}, usagef("--workspace-id requires a workspace ID from projects ls")
 	}
 	return agenttools.ConfigArgs{
-		ConnectionID: f.connection, WorkspaceID: strFlag(c, "workspace-id", f.workspace), BindingID: f.binding.Ptr(), ExecutionConfig: f.executionConfig, Project: f.project, Title: f.title, Prompt: prompt,
+		ConnectionID: f.connection, WorkspaceID: strFlag(c, "workspace-id", f.workspace), ExecutionConfig: f.executionConfig, Project: f.project, Title: f.title, Prompt: prompt,
 		ImagePaths: f.images,
 	}, nil
 }
@@ -162,7 +150,7 @@ func (f *configFlags) update(c *cmd, id int64) (agenttools.UpdateArgs, error) {
 		return agenttools.UpdateArgs{}, err
 	}
 	a := agenttools.UpdateArgs{
-		ConnectionID: f.connection, BindingID: f.binding, ExecutionConfig: f.executionConfig, ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
+		ConnectionID: f.connection, ExecutionConfig: f.executionConfig, ID: id, Project: strFlag(c, "project", f.project), Title: strFlag(c, "title", f.title),
 	}
 	if c.set("workspace-id") {
 		a.WorkspaceID = db.Optional[string]{Set: true, Null: f.workspace == "", V: f.workspace}

@@ -494,7 +494,7 @@ export function useInvalidateWork(): () => Promise<void> {
   return () => invalidateWork(qc);
 }
 
-/** Binding and identity changes affect discovery, placement and the harness catalogs. */
+/** Project membership and identity changes affect discovery and the harness catalogs. */
 export function useInvalidateProjects(): () => Promise<void> {
   const qc = useQueryClient();
   return async () => {
@@ -514,17 +514,14 @@ const NO_REQUESTS: SessionRequest[] = [];
 /** How often pending requests are re-read while a task needs input: a request can appear or be answered elsewhere at any time. */
 const REQUESTS_POLL = 3000;
 
-type CapabilityScope = { projectId: number; id: number; revision: number } | { workspaceId: string };
+type CapabilityScope = { workspaceId: string };
 
 /** One cached read per connection and workspace scope. Omit the scope for harness-wide declarations. */
 export function connectionCapabilityOptions(api: Pick<ReturnType<typeof useApi>, "capabilities">, connectionId: number, scope?: CapabilityScope) {
-  const key = scope === undefined ? ["", false] : "workspaceId" in scope
-    ? ["workspace", scope.workspaceId]
-    : [scope.projectId, scope.id, scope.revision];
-  const params = scope === undefined || "workspaceId" in scope ? scope : { projectId: scope.projectId, bindingId: scope.id };
+  const key = scope === undefined ? ["", false] : ["workspace", scope.workspaceId];
   return queryOptions({
     queryKey: ["capabilities", connectionId, ...key],
-    queryFn: ({ signal }) => api.capabilities(connectionId, params, signal),
+    queryFn: ({ signal }) => api.capabilities(connectionId, scope, signal),
     staleTime: 60_000,
     retry: false,
   });

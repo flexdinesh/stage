@@ -146,6 +146,23 @@ func (h *harness) project(root string) db.Project {
 	return p
 }
 
+func (h *harness) workspaceID(p db.Project) string {
+	h.t.Helper()
+	catalog, err := client.New(h.url).ProjectSummaries(h.t.Context())
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	b := p.Bindings[0]
+	want := db.WorkspaceID(b.ConnectionID, b.ExternalProjectID, b.Workspace)
+	for _, d := range catalog.Destinations {
+		if d.ConnectionID == b.ConnectionID && d.WorkspaceID == want && d.Available {
+			return d.WorkspaceID
+		}
+	}
+	h.t.Fatalf("seeded workspace %s missing from destinations: %+v", want, catalog.Destinations)
+	return ""
+}
+
 func decode[T any](t *testing.T, s string) T {
 	t.Helper()
 	var v T
@@ -249,9 +266,10 @@ func TestTreeCommandsAndOriginSessionFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.caller = agentctx.Caller{Session: t3Session(out.ThreadID)}
+	workspace := h.workspaceID(p)
 	add := func(args ...string) client.Task {
 		t.Helper()
-		code, stdout, stderr := h.run("", append([]string{"task", "add", "--project", "1", "--prompt", "p", "--json"}, args...)...)
+		code, stdout, stderr := h.run("", append([]string{"task", "add", "--project", "1", "--connection", "1", "--workspace-id", workspace, "--prompt", "p", "--json"}, args...)...)
 		if code != 0 {
 			t.Fatalf("add: %s", stderr)
 		}
@@ -442,7 +460,7 @@ func TestTreeFlags(t *testing.T) {
 	h.caller = agentctx.Caller{Cwd: "/w/cli-tree-flags"}
 	add := func(args ...string) client.Task {
 		t.Helper()
-		code, stdout, stderr := h.run("", append([]string{"task", "add", "--project", "1", "--prompt", "p", "--json"}, args...)...)
+		code, stdout, stderr := h.run("", append([]string{"task", "add", "--project", "1", "--connection", "1", "--prompt", "p", "--json"}, args...)...)
 		if code != 0 {
 			t.Fatalf("add %v: %s", args, stderr)
 		}
@@ -475,13 +493,13 @@ func TestTreeFlags(t *testing.T) {
 
 func TestScheduleAndContextCommands(t *testing.T) {
 	h := newHarness(t)
-	h.project("/w/cli-s")
+	p := h.project("/w/cli-s")
 	h.caller = agentctx.Caller{Cwd: "/w/cli-s/pkg"}
 	code, stdout, stderr := h.run("", "context", "--json")
 	if cx := decode[agenttools.ContextOut](t, stdout); code != 0 || cx.Project != nil || cx.ProjectSource != "" {
 		t.Fatalf("context: %d %s %s", code, stdout, stderr)
 	}
-	code, stdout, stderr = h.run("", "schedule", "add", "--project", "1", "--title", "n", "--prompt", "p", "--cron", "0 2 * * *", "--tz", "UTC", "--json")
+	code, stdout, stderr = h.run("", "schedule", "add", "--connection", "1", "--workspace-id", h.workspaceID(p), "--title", "n", "--prompt", "p", "--cron", "0 2 * * *", "--tz", "UTC", "--json")
 	if code != 0 {
 		t.Fatalf("schedule add: %s", stderr)
 	}
@@ -589,7 +607,7 @@ func TestCLIOverUnixSocket(t *testing.T) {
 	}
 
 	p := h.project("/w/cli-unix")
-	code, stdout, stderr := h.run("", "task", "add", "--project", "1", "--project", fmt.Sprint(p.ID), "--title", "Over unix", "--prompt", "go", "--json")
+	code, stdout, stderr := h.run("", "task", "add", "--connection", "1", "--project", fmt.Sprint(p.ID), "--title", "Over unix", "--prompt", "go", "--json")
 	if code != 0 {
 		t.Fatalf("task add over unix socket: %d %s", code, stderr)
 	}
@@ -606,9 +624,10 @@ func TestCLIOverUnixSocket(t *testing.T) {
 
 func TestHandoffFlags(t *testing.T) {
 	h := newHarness(t)
-	h.project("/w/cli-handoff")
+	p := h.project("/w/cli-handoff")
+	workspace := h.workspaceID(p)
 	h.caller = agentctx.Caller{Cwd: "/w/cli-handoff"}
-	code, stdout, stderr := h.run("", "task", "add", "--project", "1", "--title", "a", "--prompt", "x", "--json")
+	code, stdout, stderr := h.run("", "task", "add", "--project", "1", "--connection", "1", "--workspace-id", workspace, "--title", "a", "--prompt", "x", "--json")
 	if code != 0 {
 		t.Fatalf("add: %d %s", code, stderr)
 	}
@@ -616,7 +635,7 @@ func TestHandoffFlags(t *testing.T) {
 	if !a.Handoff {
 		t.Fatalf("handoff defaults on: %+v", a)
 	}
-	code, stdout, stderr = h.run("", "task", "add", "--project", "1", "--title", "b", "--prompt", "y", "--needs", fmt.Sprint(a.ID), "--handoff=false", "--json")
+	code, stdout, stderr = h.run("", "task", "add", "--project", "1", "--connection", "1", "--workspace-id", workspace, "--title", "b", "--prompt", "y", "--needs", fmt.Sprint(a.ID), "--handoff=false", "--json")
 	if code != 0 {
 		t.Fatalf("add b: %d %s", code, stderr)
 	}

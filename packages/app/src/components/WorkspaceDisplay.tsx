@@ -1,8 +1,7 @@
-import type { ReactNode } from "react";
 import { useHarnesses, useMachines } from "../api/queries.ts";
 import type { ProjectBinding } from "../api/types.ts";
 import { machineStatusLabel } from "../lib/machines.ts";
-import { currentBindings, orderedWorkspaces, primaryWorkspace, workspaceLocation } from "../lib/projects.ts";
+import { orderedWorkspaces, workspaceLocation } from "../lib/projects.ts";
 import { HarnessFacts } from "./HarnessPresentation.tsx";
 import { Chip, CopyButton, ErrorText, Meta, type ChipTone } from "./ui.tsx";
 
@@ -45,35 +44,15 @@ function workspaceState(binding: ProjectBinding, site: Placement): { text: strin
   return { text: "Available", tone: "ok" };
 }
 
-/** Compact project placement and the expanded list use the same bindings and status labels. */
-export function WorkspaceDisplay({
-  bindings, connectionId, renderActions, connections,
+export function RecordedWorkspaceDisplay({
+  bindings, connections,
 }: {
   bindings: readonly ProjectBinding[];
-  connectionId?: number | undefined;
   connections: WorkspaceConnections;
-  renderActions?: (binding: ProjectBinding, site: Placement) => ReactNode;
 }) {
   const { machines, harnesses, placement } = connections;
-  const ordered = orderedWorkspaces(currentBindings(bindings));
-  const summary = primaryWorkspace(ordered, connectionId);
-  const more = ordered.length - 1;
-  if (renderActions === undefined) {
-    if (summary === undefined) return <Meta>Workspace not bound</Meta>;
-    const site = placement(summary.connectionId, summary);
-    const state = workspaceState(summary, site);
-    const location = workspaceLocation(summary);
-    return (
-      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-        <Meta className="wrap-anywhere">{site.machineName} · {site.harness} · {location}</Meta>
-        {summary.primary && ordered.length > 1 ? <Meta>Primary</Meta> : null}
-        <Chip tone={state.tone}>{state.text}</Chip>
-        {more === 0 ? null : <Meta>+{more} {more === 1 ? "workspace" : "workspaces"}</Meta>}
-      </span>
-    );
-  }
   const groups = new Map<number, ProjectBinding[]>();
-  for (const binding of ordered) {
+  for (const binding of orderedWorkspaces(bindings)) {
     const group = groups.get(binding.machineId);
     if (group === undefined) groups.set(binding.machineId, [binding]);
     else group.push(binding);
@@ -81,13 +60,7 @@ export function WorkspaceDisplay({
   return (
     <div className="min-w-0">
       <ErrorText error={machines.error ?? harnesses.error} />
-      {ordered.length === 0 ? (
-        <p className="px-3 py-3 text-small text-muted">
-          {!harnesses.loaded && harnesses.error === null ? "Loading connections…" :
-            harnesses.error !== null ? "Connection status is unavailable." :
-              harnesses.connectedList.length === 0 ? "Connect a harness to bind a workspace." : "No workspaces bound. Bind one to launch tasks."}
-        </p>
-      ) : Array.from(groups, ([machineId, group]) => {
+      {Array.from(groups, ([machineId, group]) => {
         const first = group[0];
         if (first === undefined) return null;
         const site = placement(first.connectionId, first);
@@ -124,12 +97,11 @@ export function WorkspaceDisplay({
                         <dt><Meta>State</Meta></dt>
                         <dd className="flex flex-wrap items-center gap-2">
                           <Chip tone={state.tone} dot>{state.text}</Chip>
-                          {binding.primary ? <Meta>Primary</Meta> : null}
+                          {binding.primary ? <Meta>Recorded primary</Meta> : null}
                         </dd>
                       </div>
                     </dl>
                     <HarnessFacts facts={binding.facts} />
-                    {renderActions(binding, target)}
                   </li>
                 );
               })}

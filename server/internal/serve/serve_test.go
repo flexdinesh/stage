@@ -2,9 +2,7 @@ package serve_test
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +22,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/cli"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/filelock"
 	"github.com/flexdinesh/stage/server/internal/instance"
@@ -180,8 +179,6 @@ func health(t *testing.T, a listen.Addr) client.Health {
 	return h
 }
 
-var projectSeq atomic.Int32
-
 // t3Connection is the T3 connection of the instance at a. A fresh install
 // has none: the refreshed T3 status stamps the connected T3's environment,
 // creating it.
@@ -202,54 +199,17 @@ func t3Connection(t *testing.T, a listen.Addr) int64 {
 	return 0
 }
 
-// startTask creates a project in T3, syncs it and starts a task through a.
+// startTask registers a T3 workspace and launches against its exact destination.
 func startTask(t *testing.T, fake *countingT3, a listen.Addr) client.Task {
 	t.Helper()
-	ctx := context.Background()
-	root := fmt.Sprintf("/w%d", projectSeq.Add(1))
-	ext, err := fake.CreateProject(ctx, t3.CreateProjectInput{Title: "P " + root, WorkspaceRoot: root})
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := t.TempDir()
+	ext := fake.AddProject("Test project", root)
 	conn := t3Connection(t, a)
 	hc, base := httpFor(a)
-	c := clientFor(a)
-	res, err := hc.Post(base+"/api/projects", "application/json", strings.NewReader(`{"title":"Test project"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var project struct {
-		ID int64 `json:"id"`
-	}
-	if err = json.NewDecoder(res.Body).Decode(&project); err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != 201 {
-		t.Fatalf("create project: %d", res.StatusCode)
-	}
-	body, _ := json.Marshal(map[string]any{"connectionId": conn, "externalProjectId": ext.ID, "workspace": root})
-	req, err := http.NewRequest("PUT", fmt.Sprintf("%s/api/projects/%d/binding", base, project.ID), bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	res, err = hc.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	projectID := project.ID
-	switch res.StatusCode {
-	case 200:
-	case 409:
-		// The sync loop's discovery imported the workspace first: use the
-		// project it bound.
-		projectID = boundProject(t, c, conn, ext.ID)
-	default:
-		t.Fatalf("bind project: %d", res.StatusCode)
-	}
-	task, err := c.CreateTask(ctx, client.CreateTask{ProjectID: projectID, Title: "T", Prompt: "do it", Start: true})
+	workspace := fixtureWorkspace(t, hc, base, conn, ext.ID, root)
+	task, err := clientFor(a).CreateTask(t.Context(), client.CreateTask{
+		ConnectionID: conn, WorkspaceID: workspace.WorkspaceID, Title: "T", Prompt: "do it", Start: true,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,22 +219,23 @@ func startTask(t *testing.T, fake *countingT3, a listen.Addr) client.Task {
 	return task
 }
 
-// boundProject is the project bound to external project ext on connection conn.
-func boundProject(t *testing.T, c *client.Client, conn int64, ext string) int64 {
+func fixtureWorkspace(t *testing.T, h *http.Client, base string, connection int64, externalID, root string) db.Workspace {
 	t.Helper()
-	ps, err := c.Projects(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range ps {
-		for _, b := range p.Bindings {
-			if b.ConnectionID == conn && b.ExternalProjectID == ext {
-				return p.ID
+	path := fmt.Sprintf("/api/connections/%d/workspaces", connection)
+	selector := db.WorkspaceID(connection, externalID, root)
+	var workspace db.Workspace
+	awaitSharedWorkflow(t, "workspace "+selector+" to be available", func() bool {
+		var catalog struct{ Workspaces []db.Workspace }
+		(transportRequest{method: "GET", path: path}).send(t, h, base, http.StatusOK, &catalog)
+		for _, row := range catalog.Workspaces {
+			if row.WorkspaceID == selector && row.Available {
+				workspace = row
+				return true
 			}
 		}
-	}
-	t.Fatalf("bind project: 409 and no project is bound to %s", ext)
-	return 0
+		return false
+	})
+	return workspace
 }
 
 func gone(t *testing.T, path string) {

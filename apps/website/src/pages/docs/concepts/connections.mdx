@@ -49,13 +49,13 @@ Codex runs on your computer: where Stage runs (the desktop app or Stage's per-us
 
 ## Choosing a connection per task
 
-Every task and schedule names its connection. Pick it on the task, or let it start on your default connection. Each connection keeps its own new-task defaults, such as a pinned model ([App reference](/docs/reference/app)).
+Choose a connection and an exact workspace for a task or schedule. The default connection can prefill the form. Each connection keeps its own new-task defaults, such as a pinned model. [App reference](/docs/reference/app)
 
 ## When a connection is offline
 
 Stage and its harnesses fail independently.
 
-- Planning works offline: create projects, tasks, trees and schedules with no harness connected.
+- Planning works offline for projects, backlog tasks and trees. A new schedule needs an exact workspace on a selected connection.
 - A lost connection preserves each task's state. Launches on it wait or are refused until it is back.
 - A disconnected harness leaves the other harness, and planning, available.
 - Accepted results are saved in Stage, so handoff to the next task works with the earlier task's harness offline.
@@ -64,7 +64,7 @@ The status button at the bottom of the sidebar sums up every connection on every
 
 ## Replacing a connection
 
-Pairing a different T3, or confirming a different OpenCode service, retires the old connection. Its tasks stay as read-only history, unlaunched backlog tasks and schedules move to the new connection, and discovery resolves workspaces on the new connection using the [project identity rules](/docs/concepts/projects). Connecting the old instance again brings back its tasks and bindings.
+Pairing a different T3 or confirming a different OpenCode service retires the old connection. Its tasks and saved destinations stay on record. Select an exact workspace on the replacement for future launches. Reconnecting the original instance can restore its connection and make its exact workspace pins usable again.
 
 ## Auto-complete
 

@@ -19,7 +19,7 @@ export function NodeChip({
   task,
   className,
 }: {
-  task: Pick<Task, "state" | "readiness" | "acceptanceId" | "connectionId" | "projectId" | "projectTitle" | "bindingId">;
+  task: Pick<Task, "state" | "readiness" | "acceptanceId" | "connectionId" | "workspaceId">;
   className?: string | undefined;
 }) {
   // A ready task its connection cannot launch reads backlog.

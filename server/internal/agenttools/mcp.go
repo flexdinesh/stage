@@ -2,6 +2,7 @@ package agenttools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -22,7 +23,7 @@ const guide = `Stage owns projects, tasks, trees, accepted results and journals.
 - Call get_context to see your scoped session, project, owning task and current tree. Before work, read the task journal and the current tree journal. Refresh membership before contributing a tree note.
 - Use whichever Stage interface you have: the {cli} CLI ({cli} help; {cli} call TOOL JSON runs any tool named here, {cli} tools NAME shows its input), Stage MCP tools (names here), or the Stage server's HTTP API (/api). If none is reachable, say so and continue; never install one.
 - Caller session: {connectionId, externalSessionId}, your harness connection in Stage and your session there. The {cli} CLI and stdio MCP detect it from your harness's session variable ({cli} context shows it). Harness integrations may also send it per call. Otherwise pass callerSession, or over HTTP MCP send the header Stage-Caller-Session: <connectionId>:<externalSessionId>. CLI: export STAGE_CALLER_SESSION=<connectionId>:<externalSessionId>, or pass --caller-connection and --caller-session. HTTP: pass {connectionId, externalSessionId} as originSession on task creates, sourceSession on journal notes and callerSession on adoption; GET /api/connections/{connectionId}/sessions/{externalSessionId}/context returns your context.
-- Create work with create_task. Supply a self-contained prompt. The default is backlog. Choose connectionId and workspaceId together from list_projects, which includes unbound workspaces. Stage assigns a project when omitted. The same pair in list_models shows workspace-specific executionConfig choices. CLI equivalents use --connection and --workspace-id. Select that pair again to repair an unavailable destination.
+- Create work with create_task. Supply a self-contained prompt. The default is backlog. Choose connectionId and workspaceId together from list_projects, which includes unbound workspaces. Stage assigns a project when omitted. The same pair in list_models shows workspace-specific executionConfig choices. CLI equivalents use --connection and --workspace-id. Select that pair again to repair an unavailable destination. To plan unresolved backlog, provide the connection and Stage project context and omit workspaceId.
 - In Stage, trees are the only way to express dependencies. Set needs to task IDs, use create_tree to group tasks, or afterMe to depend on your own session's task. adopt_session explicitly tracks a top-level session. Existing owners can be reused offline. Trees default to auto start and tasks inherit the tree mode: omit startMode unless the user asks for manual. Auto is safe for planned work: roots never start on their own, and other members launch only once the user completes their needs in Stage (a task added after its needs are completed launches at once; that is expected). Do not pick manual to avoid launches; ask the user if unsure. Only user completion in Stage releases dependencies. start_tree starts ready members.
 - A dependent launch receives Stage's stored accepted reply and references unless handoff is disabled. Stage does not start a dependent from its predecessor's branch: the handoff carries the branch the harness reported. A worktree, its base ref or branch are launch options in executionConfig where the harness declares them (list_models).
 - Append findings and outcomes with append_note. Provide taskId for a task note, or treeId and the current sourceTaskId for a tree conclusion. Reuse requestId only for identical retries. Agents can report outcomes. Acceptance belongs to the user.
@@ -66,14 +67,15 @@ func Skill(cli string) string {
 func NewServer(o *Ops) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "stage", Title: "stage", Version: Version},
 		&mcp.ServerOptions{Instructions: Guide(o.cli())})
+	s.AddReceivingMiddleware(retiredDestinationInputs)
 	ro := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	destructive := true
 	del := &mcp.ToolAnnotations{DestructiveHint: &destructive}
 
-	add(s, o, "get_context", "Your session id, cwd, resolved Stage project, owning task, selected workspaceId or legacy bindingId, and current treeId/treeTitle.", ro, o.Context)
-	add(s, o, "list_projects", "List Stage projects, legacy workspace bindings, and available destinations, including unbound workspaces.", ro, o.ListProjects)
+	add(s, o, "get_context", "Your session id, cwd, resolved Stage project, owning task, selected workspaceId, and current treeId/treeTitle.", ro, o.Context)
+	add(s, o, "list_projects", "List Stage project groups and available destinations. Use connectionId and workspaceId to launch.", ro, o.ListProjects)
 	add(s, o, "list_models", "List execution capabilities for connectionId. Supply workspaceId for exact workspace-specific models and agents.", ro, o.ListModels)
-	add(s, o, "list_actions", "List harness actions for exactly one connectionId, taskId, or projectId. For a project, also supply onConnectionId and optionally bindingId.", ro, o.ListActions)
+	add(s, o, "list_actions", "List harness actions for exactly one connectionId, taskId, or projectId. For a project, also supply onConnectionId and workspaceId.", ro, o.ListActions)
 	add(s, o, "run_action", "Run a harness action by actionId from list_actions. Use the same target and pass its declared input fields. A journalError in the result means the action succeeded and Stage could not record it.", nil, o.RunAction)
 
 	add(s, o, "read_journal", "Read task or tree journal previews (600 runes), notes by default; events or all are opt-in. Exactly one taskId/treeId; filterTaskId filters tree reads. Follow nextCursor; a stale tree cursor requires restarting pagination.", ro, o.ReadJournal)
@@ -82,7 +84,7 @@ func NewServer(o *Ops) *mcp.Server {
 
 	add(s, o, "list_tasks", "List tasks (compact rows, newest activity first); open tasks by default (closed=true|all adds archived tasks and members of done or archived trees).", ro, o.ListTasks)
 	add(s, o, "get_task", "Read a task with its events, session identity, final reply, tree (members, edges, levels), and currentHandoffs (what its launch appended, one per need).", ro, o.GetTask)
-	add(s, o, "create_task", "Create a task: saved to backlog by default; start=true launches it now; needs/afterMe put it in a tree and wait for user completion of those tasks in Stage (in an auto tree it then launches, at once if they are already completed). Task startMode defaults to inherit: omit it unless the user asks; never set manual just to prevent that launch. Shared start policy belongs on the tree; auto|manual only for a user-requested per-task exception. Handoff (default true) appends each need's saved accepted result and available references at launch; treeId joins a tree; startLocal+startTz schedule a one-shot start.", nil, o.CreateTask)
+	add(s, o, "create_task", "Create a task: saved to backlog by default; start=true launches it now using an explicit connectionId and workspaceId; needs/afterMe put it in a tree and wait for user completion of those tasks in Stage (in an auto tree it then launches, at once if they are already completed). Task startMode defaults to inherit: omit it unless the user asks; never set manual just to prevent that launch. Shared start policy belongs on the tree; auto|manual only for a user-requested per-task exception. Handoff (default true) appends each need's saved accepted result and available references at launch; treeId joins a tree; startLocal+startTz schedule a one-shot start.", nil, o.CreateTask)
 	add(s, o, "update_task", "Edit a task (incl. handoff on/off, startMode, executionConfig with its launch options). Outside backlog only the title changes. Needs change with set_needs.", nil, o.UpdateTask)
 	add(s, o, "delete_task", "Delete a task only when deletable (no recorded work); otherwise archive it. In a tree, its dependents take over its needs.", del, o.DeleteTask)
 	add(s, o, "archive_task", "Archive a standalone task (archived=false unarchives); not while launching, running or needing input. It leaves the default lists; activity on it unarchives it. A tree member is closed with its tree (update_tree status).", nil, o.ArchiveTask)
@@ -104,7 +106,7 @@ func NewServer(o *Ops) *mcp.Server {
 
 	add(s, o, "list_schedules", "List recurring schedules (next fire first).", ro, o.ListSchedules)
 	add(s, o, "get_schedule", "Read a schedule with its recent runs.", ro, o.GetSchedule)
-	add(s, o, "create_schedule", "Create a recurring schedule: each cron fire spawns and starts a task with this config.", nil, o.CreateSchedule)
+	add(s, o, "create_schedule", "Create a recurring schedule using connectionId and workspaceId from list_projects. Each cron fire spawns and starts a task on that destination.", nil, o.CreateSchedule)
 	add(s, o, "update_schedule", "Edit a schedule, or pause/resume it (paused).", nil, o.UpdateSchedule)
 	add(s, o, "delete_schedule", "Delete a schedule (spawned tasks stay).", del, o.DeleteSchedule)
 	add(s, o, "run_schedule", "Spawn and start a schedule's task now.", nil, o.RunSchedule)
@@ -114,12 +116,45 @@ func NewServer(o *Ops) *mcp.Server {
 	return s
 }
 
+// Inspect retired fields before the SDK rejects them against the current input schema.
+func retiredDestinationInputs(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		if method != "tools/call" {
+			return next(ctx, method, req)
+		}
+		call, ok := req.GetParams().(*mcp.CallToolParamsRaw)
+		if !ok {
+			return next(ctx, method, req)
+		}
+		switch call.Name {
+		case "create_task", "update_task", "create_schedule", "update_schedule", "list_models", "list_actions", "run_action":
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(call.Arguments, &fields) == nil {
+				_, binding := fields["bindingId"]
+				_, project := fields["projectId"]
+				if binding {
+					return retiredInputResult("bindingId"), nil
+				}
+				if call.Name == "list_models" && project {
+					return retiredInputResult("projectId"), nil
+				}
+			}
+		}
+		return next(ctx, method, req)
+	}
+}
+
+func retiredInputResult(field string) *mcp.CallToolResult {
+	result := &mcp.CallToolResult{}
+	result.SetError(fmt.Errorf("Routing selectors were retired. Replace %s: %s", field, destinationHelp))
+	return result
+}
+
 // add registers op as a tool with an inferred input schema. Output has no
 // schema (Out = any): results are the REST shapes as JSON.
 func add[In, Out any](s *mcp.Server, o *Ops, name, desc string, ann *mcp.ToolAnnotations, op func(context.Context, In) (Out, error)) {
 	// PATCH distinguishes an omitted selector from an explicit null.
 	input, err := jsonschema.For[In](&jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
-		reflect.TypeFor[db.Optional[int64]]():  {Types: []string{"integer", "null"}},
 		reflect.TypeFor[db.Optional[string]](): {Types: []string{"string", "null"}},
 	}})
 	if err != nil {

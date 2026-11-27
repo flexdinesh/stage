@@ -48,7 +48,7 @@ func TestActionCommandsForUsers(t *testing.T) {
 			})
 		case "POST /api/connections/2/actions/replace":
 			json.NewEncoder(w).Encode(execution.ActionResult{Message: "Connected", Replaced: 5})
-		case "POST /api/projects/3/actions/show.details?bindingId=6&connectionId=2":
+		case "POST /api/projects/3/actions/show.details?connectionId=2&workspaceId=ws_exact":
 			body, err := io.ReadAll(r.Body)
 			if err != nil || string(body) != "{}" || r.Header.Get("Stage-Action-Confirmed") != "" {
 				t.Errorf("default run body %q, %v, headers %v", body, err, r.Header)
@@ -93,7 +93,7 @@ func TestActionCommandsForUsers(t *testing.T) {
 	if code != 0 || !strings.Contains(out, "Replaced connection #5") || stderr != "" {
 		t.Fatalf("replaced connection %d %s %s", code, out, stderr)
 	}
-	code, out, stderr = h.run("", "action", "run", "show.details", "--project", "3", "--on-connection", "2", "--binding", "6")
+	code, out, stderr = h.run("", "action", "run", "show.details", "--project", "3", "--on-connection", "2", "--workspace-id", "ws_exact")
 	if code != 1 || !strings.Contains(stderr, "Check the harness before retrying.") {
 		t.Fatalf("uncertain action %d %s %s", code, out, stderr)
 	}
@@ -102,7 +102,7 @@ func TestActionCommandsForUsers(t *testing.T) {
 		{"action", "ls", "--connection", "2", "--task", "4"},
 		{"action", "ls", "--project", "3"},
 		{"action", "ls", "--task", "4", "--on-connection", "2"},
-		{"action", "ls", "--task", "4", "--binding", "6"},
+		{"action", "ls", "--task", "4", "--workspace-id", "ws_exact"},
 		{"action", "ls", "--connection", "0"},
 		{"action", "ls", "--connection", "2", "--confirm"},
 		{"action", "run", "--connection", "2"},
@@ -111,6 +111,9 @@ func TestActionCommandsForUsers(t *testing.T) {
 		if code, _, _ := h.run("", args...); code != 2 {
 			t.Fatalf("invalid command %v exited %d", args, code)
 		}
+	}
+	if code, _, stderr := h.run("", "action", "ls", "--project", "3", "--on-connection", "2"); code != 2 || !strings.Contains(stderr, "workspaceId from list_projects or projects ls") {
+		t.Fatalf("missing project workspace: %d, %s", code, stderr)
 	}
 	if got := requests.Load(); got != 5 {
 		t.Fatalf("action request count %d", got)

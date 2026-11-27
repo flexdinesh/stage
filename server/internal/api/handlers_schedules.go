@@ -77,7 +77,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := decodeConfig(r, &req, true); err != nil {
 		return err
 	}
-	if req.WorkspaceID.Null {
+	if req.WorkspaceID.V == "" {
 		return db.DestinationRequired()
 	}
 	if req.TreeID != nil || req.Needs != nil || req.NeedsSession != nil || req.StartMode != nil ||
@@ -99,7 +99,7 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	}
 	sc, err := s.Store.CreateSchedule(r.Context(), db.NewSchedule{
 		ExecutionConfig: in.ExecutionConfig, ConnectionID: in.ConnectionID,
-		ProjectID: in.ProjectID, BindingID: in.BindingID, WorkspaceID: in.WorkspaceID, Title: in.Title, Prompt: in.Prompt,
+		ProjectID: in.ProjectID, WorkspaceID: in.WorkspaceID, Title: in.Title, Prompt: in.Prompt,
 		Notes: req.Notes, AttachmentIDs: in.AttachmentIDs,
 		Cron: req.Cron, Tz: req.Tz, Paused: req.Paused, OriginSession: in.OriginSession,
 	})
@@ -145,6 +145,9 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := decodeConfig(r, &p, false); err != nil {
 		return err
 	}
+	if p.WorkspaceID.Null {
+		return db.DestinationRequired()
+	}
 	current, err := s.Store.GetSchedule(r.Context(), id)
 	if err != nil {
 		return err
@@ -157,8 +160,8 @@ func (s *server) updateSchedule(w http.ResponseWriter, r *http.Request) error {
 	}); err != nil {
 		return err
 	}
-	original := taskDestination{current.ConnectionID, current.ProjectID, current.BindingID, current.WorkspaceID}
-	if err := s.validateDestinationPatch(r.Context(), original, p.ConnectionID, &p.ProjectID, p.BindingID, p.WorkspaceID,
+	original := taskDestination{current.ConnectionID, current.WorkspaceID}
+	if err := s.validateDestinationPatch(r.Context(), original, p.ConnectionID, &p.ProjectID, p.WorkspaceID,
 		current.ExecutionConfig, p.ExecutionConfig, current.Attachments, p.AttachmentIDs); err != nil {
 		return err
 	}

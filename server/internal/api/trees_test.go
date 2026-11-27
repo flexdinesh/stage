@@ -355,13 +355,13 @@ func TestCreateWithNeedsResolvesTree(t *testing.T) {
 	if d.TreeID == nil || *d.TreeID == ta.ID {
 		t.Fatalf("second tree %+v", d)
 	}
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "needs": []int64{a.ID, b.ID}, "startMode": "auto"}, 409, nil)
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "treeId": ta.ID, "needs": []int64{b.ID}}, 409, nil)
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "treeId": 99999}, 404, nil)
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "needs": []int64{99999}}, 404, nil)
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "startMode": "soon"}, 400, nil)
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "needs": []int64{a.ID}, "start": true}, 400, nil)
-	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "title": "x", "prompt": "y", "needs": []int64{a.ID},
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "connectionId": 1, "workspaceId": p.workspaceID(), "title": "x", "prompt": "y", "needs": []int64{a.ID, b.ID}, "startMode": "auto"}, 409, nil)
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "connectionId": 1, "workspaceId": p.workspaceID(), "title": "x", "prompt": "y", "treeId": ta.ID, "needs": []int64{b.ID}}, 409, nil)
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "connectionId": 1, "workspaceId": p.workspaceID(), "title": "x", "prompt": "y", "treeId": 99999}, 404, nil)
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "connectionId": 1, "workspaceId": p.workspaceID(), "title": "x", "prompt": "y", "needs": []int64{99999}}, 404, nil)
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "connectionId": 1, "workspaceId": p.workspaceID(), "title": "x", "prompt": "y", "startMode": "soon"}, 400, nil)
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "connectionId": 1, "workspaceId": p.workspaceID(), "title": "x", "prompt": "y", "needs": []int64{a.ID}, "start": true}, 400, nil)
+	e.must("POST", "/api/tasks", map[string]any{"projectId": p.ID, "connectionId": 1, "workspaceId": p.workspaceID(), "title": "x", "prompt": "y", "needs": []int64{a.ID},
 		"startLocal": "2999-01-01T10:00", "startTz": "UTC"}, 400, nil)
 
 	f := e.task(p.ID, "f", map[string]any{"treeId": ta.ID, "startMode": "manual"})
@@ -383,7 +383,7 @@ func TestSchedulesRejectTreeFields(t *testing.T) {
 	e := newEnv(t)
 	p := e.project("/w/sched-trees")
 	a := e.task(p.ID, "a", nil)
-	base := map[string]any{"projectId": p.ID, "title": "n", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC"}
+	base := map[string]any{"projectId": p.ID, "connectionId": 1, "workspaceId": p.workspaceID(), "title": "n", "prompt": "go", "cron": "0 2 * * *", "tz": "UTC"}
 	for _, extra := range []map[string]any{
 		{"treeId": 1}, {"needs": []int64{a.ID}}, {"needs": []int64{}}, {"startMode": "manual"}, {"needsSession": map[string]any{"connectionId": 1, "externalSessionId": "s"}},
 		{"workspace": map[string]any{"type": "worktree", "baseRef": "origin/main", "base": "predecessor"}},

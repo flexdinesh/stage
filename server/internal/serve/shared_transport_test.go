@@ -577,7 +577,7 @@ func TestSharedClaimResumesWorkOnce(t *testing.T) {
 	defer disk.Close()
 	database := db.NewStore(disk)
 	cron, err := database.CreateSchedule(ctx, db.NewSchedule{
-		Title: "Cron paused for setup", Prompt: "work", ProjectID: seed.ProjectID, ConnectionID: seed.ConnectionID,
+		Title: "Cron paused for setup", Prompt: "work", ProjectID: seed.ProjectID, ConnectionID: seed.ConnectionID, WorkspaceID: seed.WorkspaceID,
 		Cron: "*/5 * * * *", Tz: "UTC",
 	})
 	if err != nil {
@@ -591,7 +591,7 @@ func TestSharedClaimResumesWorkOnce(t *testing.T) {
 	}
 	tz := "UTC"
 	one, err := database.CreateTask(ctx, db.NewTask{
-		Title: "One-shot due during setup", Prompt: "work", ProjectID: seed.ProjectID, ConnectionID: seed.ConnectionID,
+		Title: "One-shot due during setup", Prompt: "work", ProjectID: seed.ProjectID, ConnectionID: seed.ConnectionID, WorkspaceID: seed.WorkspaceID,
 		StartAt: &due, StartTz: &tz,
 	})
 	if err != nil {

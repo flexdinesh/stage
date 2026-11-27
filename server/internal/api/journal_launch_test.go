@@ -86,7 +86,7 @@ func TestScheduleNotesRemainTemplateAndSpawnInitialNote(t *testing.T) {
 		ID    int64  `json:"id"`
 		Notes string `json:"notes"`
 	}
-	body := map[string]any{"projectId": p.ID, "title": "scheduled", "prompt": "go", "notes": "template context", "cron": "0 2 * * *", "tz": "UTC"}
+	body := e.taskBody(p.ID, "scheduled", map[string]any{"prompt": "go", "notes": "template context", "cron": "0 2 * * *", "tz": "UTC"})
 	e.must("POST", "/api/schedules", body, 201, &schedule)
 	if schedule.Notes != "template context" {
 		t.Fatalf("schedule %+v", schedule)

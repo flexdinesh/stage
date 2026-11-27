@@ -272,7 +272,6 @@ type CreateTask struct {
 	OriginSession   *db.SessionRef    `json:"originSession,omitempty"`
 	ExecutionConfig *execution.Config `json:"executionConfig,omitempty"`
 	ProjectID       int64             `json:"projectId,omitempty"`
-	BindingID       *int64            `json:"bindingId,omitempty"`
 	Title           string            `json:"title"`
 	Prompt          string            `json:"prompt"`
 	InitialNote     *string           `json:"initialNote,omitempty"`
@@ -293,7 +292,6 @@ type CreateSchedule struct {
 	OriginSession   *db.SessionRef    `json:"originSession,omitempty"`
 	ExecutionConfig *execution.Config `json:"executionConfig,omitempty"`
 	ProjectID       int64             `json:"projectId,omitempty"`
-	BindingID       *int64            `json:"bindingId,omitempty"`
 	Title           string            `json:"title"`
 	Prompt          string            `json:"prompt"`
 	Notes           *string           `json:"notes,omitempty"`
@@ -835,21 +833,7 @@ func (c *Client) SetAutoComplete(ctx context.Context, id int64, on bool) (db.Har
 	return out.Connection, err
 }
 func (c *Client) Capabilities(ctx context.Context, id int64) (execution.Capabilities, error) {
-	return c.ProjectCapabilities(ctx, id, 0)
-}
-func (c *Client) ProjectCapabilities(ctx context.Context, id, projectID int64) (execution.Capabilities, error) {
-	return c.WorkspaceCapabilities(ctx, id, projectID, nil)
-}
-
-// WorkspaceCapabilities reads features for the selected binding, defaulting to
-// the project's primary workspace on the connection.
-func (c *Client) WorkspaceCapabilities(ctx context.Context, id, projectID int64, bindingID *int64) (execution.Capabilities, error) {
-	q := url.Values{}
-	if projectID != 0 {
-		setID(q, "projectId", &projectID)
-	}
-	setID(q, "bindingId", bindingID)
-	return c.capabilities(ctx, id, q)
+	return c.capabilities(ctx, id, nil)
 }
 
 // DestinationCapabilities reads features for an exact connection workspace.

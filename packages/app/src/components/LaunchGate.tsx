@@ -2,7 +2,7 @@
 // once for the whole app and reuse the status row's live queries.
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, type ReactNode } from "react";
-import { connectionCapabilityOptions, keys, useConnections, useDestinations, useHarnesses, useInvalidateWork, useMachines, useProjects } from "../api/queries.ts";
+import { connectionCapabilityOptions, keys, useConnections, useDestinations, useHarnesses, useInvalidateWork, useMachines } from "../api/queries.ts";
 import { useApi } from "../platform/context.tsx";
 import { useConnectionStatuses } from "../harnesses/index.ts";
 import type { StartTreeResponse, Task } from "../api/types.ts";
@@ -15,7 +15,7 @@ import { POLL } from "../lib/polling.ts";
 import { SETTINGS_PATH } from "../lib/settings.ts";
 import { Alert, Hint, TextLink, cx, errorText } from "./ui.tsx";
 
-/** The block on launching a task on a connection, or null; `connectionId` and the project name where. */
+/** The block on launching a task on its saved destination, or null. */
 export type LaunchGate = (t: LaunchTarget) => LaunchBlock | null;
 
 type OperationGate = (connectionId: number, operation: SessionOperation) => LaunchBlock | null;
@@ -33,7 +33,6 @@ export function LaunchGateProvider({ children }: { children: ReactNode }) {
   const connections = useConnections();
   const harnesses = useHarnesses();
   const { machines, data } = useMachines();
-  const projects = useProjects();
   const destinations = useDestinations();
   const loaded = harnesses.loaded && data !== undefined;
   const targets = loaded ? statusTargets(machines, harnesses.connection) : [];
@@ -83,7 +82,6 @@ export function LaunchGateProvider({ children }: { children: ReactNode }) {
   const launch: LaunchGate = (t) =>
     launchBlock(t, {
       ...context(t.connectionId),
-      bindings: projects.data?.projects.find((p) => p.id === t.projectId)?.bindings,
       ...(destinations.data?.destinations === undefined ? {} : { destinations: destinations.data.destinations }),
       destinationError: destinations.data?.destinations === undefined && !destinations.isPending,
     }) ?? operation(t.connectionId, "launch");

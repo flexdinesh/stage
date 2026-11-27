@@ -1,62 +1,41 @@
 ---
 title: Projects
-description: A Stage project is a title you own, with workspace bindings on the connections that run its tasks.
+description: A Stage project organizes related workspaces and recorded work under a title you own.
 showAskAi: false
 ---
 
 # Projects
 
-A project groups tasks, trees and schedules under one title. Stage owns its ID, title and archive state. Each **binding** points to a workspace on a [connection](/docs/concepts/connections).
+A Stage project organizes workspace rows, tasks, trees, schedules and
+snippets under one title. Stage owns the project's ID, title and archive
+state. Each [connection](/docs/concepts/connections) owns its workspace catalog.
 
-## Stage owns the project
+## Find or create a project
 
-- Create a project with just a title. It needs no harness, so you can plan offline.
-- Rename and archive it in Stage. A harness never renames or deletes it.
-- If a workspace disappears or a harness is removed, the project keeps its tasks and history.
+In **Projects**, open the group for your repository or folder. Stage groups
+new workspaces when strong evidence identifies one existing project. A
+matching repository origin and a known checkout subpath can group clones
+across machines. Local directory and checkout evidence is scoped to the
+machine that holds the files. Ambiguous workspaces get their own groups.
 
-## Bindings
+Use **New project** and enter a title to create an empty group for planning.
+To add a workspace to it, open the existing group that lists the workspace,
+choose **Move to project**, select the target, then review and confirm.
+When a group has several members, use **Separate** from a workspace row
+to place it in a new group. If someone
+changes the membership while the preview is open, review the updated
+preview before confirming.
 
-A workspace has one Stage owner. A project can have several workspaces
-on a connection, with one primary. Tasks and schedules follow that primary
-by default. Their forms offer a workspace choice when the selected connection
-has several.
+## Choose where work runs
 
-- **Bind workspace.** Pick an existing workspace the harness reports. The drawer puts suggestions first, can filter by repository, and links the Stage project that already owns a workspace. Follow the harness hint if it supplies one, then refresh the inventory.
-- **Import.** Sync imports eligible workspaces. These include live T3 projects, unarchived OpenCode Git or Mercurial checkouts, Git checkouts Codex trusts, and Claude Code folders at a Git checkout's top.
-- **Unbind.** Discovery records a decline for that workspace on its connection. Binding it manually clears the decline.
+When saving a task that will run or creating a schedule, select a connection
+and an exact workspace on it. A launch uses the selected pair even if
+someone later moves the workspace to a different group. Save an untimed
+backlog task for planning if you need to choose the workspace later.
 
-When a project has bindings on several connections, pick the connection for the new task.
-
-## Paths change, history stays
-
-Stage can carry a binding to a uniquely identified replacement workspace
-on the same connection. When several replacements or source bindings
-could match, the workspace waits for review. A chosen workspace that
-becomes unavailable blocks launch. A claimed attempt keeps the destination
-it used.
-
-## Projects across machines
-
-With [workers](/docs/concepts/machines), the same repository can be checked
-out on several machines. A normalized Git origin and a known path within
-the repository can join the same project across clones, worktrees and
-machines. Each machine reads its own files. Directory and checkout keys
-stay local to the file host. Pathless workspaces use their connection and
-external ID. Several candidate projects require manual placement.
-
-The Workspaces panel groups checkout addresses by machine. A network workspace
-can show its title and external ID. Offline workspaces stay visible. When a connection
-retires, its workspaces disappear from project pickers, workspace lists and counts.
-Past tasks keep their recorded workspace.
-
-**Discovery review** lists new, suggested, ambiguous, declined and moved
-workspaces with their candidate projects. A decline stays visible without
-adding to the attention count. **Resolve now** previews changes on one connection.
-
-Use **Merge projects** in Discovery review to choose a survivor and preview
-what moves. A merged project's old ID opens the surviving project. **Split**
-on a workspace moves that workspace to a new project while the other
-workspaces and records stay.
+A missing workspace or retired connection can still appear in project
+history. Select a replacement explicitly to run future work there. Old
+links, snippets and recorded work remain available in **Project history**.
 
 ## Archive
 
@@ -69,6 +48,6 @@ The sidebar lists projects with open work by recent activity, with counts for ne
 
 ## Next steps
 
-- [Connections](/docs/concepts/connections): what a project binds to.
+- [Connections](/docs/concepts/connections): where workspaces and sessions live.
 - [Tasks](/docs/concepts/tasks): the work inside a project.
 - [Connections reference](/docs/reference/connections): setting up each harness.
