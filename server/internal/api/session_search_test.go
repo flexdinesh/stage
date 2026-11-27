@@ -274,7 +274,39 @@ func TestSharedSessionSearchThroughWorker(t *testing.T) {
 		}
 	}
 
+	trackPath := remotePath + "/" + rosterID
+	trackWithoutLaunch := []byte(`{"operations":{"adopt":{"available":true},"launch":{"available":false}}}`)
+	rig.ReplaceResult(remote.KindFeatures, trackWithoutLaunch)
+	var preview adoptionPreview
+	notifyRequest(t, e, member, http.MethodGet, trackPath+"/context", "", 200, &preview)
+	if preview.Task != nil || preview.Project != nil || preview.Title != "Worker completed" ||
+		preview.Workspace != workerClaude.Workspace || preview.UnavailableReason != "" {
+		t.Fatalf("worker preview: %+v", preview)
+	}
+	if _, err := e.store.Observation(ctx, preview.Session); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("worker preview wrote an observation: %v", err)
+	}
+	for _, check := range []struct{ method, suffix, body string }{{http.MethodGet, "/context", ""}, {http.MethodPost, "/adopt", "{}"}} {
+		var refused errOut
+		notifyRequest(t, e, member, check.method, remotePath+"/"+wrappedID+check.suffix, check.body, 409, &refused)
+		if refused.Code != "session_refused" || !strings.Contains(refused.Error, "Track it through T3") {
+			t.Fatalf("named wrapper guard: %+v", refused)
+		}
+	}
+	var tracked db.Task
+	rig.ReplaceResult(remote.KindFeatures, trackWithoutLaunch)
+	notifyRequest(t, e, member, http.MethodPost, trackPath+"/adopt", "{}", 201, &tracked)
+	if tracked.Session == nil || *tracked.Session != preview.Session || tracked.State != db.StateDone ||
+		tracked.CreatedBy != member.Account.ID || tracked.SourceMachineID != nil || tracked.BindingID != nil {
+		t.Fatalf("worker session adoption: %+v", tracked)
+	}
+
 	rig.StopWorker()
+	preview = adoptionPreview{}
+	notifyRequest(t, e, member, http.MethodGet, trackPath+"/context", "", 200, &preview)
+	if preview.Task == nil || preview.Task.ID != tracked.ID {
+		t.Fatalf("owned offline session: %+v", preview)
+	}
 	var unavailable errOut
 	notifyRequest(t, e, member, http.MethodGet, remotePath, "", http.StatusServiceUnavailable, &unavailable)
 	if unavailable.Code != "session_search_unavailable" || !strings.Contains(unavailable.Error, "session link or ID") {
@@ -289,5 +321,17 @@ func TestSharedSessionSearchThroughWorker(t *testing.T) {
 	notifyRequest(t, e, member, http.MethodGet, remotePath, "", http.StatusConflict, &unavailable)
 	if unavailable.Code != "operation_unavailable" || !strings.Contains(unavailable.Error, "Update Stage on the worker") || worker.searches.Load() != before {
 		t.Fatalf("older worker: %+v, search calls: %d", unavailable, worker.searches.Load())
+	}
+	disabledTracking := []byte(`{"operations":{"adopt":{"available":false,"reason":"Tracking unavailable on this worker."}}}`)
+	rig.ReplaceResult(remote.KindFeatures, disabledTracking)
+	preview = adoptionPreview{}
+	notifyRequest(t, e, member, http.MethodGet, remotePath+"/"+wrappedID+"/context", "", 200, &preview)
+	if preview.UnavailableReason != "Tracking unavailable on this worker." {
+		t.Fatalf("unavailable tracking preview: %+v", preview)
+	}
+	rig.ReplaceResult(remote.KindFeatures, disabledTracking)
+	notifyRequest(t, e, member, http.MethodPost, remotePath+"/"+wrappedID+"/adopt", "{}", 409, &unavailable)
+	if unavailable.Code != "operation_unavailable" || unavailable.Error != preview.UnavailableReason {
+		t.Fatalf("unavailable tracking confirmation: %+v", unavailable)
 	}
 }

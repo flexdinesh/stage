@@ -9,24 +9,39 @@ import (
 )
 
 func (s *Service) RefreshScopedSession(ctx context.Context, ref execution.SessionRef) error {
+	o, err := s.ReadScopedSession(ctx, ref)
+	if err != nil {
+		return err
+	}
+	return s.store.PutObservation(ctx, o)
+}
+
+// ReadScopedSession verifies one named session without changing Stage state.
+func (s *Service) ReadScopedSession(ctx context.Context, ref execution.SessionRef) (execution.Observation, error) {
 	a, e := s.conns.Sessions(ref.ConnectionID)
 	if e != nil {
-		return e
+		return execution.Observation{}, e
 	}
 	o, e := a.Observe(ctx, ref)
 	if errors.Is(e, execution.ErrNotFound) {
-		return db.ErrNotFound
+		return execution.Observation{}, db.ErrNotFound
 	}
 	if e != nil {
-		return harnessErr(e)
+		return execution.Observation{}, harnessErr(e)
 	}
 	if o.Session != ref {
-		return db.Conflict("Harness returned a different session. Check the configured connection.")
+		return execution.Observation{}, db.Conflict("Harness returned a different session. Check the configured connection.")
 	}
-	if e := s.refusal(s.store.Harness(ref.ConnectionID), o); e != nil {
-		return e
+	kind := s.store.Harness(ref.ConnectionID)
+	if e := s.refusal(kind, o); e != nil {
+		return execution.Observation{}, e
 	}
-	return s.putObservation(ctx, o)
+	if e := o.Valid(); e != nil {
+		return execution.Observation{}, harnessErr(e)
+	}
+	d, _ := s.conns.Descriptor(kind)
+	o.Facts = d.DisplayFacts(o.Facts)
+	return o, nil
 }
 
 // putObservation filters display metadata without interfering with execution state.

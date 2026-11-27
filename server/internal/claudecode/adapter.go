@@ -502,16 +502,22 @@ func (a *Adapter) usage(s session) *execution.Usage {
 		CacheWriteTokens: tok.CacheWrite, OutputTokens: tok.Output, WorkingMs: t.WorkingMs}
 }
 
-// Observe reads the session list (shared, cached) and the transcript.
+// Observe reads the session list and the transcript. Named tracking reads
+// refresh the roster to recheck archive and live state.
 func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execution.Observation, error) {
 	if ref.ConnectionID != a.conn {
 		return execution.Observation{}, execution.ErrNotFound
 	}
-	s, err := a.read(ctx, ref.ExternalSessionID, false)
+	mode := execution.SessionReadModeFrom(ctx)
+	s, err := a.read(ctx, ref.ExternalSessionID, mode != "")
 	if err != nil {
 		return execution.Observation{}, err
 	}
-	return a.observation(s)
+	o, err := a.observation(s)
+	if mode == execution.SessionReadPreview {
+		o.Reply = nil
+	}
+	return o, err
 }
 
 // Stop stops a background session (`claude stop <short>`).

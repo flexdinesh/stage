@@ -73,6 +73,7 @@ func (r projects) ApplyMerge(ctx context.Context, into, from, by int64) error {
  AND EXISTS (SELECT 1 FROM project_bindings target WHERE target.project_id=$2
  AND target.connection_id=source.connection_id AND target.active AND target.is_primary)`,
 		`UPDATE project_bindings SET project_id=$2 WHERE project_id=$1`,
+		`UPDATE external_projects SET historical_project_id=$2 WHERE historical_project_id=$1`,
 		`UPDATE tasks SET project_id=$2 WHERE project_id=$1`,
 		`UPDATE schedules SET project_id=$2 WHERE project_id=$1`,
 		`UPDATE snippets SET project_id=$2 WHERE project_id=$1`,

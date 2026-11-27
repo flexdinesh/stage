@@ -158,6 +158,10 @@ type Projects interface {
 	// BoundOn: the project has an active binding on the connection.
 	BoundOn(ctx context.Context, projectID, connectionID int64) (bool, error)
 	WorkspaceRows(ctx context.Context) ([]StoredWorkspace, error)
+	// HistoricalWorkspaceProject records a group for tracking an exact row
+	// independently of any active binding.
+	HistoricalWorkspaceProject(ctx context.Context, b ProjectBinding) (int64, error)
+	SetHistoricalWorkspaceProject(ctx context.Context, b ProjectBinding, projectID int64) error
 	IdentityBindings(ctx context.Context) ([]IdentityBinding, error)
 	WorkspaceDeclines(ctx context.Context) ([]WorkspaceDecline, error)
 	SetWorkspaceDecline(ctx context.Context, connection int64, key string, decline bool) error

@@ -1138,6 +1138,20 @@ export interface SessionPreview {
   unavailableReason?: string;
 }
 
+export interface SessionSearchResult {
+  session: SessionRef;
+  title?: string;
+  workspace?: string;
+  startedAt?: string;
+  eligibility: { available: boolean; reason?: string };
+  trackedTaskId?: number;
+}
+
+export interface SessionSearchPage {
+  sessions: SessionSearchResult[];
+  nextCursor?: string;
+}
+
 /** The adopted task's first own user message. */
 export interface OpeningItem {
   itemId: string;

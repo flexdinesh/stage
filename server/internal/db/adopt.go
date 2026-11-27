@@ -8,6 +8,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/projectmatch"
 )
 
 // AdoptInput names the target independently of the caller who wrote the note.
@@ -20,12 +21,26 @@ type AdoptInput struct {
 	Title           *string
 	InitialNote     *string
 	TreeID          *int64
+	TrackUnbound    bool
+	RequireLive     bool
 }
 
-// AdoptionWorkspace pairs the verified workspace with its connection's complete live inventory.
+// AdoptionWorkspace carries the verified observation and its exact workspace.
 type AdoptionWorkspace struct {
-	Binding   ProjectBinding
-	Inventory []execution.WorkspaceInfo
+	Binding            ProjectBinding
+	Inventory          []execution.WorkspaceInfo
+	Observation        execution.Observation
+	ConnectionIdentity *string
+}
+
+func CheckAdoptableSession(o execution.Observation) error {
+	if o.Child || o.Parent != nil {
+		return Conflict("only a top-level session can be adopted")
+	}
+	if o.Archived || o.Closed != nil && o.Closed.Signal == execution.ClosedArchived {
+		return Conflict("session is archived")
+	}
+	return nil
 }
 
 func (s *Store) AdoptSession(ctx context.Context, in AdoptInput) (Task, bool, error) {
@@ -55,9 +70,6 @@ func (s *Store) AdoptSession(ctx context.Context, in AdoptInput) (Task, bool, er
 
 func (s *Store) adoptSession(ctx context.Context, tx store.Tx, in AdoptInput) (int64, bool, error) {
 	ref := in.Session
-	if err := connectionUsable(ctx, tx, ref.ConnectionID); err != nil {
-		return 0, false, err
-	}
 	sid, err := ensureSession(ctx, tx, ref)
 	if err != nil {
 		return 0, false, err
@@ -69,15 +81,29 @@ func (s *Store) adoptSession(ctx context.Context, tx store.Tx, in AdoptInput) (i
 	if !errors.Is(err, ErrNotFound) {
 		return 0, false, err
 	}
-	o, err := tx.Observations().Get(ctx, sid)
-	if err != nil {
+	if err := connectionUsable(ctx, tx, ref.ConnectionID); err != nil {
 		return 0, false, err
 	}
-	if o.Child || o.Parent != nil {
-		return 0, false, Conflict("only a top-level session can be adopted")
+	var o execution.Observation
+	if in.Workspace == nil {
+		if in.RequireLive {
+			return 0, false, Conflict("session ownership changed; retry adoption")
+		}
+		o, err = tx.Observations().Get(ctx, sid)
+		if err != nil {
+			return 0, false, err
+		}
+	} else {
+		o = in.Workspace.Observation
+		if o.Session != ref {
+			return 0, false, Conflict("session changed; retry adoption")
+		}
+		if err := o.Valid(); err != nil {
+			return 0, false, err
+		}
 	}
-	if o.Archived {
-		return 0, false, Conflict("session is archived")
+	if err := CheckAdoptableSession(o); err != nil {
+		return 0, false, err
 	}
 	projectID, err := s.adoptionProject(ctx, tx, in, o)
 	if err != nil {
@@ -85,6 +111,9 @@ func (s *Store) adoptSession(ctx context.Context, tx store.Tx, in AdoptInput) (i
 	}
 	if in.Workspace != nil {
 		if err := resolveAll(ctx, tx); err != nil {
+			return 0, false, err
+		}
+		if err := putObservation(ctx, tx, sid, o, time.Time{}); err != nil {
 			return 0, false, err
 		}
 	}
@@ -146,6 +175,20 @@ func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput,
 		if b.ExternalProjectID != o.Project || b.ConnectionID != o.Session.ConnectionID {
 			return 0, Conflict("session workspace changed; retry adoption")
 		}
+		if identity := in.Workspace.ConnectionIdentity; identity != nil {
+			connections := tx.Connections()
+			c, err := connections.Get(ctx, b.ConnectionID)
+			if err != nil {
+				return 0, err
+			}
+			active, err := connections.Active(ctx, c.MachineID, c.Harness)
+			if err != nil {
+				return 0, err
+			}
+			if active.ID != b.ConnectionID || active.Identity != *identity {
+				return 0, Conflict("harness connection changed; retry adoption")
+			}
+		}
 		workspace = &b.Workspace
 		if _, err := refreshWorkspaceRows(ctx, tx, b.ConnectionID, in.Workspace.Inventory); err != nil {
 			return 0, err
@@ -160,6 +203,9 @@ func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput,
 			return 0, Conflict("session already has a bound Stage project")
 		}
 		return id, nil
+	}
+	if in.Workspace != nil && in.TrackUnbound && in.ProjectID == nil && strings.TrimSpace(in.NewProjectTitle) == "" {
+		return historicalAdoptionProject(ctx, tx.Projects(), in.Workspace.Binding)
 	}
 	if in.Workspace == nil || in.ProjectID == nil && strings.TrimSpace(in.NewProjectTitle) == "" {
 		return 0, Conflict("choose a bound Stage project or explicitly bind this session workspace before adoption")
@@ -178,4 +224,54 @@ func (s *Store) adoptionProject(ctx context.Context, tx store.Tx, in AdoptInput,
 		return 0, err
 	}
 	return id, nil
+}
+
+func historicalAdoptionProject(ctx context.Context, pr store.Projects, b ProjectBinding) (int64, error) {
+	id, err := pr.HistoricalWorkspaceProject(ctx, b)
+	if !errors.Is(err, ErrNotFound) {
+		return id, err
+	}
+	state, err := loadIdentity(ctx, pr)
+	if err != nil {
+		return 0, err
+	}
+	i, ok := state.byRef[workspaceRef{b.ConnectionID, b.ExternalProjectID, b.Workspace}]
+	if !ok || !state.rows[i].Available || state.rows[i].HarnessArchived {
+		return 0, Conflict("session workspace is unavailable; refresh and retry adoption")
+	}
+	row := state.rows[i]
+	id = projectmatch.NewResolver(state.input).StrongProject(state.input.Workspaces[i])
+	if id == 0 {
+		title := splitProjectTitle("", store.ProjectSplitWorkspace{
+			Title: row.Title, Workspace: row.Workspace.Workspace, ExternalID: row.ExternalID,
+		}, row.ExternalID)
+		id, err = pr.Insert(ctx, title, ActingUser(ctx), ActingMachine(ctx))
+		if err != nil {
+			return 0, err
+		}
+	}
+	return id, pr.SetHistoricalWorkspaceProject(ctx, b, id)
+}
+
+// AdoptionPreviewProject reports existing exact associations. Confirmation
+// resolves newly observed grouping evidence under the identity lock.
+func (s *Store) AdoptionPreviewProject(ctx context.Context, b ProjectBinding, includeHistory bool) (Project, error) {
+	if !includeHistory {
+		return s.BoundProject(ctx, b)
+	}
+	return read(ctx, s, func(tx store.Tx) (Project, error) {
+		pr := tx.Projects()
+		bound, err := pr.ActiveWorkspaceBinding(ctx, b.ConnectionID, b.ExternalProjectID, b.Workspace)
+		if err == nil {
+			return pr.Get(ctx, bound.ProjectID)
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return Project{}, err
+		}
+		id, err := pr.HistoricalWorkspaceProject(ctx, b)
+		if err != nil {
+			return Project{}, err
+		}
+		return pr.Get(ctx, id)
+	})
 }

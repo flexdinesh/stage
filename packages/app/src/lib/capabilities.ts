@@ -80,9 +80,10 @@ export function launchParts(config: ExecutionConfig | null | undefined, caps: Pi
   if (config === null || config === undefined) return [];
   const model = caps?.models?.find((m) => m.id === config.model);
   const declared = optionsFor(caps, model);
+  const options = config.options ?? [];
   const parts: LaunchPart[] = [];
   if (config.model !== "") parts.push({ label: "Model", value: model?.label || (modelName(config.model) ?? config.model) });
-  const ordered = [...declared.flatMap((o) => config.options.filter((v) => v.id === o.id)), ...config.options.filter((v) => !declared.some((o) => o.id === v.id))];
+  const ordered = [...declared.flatMap((o) => options.filter((v) => v.id === o.id)), ...options.filter((v) => !declared.some((o) => o.id === v.id))];
   for (const v of ordered) {
     const o = declared.find((d) => d.id === v.id);
     if (typeof v.value !== "boolean" && o?.default === v.value) continue;

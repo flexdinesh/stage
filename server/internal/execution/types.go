@@ -414,6 +414,26 @@ type Sessions interface {
 	Attention(context.Context) ([]SessionRef, error)
 }
 
+type SessionReadMode string
+
+const (
+	SessionReadPreview SessionReadMode = "preview"
+	SessionReadConfirm SessionReadMode = "confirm"
+)
+
+type sessionReadKey struct{}
+
+// WithSessionReadMode marks a named read so adapters can bypass polling caches
+// and omit reply text from a preview.
+func WithSessionReadMode(ctx context.Context, mode SessionReadMode) context.Context {
+	return context.WithValue(ctx, sessionReadKey{}, mode)
+}
+
+func SessionReadModeFrom(ctx context.Context) SessionReadMode {
+	mode, _ := ctx.Value(sessionReadKey{}).(SessionReadMode)
+	return mode
+}
+
 type Launcher interface {
 	Launch(context.Context, Intent, Checkpoint, SaveCheckpoint) (Observation, error)
 	// Stop validates that the scoped session can be stopped, even when its

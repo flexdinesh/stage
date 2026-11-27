@@ -91,6 +91,11 @@ type SessionRequest struct {
 	Session execution.SessionRef `json:"session"`
 }
 
+type ObserveRequest struct {
+	Session execution.SessionRef      `json:"session"`
+	Mode    execution.SessionReadMode `json:"mode,omitempty"`
+}
+
 // WorkspaceRequest is adapter.featuresForWorkspace: a pinned harness
 // project and directory.
 type WorkspaceRequest struct {

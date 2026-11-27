@@ -3,13 +3,20 @@ package api_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/db/store"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/principal"
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
@@ -138,6 +145,315 @@ func TestAdoptSession(t *testing.T) {
 	e.must("POST", "/api/connections/1/sessions/"+sub+"/adopt", nil, 409, nil)
 	other := runningSession(t, e, p.T3ProjectID, "Other")
 	e.must("POST", "/api/connections/1/sessions/"+other+"/adopt", map[string]any{"treeId": 9999}, 404, nil)
+}
+
+type adoptionPreview struct {
+	Session           db.SessionRef
+	Task              *db.Task
+	Project           *db.Project
+	Title             string
+	Workspace         string
+	UnavailableReason string
+}
+
+func TestConcurrentHumanSessionTracking(t *testing.T) {
+	e, _, accounts, owner, historical := sharedNotificationEnv(t)
+	member := addNotificationMember(t, accounts)
+	ctx := t.Context()
+	external := e.fake.AddProject("Native workspace", t.TempDir())
+	id := launchSession(t, e, external.ID, "Unbound session")
+	ref := db.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, t3.Kind), ExternalSessionID: id}
+	path := rosterPath(ref.ConnectionID) + "/" + id
+
+	var preview adoptionPreview
+	notifyRequest(t, e, owner, http.MethodGet, path+"/context", "", 200, &preview)
+	resolve := fmt.Sprintf("/api/refs/resolve?connectionId=%d&ref=%s", ref.ConnectionID, url.QueryEscape(id))
+	notifyRequest(t, e, member, http.MethodGet, resolve, "", 200, nil)
+	if preview.Session != ref || preview.Task != nil || preview.Project != nil || preview.Title != "Unbound session" ||
+		preview.Workspace != external.WorkspaceRoot || preview.UnavailableReason != "" {
+		t.Fatalf("preview: %+v", preview)
+	}
+	if _, err := e.store.Observation(ctx, ref); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("preview recorded an observation: %v", err)
+	}
+	if rows, err := e.store.Workspaces(ctx, ref.ConnectionID); err != nil || len(rows) != 0 {
+		t.Fatalf("preview changed the workspace catalog: %+v, %v", rows, err)
+	}
+	inbox, err := e.store.ListNotifications(db.WithUser(ctx, owner.Account.ID), 10, nil)
+	if err != nil || len(inbox) != 1 || inbox[0].ID != historical || inbox[0].ReadAt != nil {
+		t.Fatalf("preview changed notifications or read receipts: %+v, %v", inbox, err)
+	}
+
+	type result struct {
+		user int64
+		note string
+		code int
+		body []byte
+	}
+	results := make(chan result, 2)
+	shared := privateAdoptionHandler(e)
+	release := make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	browsers := []struct {
+		user, token, note string
+		id                int64
+	}{
+		{"Owner", owner.Token.Reveal(), "Owner note", owner.Account.ID},
+		{"Member", member.Token.Reveal(), "Member note", member.Account.ID},
+	}
+	for _, browser := range browsers {
+		reached := make(chan struct{}, 1)
+		e.t3.listGate.Store(&listGate{release, reached})
+		go func() {
+			rec := raw(t, shared, http.MethodPost, notificationOrigin+path+"/adopt", map[string]string{
+				"Cookie": "stage_session=" + browser.token,
+				"Origin": notificationOrigin,
+			}, map[string]string{"title": browser.user, "initialNote": browser.note}, nil)
+			results <- result{browser.id, browser.note, rec.Code, rec.Body.Bytes()}
+		}()
+		select {
+		case <-reached:
+		case early := <-results:
+			t.Fatalf("confirmation returned before live verification: %d %s", early.code, early.body)
+		case <-time.After(10 * time.Second):
+			t.Fatal("confirmation did not reach the harness")
+		}
+	}
+	close(release)
+
+	var winner, loser result
+	for range browsers {
+		r := <-results
+		switch r.code {
+		case http.StatusCreated:
+			winner = r
+		case http.StatusOK:
+			loser = r
+		default:
+			t.Fatalf("unexpected confirmation response: %d %s", r.code, r.body)
+		}
+	}
+	if winner.user == 0 || loser.user == 0 {
+		t.Fatalf("expected one creation and one existing task: %+v %+v", winner, loser)
+	}
+	var created, existing db.Task
+	if err := json.Unmarshal(winner.body, &created); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(loser.body, &existing); err != nil {
+		t.Fatal(err)
+	}
+	if created.ID != existing.ID || winner.user != created.CreatedBy || created.CreatedBy != existing.CreatedBy ||
+		created.Title != existing.Title || created.BindingID != nil || created.Session == nil || *created.Session != ref {
+		t.Fatalf("task attribution or ownership: %+v %+v", created, existing)
+	}
+	events, err := e.store.TaskEvents(ctx, created.ID)
+	if err != nil || len(events) != 1 || events[0].Detail != "adopted session" || events[0].Actor.UserID != winner.user {
+		t.Fatalf("adoption event: %+v, %v", events, err)
+	}
+	journal, err := e.store.ReadJournal(ctx, db.JournalOwner{TaskID: &created.ID}, db.JournalQuery{Kind: "notes"})
+	if err != nil || len(journal.Entries) != 1 || journal.Entries[0].Text != winner.note || journal.Entries[0].CreatedBy != winner.user {
+		t.Fatalf("initial note: %+v, %v", journal, err)
+	}
+	projects, err := e.store.ListProjects(ctx, "all")
+	if err != nil || len(projects) != 1 || projects[0].ID != created.ProjectID || projects[0].Title != external.Title ||
+		projects[0].CreatedBy != winner.user || len(projects[0].Bindings) != 0 {
+		t.Fatalf("historical project: %+v, %v", projects, err)
+	}
+	second := rosterPath(ref.ConnectionID) + "/" + launchSession(t, e, external.ID, "Same workspace")
+	preview = adoptionPreview{}
+	notifyRequest(t, e, member, http.MethodGet, second+"/context", "", 200, &preview)
+	if preview.Project == nil || preview.Project.ID != created.ProjectID {
+		t.Fatalf("preview did not reuse the historical project: %+v", preview)
+	}
+	var next db.Task
+	notifyRequest(t, e, member, http.MethodPost, second+"/adopt", "{}", 201, &next)
+	if next.ProjectID != created.ProjectID || next.ID == created.ID || next.BindingID != nil {
+		t.Fatalf("repeat adoption in the same workspace: %+v", next)
+	}
+	tree, err := e.store.CreateTree(ctx, db.NewTree{Title: "Explicit tree", Tasks: []db.TreeMember{{TaskID: next.ID}}})
+	tree = mustValue(t, tree, err)
+	e.t3.failCatalog.Store(true)
+	var joined db.Task
+	notifyRequest(t, e, member, http.MethodPost, path+"/adopt", fmt.Sprintf(`{"treeId":%d}`, tree.ID), 200, &joined)
+	if joined.ID != created.ID || joined.TreeID == nil || *joined.TreeID != tree.ID {
+		t.Fatalf("existing task did not join the explicit tree: %+v", joined)
+	}
+}
+
+func TestScopedAgentNamedSessionAdoption(t *testing.T) {
+	e, _, accounts, _, _ := sharedNotificationEnv(t)
+	ctx := t.Context()
+	member := addNotificationMember(t, accounts)
+	cred, err := accounts.RotateAgent(ctx, member.Token.Reveal(), store.SessionBrowser)
+	bearer := "Bearer " + principal.AgentTokenPrefix + mustValue(t, cred, err).Token.Reveal()
+	headers := map[string]string{"Authorization": bearer}
+	shared := privateAdoptionHandler(e)
+	connection := e.store.ActiveID(db.LocalMachine, t3.Kind)
+	external := e.fake.AddProject("Agent workspace", t.TempDir())
+	project, err := e.store.InsertProject(ctx, db.Project{Title: "Agent project"})
+	project = mustValue(t, project, err)
+	session := launchSession(t, e, external.ID, "Agent's named session")
+	path := notificationOrigin + rosterPath(connection) + "/" + session
+	var preview adoptionPreview
+	w := raw(t, shared, http.MethodGet, path+"/context", headers, nil, &preview)
+	if w.Code != 200 || preview.Task != nil || preview.Title != "Agent's named session" || preview.Project != nil {
+		t.Fatalf("named lookup: %d %s", w.Code, w.Body)
+	}
+	w = raw(t, shared, http.MethodPost, path+"/adopt", headers, map[string]string{}, nil)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "explicitly bind") {
+		t.Fatalf("scoped agent without a bound project: %d %s", w.Code, w.Body)
+	}
+	var adopted db.Task
+	w = raw(t, shared, http.MethodPost, path+"/adopt", headers, map[string]any{"projectId": project.ID, "initialNote": "Via agent"}, &adopted)
+	if w.Code != 201 || adopted.ProjectID != project.ID || adopted.CreatedBy != member.Account.ID ||
+		adopted.Session == nil || adopted.Session.ExternalSessionID != session {
+		t.Fatalf("agent adoption: %d %s", w.Code, w.Body)
+	}
+	bound, err := e.store.BoundProject(ctx, db.ProjectBinding{ConnectionID: connection, ExternalProjectID: external.ID, Workspace: external.WorkspaceRoot})
+	if err != nil || bound.ID != project.ID {
+		t.Fatalf("explicit legacy binding: %+v, %v", bound, err)
+	}
+}
+
+func privateAdoptionHandler(e *env) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.RemoteAddr = "127.0.0.1:32101"
+		e.h.ServeHTTP(w, r)
+	})
+}
+
+func TestSessionTrackingRevalidatesLiveGuards(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason string
+		change       func(*env, string, string) error
+	}{
+		{"parent only", "top-level", func(e *env, id, _ string) error {
+			return e.fake.SetThread(id, func(d *t3.ThreadDetail) { d.ParentThreadID = "parent" })
+		}},
+		{"archived session", "session is archived", func(e *env, id, _ string) error {
+			return e.fake.SetThread(id, func(d *t3.ThreadDetail) { d.Archived = true })
+		}},
+		{"archived workspace", "workspace is unavailable", func(e *env, _, project string) error {
+			now := time.Now()
+			return e.fake.SetProject(project, func(p *t3.Project) { p.ArchivedAt = &now })
+		}},
+		{"deleted workspace", "workspace is unavailable", func(e *env, _, project string) error {
+			now := time.Now()
+			return e.fake.SetProject(project, func(p *t3.Project) { p.DeletedAt = &now })
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			connection := e.store.ActiveID(db.LocalMachine, t3.Kind)
+			external := e.fake.AddProject("Native workspace", t.TempDir())
+			id := launchSession(t, e, external.ID, "Session")
+			path := rosterPath(connection) + "/" + id
+			ref := db.SessionRef{ConnectionID: connection, ExternalSessionID: id}
+			thread, err := e.fake.ReadThread(t.Context(), id)
+			o := mustValue(t, thread, err).Observation()
+			o.Session, o.UpdatedAt = ref, time.Now().Add(time.Hour)
+			if err := e.store.PutObservation(t.Context(), o); err != nil {
+				t.Fatal(err)
+			}
+			var preview adoptionPreview
+			e.must(http.MethodGet, path+"/context", nil, 200, &preview)
+			if preview.UnavailableReason != "" {
+				t.Fatal(preview.UnavailableReason)
+			}
+			if err := tc.change(e, id, external.ID); err != nil {
+				t.Fatal(err)
+			}
+			var failure errOut
+			e.must(http.MethodPost, path+"/adopt", nil, 409, &failure)
+			if !strings.Contains(failure.Error, tc.reason) {
+				t.Fatalf("confirm: %+v", failure)
+			}
+			e.must(http.MethodGet, path+"/context", nil, 200, &preview)
+			if !strings.Contains(preview.UnavailableReason, tc.reason) {
+				t.Fatalf("preview: %+v", preview)
+			}
+			if _, err := e.store.TaskBySession(t.Context(), ref); !errors.Is(err, db.ErrNotFound) {
+				t.Fatalf("unavailable session was tracked: %v", err)
+			}
+		})
+	}
+}
+
+func TestSessionTrackingRejectsRestampedConnection(t *testing.T) {
+	e := newEnv(t)
+	ctx := t.Context()
+	connection := e.store.ActiveID(db.LocalMachine, t3.Kind)
+	external := e.fake.AddProject("Workspace", t.TempDir())
+	id := launchSession(t, e, external.ID, "Previous instance")
+	ref := db.SessionRef{ConnectionID: connection, ExternalSessionID: id}
+	path := rosterPath(connection) + "/" + id + "/adopt"
+	gate, reached := make(chan struct{}), make(chan struct{}, 1)
+	e.t3.listGate.Store(&listGate{gate, reached})
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		result <- raw(t, e.h, http.MethodPost, path, nil, map[string]any{}, nil)
+	}()
+	select {
+	case <-reached:
+	case early := <-result:
+		close(gate)
+		t.Fatalf("confirmation returned before observation: %d %s", early.Code, early.Body)
+	case <-time.After(10 * time.Second):
+		close(gate)
+		t.Fatal("confirmation did not reach the harness")
+	}
+	switched, err := e.store.SwitchInstance(ctx, db.LocalMachine, t3.Descriptor, "replacement", "Replacement", 0)
+	close(gate)
+	if err != nil || switched.New != connection {
+		t.Fatalf("test requires an in-place connection restamp: %+v, %v", switched, err)
+	}
+	rec := <-result
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "harness connection changed") {
+		t.Fatalf("replacement connection: %d %s", rec.Code, rec.Body)
+	}
+	if _, err := e.store.Observation(ctx, ref); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("old instance observation was recorded on the replacement: %v", err)
+	}
+}
+
+func TestSessionTrackingDisambiguatesOnlyExactReportedRoot(t *testing.T) {
+	e := newEnv(t)
+	connection := e.store.ActiveID(db.LocalMachine, t3.Kind)
+	first := e.fake.AddProject("First", "/repo/first")
+	second := e.fake.AddProject("Second", "/repo/second")
+	if err := e.fake.SetProject(second.ID, func(p *t3.Project) { p.ID = first.ID }); err != nil {
+		t.Fatal(err)
+	}
+	id := launchSession(t, e, first.ID, "Session in second root")
+	path := rosterPath(connection) + "/" + id
+	var preview adoptionPreview
+	e.must(http.MethodGet, path+"/context", nil, 200, &preview)
+	if !strings.Contains(preview.UnavailableReason, "ambiguous") {
+		t.Fatalf("ambiguous native ID: %+v", preview)
+	}
+	e.must(http.MethodPost, path+"/adopt", nil, 409, nil)
+
+	if err := e.fake.SetThread(id, func(d *t3.ThreadDetail) { d.WorktreePath = second.WorkspaceRoot }); err != nil {
+		t.Fatal(err)
+	}
+	preview = adoptionPreview{}
+	e.must(http.MethodGet, path+"/context", nil, 200, &preview)
+	if preview.Workspace != second.WorkspaceRoot || preview.UnavailableReason != "" {
+		t.Fatalf("exact native root: %+v", preview)
+	}
+	var adopted db.Task
+	e.must(http.MethodPost, path+"/adopt", nil, 201, &adopted)
+	p, err := e.store.GetProject(t.Context(), adopted.ProjectID)
+	if err != nil || p.Title != second.Title || len(p.Bindings) != 0 {
+		t.Fatalf("exact workspace project: %+v, %v", p, err)
+	}
 }
 
 func TestAdoptionCreatesBindingAtomically(t *testing.T) {

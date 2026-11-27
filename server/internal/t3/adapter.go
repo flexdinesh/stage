@@ -301,13 +301,19 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 	if err = o.Valid(); err != nil {
 		return o, err
 	}
+	mode := execution.SessionReadModeFrom(ctx)
+	if mode == execution.SessionReadPreview {
+		return o, nil
+	}
 	cached, found := a.replies.Load(d.ThreadID)
-	if (!o.Active || o.State == "needs_input") && (!found || cached != d.UpdatedAt) {
+	if (!o.Active || o.State == "needs_input") && (mode == execution.SessionReadConfirm || !found || cached != d.UpdatedAt) {
 		r, e := a.Client.LatestReply(ctx, LatestReplyInput{ThreadID: d.ThreadID, MaxChars: 4000, ItemCount: d.ItemCount})
 		if e == nil {
 			o.Reply = &r
-			a.replies.Store(d.ThreadID, d.UpdatedAt)
-		} else if errors.Is(e, ErrNoReply) {
+		}
+		// The tracking transaction can still roll back. Leave the next
+		// polling read free to fetch this reply again.
+		if mode == "" && (e == nil || errors.Is(e, ErrNoReply)) {
 			a.replies.Store(d.ThreadID, d.UpdatedAt)
 		}
 	}

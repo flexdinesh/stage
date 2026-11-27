@@ -21,6 +21,7 @@ import { IconMore } from "./icons.tsx";
 import { ConnectionCapabilities } from "./ConnectionCapabilities.tsx";
 import { ConnectionRow, MachineScope } from "./ConnectionRow.tsx";
 import { WorkspaceInventoryStatus } from "./WorkspaceInventoryStatus.tsx";
+import { AdoptSessionDrawer } from "./trees/AdoptSessionDrawer.tsx";
 import { Button, Drawer, Hint, IconButton, Menu, MenuItem, Meta, Panel, QueryState, Row, RowList, useMenu } from "./ui.tsx";
 
 export { MachineScope } from "./ConnectionRow.tsx";
@@ -163,16 +164,23 @@ function ConnectionActionItems({ descriptor, machine, status, onPick }: {
 
 /** The harness's setup, or a scoped action selected from the invoking row. */
 export function ManageDrawer({ machine, target, onClose }: { machine: Machine; target: ManageTarget; onClose: () => void }) {
+  const [tracking, setTracking] = useState<number | null>(null);
+  if (tracking !== null) return <AdoptSessionDrawer initialConnectionId={tracking} onClose={onClose} />;
   return (
     <Drawer title={`${target.descriptor.name} on ${machine.label}`} onClose={onClose}>
       <MachineScope machine={machine}>
-        <ManageBody machine={machine} target={target} onClose={onClose} />
+        <ManageBody machine={machine} target={target} onClose={onClose} onTrack={setTracking} />
       </MachineScope>
     </Drawer>
   );
 }
 
-function ManageBody({ machine, target, onClose }: { machine: Machine; target: ManageTarget; onClose: () => void }) {
+function ManageBody({ machine, target, onClose, onTrack }: {
+  machine: Machine;
+  target: ManageTarget;
+  onClose: () => void;
+  onTrack: (connectionId: number) => void;
+}) {
   const [actionId, select] = useState(target.actionId);
   const [replaced, setReplaced] = useState<ReplacedConnection | null>(null);
   const descriptors = useScopedHarnessDescriptors(machineLive(machine));
@@ -192,6 +200,9 @@ function ManageBody({ machine, target, onClose }: { machine: Machine; target: Ma
         return (
           <div className="flex min-w-0 flex-col gap-3.5">
             <ReplacedConnectionNotice replaced={replaced} />
+            {actionId === undefined && status?.configured && status.connectionId > 0 ? (
+              <div><Button onClick={() => onTrack(status.connectionId)}>Track session</Button></div>
+            ) : null}
             {actionId === undefined ? <Setup descriptor={descriptor} /> : (
               <div><Button small onClick={() => select(undefined)}>Back to Manage</Button></div>
             )}
