@@ -179,17 +179,9 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const { kindName } = useHarnesses();
   const navigate = useNavigate();
   const invalidate = useInvalidateWork();
-  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState<"edit" | "duplicate" | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const { start, block: launchBlock } = useStartTask(task);
-  const duplicate = useMutation({
-    mutationFn: () => api.duplicateTask(task.id),
-    // The copy's page fetches itself; the rest refreshes behind the navigation.
-    onSuccess: async (t) => {
-      void invalidate();
-      await navigate(`/tasks/${t.id}`);
-    },
-  });
   const remove = useMutation({
     mutationFn: () => api.deleteTask(task.id),
     onSuccess: async () => {
@@ -210,7 +202,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const startable = canStart(live);
   const stoppable = canStop(live);
   const { stop, block: stopBlock } = useStopTask(task, stoppable);
-  const actionError = start.error ?? stop.error ?? duplicate.error ?? remove.error ?? archive.error;
+  const actionError = start.error ?? stop.error ?? remove.error ?? archive.error;
   const block = startable && !retired ? launchBlock : null;
   const retiredReason = retired ? retiredHint(kindName(task.harness)) : undefined;
   const lockedHint = retiredReason ?? block?.reason;
@@ -352,11 +344,11 @@ function TaskBody({ task }: { task: TaskDetail }) {
             </div>
           ) : null}
           {task.adopted ? null : (
-            <Button busy={duplicate.isPending} onClick={() => duplicate.mutate()}>
+            <Button onClick={() => setForm("duplicate")}>
               Duplicate
             </Button>
           )}
-          <Button onClick={() => setEditing(true)}>Edit</Button>
+          <Button onClick={() => setForm("edit")}>Edit</Button>
           {/* Archive (standalone tasks; a member closes with its tree), then Delete far right, only before it ever started. */}
           {archived ? (
             <Button className="ml-auto" busy={archive.isPending} onClick={() => archive.mutate(false)}>
@@ -432,7 +424,10 @@ function TaskBody({ task }: { task: TaskDetail }) {
         </div>
       </div>
 
-      {editing ? <TaskFormModal task={task} onClose={() => setEditing(false)} /> : null}
+      {form === "edit" ? <TaskFormModal task={task} onClose={() => setForm(null)} /> : null}
+      {form === "duplicate" ? <TaskFormModal duplicate={task} onClose={() => setForm(null)} onSaved={(saved) => {
+        if (saved.kind === "task") void navigate(`/tasks/${saved.task.id}`);
+      }} /> : null}
     </div>
   );
 }

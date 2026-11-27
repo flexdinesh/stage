@@ -98,6 +98,39 @@ func setOwned(ctx context.Context, tx store.Tx, owner store.AttachmentOwner, own
 	return tx.Attachments().SetOwned(ctx, owner, ownerID, ids)
 }
 
+func attachDuplicateImages(ctx context.Context, tx store.Tx, source, target int64, ids []int64) error {
+	ids = uniqueIDs(ids)
+	if len(ids) > MaxTaskAttachments {
+		return Invalid("at most %d images per task", MaxTaskAttachments)
+	}
+	attachments := tx.Attachments()
+	usable, err := attachments.Usable(ctx, store.OwnerTask, source, ids)
+	if err != nil {
+		return err
+	}
+	if usable != len(ids) {
+		return Invalid("unknown or already attached image in attachmentIds")
+	}
+	for i, id := range ids {
+		image, err := attachments.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if image.TaskID == nil {
+			continue
+		}
+		if *image.TaskID != source {
+			return Invalid("image %d does not belong to the source task", id)
+		}
+		copy, err := attachments.Create(ctx, image.Name, image.MimeType, image.Data)
+		if err != nil {
+			return err
+		}
+		ids[i] = copy.ID
+	}
+	return setOwned(ctx, tx, store.OwnerTask, target, ids)
+}
+
 func uniqueIDs(ids []int64) []int64 {
 	out := make([]int64, 0, len(ids))
 	for _, id := range ids {

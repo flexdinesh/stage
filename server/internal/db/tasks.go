@@ -41,21 +41,22 @@ func (s *Store) TaskEvents(ctx context.Context, taskID int64) ([]TaskEvent, erro
 // NewTask is a validated create input. ConnectionID is required; a nil
 // ExecutionConfig is the harness defaults.
 type NewTask struct {
-	ExecutionConfig *execution.Config
-	ConnectionID    int64
-	OriginSession   *SessionRef
-	ProjectID       int64
-	BindingID       *int64
-	WorkspaceID     string
-	workspacePin    *WorkspacePin
-	Title           string
-	Prompt          string
-	InitialNote     string
-	AttachmentIDs   []int64 // staged images to attach (setAttachments)
-	StartAt         *time.Time
-	StartTz         *string // set with StartAt (IANA zone)
-	ScheduleID      *int64  // spawning schedule
-	Handoff         *bool   // append the needs' handoff at launch; nil = default (on)
+	ExecutionConfig     *execution.Config
+	ConnectionID        int64
+	OriginSession       *SessionRef
+	ProjectID           int64
+	BindingID           *int64
+	WorkspaceID         string
+	UnresolvedWorkspace bool
+	workspacePin        *WorkspacePin
+	Title               string
+	Prompt              string
+	InitialNote         string
+	AttachmentIDs       []int64 // staged images to attach (setAttachments)
+	StartAt             *time.Time
+	StartTz             *string // set with StartAt (IANA zone)
+	ScheduleID          *int64  // spawning schedule
+	Handoff             *bool   // append the needs' handoff at launch; nil = default (on)
 	// TreeID: join this tree (docs/api.md "Tree rules"); nil with Needs joins
 	// the needs' tree (or a new one).
 	TreeID *int64
@@ -84,18 +85,30 @@ func (s *Store) CreateTask(ctx context.Context, in NewTask) (Task, error) {
 		if err := connectionUsable(ctx, tx, in.ConnectionID); err != nil {
 			return 0, err
 		}
-		project, pin, err := creationDestination(ctx, tx, in.ConnectionID, in.ProjectID, in.BindingID, in.WorkspaceID)
+		in, err := taskCreationDestination(ctx, tx, in)
 		if err != nil {
 			return 0, err
 		}
-		in := in
-		in.ProjectID, in.workspacePin = project, pin
 		return s.insertTask(ctx, tx, in, nil)
 	})
 	if err != nil {
 		return Task{}, err
 	}
 	return s.GetTask(ctx, id)
+}
+
+func taskCreationDestination(ctx context.Context, tx store.Tx, in NewTask) (NewTask, error) {
+	if in.UnresolvedWorkspace {
+		if in.BindingID != nil || in.WorkspaceID != "" || in.StartAt != nil {
+			return in, DestinationRequired()
+		}
+		project, err := projectID(ctx, tx, in.ProjectID)
+		in.ProjectID = project
+		return in, err
+	}
+	project, pin, err := creationDestination(ctx, tx, in.ConnectionID, in.ProjectID, in.BindingID, in.WorkspaceID)
+	in.ProjectID, in.workspacePin = project, pin
+	return in, err
 }
 
 // insertTask is createTask's insert, inside tx: insert, adopt
@@ -330,6 +343,15 @@ func (s *Store) ArchiveTask(ctx context.Context, id int64, archived bool) (Task,
 // DuplicateTask copies a task's config and images into a new backlog task
 // (no tree, no needs). An adopted session cannot be duplicated (Conflict).
 func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
+	return s.duplicateTask(ctx, id, nil)
+}
+
+// DuplicateTaskWithDraft saves a confirmed backlog copy with its own destination and source link.
+func (s *Store) DuplicateTaskWithDraft(ctx context.Context, id int64, draft NewTask) (Task, error) {
+	return s.duplicateTask(ctx, id, &draft)
+}
+
+func (s *Store) duplicateTask(ctx context.Context, id int64, draft *NewTask) (Task, error) {
 	dst, err := write(ctx, s, func(tx store.Tx) (int64, error) {
 		if err := tx.Projects().LockIdentity(ctx); err != nil {
 			return 0, err
@@ -348,7 +370,18 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 			ProjectID: src.ProjectID, ConnectionID: src.ConnectionID, BindingID: src.BindingID,
 			ExecutionConfig: src.ExecutionConfig, Title: src.Title, Prompt: src.Prompt, workspacePin: src.WorkspacePin,
 		}
-		if in.workspacePin == nil && src.LaunchAttempt > 0 {
+		if draft != nil {
+			if err := connectionUsable(ctx, tx, draft.ConnectionID); err != nil {
+				return 0, err
+			}
+			in, err = taskCreationDestination(ctx, tx, *draft)
+			if err != nil {
+				return 0, err
+			}
+			// Source images stay on the original. Staged uploads and selected copies
+			// are attached together in this transaction.
+			in.AttachmentIDs = nil
+		} else if in.workspacePin == nil && src.LaunchAttempt > 0 {
 			frozen, err := tx.Attempts().Destination(ctx, id, src.LaunchAttempt)
 			if err != nil && !errors.Is(err, ErrNotFound) {
 				return 0, err
@@ -358,7 +391,13 @@ func (s *Store) DuplicateTask(ctx context.Context, id int64) (Task, error) {
 			}
 		}
 		return s.insertTask(ctx, tx, in, func(tx store.Tx, dst int64) error {
-			if err := tx.Attachments().CopyToTask(ctx, store.OwnerTask, src.ID, dst); err != nil {
+			var err error
+			if draft == nil {
+				err = tx.Attachments().CopyToTask(ctx, store.OwnerTask, src.ID, dst)
+			} else {
+				err = attachDuplicateImages(ctx, tx, src.ID, dst, draft.AttachmentIDs)
+			}
+			if err != nil {
 				return err
 			}
 			return tx.Journal().Duplicated(ctx, dst, src.ID, ActingUser(ctx), ActingMachine(ctx), WorkAttribution(ctx))

@@ -112,7 +112,7 @@ the sign-in, connection and worker screens also offer a switch action:
 1. The choice is saved as `active`.
 2. The bridge is unset at once: every open request and stream to the old server ends (in-flight JSON gets 503 `unavailable`, streams end and EventSource reconnects into the wait), so nothing of the old server reaches the page afterwards.
 3. The state starts over for the new server: `starting` (local: steps service / server / api; remote: server / api), `target` set, `server` null, `serverEpoch` 0. A start still running for the old server is cancelled, and its late outcome is dropped.
-4. The page sees `target.id` or `target.url` change with that first state. When the app had run on the old target it drops its cached data (`queryClient.clear()`) and opens `/`. A navigation that triggered the switch (a notification click) arrives after it and wins. Until the new server answers the page shows the blank ground, then the connection screen.
+4. The page starts a fresh query client when the target ID, URL or account epoch changes. If the app had run on the old target it opens `/`. A navigation that triggered the switch (a notification click) arrives after it and wins. Until the new server answers the page shows the blank ground, then the connection screen.
 5. On ready, the bridge points at the new server, `epoch` and `serverEpoch` increment, and the app mounts.
 
 Switching to the active server only refreshes its name. Editing the active server's URL reconnects it; removing it switches to this machine first.

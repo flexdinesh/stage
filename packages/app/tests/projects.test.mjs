@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   currentBindings, filterWorkspaceInventory, importNotice, matchProjects, orderedWorkspaces, primaryWorkspace, projectDetail,
-  projectsForConnection, projectWorkspace, repoLabel, suggestedWorkspaceFor, workspaceLocation,
+  projectWorkspace, repoLabel, suggestedWorkspaceFor, workspaceLocation,
 } from "../src/lib/projects.ts";
 import { fakeApi } from "./fake-transport.mjs";
 
@@ -140,17 +140,6 @@ test("matches repo metadata after title and path, highlighting it in the subtext
   // A title match ranks before a repo-only match.
   const flexTitle = project(8, "flex tools", "/x", null);
   assert.deepEqual(ids(matchProjects([site, flexTitle], "flex")), [8, 6]);
-});
-
-test("a chosen harness narrows the picker to its projects and unbound ones", () => {
-  const openCode = {...project(9, "oc", "/w/oc", null), bindings: [{connectionId: 2, workspace: "/w/oc", connectionActive: true}]};
-  const unbound = {...project(10, "plan", "/w/plan", null), bindings: []};
-  const retiredOnly = {...project(11, "old", "/w/old", null), bindings: [{connectionId: 3, workspace: "/w/old", connectionActive: false}]};
-  const list = [stage, openCode, unbound, retiredOnly];
-  assert.deepEqual(projectsForConnection(list, 0, "").map((p) => p.id), [1, 9, 10, 11]);
-  assert.deepEqual(projectsForConnection(list, 2, "").map((p) => p.id), [9, 10, 11]);
-  // The current selection stays listed.
-  assert.deepEqual(projectsForConnection(list, 2, "1").map((p) => p.id), [1, 9, 10, 11]);
 });
 
 const row = (id, machineId, connectionId, workspace, primary = false, connectionActive = true) =>

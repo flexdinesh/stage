@@ -77,6 +77,9 @@ func (s *server) createSchedule(w http.ResponseWriter, r *http.Request) error {
 	if err := decodeConfig(r, &req, true); err != nil {
 		return err
 	}
+	if req.WorkspaceID.Null {
+		return db.DestinationRequired()
+	}
 	if req.TreeID != nil || req.Needs != nil || req.NeedsSession != nil || req.StartMode != nil ||
 		req.Start || req.StartLocal != nil || req.StartTz != nil {
 		return db.Invalid("treeId, needs, needsSession, startMode, start, startLocal and startTz are not schedule fields")

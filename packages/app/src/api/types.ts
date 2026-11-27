@@ -250,6 +250,7 @@ export interface Workspace extends WorkspaceRef {
   harnessArchived: boolean;
   activeAt: string | null;
   projectId: number | null;
+  groupProjectId?: number | null;
   bindingId: number | null;
   primary: boolean;
   fileHost: number | null;
@@ -963,9 +964,10 @@ export interface TaskList {
 export interface CreateTaskRequest {
   connectionId?: number;
   bindingId?: number | null;
-  workspaceId?: string;
+  /** Null saves an explicitly unresolved backlog item. */
+  workspaceId?: string | null;
   executionConfig?: ExecutionConfig;
-  projectId: number;
+  projectId?: number;
   title: string;
   prompt: string;
   initialNote?: string;
@@ -986,6 +988,11 @@ export interface CreateTaskRequest {
   startTz?: string | null;
   start?: boolean;
 }
+
+export type DuplicateTaskRequest = Pick<CreateTaskRequest, "projectId" | "title" | "prompt" | "executionConfig" | "attachmentIds"> & {
+  connectionId: number;
+  workspaceId: string | null;
+};
 
 export interface UpdateTaskRequest {
   connectionId?: number;
@@ -1124,7 +1131,7 @@ export interface CreateScheduleRequest {
   bindingId?: number | null;
   workspaceId?: string;
   executionConfig?: ExecutionConfig;
-  projectId: number;
+  projectId?: number;
   title: string;
   prompt: string;
   notes?: string;

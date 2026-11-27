@@ -99,19 +99,6 @@ export function matchProjects(projects: readonly Project[], query: string): Proj
     .toSorted((a, b) => rank(a) - rank(b) || byRecency(a.project, b.project));
 }
 
-/**
- * The projects a task on `connectionId` can use: bound to that connection, or not bound to any
- * active connection (plannable, bindable later). 0 means no harness chosen yet: all of them.
- * `keepId` (the current selection) always stays listed.
- */
-export function projectsForConnection(projects: readonly Project[], connectionId: number, keepId: string): Project[] {
-  if (connectionId === 0) return [...projects];
-  return projects.filter((p) => {
-    const active = currentBindings(p.bindings);
-    return String(p.id) === keepId || active.length === 0 || active.some((b) => b.connectionId === connectionId);
-  });
-}
-
 export function currentBindings(bindings: readonly ProjectBinding[]): ProjectBinding[] {
   return bindings.filter((b) => b.connectionActive);
 }

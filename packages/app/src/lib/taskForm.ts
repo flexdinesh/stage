@@ -1,35 +1,36 @@
 // Request bodies the task form (components/TaskForm.tsx) saves: a new task, a task edit, or a schedule.
-import type { CreateScheduleRequest, CreateTaskRequest, ExecutionConfig, ProjectBinding, Schedule, StartMode, Task, TaskWorkspace, UpdateScheduleRequest, UpdateTaskRequest } from "../api/types.ts";
+import type { CreateScheduleRequest, CreateTaskRequest, ExecutionConfig, Schedule, StartMode, Task, TaskWorkspace, UpdateScheduleRequest, UpdateTaskRequest, Workspace, WorkspaceInventory } from "../api/types.ts";
 import { changedFields } from "./changes.ts";
-import { orderedWorkspaces, workspaceBinding } from "./projects.ts";
 import { buildCron, parseCron } from "./schedules.ts";
 import { taskEditBaseline, taskEditChanges } from "./tasks.ts";
 
 /** The task-shaped config shared by task and schedule forms. */
 export interface TaskTemplate {
-  projectId: number;
+  projectId?: number;
   title: string;
   prompt: string;
   connectionId: number;
-  bindingId?: number | null;
-  workspaceId?: string;
+  workspaceId?: string | null;
   executionConfig?: ExecutionConfig;
 }
 
-/** Live choices and the selected binding, including a saved choice that needs repair. */
-export function taskWorkspaceSelection(bindings: readonly ProjectBinding[], connectionId: number, bindingId: number | null) {
-  const choices = orderedWorkspaces(bindings.filter((b) => b.connectionActive && b.connectionId === connectionId && b.status === "available"));
-  const primary = workspaceBinding(bindings, connectionId);
-  const selected = bindingId === null ? primary : workspaceBinding(bindings, connectionId, bindingId);
-  const available = selected?.status === "available" ? selected : undefined;
-  const issue = bindingId === null || available !== undefined
-    ? null
-    : selected?.status === "changed"
-      ? "The selected workspace changed. Verify it in Projects or choose another workspace."
-      : selected?.status === "missing"
-        ? "The harness no longer reports the selected workspace. Choose another workspace."
-        : "The selected workspace is no longer available on this project and harness. Choose another workspace.";
-  return { choices, primary, selected, available, issue };
+type SelectableWorkspace = Workspace & { workspaceId: string };
+
+export function workspaceGroupId(row: Workspace) {
+  return row.groupProjectId ?? row.projectId;
+}
+
+export function availableTaskWorkspaces(inventory: WorkspaceInventory | undefined, connectionId: number, projectId: number | undefined) {
+  if (inventory?.inventory?.state !== "ready") return [];
+  const inProject = (row: Workspace) => Number(workspaceGroupId(row) === projectId);
+  return inventory.workspaces.filter((row): row is SelectableWorkspace => (
+    row.connectionId === connectionId && row.available && !row.harnessArchived && !!row.workspaceId
+  )).toSorted((a, b) => inProject(b) - inProject(a) || a.title.localeCompare(b.title) || a.workspace.localeCompare(b.workspace));
+}
+
+export function suggestedTaskWorkspace(rows: readonly SelectableWorkspace[], projectId: number | undefined) {
+  const candidates = projectId === undefined ? rows : rows.filter((row) => workspaceGroupId(row) === projectId);
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 /** Display the assignment from the task itself, including pathless destinations. */
@@ -44,7 +45,8 @@ export type TreeStartChoice = "inherit" | StartMode;
 export type TimedStart = { startLocal: string; startTz: string } | null;
 
 export function scheduleBody(template: TaskTemplate, s: { notes: string; attachmentIds: number[]; cron: string; tz: string }): CreateScheduleRequest {
-  return { ...template, notes: s.notes, attachmentIds: s.attachmentIds, cron: s.cron, tz: s.tz };
+  const { workspaceId, ...fields } = template;
+  return { ...fields, ...(workspaceId == null ? {} : { workspaceId }), notes: s.notes, attachmentIds: s.attachmentIds, cron: s.cron, tz: s.tz };
 }
 
 /** A schedule edit sends only changed fields, so other edits keep the saved destination and repeat. */

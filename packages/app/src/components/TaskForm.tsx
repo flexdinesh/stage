@@ -1,12 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApi } from "../platform/context.tsx";
-import { useConnectionCapabilities, useDestinations, useHarnesses, useMachines, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
-import { connectionOptions, machineTag, withMachine } from "../lib/machines.ts";
+import { useConnectionCapabilities, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
 import {
   type ExecutionConfig,
-  type Project,
-  type ProjectBinding,
   type Schedule,
   type StartMode as TreeStartMode,
   type Task,
@@ -33,16 +30,17 @@ import {
 } from "../lib/schedules.ts";
 import { handoffHint } from "../lib/handoff.ts";
 import { isFullyEditable } from "../lib/tasks.ts";
-import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceSelection, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
-import { projectsForConnection } from "../lib/projects.ts";
+import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceLocation, workspaceGroupId, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
+import { operationReason } from "../lib/launch.ts";
 import { HandoffToggle } from "./Handoff.tsx";
-import { LaunchBlockAlert, useLaunchGate } from "./LaunchGate.tsx";
+import { LaunchBlockAlert, useOperationGate } from "./LaunchGate.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
 import { HarnessFields, harnessDefaults, incompatibleSettings } from "./HarnessFields.tsx";
-import { newTaskConnection, prefillConfig } from "../lib/capabilities.ts";
+import { prefillConfig } from "../lib/capabilities.ts";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import { TaskStateBadge } from "./StateBadge.tsx";
+import { TaskDestinationFields, useTaskDestination } from "./TaskDestination.tsx";
 import {
   Alert,
   Button,
@@ -57,11 +55,9 @@ import {
   MetaLine,
   Muted,
   Segmented,
-  TextLink,
   Textarea,
   errorText,
   Combobox,
-  type ComboboxOption,
 } from "./ui.tsx";
 
 /** How a saved task starts: right away, parked, at a time, or as a recurring schedule. */
@@ -197,6 +193,8 @@ function useDebounced<T extends string | null>(value: T, ms: number): T {
 interface TaskFormProps {
   /** Edit this task. */
   task?: Task;
+  /** Start a new backlog draft from this task. */
+  duplicate?: Task;
   /** Edit this schedule (Repeat only). */
   schedule?: Schedule;
   defaultProjectId?: number;
@@ -211,7 +209,7 @@ interface TaskFormProps {
 /** Create (no `task`/`schedule`) or edit form in a drawer. A new one waits for preferences (usually cached) to start on the default connection. */
 export function TaskFormModal(props: TaskFormProps) {
   const prefs = usePreferences();
-  if (props.task !== undefined || props.schedule !== undefined) return <TaskFormDrawer {...props} defaultConnection={null} />;
+  if (props.task !== undefined || props.schedule !== undefined || props.duplicate !== undefined) return <TaskFormDrawer {...props} defaultConnection={null} />;
   if (prefs.isPending) {
     return (
       <Drawer title={props.defaultMode === "repeat" ? "New schedule" : "New task"} onClose={props.onClose} wide>
@@ -225,6 +223,7 @@ export function TaskFormModal(props: TaskFormProps) {
 function TaskFormDrawer({
   task,
   schedule,
+  duplicate,
   defaultProjectId,
   defaultMode,
   defaultTree,
@@ -233,43 +232,42 @@ function TaskFormDrawer({
   defaultConnection,
 }: TaskFormProps & { defaultConnection: number | null }) {
   const api = useApi();
-  const [s, setS] = useState(() => initialState(task, schedule, defaultProjectId, defaultMode, defaultTree));
+  const [copySource] = useState(duplicate);
+  const [s, setS] = useState(() => copySource === undefined
+    ? initialState(task, schedule, defaultProjectId, defaultMode, defaultTree)
+    : { ...initialState(undefined, undefined, copySource.projectId, "backlog", undefined), ...fromTemplate(copySource) });
   // The task and form state as the form opened: a save sends only what differs from them.
   const [opened] = useState(() => (task === undefined ? null : { task, state: s }));
   const [openedSchedule] = useState(schedule);
   const set = (patch: Partial<FormState>) => setS((prev) => ({ ...prev, ...patch }));
   const invalidate = useInvalidateWork();
-  const { machines } = useMachines();
   const existing = opened?.task ?? openedSchedule;
-  const {
-    harnesses,
-    selectedProject,
-    bindings,
-    chosen,
-    connection,
-    bindingId,
-    workspace,
-    workspaceIssue,
-    chooseWorkspace,
-    exactWorkspace,
-    workspaceId,
-    destinationChanged,
-    chooseExactWorkspace,
-    pickable,
-    bound,
-    caps,
-    acceptsImages,
-    prefilled,
-    setConfig,
-    effectiveConfig,
-    configEdited,
-    issues,
-    chooseHarness,
-    chooseProject,
-    fellBack,
-  } = useHarnessConfig(existing, s.projectId, defaultConnection);
   const full = task === undefined || isFullyEditable(task);
-  const images = useImageSet(existing?.attachments);
+  const source = existing ?? copySource;
+  const savedId = source?.workspaceId || null;
+  const savedWorkspace = opened?.task.workspace ?? copySource?.workspace;
+  const destination = useTaskDestination({
+    initialConnection: source?.connectionId ?? defaultConnection,
+    initialWorkspace: savedId === null ? null : {
+      id: savedId, label: "Saved workspace", detail: savedWorkspace == null ? "" : taskWorkspaceLocation(savedWorkspace),
+    },
+    allowPrefill: source === undefined,
+    projectId: defaultProjectId,
+    enabled: full,
+  });
+  const { connection, workspaceId, selected, connectionName } = destination;
+  const bound = selected !== undefined;
+  const destinationChanged = source === undefined || source.connectionId !== connection || savedId !== workspaceId;
+  const [keepOriginalConfig, setKeepOriginalConfig] = useState(true);
+  const [draftConfig, setConfig] = useState<ExecutionConfig | null>(null);
+  const prefilled = (source === undefined || !keepOriginalConfig) && draftConfig === null ? prefillConfig(destination.picked) : undefined;
+  const original = keepOriginalConfig && source !== undefined ? source.executionConfig : prefilled;
+  const effectiveConfig = draftConfig ?? (original == null ? harnessDefaults : { ...original, options: original.options ?? [] });
+  const configEdited = destinationChanged || draftConfig !== null;
+  const caps = useConnectionCapabilities(connection, full && bound, selected === undefined ? undefined : { workspaceId: selected.workspaceId });
+  const issues = bound && (configEdited || copySource !== undefined) ? incompatibleSettings(effectiveConfig, caps.data) : [];
+  const acceptsImages = caps.data === undefined || caps.data.operations.images?.available === true;
+  const images = useImageSet(source?.attachments);
   const isNew = existing === undefined;
   // The API verifies images when the destination changes or when a draft adds an image.
   const checksImages =
@@ -278,40 +276,54 @@ function TaskFormDrawer({
     images.ids.some((id) => !existing.attachments?.some((attachment) => attachment.id === id));
   // Start options: all for a new task, timing only for a backlog task without needs, none otherwise (or for a schedule).
   const needs = task?.needs ?? [];
-  const modes: readonly StartMode[] = isNew ? newModes(defaultTree) : task !== undefined && full && needs.length === 0 ? ["backlog", "at"] : [];
-  // A harness that cannot launch now leaves Backlog (and an edited task's own timing); the choice returns with it.
-  const launchGate = useLaunchGate();
-  const block = (existing === undefined && selectedProject === undefined) || connection === 0 ? null : launchGate({
-    connectionId: connection,
-    projectId: Number(s.projectId),
-    projectTitle: selectedProject?.title ?? existing?.projectTitle ?? "",
-    bindingId,
-    ...(existing === undefined ? {} : { id: existing.id }),
-    ...(workspaceId === undefined ? {} : { workspaceId }),
-  });
-  const offModes = blockedStartModes(modes, block !== null, opened === null ? null : opened.state.mode);
-  const mode: StartMode = offModes.includes(s.mode) ? "backlog" : s.mode;
-  const snippetProject = s.projectId === "" ? null : Number(s.projectId);
+  const modes: readonly StartMode[] = copySource !== undefined || defaultMode === "repeat" ? []
+    : isNew ? newModes(defaultTree) : task !== undefined && full && needs.length === 0 ? ["backlog", "at"] : [];
+  const operationGate = useOperationGate();
+  const block = bound && full ? operationGate(connection, "launch") : null;
+  const scopedBlock = bound && full ? operationReason("launch", caps.data, caps.error) : null;
+  const launchable = bound && block === null && scopedBlock === null;
+  const mode = s.mode;
+  const timingUnchanged = opened !== null && mode === "at" && opened.state.mode === "at"
+    && s.startLocal === opened.state.startLocal && s.tz === opened.state.tz;
+  const requiresLaunch = mode === "now" || (mode === "at" && (!timingUnchanged || destinationChanged))
+    || (mode === "repeat" && (isNew || destinationChanged));
+  const offModes = blockedStartModes(modes, !launchable, mode);
+  const planning = full && mode === "backlog" && !bound;
+  const chosenProject = s.projectId === "" ? undefined : Number(s.projectId);
+  const workspaceProject = selected === undefined ? undefined : workspaceGroupId(selected) ?? undefined;
+  const projectId = existing?.projectId ?? (planning || (copySource !== undefined && !destinationChanged) ? chosenProject
+    : workspaceProject);
+  const snippetProject = projectId ?? null;
+  const showPlanningProject = isNew && planning;
+  const projects = useProjects("false", { enabled: showPlanningProject });
   // A tree member (or a new task joining a tree) picks its own start mode; backlog only.
   const inTree = isNew ? defaultTree !== undefined : task !== undefined && task.treeId !== null && full;
   const inheritedMode = isNew ? (defaultTree?.startMode ?? null) : task !== undefined && task.startMode === null ? task.effectiveStartMode : null;
   const { tzValid, startMs, now, startPast, cron, previewInput, preview, previewStale, previewError } = useStartTiming({ ...s, mode });
-  // "T3 · desk" once there is more than one machine, else "T3".
-  const connectionName = (id: number) => withMachine(harnesses.name(id), machineTag(machines, harnesses.connection(id)?.machineId ?? 0));
+
+  function resetConfig() {
+    setKeepOriginalConfig(false);
+    setConfig(null);
+  }
 
   function template(): TaskTemplate {
     return {
-      projectId: Number(s.projectId),
+      ...(projectId === undefined ? {} : { projectId }),
       title: s.title.trim(),
       prompt: s.prompt,
       connectionId: connection,
-      ...(isNew ? { bindingId } : workspaceId === undefined ? {} : { workspaceId }),
-      ...(isNew || existing.executionConfig != null || configEdited ? { executionConfig: effectiveConfig } : {}),
+      ...(bound ? { workspaceId: selected.workspaceId } : isNew || destinationChanged ? { workspaceId: null } : {}),
+      ...(isNew || existing.executionConfig != null || configEdited
+        ? { executionConfig: !bound && (isNew || destinationChanged) ? harnessDefaults : effectiveConfig } : {}),
     };
   }
 
   const save = useMutation({
     mutationFn: async (): Promise<Saved> => {
+      if (copySource !== undefined) {
+        const body = { ...template(), workspaceId: selected?.workspaceId ?? null, attachmentIds: images.ids };
+        return { kind: "task", task: await api.duplicateTask(copySource.id, body) };
+      }
       if (mode === "repeat") {
         const body = scheduleBody(template(), { notes: s.notes, attachmentIds: images.ids, cron, tz: s.tz });
         if (openedSchedule === undefined) return { kind: "schedule", schedule: await api.createSchedule(body) };
@@ -345,35 +357,35 @@ function TaskFormDrawer({
       });
       return { kind: "task", task: await api.createTask(body) };
     },
-    // Closes at once; the views behind the drawer refresh in the background.
-    onSuccess: (saved) => {
-      void invalidate();
-      onSaved?.(saved);
-      onClose();
-    },
   });
 
   const missing = [
-    s.projectId === "" && "project",
+    showPlanningProject && projectId === undefined && "project for backlog",
     s.title.trim() === "" && "title",
     full && s.prompt.trim() === "" && "prompt",
-    full && connection === 0 && "harness",
-    full && destinationChanged && connection > 0 && !bound && "workspace",
+    full && (isNew || destinationChanged) && !destination.canPlan && "connection",
+    full && requiresLaunch && !bound && "workspace",
+    full && requiresLaunch && bound && !launchable && "available launch connection",
+    full && !bound && workspaceId !== null && (isNew || destinationChanged) && "choose or clear workspace",
     full && issues.length > 0 && `resolve ${issues.join(", ")}`,
     full && checksImages && !acceptsImages && images.items.length > 0 && "remove images",
     images.uploading && "images still uploading",
     images.failed && "remove failed images",
     (mode === "at" || mode === "repeat") && !tzValid && "time zone",
     mode === "at" && startMs === null && "start time",
-    startPast && "a future start time",
+    startPast && !timingUnchanged && "a future start time",
     mode === "repeat" && cron === "" && "cron",
     previewError !== null && "a valid schedule",
   ].filter((m) => m !== false);
 
-  const blocked = missing.length > 0 || save.isPending || (isNew && workspaceIssue !== null) || (mode === "now" && !bound);
+  const blocked = missing.length > 0 || save.isPending;
   const submit = (e?: FormEvent) => {
     e?.preventDefault();
-    if (!blocked) save.mutate();
+    if (!blocked) save.mutate(undefined, { onSuccess: (saved) => {
+      void invalidate();
+      onSaved?.(saved);
+      onClose();
+    } });
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLFormElement>) => {
@@ -382,7 +394,8 @@ function TaskFormDrawer({
     submit();
   };
 
-  const title = schedule !== undefined ? "Edit schedule" : task !== undefined ? `Edit task #${task.id}` : mode === "repeat" ? "New schedule" : "New task";
+  const title = copySource !== undefined ? `Duplicate task #${copySource.id}` : schedule !== undefined ? "Edit schedule"
+    : task !== undefined ? `Edit task #${task.id}` : mode === "repeat" ? "New schedule" : "New task";
   const startLabel = startMs === null ? null : wallTime(new Date(startMs).toISOString(), s.tz, { short: true, now });
   const primaryLabel =
     mode === "repeat"
@@ -431,62 +444,31 @@ function TaskFormDrawer({
         {schedule === undefined ? null : (
           <Alert tone="plain">Changes apply to future runs. Tasks this schedule already started keep their config.</Alert>
         )}
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <TaskDestinationFields
+          destination={destination}
+          readOnly={!full}
+          canClear={mode === "backlog"}
+          onConnection={(id) => {
+            destination.chooseConnection(id);
+            resetConfig();
+          }}
+          onWorkspace={(id) => {
+            destination.chooseWorkspace(id);
+            resetConfig();
+          }}
+        />
+        {planning && workspaceId === null ? <Hint>Choose a workspace before starting this backlog task.</Hint> : null}
+        {showPlanningProject ? (
           <Field label="Project">
-            {(id) => (
-              <ProjectCombobox
-                id={id}
-                projects={pickable}
-                connectionId={connection}
-                disabled={!full}
-                value={s.projectId}
-                onChange={(projectId) => {
-                  chooseProject(projectId);
-                  set({ projectId });
-                }}
-                placeholder="Select project…"
-                autoFocus={isNew}
-                emptyText={!isNew || chosen === 0 || pickable.length > 0 ? undefined : <NoHarnessProjects connectionId={chosen} />}
-              />
-            )}
+            {(id) => <ProjectCombobox id={id} value={s.projectId} projects={projects.data?.projects ?? []}
+              onChange={(pickedId) => set({ projectId: pickedId })} placeholder="Choose a project…" />}
           </Field>
-          <Field label="Harness">{id=><Combobox id={id} disabled={!full} value={connection ? String(connection) : ""} onChange={next=>chooseHarness(Number(next))} listLabel="Harnesses" showTag options={[
-            {value: "", label: "Choose a harness"},
-            // Machine > Harness: the machine is the tag once there is more than one; a chosen project's bindings list first.
-            ...connectionOptions(harnesses.connectedList, machines, harnesses.kindName, !isNew || selectedProject === undefined ? null : new Set(bindings.map(b => b.connectionId)), defaultConnection),
-            // The current harness of a task or schedule that can no longer launch shows, disabled, so the field is not blank.
-            ...(connection > 0 && harnesses.retired(connection) ? [{value: String(connection), label: `${harnesses.name(connection)} (replaced)`, disabled: true}] : []),
-            ...(connection > 0 && harnesses.unconfigured(connection) ? [{value: String(connection), label: `${harnesses.name(connection)} (disconnected)`, disabled: true}] : []),
-            ...(!isNew && connection > 0 && harnesses.connection(connection) === undefined ? [{value: String(connection), label: harnesses.loaded ? "Saved harness (unavailable)" : "Loading harnesses…", disabled: true}] : []),
-          ]}/>}</Field>
-        </div>
-        {fellBack === null || selectedProject === undefined ? null : (
-          <Hint className="-mt-1.5">
-            {selectedProject.title} is not on {connectionName(fellBack)} (default).{" "}
-            {connection ? `Using ${connectionName(connection)}.` : "Choose a harness."}
-          </Hint>
-        )}
-        {full && exactWorkspace !== null ? (
-          <ExactWorkspaceField workspace={exactWorkspace} workspaceId={workspaceId} onChange={chooseExactWorkspace} />
-        ) : full && selectedProject !== undefined && connection > 0 ? (
-          <WorkspaceField workspace={workspace} bindingId={bindingId} onChange={chooseWorkspace} />
         ) : null}
-        {isNew && full && workspaceIssue !== null ? (
-          <div aria-live="polite">
-            <InlineError>
-              {workspaceIssue}
-              {selectedProject === undefined || workspace.issue === null ? null : (
-                <> <TextLink to={`/projects/${selectedProject.id}`} variant="rest">View project workspaces</TextLink></>
-              )}
-            </InlineError>
-          </div>
-        ) : null}
-        <ErrorText error={harnesses.error}/>
-        {block === null || !full || (block.kind === "unbound" && (exactWorkspace !== null || workspaceIssue !== null)) ? null : (
-          <LaunchBlockAlert block={block} {...(modes.includes("backlog") && mode === "backlog" ? { after: "Saves to backlog until then." } : {})} />
-        )}
+        {showPlanningProject ? <ErrorText error={projects.error} /> : null}
+        {block === null ? null : <LaunchBlockAlert block={block} />}
+        {bound && block === null && scopedBlock !== null ? <Hint>{scopedBlock}</Hint> : null}
         <Field label="Title">
-          {(id) => <Input id={id} data-autofocus={isNew ? undefined : true} value={s.title} onChange={(e) => set({ title: e.target.value })} />}
+          {(id) => <Input id={id} data-autofocus={full ? undefined : true} value={s.title} onChange={(e) => set({ title: e.target.value })} />}
         </Field>
         <Field label="Prompt" hint={full ? "Type / to insert a snippet." : undefined}>
           {(id) =>
@@ -517,9 +499,9 @@ function TaskFormDrawer({
             )
           }
         </Field>
-        {connection > 0 && (isNew ? workspaceIssue === null : bound) ? (
+        {full && bound ? (
           <HarnessFields
-            title={`Harness · ${connectionName(connection)}`}
+            title={`Harness · ${connectionName}`}
             config={effectiveConfig}
             caps={caps.data}
             onChange={setConfig}
@@ -530,8 +512,8 @@ function TaskFormDrawer({
             onRetry={() => void caps.refetch()}
           />
         ) : null}
-        {prefilled === undefined ? null : (
-          <Hint className="-mt-1.5">model prefilled from the {connectionName(connection)} pin (Settings › Connections)</Hint>
+        {!bound || prefilled === undefined ? null : (
+          <Hint className="-mt-1.5">Model and options use this connection’s defaults.</Hint>
         )}
         {modes.length > 0 ? (
           <FieldGroup label="Start">
@@ -579,7 +561,7 @@ function TaskFormDrawer({
             error={previewError}
           />
         ) : null}
-        {task === undefined ? (
+        {task === undefined && copySource === undefined ? (
           <Field
             label={mode === "repeat" ? "Notes template" : "Initial note"}
             hint={mode === "repeat" ? "Starts each spawned task's journal." : "Optional. Appended once to the new task's journal."}
@@ -592,253 +574,6 @@ function TaskFormDrawer({
         <ErrorText error={save.error} />
       </form>
     </Drawer>
-  );
-}
-
-/**
- * The harness a form launches on and its execution config: the chosen harness (or the project's default),
- * what it can do there, the config draft, and what blocks saving it.
- */
-function useHarnessConfig(
-  existing: Task | Schedule | undefined,
-  projectId: string,
-  defaultConnection: number | null,
-) {
-  const projects = useProjects();
-  const harnesses = useHarnesses();
-  const exact = existing !== undefined;
-  const catalog = useDestinations(exact);
-  const projectFor = (id: string) => projects.data?.projects.find((project) => String(project.id) === id);
-  const activeProject = projectFor(projectId);
-  // An edited task or schedule can still reference an archived project.
-  const needsArchived = existing !== undefined && String(existing.projectId) === projectId && projects.data !== undefined && activeProject === undefined;
-  const archived = useProjects("true", { enabled: needsArchived });
-  const selectedProject = needsArchived ? archived.data?.projects.find((project) => project.id === existing.projectId) : activeProject;
-  const placementProjects = needsArchived ? archived : projects;
-  const [chosen, setChosen] = useState(existing?.connectionId ?? 0);
-  const [workspaceId, setWorkspaceId] = useState(() => existing?.workspaceId || undefined);
-  const [workspaceChoice, setWorkspaceChoice] = useState<{ projectId: string; connectionId: number; bindingId: number } | null>(null);
-  const [draftConfig, setDraftConfig] = useState<{ connectionId: number; config: ExecutionConfig } | null>(null);
-  // Bindings on replaced or disconnected connections never pick the destination.
-  const bindingsFor = (project: Project | undefined) =>
-    (project?.bindings ?? []).filter((b) => b.connectionActive && !harnesses.unconfigured(b.connectionId));
-  const bindings = bindingsFor(selectedProject);
-  const fallbackDefault = defaultConnection !== null && harnesses.active(defaultConnection) && !harnesses.unconfigured(defaultConnection) ? defaultConnection : null;
-  // When no connection was chosen, follow the project's bindings or the new-task default.
-  const implicit = (project: Project | undefined, projectBindings: Project["bindings"]) => {
-    const preferred = existing === undefined ? fallbackDefault : null;
-    if (project === undefined) return preferred ?? 0;
-    return newTaskConnection(projectBindings, preferred, (id) => harnesses.connection(id)?.machineId ?? Number.MAX_SAFE_INTEGER);
-  };
-  const connection = exact ? chosen : chosen || implicit(selectedProject, bindings);
-  const fellBack = chosen === 0 && fallbackDefault !== null && selectedProject !== undefined && connection !== fallbackDefault ? fallbackDefault : null;
-  // An explicitly chosen harness narrows the picker; the current Stage project stays selected.
-  const pickable = projectsForConnection(projects.data?.projects ?? [], exact ? 0 : chosen, projectId);
-  if (needsArchived && selectedProject !== undefined) pickable.push(selectedProject);
-  const bindingId = workspaceChoice?.projectId === projectId && workspaceChoice.connectionId === connection ? workspaceChoice.bindingId : null;
-  const workspace = taskWorkspaceSelection(bindings, connection, bindingId);
-  const bindingIssue = bindingId === null || placementProjects.data !== undefined
-    ? workspace.issue
-    : placementProjects.isError ? "Stage could not verify the selected workspace. Try again when projects are available." : "Checking the selected workspace…";
-  const catalogRows = catalog.data?.destinations?.filter((d) => d.connectionId === connection) ?? [];
-  const selected = catalogRows.find((d) => d.workspaceId === workspaceId);
-  const savedBinding = workspaceId === undefined ? undefined : catalog.data?.projects
-    .flatMap((p) => p.bindings)
-    .find((b) => b.connectionId === connection && b.workspaceId === workspaceId);
-  const catalogLoading = catalog.data === undefined && catalog.isPending;
-  const catalogFailed = catalog.data?.destinations === undefined && (catalog.isError || catalog.isSuccess);
-  let exactIssue: string | null = null;
-  if (connection === 0) {
-    exactIssue = "Choose a harness to see its workspaces.";
-  } else if (!catalogLoading && !catalogFailed && selected?.available !== true) {
-    if (harnesses.retired(connection)) {
-      exactIssue = "This harness was replaced. Choose another harness and workspace.";
-    } else if (workspaceId === undefined) {
-      exactIssue = "Choose a workspace before running.";
-    } else if (savedBinding?.status === "missing") {
-      exactIssue = "The harness no longer reports the saved workspace. Choose another workspace.";
-    } else {
-      exactIssue = selected?.reason || "The saved workspace is unavailable on this harness. Choose another workspace.";
-    }
-  }
-  const exactWorkspace = !exact ? null : {
-    choices: catalogRows.filter((d) => d.available),
-    selected,
-    savedTitle: savedBinding?.title,
-    issue: exactIssue,
-    loading: catalogLoading,
-    failed: catalogFailed,
-    retry: () => void catalog.refetch(),
-    connection,
-  };
-  const bound = exact ? selected?.available === true : workspace.available !== undefined;
-  const workspaceIssue = exact ? exactIssue : bindingIssue;
-  const caps = useConnectionCapabilities(
-    connection,
-    exact ? bound : workspaceIssue === null,
-    exact ? workspaceId === undefined ? undefined : { workspaceId } : workspace.available,
-  );
-
-  function chooseWorkspace(nextBindingId: number | null) {
-    setWorkspaceChoice(nextBindingId === null ? null : { projectId, connectionId: connection, bindingId: nextBindingId });
-  }
-  function chooseExactWorkspace(id: string) {
-    if (id === workspaceId) return;
-    setWorkspaceId(id);
-    setDraftConfig({ connectionId: connection, config: harnessDefaults });
-  }
-  const acceptsImages = caps.data === undefined || caps.data.operations.images?.available === true;
-  // The first connection uses its pin. Switching connections starts with the harness defaults.
-  const prefilled = existing === undefined && draftConfig === null ? prefillConfig(harnesses.connection(connection)) : undefined;
-  const original = existing?.connectionId === connection ? existing.executionConfig : prefilled;
-  const initialConfig = original ? { ...original, options: original.options ?? [] } : harnessDefaults;
-  const effectiveConfig = draftConfig === null ? initialConfig : draftConfig.connectionId === connection ? draftConfig.config : harnessDefaults;
-  const destinationChanged = exact && (connection !== existing.connectionId || workspaceId !== (existing.workspaceId || undefined));
-  const configEdited = destinationChanged || draftConfig !== null;
-
-  function resetForConnection(connectionId: number) {
-    if (connectionId !== connection && (connection > 0 || draftConfig !== null)) {
-      setDraftConfig({ connectionId, config: harnessDefaults });
-    }
-  }
-  function chooseHarness(id: number) {
-    const next = exact ? id : id || implicit(selectedProject, bindings);
-    if (next !== connection) {
-      setWorkspaceChoice(null);
-      setWorkspaceId(undefined);
-    }
-    resetForConnection(next);
-    setChosen(id);
-  }
-  function chooseProject(id: string) {
-    if (exact) return;
-    if (id !== projectId) setWorkspaceChoice(null);
-    if (chosen !== 0) return;
-    const nextProject = projectFor(id);
-    resetForConnection(implicit(nextProject, bindingsFor(nextProject)));
-  }
-  return {
-    harnesses,
-    selectedProject,
-    bindings,
-    chosen,
-    connection,
-    bindingId,
-    workspace,
-    workspaceIssue,
-    chooseWorkspace,
-    exactWorkspace,
-    workspaceId,
-    destinationChanged,
-    chooseExactWorkspace,
-    pickable,
-    bound,
-    caps,
-    acceptsImages,
-    prefilled,
-    setConfig: (config: ExecutionConfig) => setDraftConfig({ connectionId: connection, config }),
-    effectiveConfig,
-    configEdited,
-    issues: exact && !configEdited ? [] : incompatibleSettings(effectiveConfig, caps.data),
-    chooseHarness,
-    chooseProject,
-    fellBack,
-  };
-}
-
-function ExactWorkspaceField({ workspace, workspaceId, onChange }: {
-  workspace: NonNullable<ReturnType<typeof useHarnessConfig>["exactWorkspace"]>;
-  workspaceId: string | undefined;
-  onChange: (workspaceId: string) => void;
-}) {
-  const { choices, selected, savedTitle, issue, loading, failed, retry, connection } = workspace;
-  const options: ComboboxOption[] = choices.map((d) => ({ value: d.workspaceId, label: d.title, detail: d.discriminator }));
-  const available = selected?.available === true;
-  if (workspaceId !== undefined && !available) {
-    options.push({ value: workspaceId, label: selected?.title || savedTitle || "Saved workspace", detail: selected?.discriminator, disabled: true });
-  }
-  const empty = connection === 0 ? "Choose a harness first"
-    : loading ? "Loading workspaces…"
-      : failed ? "Could not load workspaces"
-        : choices.length === 0 ? "No workspaces available" : "Choose a workspace…";
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Field label="Workspace" hint={available ? selected.discriminator : undefined}>
-        {(id) => (
-          <Combobox id={id} value={workspaceId ?? ""} onChange={onChange} options={options} listLabel="Workspaces" placeholder={empty} disabled={choices.length === 0} />
-        )}
-      </Field>
-      <div aria-live="polite" className="empty:hidden">
-        {failed && connection !== 0 ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <InlineError>Stage could not load workspaces for this harness.</InlineError>
-            <Button small variant="ghost" onClick={retry}>Try again</Button>
-          </div>
-        ) : loading && workspaceId !== undefined ? <Hint>Checking the saved workspace…</Hint>
-          : issue === null ? null : <Hint>{issue}</Hint>}
-      </div>
-    </div>
-  );
-}
-
-function workspaceOptionLocation(binding: ProjectBinding): string {
-  return binding.workspace || binding.externalProjectId || binding.title;
-}
-
-function WorkspaceField({
-  workspace,
-  bindingId,
-  onChange,
-}: {
-  workspace: ReturnType<typeof taskWorkspaceSelection>;
-  bindingId: number | null;
-  onChange: (bindingId: number | null) => void;
-}) {
-  const { choices, primary, selected, issue } = workspace;
-  if (choices.length === 0 && bindingId === null) return null;
-  if (choices.length === 1 && primary?.status === "available" && issue === null) {
-    return (
-      <Field label="Workspace">
-        {(id) => (
-          <output id={id} className="flex min-h-control items-center border border-line bg-panel px-2.5 py-1.5 font-mono text-meta wrap-anywhere">
-            {bindingId === null ? "Primary · " : ""}{workspaceOptionLocation(primary)}
-          </output>
-        )}
-      </Field>
-    );
-  }
-
-  const options = [
-    {
-      value: "",
-      label: primary?.status === "available" ? "Primary" : "Primary (unavailable)",
-      detail: primary === undefined ? undefined : workspaceOptionLocation(primary),
-    },
-    ...choices.map((b) => {
-      const location = workspaceOptionLocation(b);
-      return { value: String(b.id), label: b.title || location, detail: b.title && b.title !== location ? location : undefined, chip: b.primary ? "primary" : undefined };
-    }),
-    ...(bindingId === null || issue === null ? [] : [{
-      value: String(bindingId),
-      label: selected?.title || `Workspace #${bindingId}`,
-      detail: selected === undefined ? undefined : workspaceOptionLocation(selected),
-      disabled: true,
-    }]),
-  ];
-  const value = bindingId === null ? "" : String(bindingId);
-  const detail = options.find((o) => o.value === value)?.detail;
-  return (
-    <Field label="Workspace" hint={detail === undefined ? undefined : <span className="font-mono wrap-anywhere">{detail}</span>}>
-      {(id) => (
-        <Combobox
-          id={id}
-          value={value}
-          onChange={(next) => onChange(next === "" ? null : Number(next))}
-          listLabel="Workspaces"
-          options={options}
-        />
-      )}
-    </Field>
   );
 }
 
@@ -864,19 +599,6 @@ function useStartTiming(s: FormState) {
 }
 
 type FieldsProps = { s: FormState; set: (patch: Partial<FormState>) => void };
-
-/** The picker's empty state for a chosen harness with no usable project. */
-function NoHarnessProjects({ connectionId }: { connectionId: number }) {
-  const harnesses = useHarnesses();
-  const name = harnesses.name(connectionId);
-  const settings = <TextLink to="/settings/connections" variant="rest">Settings</TextLink>;
-  if (harnesses.connection(connectionId)?.configured === false) {
-    return <>{name} is not connected. Connect it in {settings}.</>;
-  }
-  const kind = harnesses.harness(connectionId);
-  const hint = kind === null ? undefined : harnesses.descriptor(kind)?.discoveryHint;
-  return <>No projects use this connection. {hint ? `${hint} ` : ""}{settings}</>;
-}
 
 function ZoneField({ s, set }: FieldsProps) {
   const zones = useMemo(() => timeZones(s.tz), [s.tz]);

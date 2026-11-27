@@ -72,31 +72,31 @@ type createTaskReq struct {
 }
 
 type taskConfigReq struct {
-	ConnectionID    *int64            `json:"connectionId"`
-	BindingID       *int64            `json:"bindingId"`
-	WorkspaceID     *string           `json:"workspaceId"`
-	NeedsSession    *db.SessionRef    `json:"needsSession"`
-	ExecutionConfig *execution.Config `json:"executionConfig"`
-	OriginSession   *db.SessionRef    `json:"originSession"`
-	ProjectID       *int64            `json:"projectId"`
-	Title           string            `json:"title"`
-	Prompt          string            `json:"prompt"`
-	TreeID          *int64            `json:"treeId"`
-	Needs           []int64           `json:"needs"`
-	StartMode       *db.StartMode     `json:"startMode"`
-	AttachmentIDs   []int64           `json:"attachmentIds"`
-	StartLocal      *string           `json:"startLocal"`
-	StartTz         *string           `json:"startTz"`
-	Handoff         *bool             `json:"handoff"`
-	Start           bool              `json:"start"`
+	ConnectionID    *int64              `json:"connectionId"`
+	BindingID       *int64              `json:"bindingId"`
+	WorkspaceID     db.Optional[string] `json:"workspaceId"`
+	NeedsSession    *db.SessionRef      `json:"needsSession"`
+	ExecutionConfig *execution.Config   `json:"executionConfig"`
+	OriginSession   *db.SessionRef      `json:"originSession"`
+	ProjectID       *int64              `json:"projectId"`
+	Title           string              `json:"title"`
+	Prompt          string              `json:"prompt"`
+	TreeID          *int64              `json:"treeId"`
+	Needs           []int64             `json:"needs"`
+	StartMode       *db.StartMode       `json:"startMode"`
+	AttachmentIDs   []int64             `json:"attachmentIds"`
+	StartLocal      *string             `json:"startLocal"`
+	StartTz         *string             `json:"startTz"`
+	Handoff         *bool               `json:"handoff"`
+	Start           bool                `json:"start"`
 }
 
 // chooseConnection resolves the project alias and uses an explicit binding's
 // connection when the caller leaves connectionId unset.
 func (s *server) chooseConnection(r *http.Request, req *taskConfigReq) error {
 	ctx := r.Context()
-	if req.WorkspaceID != nil {
-		if *req.WorkspaceID == "" || req.ConnectionID == nil {
+	if req.WorkspaceID.Set {
+		if (!req.WorkspaceID.Null && req.WorkspaceID.V == "") || req.ConnectionID == nil {
 			return db.DestinationRequired()
 		}
 		if req.BindingID != nil {
@@ -193,8 +193,10 @@ func (req taskConfigReq) validate() (db.NewTask, error) {
 	if err := attachmentIDs(req.AttachmentIDs); err != nil {
 		return in, err
 	}
-	if req.WorkspaceID != nil {
-		in.WorkspaceID = *req.WorkspaceID
+	in.WorkspaceID = req.WorkspaceID.V
+	in.UnresolvedWorkspace = req.WorkspaceID.Null
+	if in.UnresolvedWorkspace && (req.Start || req.StartLocal != nil || req.StartTz != nil) {
+		return in, db.DestinationRequired()
 	}
 	if req.ProjectID == nil && in.WorkspaceID == "" {
 		return in, db.Invalid("projectId is required")
@@ -553,7 +555,46 @@ func (s *server) duplicateTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	task, err := s.Store.DuplicateTask(r.Context(), id)
+	var req *struct {
+		ConnectionID    *int64              `json:"connectionId"`
+		ProjectID       *int64              `json:"projectId"`
+		WorkspaceID     db.Optional[string] `json:"workspaceId"`
+		ExecutionConfig *execution.Config   `json:"executionConfig"`
+		Title           string              `json:"title"`
+		Prompt          string              `json:"prompt"`
+		AttachmentIDs   []int64             `json:"attachmentIds"`
+	}
+	if r.ContentLength != 0 {
+		if err := decodeConfig(r, &req, true); err != nil {
+			return err
+		}
+	}
+	var task db.Task
+	if req == nil {
+		task, err = s.Store.DuplicateTask(r.Context(), id)
+	} else {
+		if !req.WorkspaceID.Set {
+			return db.Invalid("Choose a workspace or send workspaceId: null for backlog.")
+		}
+		config := taskConfigReq{
+			ConnectionID: req.ConnectionID, ProjectID: req.ProjectID, WorkspaceID: req.WorkspaceID,
+			ExecutionConfig: req.ExecutionConfig, Title: req.Title, Prompt: req.Prompt, AttachmentIDs: req.AttachmentIDs,
+		}
+		if err := s.chooseConnection(r, &config); err != nil {
+			return err
+		}
+		in, err := config.validate()
+		if err != nil {
+			return err
+		}
+		if err := s.validateTaskDestination(r.Context(), in); err != nil {
+			return err
+		}
+		task, err = s.Store.DuplicateTaskWithDraft(r.Context(), id, in)
+		if err != nil {
+			return err
+		}
+	}
 	if err != nil {
 		return err
 	}

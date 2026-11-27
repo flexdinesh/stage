@@ -33,6 +33,9 @@ func (s *server) projectFilter(r *http.Request, key string) (*int64, error) {
 
 func (s *server) validateTaskDestination(ctx context.Context, in db.NewTask) error {
 	d := taskDestination{in.ConnectionID, in.ProjectID, in.BindingID, in.WorkspaceID}
+	if in.UnresolvedWorkspace {
+		d.projectID = 0
+	}
 	if err := s.Store.ValidateBinding(ctx, d.projectID, d.connectionID, d.bindingID); err != nil {
 		return err
 	}

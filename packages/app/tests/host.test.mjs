@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   gateView,
+  hostAccessScope,
   isServerSwitch,
   primaryAction,
   serverStatus,
@@ -42,6 +43,15 @@ const base = {
 };
 const state = (over) => ({ ...base, ...over });
 const steps = (s) => ["service", "server", "api"].map((k) => stepStatus(s, k));
+
+test("the access and cache scope changes with the desktop target or account before readiness", () => {
+  const first = state({ target: { id: "saved", url: "https://first.test" }, accountEpoch: 2 });
+  const second = state({ target: { id: "saved", url: "https://second.test" }, accountEpoch: 2 });
+  assert.equal(isServerSwitch(first, second), false);
+  assert.notEqual(hostAccessScope(first), hostAccessScope(second));
+  assert.notEqual(hostAccessScope(second), hostAccessScope({ ...second, accountEpoch: 3 }));
+  assert.equal(hostAccessScope(second), hostAccessScope({ ...second, phase: "ready", serverEpoch: 1 }));
+});
 
 test("starting steps progress in order", () => {
   assert.deepEqual(steps(state({ step: "service" })), ["active", "idle", "idle"]);
