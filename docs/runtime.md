@@ -10,6 +10,22 @@ the PWA and OS services all rely on this. Code: `server/internal/{serve,listen,i
 (sync, links, schedules, notifications, the T3 connection) on every
 configured listener. The listeners are not separate instances.
 
+Personal is the default, including desktop and trusted home LANs with
+workers. Anyone who can reach a personal product listener has implicit
+operator access. Current bind defaults still apply. The [shared access
+ADR](adr/0009-shared-access.md) defines opt-in named access for one trusted
+workspace. Members can run code through configured harnesses. The
+installation owner's OS account protects secrets and recovery.
+
+Migration 0040 introduces a durable installation ID distinct from the
+process `instanceId` and the build identity (`stage` or `stage-dev`). Stage
+resolves the database's mode after migration and before starting the
+runtime. Shared state is sticky across restarts, including when the opt-in is
+omitted. An explicit false setting requires restarting with shared
+configuration. During foundation delivery, the server refuses to serve
+shared data until shared transport enforcement is available. The public
+opt-in ships with the integrated feature.
+
 `STAGE_LISTEN` takes a comma list; `--listen` can be repeated (or take a
 comma list), and when given it replaces `STAGE_LISTEN` entirely. Each item is:
 

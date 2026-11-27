@@ -37,6 +37,7 @@ type Tx interface {
 	Push() Push
 	Preferences() Preferences
 	Users() Users
+	Access() Access
 	Attachments() Attachments
 	Notifications() Notifications
 	Sessions() Sessions

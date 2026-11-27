@@ -23,6 +23,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/config"
+	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/sqlite"
 	"github.com/flexdinesh/stage/server/internal/filelock"
 	"github.com/flexdinesh/stage/server/internal/instance"
@@ -83,6 +84,40 @@ func cfg(t *testing.T, dataDir string, listens ...string) config.Config {
 		t.Fatal(err)
 	}
 	return config.Config{Listen: addrs, DataDir: dataDir}
+}
+
+func TestSharedDataNeverStartsPersonalRuntime(t *testing.T) {
+	c := cfg(t, t.TempDir(), "unix://"+filepath.Join(isolate(t), "shared.sock"))
+	sharedDataNeverStartsPersonalRuntime(t, c)
+}
+
+func sharedDataNeverStartsPersonalRuntime(t *testing.T, c config.Config) {
+	t.Helper()
+	on, off := true, false
+	for _, step := range []struct {
+		name   string
+		intent *bool
+	}{
+		{"opt in", &on},
+		{"restart with omitted intent", nil},
+		{"restart with explicit false", &off},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			err := serve.Run(ctx, serve.Options{Config: c, SharedAccess: step.intent, Logger: quiet(),
+				Ready: func(serve.Ready) { t.Error("served traffic for a shared database") }})
+			if step.intent == &off {
+				if !errors.Is(err, db.ErrSharedAccessRequired) {
+					t.Fatalf("explicit false: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "build that supports shared access") {
+				t.Fatalf("shared startup: %v", err)
+			}
+		})
+	}
 }
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

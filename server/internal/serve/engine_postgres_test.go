@@ -48,6 +48,13 @@ func noSecret(t *testing.T, what, out, rawURL string) {
 	}
 }
 
+func TestPostgresSharedDataNeverStartsPersonalRuntime(t *testing.T) {
+	short := isolate(t)
+	rawURL := pgtest.DatabaseURL(t, pgtest.CreateDatabase(t, ""))
+	c := pgConfig(t, filepath.Join(short, "d"), rawURL, "unix:"+filepath.Join(short, "shared.sock"))
+	sharedDataNeverStartsPersonalRuntime(t, c)
+}
+
 // TestPostgresEngine: STAGE_DATABASE_URL selects Postgres. The server
 // migrates a fresh database, reports the engine (never the URL), keeps only
 // its lock and sockets in the data dir, and is the database's single owner

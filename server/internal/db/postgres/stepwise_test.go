@@ -49,6 +49,43 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	37: {{name: "existing connection and task evidence retained", seed: seedV0037ConnectionFacts, check: checkV0037ConnectionFacts}},
 	39: {{name: "observation producer history", check: checkV0039ObservationProducers}},
 	38: {{name: "identity history and workspace bindings", seed: seedV0038ProjectIdentity, check: checkV0038ProjectIdentity}},
+	40: {{name: "legacy identity and evidence retained", seed: seedV0040SharedAccess, check: checkV0040SharedAccess}},
+}
+
+func seedV0040SharedAccess(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`INSERT INTO users(id, display_name) VALUES (7, 'Existing user')`,
+		`INSERT INTO identities(id, user_id, provider, subject) VALUES (9, 7, 'legacy', 'existing-subject')`,
+		`INSERT INTO projects(id, title) VALUES (4, 'Existing project')`,
+		`INSERT INTO harness_connections(id, machine_id, harness) VALUES (4, 1, 't3')`,
+		`INSERT INTO tasks(id, project_id, title, prompt, connection_id) VALUES (6, 4, 'Existing task', 'prompt', 4)`,
+		`INSERT INTO journal_entries(id, kind, task_id, text, created_by_user_id, request_id) VALUES (8, 'note', 6, 'old evidence  ✓', 7, 'old-note')`,
+	} {
+		if _, err := pool.ExecContext(context.Background(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func checkV0040SharedAccess(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	for label, q := range map[string]string{
+		"implicit admin":     `SELECT count(*) FROM users WHERE id = 1 AND display_name = 'Default user' AND role = 'admin' AND status = 'active' AND email IS NULL`,
+		"legacy identity":    `SELECT count(*) FROM identities i JOIN users u ON u.id = i.user_id WHERE i.id = 9 AND u.id = 7 AND i.subject = 'existing-subject' AND u.role = 'member'`,
+		"historical creator": `SELECT count(*) FROM tasks WHERE id = 6 AND created_by_user_id = 1`,
+		"journal evidence":   `SELECT count(*) FROM journal_entries WHERE id = 8 AND text = 'old evidence  ✓' AND created_by_user_id = 7`,
+		"personal state":     `SELECT count(*) FROM installation_access WHERE mode = 'personal' AND claimed_at IS NULL`,
+	} {
+		var count int
+		if err := pool.QueryRowContext(context.Background(), q).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("%s: count %d, err %v", label, count, err)
+		}
+	}
+	q := `DELETE FROM users WHERE id = 7`
+	if _, err := pool.ExecContext(context.Background(), q); err == nil {
+		t.Fatal("removed referenced historical creator")
+	}
 }
 
 func seedV0029Search(t *testing.T, pool *sql.DB) {

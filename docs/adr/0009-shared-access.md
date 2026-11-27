@@ -1,0 +1,103 @@
+# ADR 0009: Shared access
+
+Stage task #452 establishes the identity and storage foundation. This ADR also specifies the target contracts for tasks #453–460. Task #460 enables public opt-in after integration.
+
+## Installation and trust
+
+Personal is the default for desktop, foreground servers and trusted home LANs with workers. Existing bind defaults and desktop's private-socket startup apply. A reachable personal product listener grants implicit operator access as user 1. Keep personal listeners within the intended trust boundary.
+
+Shared access is per installation. There is one trusted workspace across projects, tasks, trees, schedules, machines and harnesses. Active members can operate shared work, pair and manage workers, and configure harness connections. Admins also manage invitations, roles and account access. Members can run code wherever configured harnesses allow. The installation owner's OS account protects Stage secrets and local recovery. Use separate OS accounts or hosts when stronger execution isolation is needed. Stage and harness ownership follows [ADR 0007](0007-harness-boundary.md) and [ADR 0008](0008-harness-foundation.md).
+
+| Persisted state | Startup and transition |
+| --- | --- |
+| `personal` | Use implicit admin user 1 without a password. Explicit shared opt-in persists `setup_pending` before product traffic. |
+| `setup_pending` | Allow the owner to redeem a valid setup grant. Claim atomically consumes the grant, updates user 1 in place, creates its local identity and verifier, and persists `claimed`. Concurrent claims have one winner. |
+| `claimed` | Require sign-in for human work. User 1 remains the same account and the installation has a single first-owner claim. |
+
+A missing flag preserves the persisted shared state. Explicit false against shared data fails startup and directs the operator to use shared configuration. Mode can only advance through these transitions. During #452, startup refuses either shared state until #454 provides the transport gates. In the integrated pending state, reject product API and gateway work, pause work-producing runners, and keep readiness and worker liveness observable. Resume on claim without duplicate launches or implicit user-1 actions. Task #460 publishes `STAGE_MULTI_USER=1` and `stage serve --multi-user`.
+
+The first opt-in prints one 30-minute setup URL through designated private operator output. Pending restart directs the owner to reissue it. Reissue revokes the prior grant. Use `STAGE_PUBLIC_URL` as the canonical origin for links and exact browser origin checks. Shared browser access requires HTTPS except for loopback HTTP testing. A socket-only service needs a browser-reachable listener or an HTTPS proxy. Keep proxy upstream TCP private or use a protected socket. Use configured origins and hosts, and ignore forwarded headers for trust decisions. Local owner setup and admin recovery use a dedicated OS-protected control path available in socket, TCP-only and container profiles. Ordinary product socket access, remote requests and machine tokens confer no owner capability. Keep grants, passwords and session secrets out of normal logs, service status, diagnostics and error reporting.
+
+## Durable identity and disposable credentials
+
+- `users.id` is the stable person ID. Preserve row 1, existing foreign keys, `createdBy` and prior evidence on claim and upgrade. Store display name, email presentation, `admin` or `member`, and `active` or `disabled`. The login address is unique after trimming and case-insensitive canonicalization. Dots and plus suffixes are significant. Invite possession does not verify the address.
+- The local password verifier belongs to a local `identities(provider, subject)` entry with subject `user:<id>`, independent of email. Future external identities use a provider namespace that includes the issuer, plus the immutable subject, and require explicit linking. V1 ships email/password only, with manual invite delivery. OAuth, SMTP, public registration, organizations and project ACLs are outside v1.
+- Generate and persist `installation_id` at first runtime startup. It identifies a logical installation across restarts, backup and supported database copies. The process `instanceId` continues to identify one running process. CLI, desktop and configured agent clients scope credentials to both the installation ID and the canonical target (scheme, host and port, or exact socket). Send credentials only to that target and refuse cross-origin credential forwarding on redirects.
+- Store opaque random 256-bit sessions and grants by digest. Sessions have `browser`, `cli` or `agent` audiences. Grants have `setup`, `invite` or `password_reset` purpose, expiry, issuer and consumption/revocation state. Validate purpose, target and expiry when redeeming in a transaction. Put grant secrets in URL fragments, remove them promptly from the address bar, and redeem only on explicit POST. GET may display a form without consuming a grant.
+- Use salted, versioned Argon2id verifiers with bounded concurrency. Accept 15–128 Unicode characters, paste and password managers. Check a local common-password blocklist and bound account/IP login attempts. Use generic sign-in errors. Browser sessions expire after seven days idle or 30 days absolute. Agent credentials expire after 30 days and support explicit rotation. Check credential validity, current account status and role on every request. End streams on expiry or revocation. Logout revokes the active session. Password change, reset and disable revoke the affected account's login and agent credentials.
+- Backups are secret material. Preserve user IDs, identity mappings, verifiers, roles, account status and sticky mode, plus the installation ID for the same logical installation. Explicit restore/import invalidates copied browser, CLI and agent sessions and outstanding setup, invite and reset links before product access. A restored pending installation uses local owner reissue. Ordinary restarts retain valid credentials. Preserve worker identity and pairing under the existing [storage](../storage.md) and [runtime](../runtime.md) contracts.
+
+The foundation exposes `db.Store.ConfigureAccess`, `ClaimInstallation`,
+`ReadAccess` and `WriteAccess`. Use the installation row lock in
+read-check-write account operations; SQLite serializes writers and
+Postgres locks the row. Account lookup uses a Unicode case-folded login key.
+Reissue revokes the outstanding row before inserting a replacement, including
+when its deadline has passed. Browser idle extension is monotonic and capped
+by absolute expiry.
+
+## Principals and endpoint policy
+
+Apply one server policy across REST, HTTP MCP (including in-process dispatch), SSE, images, attachments, push and direct Unix/TCP access. Apply it to aliases and inner gateway dispatch too. Keep `guard.Policy`, Host/origin checks and scoped hook authentication. Return structured 401 for missing or invalid credentials on protected endpoints and 403 when a valid principal lacks permission. Personal implicit human access exists at the human boundary only.
+
+| Surface | Shared principal and credential |
+| --- | --- |
+| Static shell and assets, minimal health/version/readiness and setup state | Public. Harness errors and operational metadata require authentication. Preserve compatibility probes. |
+| Sign-in and setup/invite/reset redemption | Public entry points with exact browser origin and CSRF controls for writes. Sign-in checks password; redemption checks its purpose-bound grant. |
+| `/api/me`, own account, sign-out, inbox, preferences, push and device bindings | Active human with the appropriate browser or CLI session. Access and delivery are scoped to that account. |
+| Shared projects, tasks, trees, schedules, journals, work streams and attachments | Active human. Agents get the existing scoped agent operations where explicitly allowed. Human-only actions such as answering an approval keep their existing restriction. |
+| Worker registry, pairing, default execution connection and harness management | Active human, including members. Agent and worker gateway reads remain limited by existing policy. |
+| Invitations, role changes, disable and member reset | Active admin. Admins retain member permissions. Enforce the last-active-admin rule transactionally. |
+| HTTP/stdio MCP and agent API paths | Trusted agent via its scoped bearer, owner-private agent-only Unix endpoint, or verified worker gateway. MCP retains agent operation limits, including when a signed-in person invokes it. Interactive CLI sign-in never silently supplies credentials to agent integrations. |
+| `/api/worker/*`, including channel and gateway | Pairing grant for enrollment, machine token for worker routes. Preserve worker protocol negotiation. A worker gateway forwards allowed agent operations and records its machine. Require a private local gateway listener or agent authentication on remotely reachable gateways. |
+| Observation and hook ingress | Authenticate the sender under the ingress policy. Workers are restricted to their own connections. Existing hooks retain their scoped credentials. |
+| Setup reissue and admin recovery | Local installation owner through the dedicated OS-protected control path. |
+| Cron, dependent release, observation and other internal work | Internal system, with authorized machine or hook provenance where applicable. The system principal exists only inside Stage. |
+
+Browser sessions use a host-only `HttpOnly`, `SameSite=Lax`, `Path=/` cookie with `Secure` on HTTPS. Protect login, logout and all state changes with the browser origin policy. Native desktop Go captures and injects only the selected upstream's Stage credential for that exact target, including streams and assets. Store it in OS-protected storage or an atomic owner-only file in a protected directory. The webview receives no raw session cookie. CLI login uses a hidden password prompt and owner-only storage. Agent setup uses a private agent endpoint or explicit secret configuration. Caller-session headers, body fields and launch hints are provenance only. Keep secrets out of prompts.
+
+Record direct actor kind and optional human initiator separately from `sourceMachineId`, connection/session, schedule and request ID. Get human IDs from authenticated context. Keep actor and cause on delayed work and retries when known. Scheduled tasks and their initial notes keep the schedule creator. Cron is the actor on automatic fires. Run now records the requester. Releases and harness observations record automation with known cause. Keep old creator IDs and immutable journal/acceptance bytes. Label ambiguous pre-identity activity historical. Disabled accounts retain IDs and history. Existing workspace work and schedules continue under the normal execution policy. Audit access-management actions without secrets and omit login emails from operational display where unnecessary.
+
+## Account and inbox flows
+
+Use Stage's existing design and operating patterns. Setup, sign-in, invite and reset use compact `Field`, `Input`, `Button` and `Alert` primitives outside the protected layout. Supply accessible labels, password-manager autocomplete, focus and error feedback, keyboard operation, narrow-phone layout and both themes. Use existing `TabNav`, ruled panels, `CopyButton` and `ConfirmInline` for account administration. Task #457 owns visual implementation and desktop/phone evidence. [Stage design](../../DESIGN.md#primitives) · [Product principles](../../PRODUCT.md#product-principles)
+
+| Flow | Result |
+| --- | --- |
+| Personal | Open the dashboard or a deep-linked task directly, including before any harness is configured. Hide Account and Admin surfaces. |
+| First setup | A bare pending URL shows a waiting-for-owner message. The private setup link asks for email, name and password. Successful claim signs in and opens the dashboard. |
+| Invitation | Admin copies the single-use URL once for manual delivery. It expires in seven days. One live link per canonical address, with explicit revoke/replace. Show pending, used, revoked and expired invitations with recipient, date and inviter. The form shows the fixed invited address and asks for name and password. Redemption creates a member and signs in to the dashboard. Existing accounts cannot be overwritten. |
+| Sign-in | Show email and password before mounting protected queries or layout. Restore a safe same-server relative deep link. Distinguish sign-in needed from offline and forbidden. Desktop signs in independently. Open setup and invite links at the canonical browser URL. |
+| Account and recovery | Account settings offer name, current-password-confirmed password change, agent credential issue/revoke and sign-out. Admin issues a 30-minute single-use member reset link. Local owner can recover an admin. Reset preserves the account and its role. Expired or revoked links explain how to get a replacement. |
+| Admin | People and Invitations subnav in a peer to Settings, reachable from desktop sidebar and mobile More. People shows roles and status, with confirmed access changes. Members see forbidden on direct Admin navigation. |
+| Session ends or changes | Close streams and clear query caches, private assets, sensitive form values, badges, delivery state and cursors. Handle expiry, revocation, logout, cross-tab change and back navigation. Desktop also isolates background servers and clears the affected credentials on sign-out, target edit or removal. |
+
+Store each workspace event once with per-user read receipts, preferences and device push bindings. New members start with retained history read and can still see open work. Preserve user 1's existing filter and read state on upgrade. Invalidate legacy unclaimed push endpoints on opt-in and rebind after sign-in. Authorize inbox, badge counts, SSE and delivery for the recipient. On session loss, disable or account switch, clear pending delivery to the extent supported by the device.
+
+## Delivery and migration order
+
+Each task merges independently and uses merged predecessor contracts. Use paired SQLite/Postgres forward-only migrations. Reserve `0040_shared_access` (#452), leave `0041` available for access audit storage (#453), and reserve `0042` for actors (#456) and `0043` for notifications (#459). Integrate in that order or renumber an unmerged migration above the freshly fetched integration head. Keep merged migration numbers and contents fixed.
+
+| Task | Owner and evidence |
+| --- | --- |
+| #452 | Identity, mode and storage. Fresh and populated databases, single claim under concurrency, canonical email uniqueness, restart, both engines and supported data copy. |
+| #453 | Account service and operator commands. Bootstrap/recovery across profiles, grant races and replay, password bounds, last admin, revocation and secret-free diagnostics. |
+| #454 | Transport policy. Two-user authorization, exact origin, direct Unix, proxy, REST/MCP, worker gateways, nested paths, hooks, paused runners, incompatible clients and stream revocation. Keep unimplemented shared entry points closed. |
+| #455 | CLI, MCP and harness integration. Exact-target credentials, rotation, OS user isolation, local and remote agent paths, real launch/report-back across supported harnesses. |
+| #456 | Actor persistence and product projections. Human, agent, machine and automation writes, atomic events, delayed retries and unchanged historical evidence. |
+| #457 | Product forms, Account and Admin. Desktop/phone layouts, accessibility, deep links and two-account cache isolation. |
+| #458 | Native bridge and saved-server credentials. Zero-TCP personal startup, shared remote, mixed endpoints, restart, attachments, SSE and background isolation. |
+| #459 | Inbox and delivery. Two users on one event, one user on two devices, recipient isolation, legacy push invalidation, retention and reconnect. |
+| #460 | Public opt-in, operator and product docs, and integrated launch evidence. Depends on #455–459, which depend on the #454 transport contract. |
+
+## Launch checklist
+
+- Verify default desktop on its private socket and trusted personal LAN with multiple workers. Upgrade populated personal databases, claim user 1, confirm work and paired workers survive, and prove sticky shared startup and explicit-false failure. Exercise foreground, `service.env` and container configuration behind HTTPS, and local owner recovery.
+- Have two people share work end to end. One creates a tree, the other runs a task on a worker and accepts it. Verify actor labels and independent inbox state. Complete manual invitation, phone/browser/desktop sign-in, role changes, disable and recovery.
+- Verify REST, CLI, both MCP transports, both agent gateways, SSE, attachments and push. Exercise 401/403, gateway restrictions, legacy client/worker compatibility, scanner GET, concurrent redemption, last-admin races, logout/revocation, exact origin and target binding, and diagnostic redaction.
+- Run populated SQLite and Postgres migrations and restore, repository checks and build, and applicable dist, desktop and service checks using isolated identities and throwaway workers. Record any unavailable native runs and cross-built targets. Public opt-in ships only with the integrated feature.
+
+## References
+
+- Take the private operator setup link pattern from Jupyter and the manually copyable invitation pattern from Plex. [Jupyter Server security](https://jupyter-server.readthedocs.io/en/latest/operators/security.html) · [Plex library access](https://support.plex.tv/articles/201105738-creating-and-managing-server-shares/)
+- Use expiring, single-use grants and salted Argon2id with bounded work. Follow passphrase, password-manager, blocklist and throttling guidance. [OWASP recovery](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html) · [OWASP password storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html) · [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b/authenticators/)
+- Reserve issuer plus immutable subject for external identity. [OpenID Connect claim stability](https://openid.net/specs/openid-connect-core-1_0.html#ClaimStability)
