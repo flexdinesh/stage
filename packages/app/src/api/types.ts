@@ -532,7 +532,8 @@ export type OperationId =
   | "attention"
   | "images"
   | "respond"
-  | "send";
+  | "send"
+  | "sessionRename";
 export interface Capabilities {
   permissions?: HarnessChoice[];
   /** Harness-wide options, beside the selected model's own (ids never collide). */

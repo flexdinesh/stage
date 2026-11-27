@@ -210,6 +210,8 @@ type operation struct {
 type serverContract struct {
 	info   serverInfo
 	search sessionListContract
+	// rename: PATCH /api/session/{sessionID} (session.update) takes a title.
+	rename bool
 }
 
 func (a *Adapter) check(ctx context.Context) (serverInfo, error) {
@@ -283,6 +285,7 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 		}
 	}
 	contract.search = inspectSessionList(spec.Paths["/api/session"]["get"], spec.Components.Schemas)
+	contract.rename = inspectSessionUpdate(spec.Paths["/api/session/{sessionID}"]["patch"], spec.Components.Schemas)
 	a.verified = contract
 	return contract, nil
 }

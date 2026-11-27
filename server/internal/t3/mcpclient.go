@@ -628,7 +628,7 @@ func retrySafe(tool string, args map[string]any) bool {
 	case "t3_thread_read", "t3_thread_list", "t3_thread_search", "t3_project_list", "orchestrator_capabilities",
 		"t3_attachment_prepare_upload": // a duplicate pending upload just expires
 		return true
-	case "t3_thread_launch":
+	case "t3_thread_launch", "t3_thread_update":
 		id, ok := args["clientRequestId"].(string)
 		return ok && id != ""
 	case "t3_pending_request":

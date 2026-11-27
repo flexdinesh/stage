@@ -31,6 +31,7 @@ const (
 	KindStop                 = "adapter.stop"
 	KindAttention            = "adapter.attention"
 	KindSessionSearch        = "adapter.sessionSearch"
+	KindSessionRename        = "adapter.sessionRename"
 	KindOpening              = "adapter.opening"
 	KindResolveLink          = "adapter.resolveLink"
 	KindCorrelate            = "adapter.correlate"
@@ -142,6 +143,12 @@ type RespondRequest struct {
 type SendRequest struct {
 	Session execution.SessionRef `json:"session"`
 	Message execution.Message    `json:"message"`
+}
+
+// SessionRenameRequest is adapter.sessionRename.
+type SessionRenameRequest struct {
+	Session execution.SessionRef `json:"session"`
+	Title   string               `json:"title"`
 }
 
 // InventoryRequest is ops.inventory.

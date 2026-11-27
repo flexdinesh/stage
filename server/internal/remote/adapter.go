@@ -55,6 +55,7 @@ var (
 	_ execution.Interactive       = (*Adapter)(nil)
 	_ execution.Actor             = (*Adapter)(nil)
 	_ execution.SessionSearcher   = (*Adapter)(nil)
+	_ execution.SessionNamer      = (*Adapter)(nil)
 )
 
 // Implements reads the current peer's declaration, never the Go proxy's methods.
@@ -129,6 +130,7 @@ var operationKinds = map[execution.Op][]string{
 	execution.OpStop: {KindStop}, execution.OpAdopt: {KindObserve, KindWorkspaces}, execution.OpReply: {KindObserve},
 	execution.OpOpening: {KindOpening}, execution.OpAttention: {KindAttention},
 	execution.OpRespond: {KindRequests, KindRespond}, execution.OpSend: {KindSend},
+	execution.OpSessionRename: {KindSessionRename},
 }
 
 func (a *Adapter) limitOperations(c *execution.Capabilities) {
@@ -160,6 +162,19 @@ func (a *Adapter) limitOperations(c *execution.Capabilities) {
 			Reason: "This worker connection does not offer session search. Enter a session link or ID.",
 		}
 	}
+	// A worker predating session rename cannot declare it either.
+	if !slices.Contains(snapshot.ChannelKinds, KindSessionRename) {
+		if c.Operations == nil {
+			c.Operations = make(map[execution.Op]execution.Availability)
+		}
+		c.Operations[execution.OpSessionRename] = execution.Availability{Reason: "Update Stage on the worker machine to rename sessions."}
+	} else if c.Operations[execution.OpSessionRename].Available && !a.Implements(execution.TraitOf[execution.SessionNamer]()) {
+		c.Operations[execution.OpSessionRename] = execution.Availability{Reason: "This worker connection does not offer session rename."}
+	}
+}
+
+func (a *Adapter) RenameSession(ctx context.Context, ref execution.SessionRef, title string) error {
+	return callTrait[execution.SessionNamer](ctx, a, KindSessionRename, SessionRenameRequest{Session: ref, Title: title}, nil)
 }
 
 func (a *Adapter) SearchSessions(ctx context.Context, q execution.SessionSearchQuery) (execution.SessionSearchPage, error) {

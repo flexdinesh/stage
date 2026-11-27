@@ -107,7 +107,7 @@ the role on the connection's machine.
 | `Launcher` | `Launch` applies the frozen intent and saves durable checkpoints. `Stop` interrupts a scoped session when available. The coordinator owns dispatch and reconciliation. |
 
 Use [`execution.As[T]`](../server/internal/execution/optional.go) for
-`LinkResolver`, `SessionSearcher`, `WorkspaceFeatures`, `Correlator`, `EventSource`,
+`LinkResolver`, `SessionSearcher`, `SessionNamer`, `WorkspaceFeatures`, `Correlator`, `EventSource`,
 `Interactive` and `Actor`. The adapter implements the Go interface.
 A partial adapter such as a worker proxy must also advertise the trait in
 its ready snapshot. The trait says whether the interface is callable.
@@ -132,6 +132,12 @@ owning connection. Worker adapters receive `adapter.workspaces` and
 their file hosts receive `ops.inventory` through the negotiated channel.
 Keep trust and exact location checks in the adapter when it launches.
 [API contract](api.md#workspace-discovery-and-project-identity)
+
+Implement session rename with `execution.SessionNamer` and declare
+`OpSessionRename` when the harness can rename a session with its own
+interface; otherwise declare it unavailable with a reason. Stage calls it
+only after a task title change for a session it launched. See
+[session rename](execution.md#session-rename).
 
 Implement roster search with `execution.SessionSearcher` and declare
 `OpSessionSearch` on the owning connection. Return bounded pages of

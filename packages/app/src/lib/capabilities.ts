@@ -22,9 +22,10 @@ export const OPERATION_LABELS: Record<OperationId, string> = {
   images: "Prompt images",
   respond: "Answer approvals and questions in Stage",
   send: "Send follow-ups",
+  sessionRename: "Rename sessions with the task title",
 };
 
-const OPERATIONS: readonly OperationId[] = ["launch", "stop", "adopt", "images", "respond", "send"];
+const OPERATIONS: readonly OperationId[] = ["launch", "stop", "adopt", "images", "respond", "send", "sessionRename"];
 
 /** One line of a connection's capability list. */
 export interface CapabilityLine {

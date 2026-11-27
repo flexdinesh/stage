@@ -836,7 +836,8 @@ returns 400 with replacement guidance. [Workspace selection](#task-and-schedule-
 
 ### `PATCH /api/tasks/:id`
 Body `UpdateTaskRequest`: any of `projectId title prompt connectionId workspaceId executionConfig` `attachmentIds` `startLocal` `startTz` `handoff` `startMode`. `executionConfig` replaces the stored config; a `connectionId` change needs one. `bindingId` and the removed T3 model inputs return 400 (see create).
-In `backlog` all fields are editable; otherwise only `title` (409 for others). `attachmentIds` is the exact image set: the task's own ids to keep plus staged uploads to add; the task's images not listed are deleted (400 for ids that are neither, more than 8).
+In `backlog` all fields are editable; otherwise only `title` (409 for others).
+A changed `title` on a task whose session Stage launched (not an adopted one) renames that session in its harness when the connection offers `sessionRename` ([execution.md](execution.md#session-rename)). The rename runs after the response, in the background, within 10 s; it never fails the update. A declared-unavailable `sessionRename` is skipped. Any other failure appends a system note (`actor.kind` `system`, `cause.kind` `session_rename`) to the task's journal: "Could not rename the <harness> session: <reason>". `attachmentIds` is the exact image set: the task's own ids to keep plus staged uploads to add; the task's images not listed are deleted (400 for ids that are neither, more than 8).
 `startLocal` + `startTz` (backlog only, 409 otherwise) set the one-shot start (same 400 rules as create); both `null` clears it; a task with needs cannot have one (400). `handoff`: `true|false` (backlog only, 409 otherwise; 400 for `null`). `startMode`: `auto|manual`, `null` inherits the tree's (backlog only). Needs change with `PUT /api/tasks/:id/needs`; tree membership with the tree endpoints.
 200 `Task`. 404.
 
@@ -883,7 +884,7 @@ attaches to the unresolved attempt; 409 if it changed. No launch or acceptance.
 Stage-owned operation availability/reasons, models/options, permissions,
 interaction modes and launch options. `operations` maps every operation
 (`launch`, `stop`, `adopt`, `reply`, `opening`, `attention`, `sessionSearch`, `images`,
-`respond`, `send`) to `{available, reason?}`; an unavailable one says why.
+`respond`, `send`, `sessionRename`) to `{available, reason?}`; an unavailable one says why.
 An option (harness-wide in `options`, or a model's) is `{id, kind?, label?,
 values, default, dependsOn?}`: `kind` `choice` (one of `values`),
 `boolean` (`true` or `false`) or `text` (a non-empty string; `values`
@@ -1241,6 +1242,7 @@ The server and workers roll forward together at API v9. Layer 07 raises the inde
 - `POST /api/sync` returns `sessions`. The T3 setup status keeps its own `details.sync.threads` counter.
 - External notification groups use `session:<connectionId>:<externalSessionId>`. Push and unread tags use `session-<connectionId>:<externalSessionId>`. Previously shown notifications with a `thread-` tag stay until dismissed. Acceptance sends no notification. Migration 0035 maps old task states and notification events to `done` while preserving acceptance history.
 - MCP `get_task` describes session identity, `stop_task` interrupts a running session, and `list_tasks.states` accepts the current TaskState values. MCP and CLI handoff help names the final reply, branch and session link. `stage task show` drops its artifact lines, `stage show` uses web and native links, and the CLI journal source line uses `connection N session X` for a scoped source session.
+- Session rename (additive, no version bump): the `sessionRename` operation, and a task title change renames the session Stage launched where available (`PATCH /api/tasks/:id`).
 - Agent operation parity (additive, no version bump; [ADR 0011](adr/0011-agent-operation-parity.md)): agent callers may complete, reopen, list and answer requests, send messages, read opening prompts, create, rename and archive projects, read project events, edit group membership, manage snippets and delete attachments. 403 `agent_forbidden` on respond and send is now `self_action_forbidden`, only for the caller's own task. `PATCH /api/projects/:id` keeps omitted fields.
 
 Task detail and MCP `get_task` omit the former `batch` field. To list tasks created by a session, use `originConnectionId` and `originSessionId` on `GET /api/tasks` or `list_tasks {originSession}` in MCP.

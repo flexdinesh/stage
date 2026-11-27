@@ -22,6 +22,7 @@ type Service struct {
 	workspaces Workspaces
 	log        *slog.Logger
 	locks      sync.Map
+	renames    renamer
 
 	PublicURL            string // STAGE_PUBLIC_URL, named in launch journal instructions when set
 	SharedAccess         bool   // Shared launch guidance requires an authorized agent transport.

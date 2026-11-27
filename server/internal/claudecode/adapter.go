@@ -225,6 +225,7 @@ func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 			execution.OpSessionSearch: available,
 			execution.OpRespond:       a.hooksRunning(),
 			execution.OpSend:          available,
+			execution.OpSessionRename: {Reason: "Claude Code has no rename interface."},
 		},
 		Models:      slices.Clone(models),
 		Options:     []execution.Option{effort, worktree},

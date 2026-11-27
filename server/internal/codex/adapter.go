@@ -154,6 +154,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 			execution.OpImages:        available,
 			execution.OpRespond:       {Reason: answerInCodex},
 			execution.OpSend:          {Reason: answerInCodex},
+			execution.OpSessionRename: available,
 		},
 	}
 	for _, p := range permissions {

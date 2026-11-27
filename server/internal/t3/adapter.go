@@ -75,7 +75,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	}
 	yes := execution.Availability{Available: true}
 	out := execution.Capabilities{Operations: map[execution.Op]execution.Availability{}, Models: []execution.Model{}}
-	for _, op := range []execution.Op{execution.OpLaunch, execution.OpStop, execution.OpAdopt, execution.OpOpening, execution.OpReply, execution.OpAttention, execution.OpImages, execution.OpSessionSearch} {
+	for _, op := range []execution.Op{execution.OpLaunch, execution.OpStop, execution.OpAdopt, execution.OpOpening, execution.OpReply, execution.OpAttention, execution.OpImages, execution.OpSessionSearch, execution.OpSessionRename} {
 		out.Operations[op] = yes
 	}
 	for _, op := range []execution.Op{execution.OpRespond, execution.OpSend} {
@@ -325,6 +325,15 @@ func (a *Adapter) Stop(ctx context.Context, ref execution.SessionRef) error {
 	}
 	return a.Client.Interrupt(ctx, ref.ExternalSessionID)
 }
+
+// RenameSession renames the thread (t3_thread_update rename).
+func (a *Adapter) RenameSession(ctx context.Context, ref execution.SessionRef, title string) error {
+	if ref.ConnectionID != a.ConnectionID {
+		return execution.ErrUnavailable
+	}
+	return a.Client.RenameThread(ctx, ref.ExternalSessionID, title)
+}
+
 func (a *Adapter) Attention(ctx context.Context) ([]execution.SessionRef, error) {
 	out := []execution.SessionRef{}
 	var cursor *int
@@ -520,7 +529,10 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, checkpoint ex
 	return execution.Observation{Session: ref, Project: in.Project, Title: in.Title, State: "running", Active: true, CreatedAt: now, UpdatedAt: now, ExecutionID: out.RunID, Links: a.sessionLinks(ctx, ref)}, nil
 }
 
-var _ execution.Adapter = (*Adapter)(nil)
+var (
+	_ execution.Adapter      = (*Adapter)(nil)
+	_ execution.SessionNamer = (*Adapter)(nil)
+)
 
 func (a *Adapter) ResolveLink(ctx context.Context, raw string) (execution.SessionRef, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))

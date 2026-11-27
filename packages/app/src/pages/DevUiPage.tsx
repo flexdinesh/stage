@@ -133,6 +133,7 @@ const SAMPLE_CAPS: Capabilities = {
     images: { available: true },
     respond: { available: false, reason: "Approvals are answered in the Codex terminal." },
     send: { available: false },
+    sessionRename: { available: true },
   },
 };
 const SAMPLE_CONFIG: ExecutionConfig = { model: "gpt-5", options: [{ id: "effort", value: "high" }, { id: "worktree", value: true }, { id: "baseRef", value: "main" }], permission: "workspace", mode: "" };
