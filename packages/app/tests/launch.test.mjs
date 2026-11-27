@@ -99,7 +99,7 @@ test("launchBlock refuses a project without an available workspace on the connec
     const b = launchBlock(subject, ctx({ bindings }));
     assert.equal(b?.kind, "unbound");
     assert.equal(b?.reason, "stage has no available primary workspace on T3 · desk.");
-    assert.deepEqual(b?.fix, { label: "Bind workspace", to: "/projects/7" });
+    assert.equal(b?.fix, null);
   }
   // Projects not loaded yet block nothing.
   assert.equal(launchBlock(subject, ctx({ bindings: undefined })), null);

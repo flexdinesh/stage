@@ -144,7 +144,7 @@ export function launchBlock(t: LaunchTarget, c: LaunchContext): LaunchBlock | nu
       reason: t.bindingId === null
         ? `${t.projectTitle} has no available primary workspace on ${name}.`
         : `This task's selected workspace on ${name} is unavailable.`,
-      fix: { label: "Bind workspace", to: `/projects/${t.projectId}` },
+      fix: null,
     };
   }
   return null;

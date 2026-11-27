@@ -1,6 +1,6 @@
 # Workspace discovery and project identity
 
-This page describes shipped bindings and discovery review under
+This page describes logical project groups and the legacy bindings under
 [ADR 0008 D9](adr/0008-harness-foundation.md#d9) and [D10](adr/0008-harness-foundation.md#d10).
 [ADR 0010](adr/0010-harness-workspaces-and-logical-projects.md) defines the
 transition to Stage-owned logical groups and harness-owned destinations.
@@ -26,6 +26,14 @@ selectors in place. Retired and forgotten connections retain grouped
 rows as history. Groups with only retired rows and groups emptied by
 edits stay addressable. Group archive and harness eligibility remain
 independent.
+
+Projects shows one row per group and summarizes its contributing connections.
+Open a group to see the exact workspaces, including last-known paths and
+connection status. Move a workspace to another project or separate it into
+a new project from that list. Members review the source and destination
+before confirming. If another member edits the grouping first, Stage refreshes
+the preview and asks for confirmation again. The History view keeps empty,
+retired and archived projects available by their original links.
 
 The [group API](api.md#logical-project-groups) is additive. Binding clients
 keep their existing list and operations during the transition. A project
@@ -81,7 +89,7 @@ Automatic import and Resolve now use one resolver over stored evidence. The bind
 
 Identity writes serialize across connections on both storage engines. Automatic import plans and applies in one transaction. Resolve now previews placements and replaces the old Match action. Confirmation rechecks the preview against current evidence and bindings. A changed plan requires fresh confirmation. The migration preserves existing projects and can surface duplicate suggestions. Stage keeps its own archive state when a harness archives a workspace.
 
-## Bindings and review (07 backend, 08 UI)
+## Legacy bindings and review API (07 backend, 08 UI)
 
 A project can have several active workspaces on a connection and one primary. Tasks and schedules use the primary by default and can choose a specific binding on their connection. An unavailable explicit choice blocks launch with a reason. Task detail shows the workspace used for its stored launch. A move preserves the primary designation, carries explicit task and schedule choices forward, and records a project event.
 
@@ -89,7 +97,11 @@ Discovery review shows **New**, **Suggested**, **Ambiguous**, **Declined** and *
 
 Merge is directional. Its preview names the survivor and counts the workspaces, tasks, schedules and snippets that move. Confirmation checks for stale inputs and can be blocked by a launching task in the source project. The merged ID becomes an alias. An existing project link opens the current surviving project, including after a later merge, and API responses use the survivor's ID. Keep separate dismisses the pair's suggestion. Split moves one binding to a new project and dismisses the pair's merge suggestion. Tasks, schedules and snippets stay with the source. Tasks and schedules that explicitly chose the split workspace need a new choice. The source must keep at least one active workspace.
 
-Projects shows the primary workspace and extra workspace count. Project detail groups all workspaces by machine, with a copyable path or external ID, harness facts, state and primary marker. The Projects **Discovery review** filter shows new, suggested, ambiguous, declined and moved rows with candidate project links. Cached rows remain visible when a machine is offline. Live inventory, binding and resolution need its connection back. Decline and undo decline update cached decisions.
+Project detail retains recorded bindings with their paths, harness facts and
+declared actions. The legacy review API still exposes new, suggested,
+ambiguous, declined and moved rows with candidate project links. Cached rows
+remain visible when a machine is offline. Live inventory, binding and
+resolution need its connection back.
 
 Use **Resolve now** to preview which workspaces will be created, joined or moved on one connection. Confirmation uses the preview token. Changed evidence or placements require a new confirmation. The bind drawer puts suggestions first, filters by repository and links any Stage owner. Its discovery instructions come from the harness descriptor when provided.
 

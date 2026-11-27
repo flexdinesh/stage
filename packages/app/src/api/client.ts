@@ -42,6 +42,9 @@ import type {
   Preferences,
   Project,
   ProjectEvent,
+  ProjectGroup,
+  GroupEdit,
+  GroupEditInput,
   ProjectList,
   ProjectMergeResult,
   PushConfig,
@@ -240,6 +243,12 @@ export function createApi(transport: Transport) {
     projects: (archived: ArchivedFilter = "false") => apiFetch<ProjectList>(`/projects${toQuery({ archived })}`),
     destinations: (signal: AbortSignal) => apiFetch<DestinationCatalog>("/projects?view=destinations&archived=all", { signal }),
     project: (id: number) => apiFetch<Project>(`/projects/${id}`),
+    projectGroups: (signal: AbortSignal) =>
+      apiFetch<{ groups: ProjectGroup[] }>("/project-groups?archived=all", { signal }),
+    projectGroup: (id: number, signal: AbortSignal) =>
+      apiFetch<ProjectGroup>(`/project-groups/${id}`, { signal }),
+    editProjectGroup: (input: GroupEditInput, signal: AbortSignal, previewToken = "") =>
+      apiFetch<GroupEdit>("/project-groups/membership", { ...post({ ...input, previewToken }), signal }),
     createProject: (body: CreateProjectRequest) => apiFetch<Project>("/projects", post(body)),
     updateProject: (id: number, body: {title: string; archived: boolean}) => apiFetch<Project>(`/projects/${id}`, patch(body)),
     workspaces: (connectionId: number, refresh = true, signal?: AbortSignal) =>

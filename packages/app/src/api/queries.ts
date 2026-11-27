@@ -255,6 +255,25 @@ export const useProject = (id: number) => {
   return useQuery({ queryKey: [...keys.projects, "one", id], queryFn: () => api.project(id), retry: retryUnlessNotFound, refetchInterval: POLL.slow });
 };
 
+export function useProjectGroups() {
+  const api = useApi();
+  return useQuery({
+    queryKey: [...keys.projects, "groups"],
+    queryFn: ({ signal }) => api.projectGroups(signal),
+    refetchInterval: POLL.slow,
+  });
+}
+
+export function useProjectGroup(id: number) {
+  const api = useApi();
+  return useQuery({
+    queryKey: [...keys.projects, "group", id],
+    queryFn: ({ signal }) => api.projectGroup(id, signal),
+    retry: retryUnlessNotFound,
+    refetchInterval: POLL.slow,
+  });
+}
+
 /** `live: false` (a picker's one-off list): read once, re-read after 30s, no polling. */
 export const useTasks = (q: TaskListQuery = {}, { live = true }: { live?: boolean } = {}) => {
   const api = useApi();

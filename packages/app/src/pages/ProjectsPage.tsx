@@ -1,17 +1,16 @@
-import { importNotice } from "../lib/projects.ts";
 import { useMutation } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import type { PreferenceStorage } from "../platform/index.ts";
-import { useInvalidateProjects, useProjects, useTasks } from "../api/queries.ts";
-import type { Project, Task } from "../api/types.ts";
+import { useInvalidateProjects, useProjectGroups, useTasks } from "../api/queries.ts";
+import type { ProjectGroup, Task } from "../api/types.ts";
 import { IconPlus } from "../components/icons.tsx";
-import { WorkspaceDisplay, useWorkspaceConnections } from "../components/WorkspaceDisplay.tsx";
-import { DiscoveryReview, useDiscoveryReview } from "../components/DiscoveryReview.tsx";
+import { GroupSummary } from "../components/GroupWorkspaceDisplay.tsx";
+import { useWorkspaceConnections } from "../components/WorkspaceDisplay.tsx";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
 import {
   Button,
-  Chip,
   Drawer,
   ErrorText,
   Field,
@@ -31,24 +30,28 @@ import {
 } from "../components/ui.tsx";
 import { dateTime, relativeTime } from "../lib/format.ts";
 import { useSearchParam } from "../lib/params.ts";
+import { duplicateGroupTitles, isCurrentGroup } from "../lib/projectGroups.ts";
 
 const FORM_ID = "new-project-form";
 
 function CreateProjectDrawer({ onClose }: { onClose: () => void }) {
   const api = useApi();
   const refresh = useInvalidateProjects();
+  const navigate = useNavigate();
   const [title, setTitle] = useState("");
   const create = useMutation({
     mutationFn: () => api.createProject({ title: title.trim() }),
-    onSuccess: async () => {
-      await refresh();
-      onClose();
-    },
+    onSuccess: refresh,
   });
   const valid = title.trim() !== "";
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (valid) create.mutate();
+    if (valid && !create.isPending) create.mutate(undefined, {
+      onSuccess: (project) => {
+        onClose();
+        void navigate(`/projects/${project.id}`);
+      },
+    });
   };
 
   return (
@@ -68,7 +71,7 @@ function CreateProjectDrawer({ onClose }: { onClose: () => void }) {
         <Field label="Title">
           {(id) => <Input id={id} data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} />}
         </Field>
-        <Muted>Plan tasks now. Bind a harness workspace when you are ready to run them.</Muted>
+        <Muted>Create a project to plan work or group workspaces.</Muted>
         <ErrorText error={create.error} />
       </form>
     </Drawer>
@@ -101,13 +104,19 @@ function readSort(storage: PreferenceStorage): Sort {
   return SORT_OPTIONS.find((o) => o.value === v)?.value ?? "name";
 }
 
-const activityMs = (p: Project) => (p.lastActivityAt === null ? 0 : new Date(p.lastActivityAt).getTime());
+const activityMs = (p: ProjectGroup) => (p.lastActivityAt === null ? 0 : new Date(p.lastActivityAt).getTime());
 
 /** Most recent activity first; projects without activity last, by name (server order, stable sort). */
-const byRecent = (projects: Project[]) => projects.toSorted((a, b) => activityMs(b) - activityMs(a));
+const byRecent = (projects: ProjectGroup[]) => projects.toSorted((a, b) => activityMs(b) - activityMs(a));
 
-const FILTERS = ["active", "all", "review"] as const;
+const FILTERS = ["active", "history", "all"] as const;
 type Filter = (typeof FILTERS)[number];
+
+const FILTER_OPTIONS: { value: Filter; label: string }[] = [
+  { value: "active", label: "Current" },
+  { value: "history", label: "History" },
+  { value: "all", label: "All" },
+];
 
 const PROJECT_ROW = "grid min-w-0 items-center gap-x-3 gap-y-1 md:grid-cols-[minmax(0,1fr)_128px]";
 
@@ -139,20 +148,18 @@ function ProjectRowsSkeleton({ title }: { title: string }) {
 export function ProjectsPage() {
   // In the address, so Back keeps the filter.
   const [filter, setFilter] = useSearchParam("archived", FILTERS, "active");
-  const review = useDiscoveryReview();
-  const reviewing = filter === "review";
-  const filterOptions: { value: Filter; label: string; short?: string }[] = [
-    { value: "active", label: "Active" },
-    { value: "all", label: "Incl. archived", short: "All" },
-    { value: "review", label: `Discovery review${review.data === undefined ? "" : ` (${review.data.attention})`}` },
-  ];
   const { storage } = usePlatform();
   const [sort, setSort] = useState<Sort>(() => readSort(storage));
   const [creating, setCreating] = useState(false);
-  const projects = useProjects(filter === "all" ? "all" : "false");
+  const projects = useProjectGroups();
   const tasks = useTasks();
-  const fetched = projects.data?.projects ?? [];
+  const groups = projects.data?.groups ?? [];
+  const fetched = groups.filter((group) => filter === "all" || isCurrentGroup(group) === (filter === "active"));
   const list = sort === "recent" ? byRecent(fetched) : fetched;
+  const duplicates = duplicateGroupTitles(list);
+  const title = filter === "history" ? "Project history" : filter === "all" ? "All projects" : "Current projects";
+  const empty = filter === "active" ? <>No projects with current workspaces. <TextLink to="/projects?archived=history">View project history</TextLink> or <TextLink to="/settings/connections">connect a harness</TextLink>.</>
+    : filter === "history" ? "No empty, retired or archived projects." : "No projects yet.";
   const changeSort = (next: Sort) => {
     setSort(next);
     // Storage unavailable (private mode): sort still applies for this page view.
@@ -160,21 +167,15 @@ export function ProjectsPage() {
   };
   const counts = tasks.data === undefined ? null : countByProject(tasks.data.tasks);
   const connections = useWorkspaceConnections();
-  const { kindName } = connections.harnesses;
-  const notice = importNotice(projects.data?.imports ?? [], kindName);
 
   return (
     <>
       <PageHeader
         title="Projects"
-        meta={reviewing ? undefined : [
-          `${projects.data === undefined ? "…" : list.length} projects`,
-          ...(notice === null ? [] : [notice]),
-        ].join(" · ")}
         actions={
           <>
-            <Segmented label="Projects filter" options={filterOptions} value={filter} onChange={setFilter} />
-            {reviewing ? null : <Segmented label="Sort projects" options={SORT_OPTIONS} value={sort} onChange={changeSort} />}
+            <Segmented label="Projects filter" options={FILTER_OPTIONS} value={filter} onChange={setFilter} />
+            <Segmented label="Sort projects" options={SORT_OPTIONS} value={sort} onChange={changeSort} />
             <TrackSessionButton />
             <Button variant="primary" onClick={() => setCreating(true)}>
               <IconPlus /> New project
@@ -182,27 +183,26 @@ export function ProjectsPage() {
           </>
         }
       />
-      {reviewing ? <DiscoveryReview review={review} /> : <QueryState
+      <QueryState
         isPending={projects.isPending}
         error={projects.error}
         hasData={projects.data !== undefined}
-        stale={projects.isPlaceholderData}
-        skeleton={<ProjectRowsSkeleton title={filter === "all" ? "All projects" : "Active projects"} />}
-        empty={list.length === 0}
-        emptyText="No projects yet. Create one to start planning."
+        skeleton={<ProjectRowsSkeleton title={title} />}
       >
-        <Panel flush title={filter === "all" ? "All projects" : "Active projects"} meta={list.length}>
-          <RowList>
+        <Panel flush title={title} meta={list.length}>
+          {list.length === 0 ? <div className="p-3"><Muted>{empty}</Muted></div> : <RowList>
             {list.map((p) => {
               const c = counts?.get(p.id) ?? { total: 0, active: 0 };
+              const duplicate = duplicates.has(p.title.toLowerCase());
               return (
                 <Row key={p.id} className={PROJECT_ROW}>
                   <div className="flex min-w-0 flex-col gap-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <TextLink to={`/projects/${p.id}`} className="wrap-anywhere text-body font-medium">{p.title}</TextLink>
-                      {p.archivedAt === null ? null : <Chip tone="idle">Archived</Chip>}
+                      <TextLink to={`/projects/${p.id}`} className="wrap-anywhere text-body font-medium"
+                        aria-label={duplicate ? `${p.title}, project #${p.id}` : undefined}>{p.title}</TextLink>
+                      {duplicate ? <Meta>#{p.id}</Meta> : null}
                     </div>
-                    <WorkspaceDisplay bindings={p.bindings} connections={connections} />
+                    <GroupSummary group={p} connections={connections} disambiguate={duplicate} />
                   </div>
                   <Meta className="flex flex-col tabular">
                     <span>
@@ -220,9 +220,9 @@ export function ProjectsPage() {
                 </Row>
               );
             })}
-          </RowList>
+          </RowList>}
         </Panel>
-      </QueryState>}
+      </QueryState>
       {creating ? <CreateProjectDrawer onClose={() => setCreating(false)} /> : null}
     </>
   );
