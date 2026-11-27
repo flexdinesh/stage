@@ -47,6 +47,8 @@ const ShutdownTimeout = 100 * time.Second
 // Options configure Run.
 type Options struct {
 	Config config.Config
+	// SharedAccess is internal until the shared transport gates are composed.
+	SharedAccess *bool
 	// HarnessOverrides injects machine-local dependencies keyed by kind in tests.
 	HarnessOverrides map[string]any
 	Logger           *slog.Logger
@@ -164,10 +166,21 @@ func Run(ctx context.Context, o Options) error {
 	if err := migrate(ctx, pool, logger); err != nil {
 		return err
 	}
+	database := db.NewStore(pool)
+	state, err := database.ConfigureAccess(ctx, o.SharedAccess)
+	if err != nil {
+		if errors.Is(err, db.ErrSharedAccessRequired) {
+			return config.Invalid(err)
+		}
+		return err
+	}
+	if state.Mode != store.AccessPersonal {
+		return config.Invalid(errors.New("this database requires shared access. Start it with a Stage build that supports shared access"))
+	}
 	if w := cfg.WarnRemovedEnv(); w != "" {
 		logger.Warn(w)
 	}
-	store := db.NewStore(pool)
+	store := database
 
 	var wg sync.WaitGroup
 	var local *localMachine

@@ -70,10 +70,11 @@ const (
 //  2. dst must be fresh (no tables: Run migrates it to the head) or at the
 //     head with only the baseline's seeded rows;
 //  3. both must hold the same tables and columns;
-//  4. in one dst transaction: clear the seeded rows, copy every table in
+//  4. in one dst transaction: clear the seeded rows, copy durable tables in
 //     foreign-key order, restart identities past the source's highest
 //     issued ID, then read every table back and compare row counts and
-//     checksums with the source's. Any error or mismatch rolls it back.
+//     checksums with the planned rows. Auth sessions and grants are empty
+//     after import. Any error or mismatch rolls it back.
 func Run(ctx context.Context, src store.CopySource, dst store.CopyTarget) (Report, error) {
 	var rep Report
 	head := dst.Migrator().Max()
@@ -168,6 +169,9 @@ func Run(ctx context.Context, src store.CopySource, dst store.CopyTarget) (Repor
 // them as they pass.
 func copyTable(ctx context.Context, src store.CopySource, l store.CopyLoad, t store.CopyTable) (tableSum, error) {
 	sum := newSum(t)
+	if t.Name == "auth_sessions" || t.Name == "auth_grants" {
+		return sum, nil
+	}
 	var batch []store.CopyRow
 	size := 0
 	flush := func() error {

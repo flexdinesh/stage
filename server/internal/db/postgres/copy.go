@@ -22,7 +22,8 @@ var _ store.CopyTarget = (*DB)(nil)
 // baselineSeeds identifies default rows that do not occupy a copy target.
 // Populated harness settings or status, and any secret, occupy the target.
 var baselineSeeds = map[string]string{
-	"users":               "id = 1",
+	"users":               "id = 1 AND email IS NULL AND role = 'admin' AND status = 'active'",
+	"installation_access": "id = 1 AND mode = 'personal'",
 	"machines":            "id = 1",
 	"preferences":         "id = 1",
 	"harness_settings":    `machine_id = 1 AND settings = '{}'::jsonb`,

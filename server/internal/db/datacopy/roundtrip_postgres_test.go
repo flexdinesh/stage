@@ -33,6 +33,17 @@ const legacyEvidence = `{"threadId":"thread-1", "executionState":"settled",  "a"
 var seedSQL = []string{
 	`INSERT INTO users (id, display_name, created_at) VALUES (2, 'Ünïcode user ✓', '2026-11-01T10:00:00.123456Z')`,
 	`INSERT INTO identities (user_id, provider, subject) VALUES (2, 'github', 'sub-1')`,
+	`UPDATE users SET display_name = 'Owner', email = 'Owner@Example.test', email_key = 'owner@example.test' WHERE id = 1`,
+	`UPDATE users SET email = 'Member@Example.test', email_key = 'member@example.test', status = 'disabled' WHERE id = 2`,
+	`UPDATE installation_access SET installation_id = 'installation-01', mode = 'claimed', claimed_at = '2026-11-01T00:00:00.000000Z' WHERE id = 1`,
+	`INSERT INTO identities (user_id, provider, subject) VALUES (1, 'local', 'user:1')`,
+	`INSERT INTO local_credentials (identity_id, password_verifier) SELECT id, 'test verifier' FROM identities WHERE provider = 'local'`,
+	`INSERT INTO auth_sessions (token_digest, user_id, audience, created_at, expires_at) VALUES
+	  (randomblob(32), 1, 'browser', '2026-11-01T00:00:00.000000Z', '2026-12-01T00:00:00.000000Z'),
+	  (randomblob(32), 1, 'agent', '2026-11-01T00:00:00.000000Z', '2026-12-01T00:00:00.000000Z')`,
+	`INSERT INTO auth_grants (token_digest, purpose, issuer_user_id, email, email_key, created_at, expires_at)
+	  VALUES (randomblob(32), 'invite', 1, 'invite@example.test', 'invite@example.test',
+	  '2026-11-01T00:00:00.000000Z', '2026-12-01T00:00:00.000000Z')`,
 	`INSERT INTO machines (id, label, created_by_user_id, last_seen_at, version) VALUES (2, 'worker', 2, '2026-11-02T10:00:00.000001Z', '1.2.3')`,
 	`INSERT INTO machine_tokens (machine_id, secret_hash) VALUES (2, X'00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF')`,
 	`INSERT INTO pairing_codes (secret_hash, label, created_by_user_id, expires_at, redeemed_at, machine_id) VALUES (X'FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00FF00', 'pair', 1, '2026-11-03T00:00:00.000000Z', '2026-11-02T23:00:00.500000Z', 2)`,
@@ -233,6 +244,12 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("source has %d tables, target %d", len(srcTables), len(schema))
 	}
 	for _, tr := range rep.Tables {
+		if tr.Name == "auth_sessions" || tr.Name == "auth_grants" {
+			if tr.Rows != 0 {
+				t.Errorf("restored %s: got %d rows, want none", tr.Name, tr.Rows)
+			}
+			continue
+		}
 		// Every table must carry rows, so the round trip covers its
 		// encodings: a new table needs a row in seedSQL.
 		if tr.Rows == 0 {
@@ -250,6 +267,23 @@ func TestRoundTrip(t *testing.T) {
 	}
 	t.Cleanup(func() { lite.Close() })
 	ls, ps := db.NewStore(lite), db.NewStore(dst)
+	if err := ps.ReadAccess(ctx, func(r store.Access) error {
+		state, err := r.Installation(ctx)
+		if err != nil || state.ID != "installation-01" || state.Mode != store.AccessClaimed || state.ClaimedAt == nil {
+			t.Fatalf("restored access state = %+v, %v", state, err)
+		}
+		a, err := r.AccountByEmail(ctx, " MEMBER@example.test ")
+		if err != nil || a.ID != 2 || a.Role != store.RoleMember || a.Status != store.AccountDisabled {
+			t.Fatalf("restored account = %+v, %v", a, err)
+		}
+		v, err := r.LocalVerifier(ctx, 1)
+		if err != nil || v != "test verifier" {
+			t.Fatal("restored verifier missing or changed")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := ps.BindObservationProducer(ctx, 2, "worker-old"); !errors.Is(err, db.ErrObservationProducer) {
 		t.Fatalf("copied retired producer: %v", err)
 	}
@@ -376,6 +410,10 @@ func TestRoundTripSeededTarget(t *testing.T) {
 	ctx := context.Background()
 	src := openSource(t, sourceDB(t, sqlite.MaxVersion()))
 	dst := pgtest.Engine(t)
+	initial, err := db.NewStore(dst).ConfigureAccess(ctx, nil)
+	if err != nil || initial.ID == "" || initial.Mode != store.AccessPersonal {
+		t.Fatalf("initialized target = %+v, %v", initial, err)
+	}
 	rep, err := datacopy.Run(ctx, src, dst)
 	if err != nil {
 		t.Fatal(err)
@@ -389,6 +427,10 @@ func TestRoundTripSeededTarget(t *testing.T) {
 	}
 	if users != 2 {
 		t.Fatalf("users %d, want the source's 2", users)
+	}
+	got, err := db.NewStore(dst).ConfigureAccess(ctx, nil)
+	if err != nil || got.ID != "installation-01" || got.Mode != store.AccessClaimed {
+		t.Fatalf("copied installation = %+v, %v", got, err)
 	}
 }
 

@@ -688,8 +688,10 @@ from the Docker image; any other binary exits 78 before touching anything.
   [backup](#backups)), stop it, then copy; above it, use a newer image. The
   target must be either fresh (no tables: the copy migrates it to the head) or
   at the head holding only default rows (user 1, machine 1, the
-  preferences row, empty settings on machine 1 and status rows with both
-  fields unset). The copy refuses other versions, other rows, and tables
+  preferences row, empty settings on machine 1, status rows with both
+  fields unset, and the personal installation row). A previously started
+  empty personal target takes the source installation ID. The copy refuses
+  other versions, other rows, and tables
   without a Stage schema. Refusals write no rows; only a schema mismatch (below) is found
   after a fresh target was migrated.
 - **Schemas:** both sides must hold the same tables and columns, apart from
@@ -707,8 +709,14 @@ from the Docker image; any other binary exits 78 before touching anything.
   never reissued (`AUTOINCREMENT`'s rule). No legacy transforms: the source
   is at the head, where #417 has already dropped the
   [legacy columns](#legacy-columns-and-compatibility-triggers).
-- **Verify:** inside the same transaction, before committing, every table is
-  read back and compared with the source: row count and a checksum (sha256
+- **Auth material:** preserve account IDs, identity mappings, password
+  verifiers, account roles and status, and the installation ID and sticky mode.
+  Copy zero rows from `auth_sessions` and `auth_grants`. The target starts
+  with all copied interactive and agent credentials and setup, invite and
+  reset links invalidated. Existing worker identity and pairing survive.
+- **Verify:** inside the same transaction, before committing, compare
+  durable rows with the source and confirm the two transient tables are
+  empty. Verification uses row count and a checksum (sha256
   over the sorted sha256 of each row's canonical encoding, so engine row
   order and collation don't matter; times compare as UTC microseconds,
   queried JSON by value since `jsonb` reorders keys and normalizes numbers,
@@ -728,6 +736,13 @@ from the Docker image; any other binary exits 78 before touching anything.
   source directory is unchanged; `cmd/stage` runs the command (held data
   dir, owned target, old source). Coordinator rules run against fakes in
   `check:go`.
+
+Treat database backups and copies as secrets. For an explicit offline
+restore or import, keep the installation offline while clearing restored
+sessions and grants. The shared-access storage contract provides
+`InvalidateRestoredAccess` for the restore tooling. Ordinary restart keeps
+credentials. A restored installation in `setup_pending` needs a fresh
+local-owner setup link. See [ADR 0009](adr/0009-shared-access.md).
 
 ### Cutover
 

@@ -145,11 +145,35 @@ Stage owns task acceptance separately from observed execution. Both storage engi
 
 ## Users
 
-Hierarchy: User -> Machines -> Harness connections -> Sessions ([ADR 0002](adr/0002-machines-and-workers.md#6-identity)). Migration 0017 adds `users`, seeded with the default user (id 1, `db.DefaultUser`), and an empty `identities(user_id, provider, subject)` table, unique per `(provider, subject)`, for future sign-in. `created_by_user_id` (NOT NULL, default 1, references `users`) is on `projects`, `tasks`, `task_trees`, `journal_entries`, `schedules` and `machines`; existing rows got the default user. The API exposes it as `createdBy` and `GET /api/me` returns the acting user ([api.md](api.md#users)).
+Stage users are people. One installation owns a shared namespace of machines,
+harness connections and sessions ([ADR 0002](adr/0002-machines-and-workers.md#6-identity)).
+Migration 0017 seeds `users` with ID 1 (`db.DefaultUser`) and adds
+`identities(user_id, provider, subject)`, unique by `(provider, subject)`.
+Migration 0040 adds the durable access mode, installation ID, account and local
+credential fields, sessions and grants specified in [ADR 0009](adr/0009-shared-access.md).
 
-There is no sign-in and no user auth (the only credentials are machine tokens on worker routes, below). Every Go write resolves its creator through one function, `db.ActingUser(ctx)`: the user `db.WithUser` put on the context, else `db.DefaultUser`. Nothing else names the default user. Today no request sets a principal, so writes from the API, MCP, CLI and background jobs (project import, acceptance) attribute to the default user. Sign-in will set the request principal in one API middleware with `db.WithUser`. A task a schedule spawns, on a cron fire or run now, and its initial notes attribute to the schedule's creator (`spawnTask`). Derived journal events (written by Go in the same `Write` as their cause; SQLite triggers until migration 0026, [storage.md](storage.md#journal-events)) take the column default (the default user). Machine tokens are machine principals, not users.
+Personal startup uses the implicit user 1 and existing listener defaults.
+Shared opt-in is sticky. A successful setup claim attaches the first admin's
+credentials to user 1 in place. The foundation refuses startup against shared
+state until transport gates arrive in task #454. Public opt-in ships in task #460.
 
-Migration 0021 adds `source_machine_id` (nullable, references `machines`) beside `created_by_user_id` on `projects`, `tasks`, `task_trees`, `journal_entries` and `schedules`: the machine whose worker agent gateway forwarded the write ([runtime.md](runtime.md#agent-gateway)). It resolves through one function, `db.ActingMachine(ctx)`: the machine the gateway route put on the context with `db.WithMachine` (from the bearer token), else none. Every Go insert that sets `created_by_user_id` sets it too, except project import; schedule spawns clear it (`spawnTask`), and derived journal events leave it null. The acting user stays the default user, so a gateway write carries both. The API exposes it as `sourceMachineId` ([api.md](api.md#users)).
+`GET /api/me` reports the acting user. Projects, tasks, trees, journal entries,
+schedules and machines expose their durable `created_by_user_id` as `createdBy`.
+Current writes use `db.ActingUser(ctx)` with the user set by `db.WithUser`, else
+the legacy default. Scheduled tasks and their initial notes keep the schedule
+creator on cron and Run now. Derived journal events currently use the column
+default and are written in the same transaction as their cause. See [API users](api.md#users)
+and [journal events](storage.md#journal-events).
+
+Migration 0021 adds `source_machine_id` on projects, tasks, trees, journal
+entries and schedules. The worker gateway sets the forwarding machine from its
+token through `db.WithMachine`. `db.ActingMachine(ctx)` supplies it for writes,
+and the API exposes it as `sourceMachineId`. Project import, schedule spawns
+and derived journal events leave it null. Machine tokens identify machines.
+The shared-access actor contract records people, agents, machines and automation
+independently of these provenance fields. Existing creator IDs and historical
+evidence carry forward. See [agent gateway](runtime.md#agent-gateway) and
+[ADR 0009 actor policy](adr/0009-shared-access.md#principals-and-endpoint-policy).
 
 ## Project and session identity
 
