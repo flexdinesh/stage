@@ -19,6 +19,9 @@ func (s *server) listTasks(w http.ResponseWriter, r *http.Request) error {
 	if f.ProjectID, err = s.projectFilter(r, "project"); err != nil {
 		return err
 	}
+	if f.ScheduleID, err = queryInt64(q, "schedule"); err != nil {
+		return err
+	}
 	f.States = multi(q, "state")
 	for _, st := range f.States {
 		if st == "settled" {

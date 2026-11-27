@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 )
@@ -23,8 +24,18 @@ type ProjectSummaries struct {
 
 // ProjectSummaries reads the selection projection without refreshing a harness.
 func (c *Client) ProjectSummaries(ctx context.Context) (ProjectSummaries, error) {
+	return c.ProjectSummariesArchived(ctx, "")
+}
+
+// ProjectSummariesArchived is ProjectSummaries filtered by archived
+// (false|true|all; "" = server default, active only).
+func (c *Client) ProjectSummariesArchived(ctx context.Context, archived string) (ProjectSummaries, error) {
+	q := url.Values{"view": {"destinations"}}
+	if archived != "" {
+		q.Set("archived", archived)
+	}
 	var out ProjectSummaries
-	err := c.do(ctx, http.MethodGet, "/api/projects?view=destinations", nil, &out)
+	err := c.do(ctx, http.MethodGet, withQuery("/api/projects", q), nil, &out)
 	return out, err
 }
 
@@ -41,6 +52,35 @@ func (c *Client) ListProjects(ctx context.Context) (ProjectList, error) {
 func (c *Client) Project(ctx context.Context, id int64) (db.Project, error) {
 	var out db.Project
 	err := c.do(ctx, http.MethodGet, projectPath(id), nil, &out)
+	return out, err
+}
+
+// ProjectSummary reads a project's selection projection (the shape agents
+// get, whatever the principal) by ID or merged ID.
+func (c *Client) ProjectSummary(ctx context.Context, id int64) (db.ProjectSummary, error) {
+	var out db.ProjectSummary
+	err := c.do(ctx, http.MethodGet, withQuery(projectPath(id), url.Values{"view": {"destinations"}}), nil, &out)
+	return out, err
+}
+
+// ProjectGroups lists logical project groups' summaries (archived:
+// false|true|all; "" = server default).
+func (c *Client) ProjectGroups(ctx context.Context, archived string) ([]db.ProjectGroupSummary, error) {
+	q := url.Values{"view": {"destinations"}}
+	if archived != "" {
+		q.Set("archived", archived)
+	}
+	var out struct {
+		Groups []db.ProjectGroupSummary `json:"groups"`
+	}
+	err := c.do(ctx, http.MethodGet, withQuery("/api/project-groups", q), nil, &out)
+	return out.Groups, err
+}
+
+// ProjectGroup reads a project group's summary by project ID or legacy alias.
+func (c *Client) ProjectGroup(ctx context.Context, id int64) (db.ProjectGroupSummary, error) {
+	var out db.ProjectGroupSummary
+	err := c.do(ctx, http.MethodGet, withQuery(fmt.Sprintf("/api/project-groups/%d", id), url.Values{"view": {"destinations"}}), nil, &out)
 	return out, err
 }
 

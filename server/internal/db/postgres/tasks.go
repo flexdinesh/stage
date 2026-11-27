@@ -132,6 +132,9 @@ func (r tasks) List(ctx context.Context, f store.TaskFilter) ([]store.Task, erro
 	if f.ProjectID != nil {
 		w.add("t.project_id = " + w.arg(*f.ProjectID))
 	}
+	if f.ScheduleID != nil {
+		w.add("t.schedule_id = " + w.arg(*f.ScheduleID))
+	}
 	if len(f.States) > 0 {
 		states := make([]string, len(f.States))
 		for i, st := range f.States {

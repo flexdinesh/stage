@@ -113,6 +113,20 @@ func (c *Client) HarnessStatus(ctx context.Context, kind string) (HarnessStatus,
 	return out, err
 }
 
+// MachineHarnesses is GET /api/machines/{id}/harnesses: Harnesses for that machine.
+func (c *Client) MachineHarnesses(ctx context.Context, machineID int64) (Harnesses, error) {
+	var out Harnesses
+	err := c.do(ctx, "GET", machinePath(machineID)+"/harnesses", nil, &out)
+	return out, err
+}
+
+// MachineHarnessStatus reads kind's connection setup on machineID.
+func (c *Client) MachineHarnessStatus(ctx context.Context, machineID int64, kind string) (HarnessStatus, error) {
+	var out HarnessStatus
+	err := c.do(ctx, "GET", machinePath(machineID)+"/harnesses/"+url.PathEscape(kind)+"/status", nil, &out)
+	return out, err
+}
+
 // ConfigureHarness saves settings (field id: value, nil resets).
 func (c *Client) ConfigureHarness(ctx context.Context, kind string, settings map[string]any) (HarnessStatus, error) {
 	var out HarnessStatus

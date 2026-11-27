@@ -628,6 +628,20 @@ func TestScheduleOriginInherited(t *testing.T) {
 	if !e.isT3Session(spawned.OriginSession, s) || spawned.TreeID != nil {
 		t.Fatalf("spawned %+v", spawned)
 	}
+	// ?schedule= lists only the tasks that schedule spawned.
+	e.agentTask(p.ID, "unscheduled", nil, 201)
+	var rows struct {
+		Tasks []task `json:"tasks"`
+	}
+	e.must("GET", fmt.Sprintf("/api/tasks?schedule=%d", sc.ID), nil, 200, &rows)
+	if len(rows.Tasks) != 1 || rows.Tasks[0].ID != spawned.ID {
+		t.Fatalf("schedule filter %+v", rows.Tasks)
+	}
+	e.must("GET", fmt.Sprintf("/api/tasks?schedule=%d", sc.ID+100), nil, 200, &rows)
+	if len(rows.Tasks) != 0 {
+		t.Fatalf("unknown schedule filter %+v", rows.Tasks)
+	}
+	e.must("GET", "/api/tasks?schedule=x", nil, 400, nil)
 }
 
 func TestTaskDetailAndOriginSessionFilter(t *testing.T) {

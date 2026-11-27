@@ -309,8 +309,11 @@ type Patch map[string]any
 type TaskQuery struct {
 	OriginSession *db.SessionRef
 	ProjectID     *int64
+	ScheduleID    *int64
 	States        []string
 	Q             string
+	From, To      *time.Time // createdAt
+	CompletedFrom *time.Time
 	// Closed: "" (open only), "true" (archived or in a done/archived tree)
 	// or "all".
 	Closed string
@@ -507,11 +510,17 @@ func (c *Client) Tasks(ctx context.Context, f TaskQuery) ([]Task, error) {
 		q.Set("originSessionId", f.OriginSession.ExternalSessionID)
 	}
 	setID(q, "project", f.ProjectID)
+	setID(q, "schedule", f.ScheduleID)
 	if len(f.States) > 0 {
 		q.Set("state", strings.Join(f.States, ","))
 	}
 	if f.Q != "" {
 		q.Set("q", f.Q)
+	}
+	for key, t := range map[string]*time.Time{"from": f.From, "to": f.To, "completedFrom": f.CompletedFrom} {
+		if t != nil {
+			q.Set(key, t.UTC().Format(time.RFC3339Nano))
+		}
 	}
 	if f.Closed != "" {
 		q.Set("closed", f.Closed)
@@ -741,10 +750,14 @@ func schedulePath(id int64, action string) string {
 	return p
 }
 
-// Schedules lists schedules (next fire first).
-func (c *Client) Schedules(ctx context.Context, projectID *int64) ([]db.Schedule, error) {
+// Schedules lists schedules (next fire first); dueWithin (a Go duration,
+// "" = any) keeps unpaused schedules firing within it.
+func (c *Client) Schedules(ctx context.Context, projectID *int64, dueWithin string) ([]db.Schedule, error) {
 	q := url.Values{}
 	setID(q, "project", projectID)
+	if dueWithin != "" {
+		q.Set("dueWithin", dueWithin)
+	}
 	var out struct {
 		Schedules []db.Schedule `json:"schedules"`
 	}
@@ -893,12 +906,14 @@ func (c *Client) Upload(ctx context.Context, name string, data []byte) (db.Attac
 	return out, err
 }
 
-// Preferences is GET /api/preferences (new-task defaults subset).
+// Preferences is GET /api/preferences.
 type Preferences struct {
 	DefaultConnectionID *int64 `json:"defaultConnectionId"`
+	// NotifyEvents is empty for agents on a shared server.
+	NotifyEvents []db.TaskState `json:"notifyEvents"`
 }
 
-// Preferences reads the default connection for new tasks.
+// Preferences reads the default connection for new tasks and notify events.
 func (c *Client) Preferences(ctx context.Context) (Preferences, error) {
 	var out Preferences
 	err := c.do(ctx, http.MethodGet, "/api/preferences", nil, &out)

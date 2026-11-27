@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/google/jsonschema-go/jsonschema"
 )
 
 // ConfigInput keeps JSON string and boolean option values distinct on the MCP wire.
@@ -39,5 +40,16 @@ func (in ConfigInput) config() (execution.Config, error) {
 	}
 	return c, nil
 }
+
+// nullableConfigSchema is ConfigInput's input schema accepting null (an
+// update clears the stored configuration).
+var nullableConfigSchema = func() *jsonschema.Schema {
+	s, err := jsonschema.For[ConfigInput](nil)
+	if err != nil {
+		panic(fmt.Sprintf("ConfigInput schema: %v", err))
+	}
+	s.Type, s.Types = "", []string{"object", "null"}
+	return s
+}()
 
 const destinationHelp = "select connectionId and workspaceId from list_projects, or use projects ls to find values for --connection and --workspace-id"
