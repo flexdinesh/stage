@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/remote/remotetest"
@@ -31,7 +32,12 @@ func TestT3InteractionOnTheWorker(t *testing.T) {
 	id, _ := fake.AddUserInput(ref.ExternalSessionID, []t3.Question{{ID: "q", Question: "Pick?", Options: []t3.QuestionOption{{Label: "A", Value: &value, Preview: "a"}}}})
 	got, err := in.Requests(t.Context(), ref)
 	want, localErr := local.Requests(t.Context(), ref)
-	if err != nil || localErr != nil || len(got) != 1 || !reflect.DeepEqual(got, want) {
+	if err != nil || localErr != nil || len(got) != 1 || len(want) != 1 || !got[0].CreatedAt.Equal(want[0].CreatedAt) {
+		t.Fatalf("requests %+v, want %+v: %v %v", got, want, err, localErr)
+	}
+	// The wire drops the monotonic clock reading; compare the rest as is.
+	got[0].CreatedAt, want[0].CreatedAt = time.Time{}, time.Time{}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("requests %+v, want %+v: %v %v", got, want, err, localErr)
 	}
 	var invalid *execution.Invalid
@@ -51,10 +57,11 @@ func TestT3InteractionOnTheWorker(t *testing.T) {
 	if err := in.Respond(t.Context(), ref, id, execution.Response{Answers: map[string][]string{"q": {"A"}}}); !errors.Is(err, execution.ErrNotFound) {
 		t.Fatal("answered", err)
 	}
-	if err := in.Send(t.Context(), ref, execution.Message{Text: "hi"}); err != nil {
+	if err := in.Send(t.Context(), ref, execution.Message{Text: "hi", RequestID: "steering-1-7"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(fake.Sent) != 1 || fake.Sent[0] != (t3.FakeSend{ThreadID: ref.ExternalSessionID, Message: "hi", Mode: t3.SendAuto}) {
+	// The request ID crosses the worker protocol.
+	if len(fake.Sent) != 1 || fake.Sent[0] != (t3.FakeSend{ThreadID: ref.ExternalSessionID, Message: "hi", Mode: t3.SendQueue, ClientRequestID: "steering-1-7"}) {
 		t.Fatalf("sent: %+v", fake.Sent)
 	}
 }

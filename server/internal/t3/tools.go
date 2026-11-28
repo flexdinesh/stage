@@ -421,7 +421,7 @@ func workspaceArg(w WorkspaceStrategy) (map[string]any, error) {
 	return m, nil
 }
 
-func (c *MCPClient) SendMessage(ctx context.Context, threadID, message string, mode SendMode) error {
+func (c *MCPClient) SendMessage(ctx context.Context, threadID, message string, mode SendMode, clientRequestID string) error {
 	if threadID == "" {
 		return ErrNotFound
 	}
@@ -431,6 +431,9 @@ func (c *MCPClient) SendMessage(ctx context.Context, threadID, message string, m
 	args := map[string]any{"threadId": threadID, "message": message}
 	if mode != "" {
 		args["mode"] = mode
+	}
+	if clientRequestID != "" {
+		args["clientRequestId"] = clientRequestID
 	}
 	return c.call(ctx, "t3_thread_send", args, nil)
 }

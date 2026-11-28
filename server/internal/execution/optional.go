@@ -89,6 +89,11 @@ type Response struct {
 // Message is a user message sent into a session.
 type Message struct {
 	Text string `json:"text"`
+	// RequestID identifies this send so a retry delivers it once, where the
+	// harness deduplicates (T3 clientRequestId). The coordinator sets a fresh
+	// one per API call; a caller that retries (steering delivery) passes its
+	// own stable ID.
+	RequestID string `json:"requestId,omitempty"`
 }
 
 // Interactive answers a session's pending requests and sends it messages.

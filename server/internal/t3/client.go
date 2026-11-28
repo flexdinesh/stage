@@ -77,8 +77,10 @@ type Client interface {
 	// RenameThread calls t3_thread_update {action: "rename"} with a fresh
 	// clientRequestId (reused when the call is retried).
 	RenameThread(ctx context.Context, threadID, title string) error
-	// SendMessage calls t3_thread_send. ErrNotFound if the thread is unknown.
-	SendMessage(ctx context.Context, threadID, message string, mode SendMode) error
+	// SendMessage calls t3_thread_send. T3 deduplicates by a non-empty
+	// clientRequestID (a retry with it is safe). ErrNotFound if the thread
+	// is unknown.
+	SendMessage(ctx context.Context, threadID, message string, mode SendMode, clientRequestID string) error
 	// ListPendingQuestions calls t3_pending_request list: the thread's
 	// pending user-input request ids (approvals are not listed).
 	ListPendingQuestions(ctx context.Context, threadID string) ([]string, error)

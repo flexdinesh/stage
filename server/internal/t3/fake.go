@@ -11,7 +11,9 @@ import (
 )
 
 // Fake is an in-memory Client for tests and local dev. Launched threads start
-// "running"; drive them with SetThread.
+// "running"; drive them with SetThread. SendMessage queues as T3's mode
+// queue does: an idle thread starts a run, a running one runs the message
+// after its current run completes.
 type Fake struct {
 	mu          sync.Mutex
 	now         func() time.Time
@@ -26,7 +28,9 @@ type Fake struct {
 	missingRefs map[string]bool   // worktree base refs that do not resolve (MissRef)
 	Catalog     Catalog
 	Sent        []FakeSend
-	Interrupted []string // interrupted thread ids
+	sends       map[string]bool // clientRequestIds already sent
+	queued      map[string]int  // thread id -> runs waiting for the current one
+	Interrupted []string        // interrupted thread ids
 	// Renamed: every accepted RenameThread; RenameErr fails it (tests).
 	Renamed   []FakeRename
 	RenameErr error
@@ -120,6 +124,7 @@ type FakeSendAttachments struct {
 type FakeSend struct {
 	ThreadID, Message string
 	Mode              SendMode
+	ClientRequestID   string
 }
 
 var _ Client = (*Fake)(nil)
@@ -131,6 +136,8 @@ func NewFake() *Fake {
 		replies:  map[string][]Reply{},
 		items:    map[string][]TimelineItem{},
 		launches: map[string]string{},
+		sends:    map[string]bool{},
+		queued:   map[string]int{},
 		requests: map[string][]*fakeRequest{},
 		Catalog: Catalog{Providers: []Provider{{
 			ProviderInstanceID: "claude",
@@ -592,7 +599,10 @@ func launchResult(d *ThreadDetail) LaunchResult {
 	}
 }
 
-func (f *Fake) SendMessage(_ context.Context, threadID, message string, mode SendMode) error {
+// SendMessage replays a clientRequestId already sent (nothing new runs).
+// Any mode queues: an idle thread starts a run, a running one gets one
+// more run after the current one.
+func (f *Fake) SendMessage(_ context.Context, threadID, message string, mode SendMode, clientRequestID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	t, ok := f.threads[threadID]
@@ -602,8 +612,31 @@ func (f *Fake) SendMessage(_ context.Context, threadID, message string, mode Sen
 	if t.Archived {
 		return &ToolError{Tool: "t3_thread_send", Code: "thread_not_sendable", Message: "Thread " + threadID + " is archived."}
 	}
-	f.Sent = append(f.Sent, FakeSend{ThreadID: threadID, Message: message, Mode: mode})
+	if clientRequestID != "" {
+		if f.sends[clientRequestID] {
+			return nil
+		}
+		f.sends[clientRequestID] = true
+	}
+	f.Sent = append(f.Sent, FakeSend{ThreadID: threadID, Message: message, Mode: mode, ClientRequestID: clientRequestID})
+	if t.ActiveRunID != "" {
+		f.queued[threadID]++
+		return nil
+	}
+	f.startRun(t)
 	return nil
+}
+
+// startRun starts a new running run on t. Caller holds mu.
+func (f *Fake) startRun(t *ThreadDetail) {
+	now := f.now()
+	run := Run{RunID: f.nextID("run"), Ordinal: t.RunCount + 1, Status: StatusRunning, ProviderInstanceID: t.ProviderInstanceID, Model: t.Model, RequestedAt: now, StartedAt: &now}
+	t.RecentRuns = append([]Run{run}, t.RecentRuns...)
+	t.RunCount++
+	t.ActiveRunID = run.RunID
+	t.LatestRunID = run.RunID
+	t.Status = StatusRunning
+	t.UpdatedAt = now
 }
 
 func (f *Fake) UploadAttachment(_ context.Context, in UploadInput) (Attachment, error) {
@@ -837,6 +870,11 @@ func (f *Fake) setStatus(t *ThreadDetail, status ThreadStatus) {
 			t.RecentRuns[0].CompletedAt = &now
 		}
 	}
+	// A queued message runs once the current run completes.
+	if status == StatusCompleted && f.queued[t.ThreadID] > 0 {
+		f.queued[t.ThreadID]--
+		f.startRun(t)
+	}
 }
 
 // AddUserInput adds a pending user-input request (as AskUserQuestion would)
@@ -951,6 +989,9 @@ func (f *Fake) RespondPendingQuestion(_ context.Context, threadID, requestID str
 	}
 	if len(answers) == 0 {
 		return &ToolError{Tool: "t3_pending_request", Code: "invalid_request", Message: "answers is required."}
+	}
+	if err := ValidateAnswers(r.questions, answers); err != nil {
+		return &ToolError{Tool: "t3_pending_request", Code: "invalid_request", Message: err.Error()}
 	}
 	r.status = "resolved"
 	f.recount(f.threads[threadID])

@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"strings"
@@ -111,6 +112,9 @@ func (s *Service) Send(ctx context.Context, id int64, m execution.Message) (db.T
 	t, in, err := s.interactive(ctx, id, execution.OpSend)
 	if err != nil {
 		return t, err
+	}
+	if m.RequestID == "" {
+		m.RequestID = "stage-send:" + rand.Text()
 	}
 	if err = in.Send(ctx, *t.Session, m); err != nil {
 		return t, harnessErr(err)
