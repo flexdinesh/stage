@@ -123,11 +123,16 @@ adapter's machine, including on a worker.
 ### Session interaction and activity
 
 Follow [ADR 0014](adr/0014-session-surface.md) and the
-[interaction contract](execution.md#interaction). Declare a harness-specific
-reason for each unavailable operation.
+[interaction contract](execution.md#interaction). In the adapter's
+capabilities, set each `execution.Op` to available only when the native
+contract is supported. Declare a harness-specific reason for each
+unavailable operation. The coordinator resolves the optional interface
+with `execution.As` after checking availability.
 
 | Operation | Adapter contract | Worker kind |
 | --- | --- | --- |
+| `respond` | `Interactive.Requests` lists answerable requests and `Interactive.Respond` submits native answers. Use the descriptor's `unlistedRequests` for requests the user must answer in the harness. | `adapter.requests`, `adapter.respond` |
+| `send` | `Interactive.Send` with `DeliverySend` starts a turn after the previous one ends. Return `Busy` if an active turn or pending request blocks it. | `adapter.send` |
 | `steer` | `Interactive.Send` with `DeliverySteer` injects into the running turn. Return `Busy` with guidance if the turn ended. | `adapter.deliver` |
 | `queue` | `Interactive.Send` with `DeliveryQueue` admits a message into the harness's native queue during a running turn. The harness delivers it as the next turn. | `adapter.deliver` |
 | `queueManage` | `QueueManager` lists pending messages in native order, cancels a message or promotes it to a steer. Return `ErrNotFound` for a gone item. Supply source and creation time when known. | `adapter.queue` |
@@ -313,11 +318,17 @@ See the [action and facts API](api.md#declared-actions-and-facts).
   the other declared actions. A kind without a custom slot uses the
   [generic renderer](../packages/app/src/harnesses/generic.tsx) for settings,
   action fields and confirmation, availability, facts and fixes.
-  Optional `HarnessSlots.session` entries extend the shared Session view
-  with `HeaderExtra` and `Sections`. Each receives the task, selected
+  To extend Session, register `session: { HeaderExtra, Sections }` on
+  the harness's slots object in `src/harnesses/<kind>/index.tsx`. Both
+  components are optional. The shared view keeps generic actions, the
+  composer, queue and activity. Each receives the task, selected
   attempt summary, bounded activity when available and a current-attempt
   flag. Render harness-specific activity `details` in that slot. Gate
-  session writes on the current flag and the declared operation.
+  session writes on the current flag and the declared operation. Set
+  `activityModelInHeader` if the slot already shows the activity model.
+  Exercise the generic view with and without the slot. For worker parity,
+  run the local and worker engine contracts and check that an older
+  worker gets a declared reason from `remote.operationKinds`.
 - **CLI, one additional file.** Add `server/internal/cli/slots_<kind>.go`
   and register a status printer in `init`, following the
   [OpenCode slot](../server/internal/cli/slots_opencode.go). The generic

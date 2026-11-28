@@ -587,7 +587,7 @@ permissions, the forms Stage can show and messages
 command, file-change and permission approvals on tracked active threads and
 messages to an idle thread ([Codex adapter](#codex-adapter)). A harness that can wait on requests
 it can't list declares `unlistedRequests` on its descriptor with where to
-answer them; the app then shows that instead of a Reply composer when a
+answer them. The app shows that guidance in the Session composer when a
 needs-input session lists none. [Interaction API](api.md#session-interaction-api-v6)
 
 `Interactive.Send` receives a `Message.Delivery`. `send` (also empty)
@@ -931,7 +931,8 @@ declares the operations from `tools/list`: `t3_pending_request` for
   queued in an active turn, and read a bounded activity page. That client
   also answered a scratch thread's question in `plan` mode. A pending
   command approval appeared in activity and was absent from the question
-  list.
+  list. The Session header shows the reported provider instance, model
+  and runtime mode.
 
 ### T3 workspace sources
 
@@ -1176,6 +1177,8 @@ A message consumed between that check and DELETE can still produce a
 success response. Workers use `adapter.requests`,
 `adapter.respond`, `adapter.send`, `adapter.deliver`, `adapter.activity`
 and `adapter.queue`. Polling refreshes activity, usage and the queue.
+The Session header shows the reported agent, model and variant. Inbox and
+usage event refresh are tracked in the [Session follow-ups](adr/0014-session-surface.md#follow-ups).
 
 ### OpenCode push
 
@@ -1484,7 +1487,8 @@ to run on that machine.
   with the resume command. A finished turn returns Busy with guidance to
   Send. Session end or observed removal clears pending messages. A Stage
   restart loses messages still awaiting a hook. A blocked or missing
-  receiver leaves Claude Code's own session controls available. [Claude Code hook reference](https://code.claude.com/docs/en/hooks)
+  receiver leaves Claude Code's own session controls available. `queueManage` is unavailable.
+  The adapter has no native inbox for Stage to read, cancel or promote. [Claude Code hook reference](https://code.claude.com/docs/en/hooks)
 - **Activity** reads the transcript on the server or worker that runs
   Claude Code. It returns a bounded feed of messages, reasoning titles
   and tools, with Bash commands and file changes identified. It also
@@ -1669,7 +1673,7 @@ server's `harness_settings` row for that machine
     passes `expectedTurnId` and `clientUserMessageId` to stable
     `turn/steer`. Reviews and compactions report busy with guidance to
     wait. An ended or replaced turn reports busy with guidance to send.
-  - **Queue.** Unavailable. “Codex queues messages only in its own client.”
+  - **Queue and queue management.** Both operations declare “Codex queues messages only in its own client.”
   - **Availability.** Stage checks the methods needed by Send, Steer
     and Activity per daemon connection without targeting a thread.
     The live gate verifies Codex 0.172.

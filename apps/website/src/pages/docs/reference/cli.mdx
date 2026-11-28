@@ -29,11 +29,13 @@ Coding agents with a shell use the CLI by default: it costs no context until use
 | `stage task reopen ID --revision N [--request-id KEY]` | reopen a completed task |
 | `stage task requests ID` | what the task's session waits on |
 | `stage task respond ID RID [--option O] [--text T] [--answers JSON] [--expect-revision N]` | answer one request |
-| `stage task send ID --text TEXT [--expect-revision N]` | message the task's session |
+| `stage task send ID --text TEXT [--steer or --queue] [--expect-revision N]` | Send after a turn or explicitly Steer or Queue during it |
+| `stage task activity ID [--attempt N] [--limit N]` | read recent activity from the current session or an earlier attempt |
+| `stage task queue ID [--cancel QID or --steer QID]` | list, cancel or promote native queued messages |
 | `stage task escalate ID --reason TEXT` | as the tree's steerer, notify the user about a member's wait now |
 | `stage task opening-prompt ID [--full]` | an adopted task's opening prompt |
 
-`complete`, `reopen`, `respond` and `send` refuse your own task or session.
+`complete`, `reopen`, `respond`, `send` and queue writes refuse your own task or session.
 
 ### Task flags
 

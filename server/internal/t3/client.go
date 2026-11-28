@@ -210,16 +210,12 @@ const (
 	InteractionPlan    InteractionMode = "plan"
 )
 
-// SendMode is t3_thread_send `mode`. auto: start idle thread, steer running
-// turn, or queue. queue: new turn. steer: mid-turn update. restart: interrupt
-// and restart.
+// SendMode is the subset of t3_thread_send modes Stage uses.
 type SendMode string
 
 const (
-	SendAuto    SendMode = "auto"
-	SendQueue   SendMode = "queue"
-	SendSteer   SendMode = "steer"
-	SendRestart SendMode = "restart"
+	SendQueue SendMode = "queue"
+	SendSteer SendMode = "steer"
 )
 
 type Project = execution.WorkspaceInfo

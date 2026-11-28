@@ -102,7 +102,7 @@ When every member is completed, or you mark the tree done or archive it, Stage s
 | Claude Code | yes: a message wakes the finished session | permission prompts and questions of sessions Stage started, and follow-ups | prompts that were open when Stage restarted, sessions you track |
 | T3 Code | yes: a message waits for the current turn to end | questions and follow-ups | permission requests |
 | OpenCode | yes: a message waits for the current turn to end | permissions, the forms Stage can show, and follow-ups | forms with conditional or external fields |
-| Codex | yes: a message starts a new turn once the thread is idle | command and file-change approvals, questions, and follow-ups | permission requests, MCP prompts, secret questions |
+| Codex | yes, when the thread is idle | command, file-change and permission approvals, Send and Steer | questions and MCP prompts |
 
 A member that waits on something only its harness can answer stays held until the hold ends, unless the steerer escalates it. Tell the steerer in its intent or playbook to escalate those at once.
 

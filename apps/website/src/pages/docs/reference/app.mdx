@@ -82,13 +82,13 @@ The palette also offers Sync now.
 - Task and tree rows on laptop-width screens show a link icon on hover or keyboard focus.
 - Pasted Stage task and session links (any host) render as live chips (number or "session", title, state) in prompts, final replies and handoff text. Tree and unknown links stay plain links.
 
-## Answering questions
+## Answering and messaging sessions
 
-Needs-input tasks and notifications open the source harness for questions and approvals. In the desktop app, T3 links open the T3 app, else T3 in the browser. OpenCode opens the configured web client; with a separate client configured, task detail also offers **Open on service** and **Copy session ID** ([Connections](/docs/reference/connections)). Claude Code has no link: task detail offers **Copy resume command**, and its needs-input alert reads "Claude Code needs input. Answer it in a terminal with the resume command." Task rows and notifications offer the same button, as does Codex ([Claude Code](/docs/guides/claude-code)).
+The Task and Session tabs share the needs-input alert. **Answer** opens the current Session's **Requests** panel. Task and inbox rows can answer a single approval inline. A question or multiple requests use **Answer** to open the panel. Each request uses the harness's choices, such as Allow, Deny with a reason, or answers to a set of form questions. An already answered request shows its status.
 
-A harness that lets Stage answer (Claude Code, for the sessions Stage starts) lists what its session waits on in a **Requests** panel under the needs-input alert, which then reads "Claude Code is waiting for your answer.": a permission prompt with its command, file or URL and the harness's choices (Allow, Always allow with the rule it saves, Deny with an optional reason), or questions with their options and Other, answered together with **Send**. A task row or inbox row with exactly one permission prompt shows it on one line with its first and last choice (Allow, Deny); a question or several requests show **Answer**, which opens the panel. An answer the harness already got shows "Already answered in Claude Code or expired". The harness's own client keeps working the whole time.
+Use **Message** in the current Session. **Send** starts a turn after the previous one ends. **Steer** adds input to the running turn. **Queue** asks the harness to deliver the message as its next turn. Each button follows its connection's declared availability. Ctrl or Cmd + Enter uses the first available delivery. The composer keeps the draft across tabs, and the task timeline records successful actions. OpenCode and T3 can list, cancel and promote native queued messages when the service supports it.
 
-A harness that takes messages from Stage (Claude Code) adds a **Follow up** box under Last word once the session finishes: **Send** (Ctrl or Cmd + Enter) continues the same session and the task runs again. When the turn ended asking you something, the box leads as **Reply** under "Claude Code is waiting for your reply.". While the session works the box keeps your draft and Send waits; a session that can't take a message says why. The timeline records "Follow-up sent from Stage".
+**Recent activity** reads a bounded feed when available. The Session header switches to a read-only earlier attempt. **Open in** or **Copy resume command** opens the full conversation or a request that the harness handles directly. See [Sessions and references](/docs/concepts/sessions) for harness support.
 
 ## Snippets
 

@@ -159,7 +159,7 @@ test("interaction notes follow the operations the connection offers", () => {
   assert.deepEqual(interactionNotes({ respond: false, send: false }), []);
   const both = interactionNotes({ respond: true, send: true });
   assert.equal(both.length, 2);
-  assert.match(both[0], /^Permissions and questions .* answered in OpenCode\.$/);
-  assert.match(both[1], /waits for its run to end/);
+  assert.match(both[0], /supported questions in the Session tab/);
+  assert.match(both[1], /Send in the Session tab after the turn ends/);
   assert.deepEqual(interactionNotes({ respond: false, send: true }), [both[1]]);
 });

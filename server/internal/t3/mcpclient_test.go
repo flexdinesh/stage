@@ -764,7 +764,7 @@ func TestIsTransportError(t *testing.T) {
 	}
 }
 
-func TestUploadAndSendAttachments(t *testing.T) {
+func TestUploadAttachment(t *testing.T) {
 	f := newFakeT3(t)
 	var mu sync.Mutex
 	args := map[string]map[string]any{}
@@ -773,12 +773,6 @@ func TestUploadAndSendAttachments(t *testing.T) {
 		args["prepare"] = a
 		mu.Unlock()
 		return structured(`{"attachmentId":"pending-1","relativeUrl":"/api/attachments/upload/tok1","expiresAt":1}`), nil
-	})
-	f.tool("t3_thread_send_attachments", func(a map[string]any) (*mcp.CallToolResult, error) {
-		mu.Lock()
-		args["send"] = a
-		mu.Unlock()
-		return structured(`{"threadId":"t1"}`), nil
 	})
 	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
 	ctx := ctxT(t)
@@ -800,21 +794,6 @@ func TestUploadAndSendAttachments(t *testing.T) {
 	mu.Unlock()
 	if pu["type"] != "image" || pu["name"] != "shot.png" || pu["mimeType"] != "image/png" || pu["sizeBytes"] != float64(len(data)) {
 		t.Fatalf("prepare args = %v", pu)
-	}
-
-	if err := c.SendAttachments(ctx, "t1", "see", []Attachment{a}); err != nil {
-		t.Fatal(err)
-	}
-	mu.Lock()
-	sa := args["send"]
-	mu.Unlock()
-	atts, _ := sa["attachments"].([]any)
-	first, _ := atts[0].(map[string]any)
-	if sa["threadId"] != "t1" || sa["message"] != "see" || len(atts) != 1 || first["id"] != "pending-1" || first["type"] != "image" || first["sizeBytes"] != float64(len(data)) {
-		t.Fatalf("send args = %v", sa)
-	}
-	if err := c.SendAttachments(ctx, "t1", "x", nil); err == nil {
-		t.Fatal("send without attachments must fail")
 	}
 }
 

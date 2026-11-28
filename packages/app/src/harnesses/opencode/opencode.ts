@@ -136,8 +136,8 @@ export function newServicePrompt(address: string, old: Pick<HarnessConnection, "
 export function interactionNotes(offered: { respond: boolean; send: boolean }): string[] {
   const notes: string[] = [];
   if (offered.respond) {
-    notes.push("Permissions and questions of OpenCode sessions can be answered on the task, or in OpenCode. Forms with conditional or external fields are answered in OpenCode.");
+    notes.push("Answer permissions and supported questions in the Session tab or in OpenCode. Answer forms with conditional or external fields in OpenCode.");
   }
-  if (offered.send) notes.push("A follow-up sent while OpenCode works waits for its run to end.");
+  if (offered.send) notes.push("Use Send in the Session tab after the turn ends.");
   return notes;
 }

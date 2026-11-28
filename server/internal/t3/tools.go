@@ -497,20 +497,6 @@ func (c *MCPClient) DiscardAttachment(ctx context.Context, attachmentID string) 
 	return c.call(ctx, "t3_attachment_discard", map[string]any{"attachmentId": attachmentID}, nil)
 }
 
-func (c *MCPClient) SendAttachments(ctx context.Context, threadID, message string, atts []Attachment) error {
-	if threadID == "" {
-		return ErrNotFound
-	}
-	if len(atts) == 0 || len(atts) > MaxAttachments {
-		return fmt.Errorf("t3 t3_thread_send_attachments: 1..%d attachments required", MaxAttachments)
-	}
-	args := map[string]any{"threadId": threadID, "attachments": attachmentsArg(atts)}
-	if strings.TrimSpace(message) != "" {
-		args["message"] = message
-	}
-	return c.call(ctx, "t3_thread_send_attachments", args, nil)
-}
-
 func (c *MCPClient) Interrupt(ctx context.Context, threadID string) error {
 	if threadID == "" {
 		return ErrNotFound
