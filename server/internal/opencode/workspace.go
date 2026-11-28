@@ -188,6 +188,9 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	if contract.location {
 		ops[execution.OpWorkspaceAdd] = available
 	}
+	if contract.respond {
+		ops[execution.OpRespond] = available
+	}
 	return execution.Capabilities{Operations: ops, ModeLabel: "Agent", Options: launchOptions(),
 		Actions:          sessionActions(contract),
 		WorkspaceSources: []execution.WorkspaceSource{folderSource(contract.location)}}, nil
@@ -205,13 +208,12 @@ func launchOptions() []execution.Option {
 
 // operations declares OpenCode's baseline capabilities.
 func operations() map[execution.Op]execution.Availability {
-	answer := execution.Availability{Reason: "Answer in OpenCode: open the session there."}
 	return map[execution.Op]execution.Availability{
 		execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
+		execution.OpSend:          available,
 		execution.OpSessionSearch: {Reason: sessionSearchUnavailable},
 		execution.OpImages:        {Reason: "Image attachment delivery has not been verified for this adapter."},
-		execution.OpRespond:       answer,
-		execution.OpSend:          answer,
+		execution.OpRespond:       {Reason: respondUnavailable},
 		execution.OpSessionRename: {Reason: sessionRenameUnavailable},
 		execution.OpWorkspaceAdd:  {Reason: workspaceAddUnavailable},
 	}

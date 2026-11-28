@@ -99,7 +99,7 @@ func call(ctx context.Context, method, target, password string, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return responseError{resp.StatusCode}
+		return responseError{code: resp.StatusCode}
 	}
 	b, e := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if e != nil {

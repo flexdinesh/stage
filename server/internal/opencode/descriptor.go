@@ -21,6 +21,8 @@ const (
 var Descriptor = harness.Descriptor{
 	Kind: Kind, Name: "OpenCode", Sessions: harness.SessionsMachine, WebAddress: true, ContinuityProof: true,
 	DiscoveryHint: "Open the workspace in OpenCode on this connection, then refresh discovery.",
+	// Forms with conditions, hidden or external fields (Interactive.Requests).
+	UnlistedRequests: "Answer this form in OpenCode.",
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedArchived, Provenance: "harness_archived",
 		Setting:   "Complete tasks when archived in OpenCode",

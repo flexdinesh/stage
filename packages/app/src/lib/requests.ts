@@ -48,9 +48,12 @@ export function pickOther(q: Pick<RequestQuestion, "multi">, d: QuestionDraft): 
   return { ...d, otherOn: !d.otherOn };
 }
 
-/** The answer a question sends: its picked labels, then the Other text when it is on and not blank. */
-export function answerOf(q: Pick<RequestQuestion, "custom">, d: QuestionDraft): string[] {
-  const other = q.custom === true && d.otherOn ? d.other.trim() : "";
+/** A question answered only in free text: it takes custom answers and offers no options, so it shows one text field. */
+export const freeText = (q: Pick<RequestQuestion, "custom" | "options">): boolean => q.custom === true && (q.options ?? []).length === 0;
+
+/** The answer a question sends: its picked labels, then the Other text when it is on (always, for free text) and not blank. */
+export function answerOf(q: Pick<RequestQuestion, "custom" | "options">, d: QuestionDraft): string[] {
+  const other = q.custom === true && (d.otherOn || freeText(q)) ? d.other.trim() : "";
   return other === "" ? d.picked : [...d.picked, other];
 }
 

@@ -14,6 +14,7 @@ import {
   answersResponse,
   draftOf,
   expiredText,
+  freeText,
   optionNote,
   optionResponse,
   pick,
@@ -112,18 +113,21 @@ function ApprovalActions({ request, harness, busy, onRespond }: { request: Sessi
   );
 }
 
-/** One question: radios or checkboxes, plus Other with its text when free answers are allowed. */
+/** One question: radios or checkboxes, plus Other with its text when free answers are allowed; a free-text question is one text field. */
 function QuestionField({ q, d, disabled, onChange }: { q: RequestQuestion; d: QuestionDraft; disabled: boolean; onChange: (d: QuestionDraft) => void }) {
   const name = useId();
+  const legendId = useId();
   const Control = q.multi === true ? Checkbox : Radio;
+  const textOnly = freeText(q);
   return (
     <fieldset disabled={disabled} className="min-w-0">
-      <legend className="mb-1 text-body">
+      <legend id={legendId} className="mb-1 text-body">
         {q.header === undefined || q.header === "" ? null : <span className="mr-2 font-mono text-meta text-muted">{q.header}</span>}
         {q.prompt}
-        {q.multi === true ? <span className="ml-2 font-mono text-meta text-muted">pick any</span> : null}
+        {q.multi === true && !textOnly ? <span className="ml-2 font-mono text-meta text-muted">pick any</span> : null}
       </legend>
-      <div className="flex flex-col">
+      {textOnly ? <Input aria-labelledby={legendId} value={d.other} onChange={(e) => onChange({ ...d, other: e.target.value })} /> : null}
+      {textOnly ? null : <div className="flex flex-col">
         {(q.options ?? []).map((o) => (
           <Fragment key={o.label}>
             <ChoiceRow control={<Control name={name} checked={d.picked.includes(o.label)} onChange={() => onChange(pick(q, d, o.label))} />}>
@@ -149,7 +153,7 @@ function QuestionField({ q, d, disabled, onChange }: { q: RequestQuestion; d: Qu
             ) : null}
           </>
         ) : null}
-      </div>
+      </div>}
     </fieldset>
   );
 }

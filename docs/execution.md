@@ -525,7 +525,9 @@ A successful follow-up records a task timeline entry. Users and agents can
 send and respond, never from the task's own session
 (`self_action_forbidden`, [ADR 0011](adr/0011-agent-operation-parity.md)). Claude Code supplies both operations, with responses requiring
 its hook receiver. T3 supplies both for its questions and messages
-([T3 interaction](#t3-interaction)). A harness that can wait on requests
+([T3 interaction](#t3-interaction)). OpenCode supplies both for its
+permissions, the forms Stage can show and messages
+([OpenCode interaction](#opencode-interaction)). A harness that can wait on requests
 it can't list declares `unlistedRequests` on its descriptor with where to
 answer them; the app then shows that instead of a Reply composer when a
 needs-input session lists none. [Interaction API](api.md#session-interaction-api-v6)
@@ -825,6 +827,55 @@ Adopting an idle OpenCode session before its first execution creates an attached
 Backlog task with no start or finish time. Stage polls it and records execution
 when work begins in OpenCode. Stage start, scheduling and tree readiness apply
 only to work Stage can launch.
+
+### OpenCode interaction
+
+OpenCode implements `Interactive` over its V2 session endpoints
+(`server/internal/opencode/interaction.go`). `send` is available on every
+connection: it uses `session.prompt`, which launch already requires.
+`respond` is available when OpenAPI advertises `session.permission.reply`
+with a `decision` body and `session.form.reply` with an `answer` body;
+otherwise it is unavailable with a version reason.
+
+- **Requests.** `GET /api/session/{id}/permission` then
+  `GET /api/session/{id}/form`, in OpenCode's order. A request whose
+  session or ID prefix (`per`, `frm_`) does not match fails the read, and a
+  missing session is `ErrNotFound`. OpenCode reports no request time, so
+  `createdAt` is zero.
+  - A permission is an `approval` with OpenCode's options: `once` "Allow
+    once", `always` "Allow always" and `reject` "Deny" (`textOption`, sent
+    as the message). Its title is OpenCode's description of the action
+    ("Run shell commands"), or "Permission required: <action>" for an
+    action OpenCode does not describe. Its detail is the request's message.
+    Its preview is the tool input as `key: value` lines, then the resources.
+  - A form is a `question` request when Stage can show every field: a
+    string (its options, custom text where allowed, free text without
+    options), a multiselect, a boolean (Yes or No) or a number. Each field
+    is a question keyed by its field key. The agent's question tool
+    (`metadata.kind` `question`) is titled "OpenCode asks" or "OpenCode
+    asks N questions"; other forms keep their title. A form with a
+    condition (`when`), a hidden or an external field is not listed, and the
+    descriptor's `unlistedRequests` says to answer it in OpenCode.
+- **Respond.** The request ID prefix picks the endpoint, and Stage re-reads
+  the session's list first: a request no longer listed is `ErrNotFound`. A
+  permission takes one of its three options, with text only on Deny
+  (`POST .../permission/{id}/reply {decision, message?}`). A form takes
+  answers by field key: option labels become option values, Yes or No a
+  boolean, a number its value; fields left out stay unanswered and OpenCode
+  checks required ones (`POST .../form/{id}/reply {answer}`). An answer
+  that does not fit is `*Invalid` (400) before anything is sent. OpenCode
+  answering 404, or 409 for a settled form, is `ErrNotFound` (404); its 400
+  is `*Invalid` with OpenCode's message.
+- **Send.** `POST /api/session/{id}/prompt {text}` with OpenCode's default
+  delivery, `steer`: an idle session starts a run and a running one takes
+  the message at its next step. OpenCode's own composer is hidden while a
+  request is pending, so a session waiting on a permission or form takes no
+  message (`*Busy`, 409 `session_busy`: answer it first, or answer a form
+  Stage can't show in OpenCode). The admission must be a user item of the
+  session. A missing session is `ErrNotFound`.
+
+Workers reach the same methods through `adapter.requests`,
+`adapter.respond` and `adapter.send` and the `interactive` trait.
 
 ### Reproduce the live gate
 

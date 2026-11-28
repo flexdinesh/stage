@@ -112,7 +112,12 @@ const rejectedReason = "OpenCode refused access. Check the configured credential
 // Rejected reports a health check that OpenCode answered with 401 or 403.
 func Rejected(h execution.Health) bool { return !h.Available && h.Reason == rejectedReason }
 
-type responseError struct{ code int }
+// responseError is a non-2xx answer; message is OpenCode's encoded error
+// message when the body carries one.
+type responseError struct {
+	code    int
+	message string
+}
 
 func (e responseError) Error() string {
 	switch e.code {
@@ -155,24 +160,20 @@ func (a *Adapter) request(ctx context.Context, method, path string, input, out i
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var body struct {
+			Tag     string `json:"_tag"`
+			Message string `json:"message"`
+		}
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&body)
 		if resp.StatusCode == http.StatusBadRequest && method == http.MethodGet &&
-			strings.HasPrefix(path, "/api/session?") && req.URL.Query().Has("cursor") {
-			var body struct {
-				Tag string `json:"_tag"`
-			}
-			if e := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&body); e == nil && body.Tag == "InvalidCursorError" {
-				return execution.ErrSessionSearchCursor
-			}
+			strings.HasPrefix(path, "/api/session?") && req.URL.Query().Has("cursor") && body.Tag == "InvalidCursorError" {
+			return execution.ErrSessionSearchCursor
 		}
-		if resp.StatusCode == http.StatusNotFound && method == http.MethodGet && strings.HasPrefix(path, "/api/location?") {
-			var body struct {
-				Tag string `json:"_tag"`
-			}
-			if e := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&body); e == nil && body.Tag == "LocationNotFoundError" {
-				return errLocationNotFound
-			}
+		if resp.StatusCode == http.StatusNotFound && method == http.MethodGet &&
+			strings.HasPrefix(path, "/api/location?") && body.Tag == "LocationNotFoundError" {
+			return errLocationNotFound
 		}
-		return responseError{resp.StatusCode}
+		return responseError{code: resp.StatusCode, message: body.Message}
 	}
 	if out == nil {
 		return nil
@@ -226,6 +227,9 @@ type serverContract struct {
 	// location: GET /api/location (location.get) resolves a directory; the
 	// folder workspace source calls it.
 	location bool
+	// respond: session.permission.reply takes a decision and
+	// session.form.reply an answer (Interactive.Respond).
+	respond bool
 }
 
 func (a *Adapter) check(ctx context.Context) (serverInfo, error) {
@@ -296,6 +300,7 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 	contract.rename = sessionUpdateTakes(update, spec.Components.Schemas, "title")
 	contract.archive = sessionUpdateTakes(update, spec.Components.Schemas, "archived")
 	contract.location = spec.Paths["/api/location"]["get"].OperationID == "location.get"
+	contract.respond = inspectReplies(spec.Paths, spec.Components.Schemas)
 	a.verified = contract
 	return contract, nil
 }
