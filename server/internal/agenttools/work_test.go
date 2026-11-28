@@ -103,8 +103,15 @@ func TestWorkToolsActOnOtherTasksOnly(t *testing.T) {
 }
 
 func TestSessionSurfaceTools(t *testing.T) {
+	past := db.SessionRef{ConnectionID: 9, ExternalSessionID: "old"}
+	current := db.SessionRef{ConnectionID: 9, ExternalSessionID: "current"}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method + " " + r.URL.Path {
+		case "GET /api/tasks/7":
+			_ = json.NewEncoder(w).Encode(client.TaskDetail{Sessions: []client.TaskSession{
+				{Attempt: 2, Session: current, Current: true, State: "running"},
+				{Attempt: 1, Session: past, State: "failed"},
+			}})
 		case "POST /api/tasks/7/messages":
 			var in execution.Message
 			if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Text != "hello" || in.Delivery != execution.DeliveryQueue {
@@ -112,7 +119,7 @@ func TestSessionSurfaceTools(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(client.Task{})
 		case "GET /api/tasks/7/activity":
-			if r.URL.Query().Get("limit") != "2" {
+			if r.URL.Query().Get("limit") != "2" || r.URL.Query().Get("attempt") != "0" {
 				t.Errorf("activity query %s", r.URL)
 			}
 			_ = json.NewEncoder(w).Encode(client.SessionActivity{Activity: execution.Activity{
@@ -129,8 +136,14 @@ func TestSessionSurfaceTools(t *testing.T) {
 		t.Fatalf("unexpected MCP validation error %q", msg)
 	}
 	mustCall(t, cs, "send_message", map[string]any{"taskId": 7, "text": "hello", "delivery": "queue"}, nil)
+	var task client.TaskDetail
+	mustCall(t, cs, "get_task", map[string]any{"id": 7}, &task)
+	if len(task.Sessions) != 2 || task.Sessions[0].Session != current || !task.Sessions[0].Current ||
+		task.Sessions[1].Session != past || task.Sessions[1].Attempt != 1 || task.Sessions[1].Current {
+		t.Fatalf("unexpected task history %+v", task.Sessions)
+	}
 	var out client.SessionActivity
-	mustCall(t, cs, "get_session_activity", map[string]any{"taskId": 7, "limit": 2}, &out)
+	mustCall(t, cs, "get_session_activity", map[string]any{"taskId": 7, "attempt": 0, "limit": 2}, &out)
 	if len(out.Activity.Items) != 1 || out.Activity.Items[0].ID != "last" {
 		t.Fatalf("unexpected activity %+v", out)
 	}

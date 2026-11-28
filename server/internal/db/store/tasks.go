@@ -146,6 +146,23 @@ type TaskEvent struct {
 	At        time.Time  `json:"at"`
 }
 
+// TaskSession pairs a recorded attempt with its latest stored observation.
+// The observation and capture time can be absent after a legacy backfill.
+type TaskSession struct {
+	Attempt     int
+	Session     SessionRef
+	Current     bool
+	RecordedAt  time.Time
+	Harness     string
+	Observation ObservationSnapshot
+}
+
+// TaskSessionOwner identifies the attempt that owns a scoped session.
+type TaskSessionOwner struct {
+	TaskID  int64
+	Attempt int
+}
+
 type Attempt struct {
 	Attribution
 	TaskID     int64                `json:"taskId"`
@@ -309,6 +326,7 @@ type AdoptedInsert struct {
 	ConnectionID    int64
 	SessionID       int64
 	ExecutionConfig execution.Config
+	LaunchAttempt   int
 	LaunchedAt      *time.Time
 	FinishedAt      *time.Time
 	CreatedBy       int64
@@ -367,6 +385,10 @@ type Tasks interface {
 	BySessionID(ctx context.Context, sessionID int64) (int64, error)
 	// SessionOccupied: another task than taskID owns the session.
 	SessionOccupied(ctx context.Context, sessionID, taskID int64) (bool, error)
+	RecordSession(ctx context.Context, taskID int64, attempt int, sessionID int64) error
+	Sessions(ctx context.Context, taskID int64) ([]TaskSession, error)
+	SessionAttempt(ctx context.Context, taskID int64, attempt int) (TaskSession, error)
+	SessionOwner(ctx context.Context, ref SessionRef) (TaskSessionOwner, error)
 	Events(ctx context.Context, taskID int64) ([]TaskEvent, error)
 	// AddEvent appends a task event (from nil: none) and returns its time.
 	AddEvent(ctx context.Context, taskID int64, from *TaskState, to TaskState, detail string, observedAt *time.Time, attribution Attribution) (time.Time, error)

@@ -104,6 +104,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	54: {{"one held notification per task; tree hold defaults to 300", seedV0040SharedAccess, checkV0054NotificationHolds}},
 	55: {{"existing binding has no finish or completion", seedV0055Steerer, checkV0055SteeringFinish}},
 	56: {{"notification subjects keep history and extend saved filters", seedV0056NotificationSubjects, checkV0056NotificationSubjects}},
+	57: {{"current task sessions backfilled", seedV0057TaskSessions, checkV0057TaskSessions}},
 }
 
 func checkV0053SteeringLaunchContext(t *testing.T, pool *sqlite.DB) {
@@ -155,6 +156,21 @@ func checkV0055SteeringFinish(t *testing.T, pool *sqlite.DB) {
 		t.Fatal("accepted an unknown completion")
 	}
 	mustExec(t, pool, `UPDATE tree_steerers SET finish_event_id=3,final_state_revision=4,completion='completed' WHERE id=1`)
+}
+
+func seedV0057TaskSessions(t *testing.T, pool *sqlite.DB) {
+	migrationfixture.SeedTaskSessions(t, func(query string) error {
+		_, err := pool.Exec(query)
+		return err
+	})
+}
+
+func checkV0057TaskSessions(t *testing.T, pool *sqlite.DB) {
+	migrationfixture.CheckTaskSessions(t, func(query string) (int, error) {
+		var n int
+		err := pool.QueryRow(query).Scan(&n)
+		return n, err
+	})
 }
 
 func seedV0056NotificationSubjects(t *testing.T, pool *sqlite.DB) {

@@ -34,13 +34,22 @@ func (s *server) taskActivity(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	var q execution.ActivityQuery
-	if params := r.URL.Query(); params.Has("limit") {
+	params := r.URL.Query()
+	if params.Has("limit") {
 		q.Limit, err = strconv.Atoi(params.Get("limit"))
 		if err != nil || q.Limit < 0 {
 			return db.Invalid("limit must be a nonnegative integer")
 		}
 	}
-	out, err := s.Engine.Coordinator.Activity(r.Context(), id, q)
+	var attempt *int
+	if params.Has("attempt") {
+		n, err := parseTaskAttempt(params.Get("attempt"))
+		if err != nil {
+			return err
+		}
+		attempt = &n
+	}
+	out, err := s.Engine.Coordinator.Activity(r.Context(), id, attempt, q)
 	if err != nil {
 		return err
 	}
@@ -96,7 +105,14 @@ func (s *server) withCaller(r *http.Request) *http.Request {
 	switch {
 	case err == nil:
 		c.TaskID = owner.ID
-	case !errors.Is(err, db.ErrNotFound):
+	case errors.Is(err, db.ErrNotFound):
+		historical, err := s.Store.TaskSessionOwner(ctx, ref)
+		if err == nil {
+			c.TaskID = historical.TaskID
+		} else if !errors.Is(err, db.ErrNotFound) {
+			return r.WithContext(context.WithValue(ctx, callerErrKey{}, err))
+		}
+	default:
 		return r.WithContext(context.WithValue(ctx, callerErrKey{}, err))
 	}
 	return r.WithContext(db.WithCallerSession(ctx, c))

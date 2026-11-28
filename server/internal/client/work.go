@@ -78,8 +78,11 @@ type SessionActivity struct {
 	Activity execution.Activity `json:"activity"`
 }
 
-func (c *Client) Activity(ctx context.Context, id int64, q execution.ActivityQuery) (SessionActivity, error) {
+func (c *Client) Activity(ctx context.Context, id int64, attempt *int, q execution.ActivityQuery) (SessionActivity, error) {
 	params := url.Values{}
+	if attempt != nil {
+		params.Set("attempt", strconv.Itoa(*attempt))
+	}
 	if q.Limit != 0 {
 		params.Set("limit", strconv.Itoa(q.Limit))
 	}

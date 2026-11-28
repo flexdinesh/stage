@@ -147,10 +147,35 @@ func TestContractSessionSurface(t *testing.T) {
 			f.mu.Unlock()
 			check(request(http.MethodGet, "activity", "", nil), 502, "bogus")
 		}
+		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateLaunching, BeginAttempt: true}); err != nil {
+			t.Fatal(err)
+		}
+		second := execution.SessionRef{ConnectionID: session.ConnectionID, ExternalSessionID: "second-activity-session"}
+		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateRunning, Session: &second}); err != nil {
+			t.Fatal(err)
+		}
+		f.mu.Lock()
+		f.activity = execution.Activity{}
+		f.mu.Unlock()
+		for _, tc := range []struct {
+			query string
+			ref   execution.SessionRef
+		}{{"?attempt=1", session}, {"?attempt=2", second}, {"", second}} {
+			check(request(http.MethodGet, "activity"+tc.query, "", &session), 200, "activity")
+			f.mu.Lock()
+			read := f.activityRef
+			f.mu.Unlock()
+			if read != tc.ref {
+				t.Fatalf("activity%s read %+v, want %+v", tc.query, read, tc.ref)
+			}
+		}
+		check(request(http.MethodGet, "activity?attempt=3", "", nil), 404, "not found")
+		check(request(http.MethodPost, "messages", `{"text":"private","delivery":"steer"}`, &session), 403, "self_action_forbidden")
 		f.mu.Lock()
 		f.surface = false
 		f.mu.Unlock()
 		check(request(http.MethodGet, "activity", "", nil), 409, "Recent activity is in Hosted.")
+		check(request(http.MethodGet, "activity?attempt=1", "", nil), 409, "Recent activity is in Hosted.")
 		check(request(http.MethodPost, "messages", `{"text":"private","delivery":"steer"}`, nil), 409, "Steer in Hosted.")
 	})
 }
@@ -198,7 +223,7 @@ func TestContractSessionSurfaceWithOlderWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	rig.ReplaceResult(remote.KindFeatures, body)
-	_, err = older.Coordinator.Activity(ctx, task.ID, execution.ActivityQuery{})
+	_, err = older.Coordinator.Activity(ctx, task.ID, nil, execution.ActivityQuery{})
 	checkUnavailable(execution.OpActivity, err)
 	if _, err := older.Coordinator.Send(ctx, task.ID, execution.Message{Text: "legacy send"}, nil); err != nil {
 		t.Fatalf("legacy send unavailable: %v", err)

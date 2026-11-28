@@ -47,6 +47,11 @@ func TestLegacyUnconfirmedLaunchLinksOnlyAfterPreview(t *testing.T) {
 		t.Fatalf("link launched or changed identity %+v", attached)
 	}
 	e.must("POST", endpoint, body, 409, nil)
+	history, err := e.store.TaskSessions(t.Context(), pending.ID)
+	if err != nil || len(history) != 1 || history[0].Attempt != 1 || !history[0].Current ||
+		history[0].Session.ExternalSessionID != existing.ThreadID {
+		t.Fatalf("manual link history %+v: %v", history, err)
+	}
 }
 func TestRecoveryPreviewRejectsForeignOwnedAndUnverifiedSessions(t *testing.T) {
 	e := newEnv(t)

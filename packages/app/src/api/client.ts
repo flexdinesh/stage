@@ -59,6 +59,7 @@ import type {
   SessionRequest,
   Task,
   TaskDetail,
+  TaskSessionSnapshot,
   LaunchLinkPreview,
   TaskList,
   TaskListQuery,
@@ -272,6 +273,7 @@ export function createApi(transport: Transport) {
     previewLaunchLink: (id: number, link: string) => apiFetch<LaunchLinkPreview>(`/tasks/${id}/launch-link/preview`, { method: "POST", body: { link } }),
     attachLaunchLink: (id: number, link: string, preview: LaunchLinkPreview) => apiFetch<Task>(`/tasks/${id}/launch-link`, { method: "POST", body: { link, attempt: preview.attempt, revision: preview.revision, environment: preview.environment } }),
     task: (id: number) => apiFetch<TaskDetail>(`/tasks/${id}`),
+    taskSession: (id: number, attempt: number) => apiFetch<TaskSessionSnapshot>(`/tasks/${id}/sessions/${attempt}`),
     completionPreview: (id: number) => apiFetch<CompletionPreview>(`/tasks/${id}/completion-preview`),
     completeTask: (id: number, body: AcceptanceRequest) => apiFetch<AcceptanceResult>(`/tasks/${id}/complete`, post(body)),
     reopenTask: (id: number, body: AcceptanceRequest) => apiFetch<AcceptanceResult>(`/tasks/${id}/reopen`, post(body)),
@@ -293,7 +295,7 @@ export function createApi(transport: Transport) {
       apiFetch<ActionResult>(`/tasks/${id}/actions/${encodeURIComponent(actionId)}`, actionPost(input, confirmed)),
     /** What the task's session waits on (409 `operation_unavailable` when its harness can't answer from Stage). */
     taskRequests: (id: number) => apiFetch<{requests: SessionRequest[]}>(`/tasks/${id}/requests`),
-    getActivity: (id: number, q: {limit?: number} = {}) =>
+    getActivity: (id: number, q: {attempt?: number; limit?: number} = {}) =>
       apiFetch<{activity: Activity}>(`/tasks/${id}/activity${toQuery(q)}`),
     /**
      * Answers one request (400 the answer doesn't fit, 404 no longer pending, 403 `self_action_forbidden` from the task's own session). With
@@ -360,7 +362,7 @@ export function createApi(transport: Transport) {
       apiFetch<Task>(`/connections/${ref.connectionId}/sessions/${encodeURIComponent(ref.externalSessionId)}/adopt`, { ...post(body), signal }),
     openingPrompt: (taskId: number, full = false) =>
       apiFetch<OpeningPromptResponse>(`/tasks/${taskId}/opening-prompt${full ? "?full=true" : ""}`),
-    resolveRef: (ref: string, connectionId?: number, cached?: boolean, signal?: AbortSignal) => apiFetch<{ kind: string; taskId: number | null; session: SessionRef | null; links: ExecutionLinks; state?: TaskState; sessionTitle?: string }>(`/refs/resolve${toQuery({ ref, connectionId, cached })}`, { signal }),
+    resolveRef: (ref: string, connectionId?: number, cached?: boolean, signal?: AbortSignal) => apiFetch<{ kind: string; taskId: number | null; attempt?: number; session: SessionRef | null; links: ExecutionLinks; state?: TaskState; sessionTitle?: string }>(`/refs/resolve${toQuery({ ref, connectionId, cached })}`, { signal }),
 
     snippets: () => apiFetch<SnippetList>("/snippets"),
     createSnippet: (body: CreateSnippetRequest) => apiFetch<Snippet>("/snippets", post(body)),

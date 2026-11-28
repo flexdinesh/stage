@@ -173,6 +173,9 @@ func (s *Store) FinishAttempt(ctx context.Context, a Attempt, o execution.Observ
 		if !confirmed {
 			return Conflict("launch already changed; reload the preview")
 		}
+		if err := s.recordTaskSession(ctx, tx, a.TaskID, a.Number, sid); err != nil {
+			return err
+		}
 		attached, err := tx.Tasks().Confirm(ctx, a, o.State, sid, o.EndedAt)
 		if err != nil {
 			return err

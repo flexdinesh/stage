@@ -124,7 +124,7 @@ reason for each unavailable operation.
 | --- | --- | --- |
 | `steer` | `Interactive.Send` with `DeliverySteer` injects into the running turn. Return `Busy` with guidance if the turn ended. | `adapter.deliver` |
 | `queue` | `Interactive.Send` with `DeliveryQueue` admits a message into the harness's native queue during a running turn. The harness delivers it as the next turn. | `adapter.deliver` |
-| `activity` | `ActivityReader.Activity` returns recent items oldest first, plus the current plan and changed files. Use the requested limit and set `Truncated` when older items exist. | `adapter.activity` |
+| `activity` | `ActivityReader.Activity` reads a scoped session ref, including past attempts, and returns recent items oldest first with the plan and changed files. Use the requested limit and set `Truncated` when older items exist. | `adapter.activity` |
 
 Return `Invalid` if a caller supplies an unsupported delivery. Keep the
 session data in the harness and expose harness-specific activity details

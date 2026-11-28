@@ -1091,6 +1091,7 @@ type RefOut struct {
 	SessionTitle string                 `json:"sessionTitle,omitempty"`
 	Kind         string                 `json:"kind"` // task | tree | schedule | project | journal | session
 	Task         *client.TaskDetail     `json:"task"`
+	Attempt      *int                   `json:"attempt,omitempty"`
 	Tree         *client.TreeDetail     `json:"tree,omitempty"`
 	Schedule     *client.ScheduleDetail `json:"schedule,omitempty"`
 	Project      *db.Project            `json:"project,omitempty"`
@@ -1112,7 +1113,7 @@ func (o *Ops) ReadRef(ctx context.Context, a RefArgs) (RefOut, error) {
 	if err != nil {
 		return RefOut{}, err
 	}
-	out := RefOut{Kind: r.Kind, SessionRef: r.Session, SessionTitle: r.SessionTitle, Links: r.Links}
+	out := RefOut{Kind: r.Kind, SessionRef: r.Session, SessionTitle: r.SessionTitle, Links: r.Links, Attempt: r.Attempt}
 	switch {
 	case r.EntryID != nil:
 		e, err := o.Client.GetJournalEntry(ctx, *r.EntryID)
@@ -1151,7 +1152,9 @@ func (o *Ops) ReadRef(ctx context.Context, a RefArgs) (RefOut, error) {
 			return out, err
 		}
 		out.Task = &t
-		out.Links = t.Links
+		if r.Attempt == nil {
+			out.Links = t.Links
+		}
 	}
 	if r.Session == nil {
 		out.Next = "Not launched yet: no session or conversation."

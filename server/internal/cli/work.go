@@ -179,8 +179,9 @@ func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 		}
 		return printTask(res)
 	case "activity":
-		var limit int
+		var limit, attempt int
 		c.fs.IntVar(&limit, "limit", 0, "recent item count (default 30, capped at 100)")
+		c.fs.IntVar(&attempt, "attempt", 0, "read this attempt's session (default current)")
 		if err := c.parse(rest); err != nil {
 			return err
 		}
@@ -188,7 +189,11 @@ func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 		if err != nil {
 			return err
 		}
-		res, err := c.ops().GetSessionActivity(ctx, agenttools.SessionActivityArgs{TaskID: id, Limit: limit})
+		in := agenttools.SessionActivityArgs{TaskID: id, Limit: limit}
+		if c.set("attempt") {
+			in.Attempt = &attempt
+		}
+		res, err := c.ops().GetSessionActivity(ctx, in)
 		if err != nil {
 			return err
 		}

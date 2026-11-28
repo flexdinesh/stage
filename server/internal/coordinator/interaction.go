@@ -36,18 +36,23 @@ func (s *Service) sessionOperation(ctx context.Context, id int64, op execution.O
 	if t.Session == nil {
 		return t, nil, db.Conflict("task has no execution session")
 	}
-	a, err := s.conns.Catalog(t.ConnectionID)
+	a, err := s.connectionOperation(ctx, t.Session.ConnectionID, op)
+	return t, a, err
+}
+
+func (s *Service) connectionOperation(ctx context.Context, connectionID int64, op execution.Op) (execution.Catalog, error) {
+	a, err := s.conns.Catalog(connectionID)
 	if err != nil {
-		return t, nil, err
+		return nil, err
 	}
 	features, err := a.Features(ctx)
 	if err != nil {
-		return t, nil, harnessErr(err)
+		return nil, harnessErr(err)
 	}
 	if avail := features.Operations[op]; !avail.Available {
-		return t, nil, unavailable(op, avail.Reason)
+		return nil, unavailable(op, avail.Reason)
 	}
-	return t, a, nil
+	return a, nil
 }
 
 // CanAnswer reports whether connection id offers respond or send, so a
@@ -87,9 +92,27 @@ func (s *Service) Requests(ctx context.Context, id int64) ([]execution.Request, 
 	return rs, nil
 }
 
-// Activity reads recent activity for the task's current session (OpActivity).
-func (s *Service) Activity(ctx context.Context, id int64, q execution.ActivityQuery) (execution.Activity, error) {
-	t, a, err := s.sessionOperation(ctx, id, execution.OpActivity)
+// Activity reads an attempt's recent activity (OpActivity). A nil attempt
+// selects the task's current session.
+func (s *Service) Activity(ctx context.Context, id int64, attempt *int, q execution.ActivityQuery) (execution.Activity, error) {
+	var ref execution.SessionRef
+	if attempt == nil {
+		t, err := s.store.GetTask(ctx, id)
+		if err != nil {
+			return execution.Activity{}, err
+		}
+		if t.Session == nil {
+			return execution.Activity{}, db.Conflict("task has no execution session")
+		}
+		ref = *t.Session
+	} else {
+		historical, err := s.store.TaskSession(ctx, id, *attempt)
+		if err != nil {
+			return execution.Activity{}, err
+		}
+		ref = historical.Session
+	}
+	a, err := s.connectionOperation(ctx, ref.ConnectionID, execution.OpActivity)
 	if err != nil {
 		return execution.Activity{}, err
 	}
@@ -98,7 +121,7 @@ func (s *Service) Activity(ctx context.Context, id int64, q execution.ActivityQu
 		return execution.Activity{}, unavailable(execution.OpActivity, "this connection does not provide session activity")
 	}
 	q = q.Bounded()
-	out, err := reader.Activity(ctx, *t.Session, q)
+	out, err := reader.Activity(ctx, ref, q)
 	if err != nil {
 		return execution.Activity{}, harnessErr(err)
 	}

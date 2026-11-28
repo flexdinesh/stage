@@ -261,7 +261,7 @@ func (r tasks) InsertAdopted(ctx context.Context, in store.AdoptedInsert) (int64
 	var id int64
 	err := r.QueryRow(ctx, `INSERT INTO tasks(project_id,title,prompt,state,connection_id,session_id,
 	 execution_config,adopted,launch_attempt,launched_at,finished_at,created_by_user_id,source_machine_id)
-	 VALUES($1,$2,'',$3,$4,$5,$6,true,1,$7,$8,$9,$10) RETURNING id`, in.ProjectID, in.Title, in.State, in.ConnectionID, in.SessionID, in.ExecutionConfig, in.LaunchedAt, in.FinishedAt, in.CreatedBy, in.SourceMachineID).Scan(&id)
+	 VALUES($1,$2,'',$3,$4,$5,$6,true,$7,$8,$9,$10,$11) RETURNING id`, in.ProjectID, in.Title, in.State, in.ConnectionID, in.SessionID, in.ExecutionConfig, in.LaunchAttempt, in.LaunchedAt, in.FinishedAt, in.CreatedBy, in.SourceMachineID).Scan(&id)
 	return id, err
 }
 

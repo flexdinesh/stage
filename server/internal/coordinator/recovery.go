@@ -90,6 +90,13 @@ func (s *Service) previewExisting(ctx context.Context, id int64, link string) (L
 	if err == nil && owner.ID != id {
 		return p, db.Conflict("Session already belongs to task #%d.", owner.ID)
 	}
+	recorded, err := s.store.TaskSessionOwner(ctx, ref)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return p, err
+	}
+	if err == nil && (recorded.TaskID != id || recorded.Attempt != a.Number) {
+		return p, db.Conflict("Session already belongs to task #%d attempt %d.", recorded.TaskID, recorded.Attempt)
+	}
 	d, _ := s.conns.Descriptor(t.Harness)
 	o.Facts = d.DisplayFacts(o.Facts)
 	p = LinkPreview{Attempt: a.Number, Revision: a.Revision, Environment: h.Identity, Observation: o}

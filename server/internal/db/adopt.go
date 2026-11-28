@@ -81,6 +81,13 @@ func (s *Store) adoptSession(ctx context.Context, tx store.Tx, in AdoptInput) (i
 	if !errors.Is(err, ErrNotFound) {
 		return 0, false, err
 	}
+	owner, err := tx.Tasks().SessionOwner(ctx, ref)
+	if err == nil {
+		return owner.TaskID, false, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return 0, false, err
+	}
 	if err := connectionUsable(ctx, tx, ref.ConnectionID); err != nil {
 		return 0, false, err
 	}
@@ -136,8 +143,10 @@ func (s *Store) adoptSession(ctx context.Context, tx store.Tx, in AdoptInput) (i
 		}
 	}
 	launched := &o.CreatedAt
+	attempt := 1
 	if state == StateBacklog {
 		launched = nil
+		attempt = 0
 	}
 	var finished *time.Time
 	if state.Finished() {
@@ -148,8 +157,11 @@ func (s *Store) adoptSession(ctx context.Context, tx store.Tx, in AdoptInput) (i
 	}
 	id, err = tx.Tasks().InsertAdopted(ctx, store.AdoptedInsert{ProjectID: projectID, Title: title, State: state,
 		ConnectionID: ref.ConnectionID, SessionID: sid, ExecutionConfig: o.Config,
-		LaunchedAt: launched, FinishedAt: finished, CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx)})
+		LaunchAttempt: attempt, LaunchedAt: launched, FinishedAt: finished, CreatedBy: ActingUser(ctx), SourceMachineID: ActingMachine(ctx)})
 	if err != nil {
+		return 0, false, err
+	}
+	if err := s.recordTaskSession(ctx, tx, id, attempt, sid); err != nil {
 		return 0, false, err
 	}
 	if err = addTaskEvent(ctx, tx, id, nil, state, "adopted session"); err != nil {
