@@ -59,6 +59,8 @@ type Task struct {
 	Workspace       *TaskWorkspace    `json:"workspace"`
 	// Steering: the task's latest steerer binding (nil: it never steered).
 	Steering *TaskSteering `json:"steering"`
+	// Hold: the task's held needs_input notification (nil: none; ADR 0013).
+	Hold *TaskHold `json:"hold"`
 	// Harness of the connection; ConnectionActive is false once its
 	// instance was replaced (ConnectionLabel names that instance).
 	Harness                 string      `json:"harness"`

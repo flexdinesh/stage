@@ -274,6 +274,11 @@ func Run(ctx context.Context, o Options) error {
 	eng.Discovery.OnFullSync = moved.Kick
 	notifier := notify.New(store, cfg.PublicURL, logger)
 	notifier.SharedAccess = access != nil
+	// Holds members' needs_input notifications while a steerer can answer
+	// (ADR 0013); kicked by transitions and tree or steering changes.
+	holds := notify.NewHolds(notifier)
+	holds.CanAnswer = eng.Coordinator.CanAnswer
+	notifier.Holds = holds
 	// One release and one schedule runner per active connection, on every
 	// machine; the sets follow instance switches.
 	releases := newPerConnection(store, func(id int64) *release.Runner {
@@ -291,6 +296,7 @@ func Run(ctx context.Context, o Options) error {
 	})
 	kickTrees := func() {
 		releases.Each(func(r *release.Runner) { r.Kick() })
+		holds.Kick()
 	}
 	// The coordinator and runners follow the machine's adapters.
 	local.OnChange(func(old, next int64) {
@@ -308,11 +314,13 @@ func Run(ctx context.Context, o Options) error {
 		releases.Each(func(r *release.Runner) { r.OnTransition(ctx, c) })
 		eng.Observe.Kick()
 		notifier.OnTransition(ctx, c)
+		holds.Kick()
 		inbox.Signal()
 	}
 	eng.Coordinator.OnObservedTransition = func(ctx context.Context, c workevent.TaskChange) {
 		releases.Each(func(r *release.Runner) { r.OnTransition(ctx, c) })
 		eng.Observe.Kick()
+		holds.Kick()
 		inbox.Signal()
 	}
 	eng.Observe.RecordNotification = notifier.RecordObservation
@@ -424,6 +432,7 @@ func Run(ctx context.Context, o Options) error {
 		case scheduleSince = <-workReady:
 		}
 		wg.Go(func() { notifier.Run(systemCtx) })
+		wg.Go(func() { holds.Run(systemCtx) })
 		wg.Go(func() { pruneNotifications(systemCtx, store, logger, inbox.Signal) })
 		wg.Go(func() { eng.Run(systemCtx) })
 		wg.Go(func() { releases.Run(systemCtx) })
@@ -439,7 +448,7 @@ func Run(ctx context.Context, o Options) error {
 	// Transcript pollers and their event streams end with ctx, so Shutdown
 	// does not wait on open streams.
 	apiHandler := api.NewRouter(api.Deps{
-		Config: cfg, Store: store, Engine: eng, Push: notifier, Logger: logger,
+		Config: cfg, Store: store, Engine: eng, Push: notifier, Holds: holds, Logger: logger,
 		Inbox: inbox, Instance: meta, OnTreeChange: kickTrees,
 		Access: access, InstallationID: state.ID,
 		LiveConnectors: func() harness.Connectors {

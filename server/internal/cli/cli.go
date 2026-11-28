@@ -225,6 +225,7 @@ Usage:
   stage task respond ID RID [--option O] [--text T] [--answers JSON] [--expect-revision N]
   stage task send ID --text TEXT [--expect-revision N]   message the task's session
                                       --expect-revision: first answer wins (409 already_answered)
+  stage task escalate ID --reason TEXT   as the tree's steerer, notify the user about a member's wait now
   stage task opening-prompt ID [--full]
                                       complete, reopen, respond and send: never your own task or session
   stage tree ls [--status active|done|archived|all] [--all] [--project P]
@@ -232,7 +233,9 @@ Usage:
   stage tree new --title T [--start-mode auto|manual] ID[:NEED,..]...
   stage tree add TREE_ID TASK_ID [--needs ID,..]   a task in another tree moves
   stage tree rm TASK_ID               take a task out of its tree (dependents take its needs)
-  stage tree edit ID [--title T] [--start-mode auto|manual]
+  stage tree edit ID [--title T] [--start-mode auto|manual] [--hold DURATION]
+                                      --hold: how long a member's needs-input notification waits
+                                      for the steerer (5m default, 0/off, at most 1h)
   stage tree start ID                 start every ready member
   stage tree done|archive ID [--undo] mark done / archive (--undo reopens)
   stage tree rm-tree ID               delete a tree and its tasks (none started)

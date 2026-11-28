@@ -214,7 +214,7 @@ func newEnvWrapped(t *testing.T, wrap func(*t3.Adapter) execution.Adapter, opts 
 	runner.OnReady = push.OnReady
 	deps := api.Deps{
 		Config: config.Config{},
-		Store:  store, Engine: svc, Push: push, Logger: log, Harnesses: testHarnesses,
+		Store:  store, Engine: svc, Push: push, Holds: notify.NewHolds(push), Logger: log, Harnesses: testHarnesses,
 	}
 	for _, opt := range opts {
 		opt(&deps)

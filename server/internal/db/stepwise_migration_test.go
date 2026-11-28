@@ -101,6 +101,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	51: {{"existing task starts at revision 0, unanswered", seedV0040SharedAccess, checkV0051StateRevision}},
 	52: {{"one active steerer per tree and per task", seedV0040SharedAccess, checkV0052TreeSteering}},
 	53: {{"one steering brief per task attempt", seedV0040SharedAccess, checkV0053SteeringLaunchContext}},
+	54: {{"one held notification per task; tree hold defaults to 300", seedV0040SharedAccess, checkV0054NotificationHolds}},
 }
 
 func checkV0053SteeringLaunchContext(t *testing.T, pool *sqlite.DB) {
@@ -112,6 +113,30 @@ func checkV0053SteeringLaunchContext(t *testing.T, pool *sqlite.DB) {
 	wantRows(t, pool, `SELECT task_id,attempt,brief FROM steering_launch_context ORDER BY attempt`, "6|1|b1", "6|2|b2")
 	mustExec(t, pool, `DELETE FROM tasks WHERE id=6`)
 	wantRows(t, pool, `SELECT count(*) FROM steering_launch_context`, "0")
+}
+
+func checkV0054NotificationHolds(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	mustExec(t, pool, `INSERT INTO task_trees(id,title) VALUES(9,'Steered')`)
+	wantRows(t, pool, `SELECT steering_hold_seconds FROM task_trees WHERE id=9`, "300")
+	mustExec(t, pool, `INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest) VALUES(9,6,'r1','d')`)
+	held := `INSERT INTO notification_holds(task_id,state_revision,steerer_id,held_at,hold_until) VALUES(6,1,1,stage_now(),stage_now())`
+	mustExec(t, pool, held)
+	for _, q := range []string{
+		held,
+		`UPDATE task_trees SET steering_hold_seconds=3601 WHERE id=9`,
+		`UPDATE task_trees SET steering_hold_seconds=-1 WHERE id=9`,
+		`UPDATE notification_holds SET state='unknown'`,
+	} {
+		if _, err := pool.Exec(q); err == nil {
+			t.Fatalf("accepted %s", q)
+		}
+	}
+	mustExec(t, pool, `UPDATE notification_holds SET state='cancelled',reason='answered'`)
+	mustExec(t, pool, held)
+	mustExec(t, pool, `INSERT INTO notifications(event,task_id,title,url,note) VALUES('needs_input',6,'T','/tasks/6','Steerer did not answer')`)
+	wantRows(t, pool, `SELECT state,count(*) FROM notification_holds GROUP BY state ORDER BY state`, "cancelled|1", "held|1")
+	wantRows(t, pool, `SELECT note FROM notifications`, "Steerer did not answer")
 }
 
 func checkV0051StateRevision(t *testing.T, pool *sqlite.DB) {

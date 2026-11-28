@@ -75,6 +75,9 @@ func (s *Store) RecordTaskAnswer(ctx context.Context, id int64, ref SessionRef, 
 			if err := tx.Tasks().SetAnswered(ctx, id, *answered); err != nil {
 				return err
 			}
+			if err := tx.Holds().CancelTask(ctx, id, HoldReasonAnswered, answered); err != nil {
+				return err
+			}
 		}
 		return addTaskEventType(ctx, tx, id, &task.State, task.State, detail, nil, event)
 	})
@@ -121,6 +124,10 @@ func addTaskEventType(ctx context.Context, tx store.Tx, taskID int64, from *Task
 		// Every state write journals here, so this counts each real
 		// transition once (ADR 0013 first answer wins).
 		if err := tx.Tasks().BumpStateRevision(ctx, taskID); err != nil {
+			return err
+		}
+		// The wait a held notification was for ended (ADR 0013 hold).
+		if err := tx.Holds().CancelTask(ctx, taskID, HoldReasonStateChanged, nil); err != nil {
 			return err
 		}
 	}
@@ -405,6 +412,7 @@ const (
 	SteerTreeStatus        = "tree_status"
 	SteerStarted           = "steering_started"
 	SteerEnded             = "steering_ended"
+	SteerHoldEscalated     = "hold_escalated"
 )
 
 // steerReplyRunes caps member_done's reply excerpt.
@@ -683,4 +691,59 @@ func endSteerer(ctx context.Context, tx store.Tx, s store.Steerer, reason store.
 		return nil
 	}
 	return treeEvent(ctx, tx, s.TreeID, "steering_ended", fmt.Sprintf("Steering by #%d ended (%s)", task, reason))
+}
+
+// finishHold moves held hold h to state with reason and its notification;
+// an escalation enqueues hold_escalated in the task's tree.
+func finishHold(ctx context.Context, tx store.Tx, h store.Hold, state store.HoldState, reason *string, notificationID *int64) error {
+	finished, err := tx.Holds().Finish(ctx, h.ID, state, reason, notificationID)
+	if err != nil || !finished {
+		return err
+	}
+	if state != store.HoldEscalated {
+		return nil
+	}
+	t, err := tx.Tasks().Get(ctx, h.TaskID)
+	if err != nil {
+		return err
+	}
+	return steerHoldEscalated(ctx, tx, t, reason, true)
+}
+
+// steerHoldEscalated enqueues hold_escalated for member t: the user was
+// notified because the steerer escalated (reason) or did not answer in
+// time (reason nil); held reports whether a hold was released.
+func steerHoldEscalated(ctx context.Context, tx store.Tx, t Task, reason *string, held bool) error {
+	if t.TreeID == nil {
+		return nil
+	}
+	id := t.ID
+	return enqueueSteering(ctx, tx, *t.TreeID, SteerHoldEscalated, &id, func() (map[string]any, error) {
+		p := map[string]any{"title": t.Title, "stateRevision": t.StateRevision, "held": held}
+		if reason != nil {
+			p["reason"] = *reason
+		} else {
+			p["timeout"] = true
+		}
+		return p, nil
+	})
+}
+
+// setSteeringHold sets tree id's steering hold, journaling a change.
+func setSteeringHold(ctx context.Context, tx store.Tx, id, seconds int64) error {
+	old, err := tx.Trees().SteeringHold(ctx, id)
+	if err != nil || old == seconds {
+		return err
+	}
+	if err := tx.Trees().SetSteeringHold(ctx, id, seconds); err != nil {
+		return err
+	}
+	return treeEvent(ctx, tx, id, "steering_hold_changed", fmt.Sprintf("Steering hold: %s -> %s", holdText(old), holdText(seconds)))
+}
+
+func holdText(seconds int64) string {
+	if seconds == 0 {
+		return "off"
+	}
+	return (time.Duration(seconds) * time.Second).String()
 }

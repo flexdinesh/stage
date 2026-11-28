@@ -96,6 +96,9 @@ type Notifier struct {
 	Inbox *Hub
 	// SharedAccess records workspace events even when every recipient mutes them.
 	SharedAccess bool
+	// Holds holds tree members' needs_input notifications while a steerer
+	// can answer them (nil: never held; ADR 0013).
+	Holds *Holds
 }
 
 // FallbackSubject is the VAPID subject when STAGE_PUBLIC_URL is not https.
@@ -177,6 +180,17 @@ func (n *Notifier) handle(ctx context.Context, e event) {
 		n.sendAll(ctx, e.savedID, e.to(), PayloadFor(notificationFrom(*e.saved), badge))
 		return
 	}
+	// A hold comes before the filter: release applies it (holds.go).
+	if n.Holds != nil {
+		held, err := n.Holds.hold(ctx, n.store, e.task)
+		if err != nil && ctx.Err() == nil {
+			n.log.Warn("hold notification; notifying", "err", err)
+		}
+		if held {
+			n.Holds.Kick()
+			return
+		}
+	}
 	if !n.SharedAccess && !n.enabled(ctx, e.to()) {
 		return
 	}
@@ -242,6 +256,15 @@ func (n *Notifier) RecordObservation(ctx context.Context, tx *db.Store, change w
 	if !workevent.Notifiable(e.to()) {
 		return nil, nil
 	}
+	if n.Holds != nil {
+		held, err := n.Holds.hold(ctx, tx, change.Task)
+		if err != nil {
+			return nil, err
+		}
+		if held {
+			return n.Holds.Kick, nil
+		}
+	}
 	if !n.SharedAccess {
 		prefs, err := tx.GetPreferences(db.WithUser(ctx, db.DefaultUser))
 		if err != nil || !slices.Contains(prefs.NotifyEvents, e.to()) {
@@ -291,6 +314,9 @@ func PayloadFor(n db.Notification, badge int) Payload {
 	if n.ProjectTitle != nil {
 		p.Body += " · " + *n.ProjectTitle
 	}
+	if n.Note != nil {
+		p.Body += " · " + *n.Note
+	}
 	if strings.HasPrefix(key, "task:") && n.ExternalSessionID != nil {
 		p.URL = "/tasks/" + strings.TrimPrefix(key, "task:")
 	}
@@ -302,7 +328,7 @@ func PayloadFor(n db.Notification, badge int) Payload {
 
 // notificationFrom is the row rec will be stored as (no id or timestamps).
 func notificationFrom(rec db.NewNotification) db.Notification {
-	n := db.Notification{Event: rec.Event, TaskID: rec.TaskID, Title: rec.Title, ProjectTitle: rec.ProjectTitle, URL: rec.URL}
+	n := db.Notification{Event: rec.Event, TaskID: rec.TaskID, Title: rec.Title, ProjectTitle: rec.ProjectTitle, URL: rec.URL, Note: rec.Note}
 	if rec.Session != nil {
 		n.ConnectionID = rec.Session.ConnectionID
 		n.ExternalSessionID = &rec.Session.ExternalSessionID

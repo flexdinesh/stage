@@ -24,6 +24,8 @@ type Notification struct {
 	ReadAt            *time.Time `json:"readAt"`
 	// CurrentState: the task's state or an external session's observed state. nil = unknown (deleted/unobserved).
 	CurrentState *TaskState `json:"currentState"`
+	// Note: why a held notification was released ("Steerer did not answer").
+	Note *string `json:"note"`
 }
 
 // NewNotification is what the notifier records.
@@ -35,6 +37,7 @@ type NewNotification struct {
 	ProjectTitle *string
 	URL          string
 	ObservedAt   *time.Time // observation time for created_at
+	Note         *string
 }
 
 // NotificationGroup summarizes all retained notifications for one task or session.

@@ -81,9 +81,10 @@ func newHarness(t *testing.T, opts ...func(*api.Deps)) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	push := notify.New(store, "https://stage.test", log)
 	deps := api.Deps{
 		Config: config.Config{},
-		Store:  store, Engine: h.engine, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:  store, Engine: h.engine, Push: push, Holds: notify.NewHolds(push), Logger: log,
 		Harnesses: reg, Connectors: connectors,
 	}
 	for _, opt := range opts {

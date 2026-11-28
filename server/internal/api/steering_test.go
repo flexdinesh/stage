@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/buildinfo"
@@ -328,5 +329,89 @@ func TestSteeringBriefAtLaunch(t *testing.T) {
 	}
 	if got := e.steeringBriefTask(st); got.CurrentSteering != nil || strings.Contains(e.lastMessage(), "<stage-steering-brief") {
 		t.Fatalf("ended steerer relaunch: %+v", got.CurrentSteering)
+	}
+}
+
+// escalate_to_user over HTTP: only the tree's active steerer (403
+// not_steerer otherwise); it releases the member's hold with the reason.
+// PATCH steeringHoldSeconds is 0 to 3600; Task JSON carries the hold.
+func TestTreeSteeringHoldAndEscalate(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/hold")
+	tr, a := e.steeringTree(p.ID, "Hold it")
+	tree := fmt.Sprintf("/api/trees/%d", tr.ID)
+	for _, v := range []string{`{"steeringHoldSeconds":-1}`, `{"steeringHoldSeconds":3601}`, `{"steeringHoldSeconds":null}`} {
+		if code, b := e.raw("PATCH", tree, v); code != 400 {
+			t.Fatalf("%s: %d %v", v, code, b)
+		}
+	}
+	var patched struct {
+		SteeringHoldSeconds int64 `json:"steeringHoldSeconds"`
+	}
+	e.must("PATCH", tree, map[string]any{"steeringHoldSeconds": 120}, 200, &patched)
+	if patched.SteeringHoldSeconds != 120 {
+		t.Fatalf("hold %d", patched.SteeringHoldSeconds)
+	}
+
+	var steered steererResponse
+	e.must("POST", tree+"/steerer", e.steerBody(p.ID, "h1", nil), 201, &steered)
+	st := steered.Task
+	ctx := t.Context()
+	steerRef := sessionOf(e, st.ID)
+	if _, err := e.store.TransitionTask(ctx, db.Transition{TaskID: st.ID, To: db.StateRunning, Session: &steerRef}); err != nil {
+		t.Fatal(err)
+	}
+	memberRef := db.SessionRef{ConnectionID: steerRef.ConnectionID, ExternalSessionID: "member-hold"}
+	if _, err := e.store.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateNeedsInput, Session: &memberRef}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if held, err := e.store.HoldNeedsInput(ctx, a.ID, now); err != nil || !held {
+		t.Fatalf("hold: %v %v", held, err)
+	}
+	type holdTask struct {
+		Hold *struct {
+			Until         time.Time `json:"until"`
+			SteererTaskID *int64    `json:"steererTaskId"`
+		} `json:"hold"`
+	}
+	var got holdTask
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", a.ID), nil, 200, &got)
+	if got.Hold == nil || got.Hold.SteererTaskID == nil || *got.Hold.SteererTaskID != st.ID || got.Hold.Until.Sub(now).Round(time.Second) != 120*time.Second {
+		t.Fatalf("task hold %+v", got.Hold)
+	}
+
+	escalate := fmt.Sprintf("/api/tasks/%d/escalate", a.ID)
+	if code, b := e.raw("POST", escalate, `{"reason":"why"}`); code != 403 || b["code"] != "not_steerer" {
+		t.Fatalf("no caller: %d %v", code, b)
+	}
+	asMember := map[string]string{buildinfo.APIVersionHeader: apiVersion, agentctx.CallerHeader: fmt.Sprintf("%d:%s", memberRef.ConnectionID, memberRef.ExternalSessionID)}
+	if rec := raw(t, e.h, "POST", escalate, asMember, map[string]any{"reason": "why"}, nil); rec.Code != 403 {
+		t.Fatalf("member caller: %d %s", rec.Code, rec.Body.String())
+	}
+	asSteerer := map[string]string{buildinfo.APIVersionHeader: apiVersion, agentctx.CallerHeader: fmt.Sprintf("%d:%s", steerRef.ConnectionID, steerRef.ExternalSessionID)}
+	if rec := raw(t, e.h, "POST", escalate, asSteerer, map[string]any{"reason": strings.Repeat("x", 501)}, nil); rec.Code != 400 {
+		t.Fatalf("long reason: %d %s", rec.Code, rec.Body.String())
+	}
+	var after holdTask
+	if rec := raw(t, e.h, "POST", escalate, asSteerer, map[string]any{"reason": "pick the API shape"}, &after); rec.Code != 200 || after.Hold != nil {
+		t.Fatalf("escalate: %d %s", rec.Code, rec.Body.String())
+	}
+	ns, err := e.store.ListNotifications(ctx, 10, nil)
+	if err != nil || len(ns) != 1 || ns[0].Note == nil || *ns[0].Note != "Steerer: pick the API shape" {
+		t.Fatalf("notifications %+v %v", ns, err)
+	}
+	var page steeringPage
+	e.must("GET", tree+"/steering/events", nil, 200, &page)
+	last := page.Events[len(page.Events)-1]
+	if last.Kind != "hold_escalated" || !last.Self || last.Payload["reason"] != "pick the API shape" {
+		t.Fatalf("last event %+v", last)
+	}
+	// Nothing held and not waiting: 409 not_waiting.
+	if _, err := e.store.TransitionTask(ctx, db.Transition{TaskID: a.ID, To: db.StateRunning, Session: &memberRef}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := raw(t, e.h, "POST", escalate, asSteerer, map[string]any{"reason": "again"}, nil); rec.Code != 409 || !strings.Contains(rec.Body.String(), "not_waiting") {
+		t.Fatalf("not waiting: %d %s", rec.Code, rec.Body.String())
 	}
 }

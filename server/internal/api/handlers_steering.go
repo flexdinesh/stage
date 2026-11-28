@@ -177,3 +177,36 @@ func (s *server) steeringEvents(w http.ResponseWriter, r *http.Request) error {
 	writeJSON(w, http.StatusOK, map[string]any{"events": events, "hasMore": more})
 	return nil
 }
+
+// escalateTask: POST /api/tasks/{id}/escalate {reason}. Only the caller
+// session of the active steerer of the task's tree (else 403 not_steerer):
+// it releases the task's held notification now, or notifies now when the
+// task needs input and nothing is held.
+func (s *server) escalateTask(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	var in struct {
+		Reason string `json:"reason"`
+	}
+	if err := decodeStrict(r, &in); err != nil {
+		return err
+	}
+	caller, _, err := callerSession(r.Context())
+	if err != nil {
+		return err
+	}
+	if s.Holds == nil {
+		return execution.ErrUnavailable
+	}
+	if err := s.Holds.Escalate(r.Context(), id, caller.TaskID, in.Reason); err != nil {
+		return err
+	}
+	t, err := s.Store.GetTask(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, s.task(t))
+	return nil
+}

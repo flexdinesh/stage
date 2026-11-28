@@ -134,6 +134,8 @@ type UpdateTreeArgs struct {
 	Title     *string `json:"title,omitempty"`
 	StartMode *string `json:"startMode,omitempty" jsonschema:"auto | manual"`
 	Status    *string `json:"status,omitempty" jsonschema:"done (mark done: remaining tasks never start) | archived | open (reopen or unarchive); not while a member is launching, running or needs input"`
+	// SteeringHoldSeconds: ADR 0013 notification hold.
+	SteeringHoldSeconds *int64 `json:"steeringHoldSeconds,omitempty" jsonschema:"how long a member's needs-input notification waits for the tree's steerer to answer, in seconds (0 off, max 3600; default 300)"`
 }
 
 func (o *Ops) UpdateTree(ctx context.Context, a UpdateTreeArgs) (client.TreeDetail, error) {
@@ -157,6 +159,9 @@ func (o *Ops) UpdateTree(ctx context.Context, a UpdateTreeArgs) (client.TreeDeta
 			return client.TreeDetail{}, fmt.Errorf("invalid status %q (want open|done|archived)", *a.Status)
 		}
 		p["status"] = st
+	}
+	if a.SteeringHoldSeconds != nil {
+		p["steeringHoldSeconds"] = *a.SteeringHoldSeconds
 	}
 	return o.Client.UpdateTree(ctx, a.ID, p)
 }

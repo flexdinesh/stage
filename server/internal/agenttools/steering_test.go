@@ -56,6 +56,30 @@ func TestSteeringTools(t *testing.T) {
 	if len(page.Events) != 1 || page.HasMore {
 		t.Fatalf("paged feed %+v", page)
 	}
+
+	// update_tree steeringHoldSeconds; escalate_to_user only from the steerer.
+	var updated client.TreeDetail
+	mustCall(t, cs, "update_tree", map[string]any{"id": tree.ID, "steeringHoldSeconds": 60}, &updated)
+	if updated.SteeringHoldSeconds != 60 {
+		t.Fatalf("update_tree hold %d", updated.SteeringHoldSeconds)
+	}
+	memberRef := db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "member-esc"}
+	if _, err := e.store.TransitionTask(ctx, db.Transition{TaskID: member.ID, To: db.StateNeedsInput, Session: &memberRef}); err != nil {
+		t.Fatal(err)
+	}
+	if msg := call(t, cs, "escalate_to_user", map[string]any{"taskId": member.ID, "reason": "why"}, nil); msg == "" {
+		t.Fatal("escalate_to_user from a non-steerer accepted")
+	}
+	var escalated client.Task
+	mustCall(t, steerer, "escalate_to_user", map[string]any{"taskId": member.ID, "reason": "needs a product call"}, &escalated)
+	if escalated.ID != member.ID || escalated.Hold != nil {
+		t.Fatalf("escalate_to_user %+v", escalated)
+	}
+	ns, err := e.store.ListNotifications(ctx, 10, nil)
+	if err != nil || len(ns) != 1 || ns[0].Note == nil || *ns[0].Note != "Steerer: needs a product call" {
+		t.Fatalf("notifications %+v %v", ns, err)
+	}
+
 	var ended client.SteererResult
 	mustCall(t, cs, "end_tree_steering", map[string]any{"treeId": tree.ID}, &ended)
 	if ended.Tree.Steerer != nil {

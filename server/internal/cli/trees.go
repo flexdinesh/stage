@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agenttools"
 )
@@ -124,9 +125,10 @@ func runTree(ctx context.Context, env Env, args []string) error {
 		}
 		return c.out(res, func(w io.Writer) { success(w, "Removed task %d from tree %d", res.TaskID, res.TreeID) })
 	case "edit", "update":
-		var title, mode string
+		var title, mode, hold string
 		c.fs.StringVar(&title, "title", "", "tree title")
 		c.fs.StringVar(&mode, "start-mode", "", "auto|manual")
+		c.fs.StringVar(&hold, "hold", "", "steering hold: a duration like 5m, at most 1h (0 or off: no hold)")
 		if err := c.parse(rest); err != nil {
 			return err
 		}
@@ -134,7 +136,15 @@ func runTree(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
-		res, err := c.ops().UpdateTree(ctx, agenttools.UpdateTreeArgs{ID: id, Title: strFlag(c, "title", title), StartMode: strFlag(c, "start-mode", mode)})
+		a := agenttools.UpdateTreeArgs{ID: id, Title: strFlag(c, "title", title), StartMode: strFlag(c, "start-mode", mode)}
+		if c.set("hold") {
+			seconds, err := holdSeconds(hold)
+			if err != nil {
+				return err
+			}
+			a.SteeringHoldSeconds = &seconds
+		}
+		res, err := c.ops().UpdateTree(ctx, a)
 		if err != nil {
 			return err
 		}
@@ -262,4 +272,17 @@ func runTree(ctx context.Context, env Env, args []string) error {
 		return c.out(res, func(w io.Writer) { success(w, "Dissolved tree %d: its tasks are standalone, the tree is archived", id) })
 	}
 	return usagef("tree %s: unknown", v)
+}
+
+// holdSeconds parses tree edit --hold: a whole-second Go duration, or 0/off.
+func holdSeconds(v string) (int64, error) {
+	v = strings.TrimSpace(v)
+	if v == "0" || v == "off" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 || d%time.Second != 0 {
+		return 0, usagef("tree edit: --hold wants a whole-second duration like 5m, or 0/off; got %q", v)
+	}
+	return int64(d / time.Second), nil
 }

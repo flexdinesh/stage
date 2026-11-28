@@ -864,6 +864,7 @@ attempt is consumed.
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt).
 - `stateRevision`: counts the task's real state transitions (a same-state event does not count; 0 for a new task). A guarded answer names the revision it answers (`expectedStateRevision`, see "Session interaction").
 - `steering`: the task's latest steerer binding (see "Tree steering"), null when it never steered: `{ "treeId", "active", "endedAt"?, "endReason"? }`, `endReason` one of `replaced | stopped | tree_finished | task_removed`.
+- `hold`: the task's held needs-input notification (see "Notification rules"), else null: `{ "until", "steererTaskId" }`. `until`: when it escalates to the user unless answered first; `steererTaskId`: the steerer that can answer (null once that task is deleted).
 - `runStartedAt` / `runEndedAt`: the task session's elapsed run span, from its observation; null without a session or before one is observed.
 - `lastWordPreview` / `lastWordAt`: the task session's latest reply as one plain line (markdown stripped, at most 240 characters) and its time, from the observation; null without a session or before a reply is read.
 
@@ -1172,8 +1173,9 @@ A tree is a DAG of tasks: each member's `needs` are members that must be complet
 
 `Tree`:
 ```json
-{ "id": 3, "title": "Ship auth", "startMode": "auto", "status": "open", "closedAt": null, "createdAt": "2026-11-08T09:59:00Z", "createdBy": 1, "sourceMachineId": null, "updatedAt": "2026-11-08T10:00:00Z", "deletable": false, "steerer": null }
+{ "id": 3, "title": "Ship auth", "startMode": "auto", "status": "open", "closedAt": null, "createdAt": "2026-11-08T09:59:00Z", "createdBy": 1, "sourceMachineId": null, "updatedAt": "2026-11-08T10:00:00Z", "deletable": false, "steerer": null, "steeringHoldSeconds": 300 }
 ```
+`steeringHoldSeconds`: how long a member's needs-input notification waits for the tree's steerer (0 off, at most 3600, default 300; see "Notification rules").
 `steerer`: the tree's active steerer (see "Tree steering"), else null: `{ "taskId", "title", "state" (the steerer task's), "since" (bound at), "deliveredThrough" (last delivered event id, 0 before any), "lastDeliveredAt", "pending" (the binding's events after `deliveredThrough` not caused by the steerer), "lastError" }`.
 `status`: `open | done | archived` (see "Done, archive and delete"); `closedAt`: when it was marked done or archived (null while open); `deletable`: the tree and every member have no recorded work and no member started (`DELETE` removes the tree and its tasks).
 `TreeDetail` = `Tree` + `TreeTimes` + `{ "tasks": Task[] (by id), "edges": [{ "taskId": 9, "needId": 5 }], "levels": [[5, 7], [9]], "events": TaskEvent[] }`. `levels`: member ids per level, roots first; a task's level is the longest need path to a root; each level by id. `events`: the members' 50 newest task events, newest first (`{ id, taskId, fromState, toState, detail, at }`), retained temporarily for compatibility. New tree Activity reads the journal.
@@ -1192,7 +1194,7 @@ Body `{ "title": string, "startMode"?: StartMode, "tasks": [{ "taskId": number, 
 200 `TreeDetail`. 404.
 
 ### `PATCH /api/trees/:id`
-Body: any of `title`, `startMode` (`auto|manual`), `status` (`open|done|archived`; applied first). 200 `TreeDetail`. 400. 404. Switching to `manual` makes released members ready (each notifies once); switching to `auto` launches them on the next reconcile. `status` `done` or `archived` 409 while a member is `launching|running|needs_input` (`#N is running: stop it first`); `startMode` 409 on a done or archived tree; `open` reopens or unarchives.
+Body: any of `title`, `startMode` (`auto|manual`), `status` (`open|done|archived`; applied first), `steeringHoldSeconds` (0 to 3600; a change journals `steering_hold_changed`). 200 `TreeDetail`. 400. 404. Switching to `manual` makes released members ready (each notifies once); switching to `auto` launches them on the next reconcile. `status` `done` or `archived` 409 while a member is `launching|running|needs_input` (`#N is running: stop it first`); `startMode` 409 on a done or archived tree; `open` reopens or unarchives.
 
 ### `DELETE /api/trees/:id`
 Deletes the tree and every member task only when `deletable`: no recorded work in the tree or its members and no member ever started. 204. 404. 409 otherwise (archive instead), and while the tree has an active steerer (stop steering first). Protection survives a task leaving the tree.
@@ -1211,7 +1213,7 @@ Splices the task out: its dependents take over its needs; the task stays, standa
 
 ## Tree steering
 
-A tree can have one steerer ([ADR 0013](adr/0013-tree-steering.md)): an ordinary standalone task bound to it that hears about the tree's members and acts on them (answering, accepting) with the operations any agent has. It is never a member: a task cannot join the tree it steers (400 `{error, code: "steerer_not_member"}` on create, add, needs and a pull-in through needs), and a task steers at most one tree. While a binding is active, each member change enqueues a steering event in the same transaction as the change; nothing is enqueued without one. Delivering events to the steerer and notification holds come later; today the steerer reads the feed.
+A tree can have one steerer ([ADR 0013](adr/0013-tree-steering.md)): an ordinary standalone task bound to it that hears about the tree's members and acts on them (answering, accepting) with the operations any agent has. It is never a member: a task cannot join the tree it steers (400 `{error, code: "steerer_not_member"}` on create, add, needs and a pull-in through needs), and a task steers at most one tree. While a binding is active, each member change enqueues a steering event in the same transaction as the change; nothing is enqueued without one. While a live steerer can answer, a member's needs-input notification is held (see "Notification rules"). Delivering events to the steerer comes later; today the steerer reads the feed.
 
 ### Steering brief
 
@@ -1240,8 +1242,12 @@ Query `after` (event id, default 0) and `limit` (1 to 200, default 50). 200 `{ "
   - `member_accepted` (`acceptanceId`, `revision`), `member_reopened` (`revision`).
   - `member_answered` (`via`: `respond` with `requestId`, or `send`): an answer through Stage.
   - `note` (`noteId`, `category`, `text` at most 600 characters, `truncated`): a `blocker` or `decision` note on a member or on the tree.
+  - `hold_escalated` (`stateRevision`, `held`: a hold was released; `reason` from `escalate_to_user`, or `timeout: true` when the hold expired): the user was notified about the member's wait.
   - `tree_status` (`from`, `to`), `steering_started`, `steering_ended` (`reason`); `taskId` is the steerer for these two.
 - `causedBy`: the caller session that made the change (`Stage-Caller-Session`) and the task that owns it; null for harness observations, the user's own actions and the server's. A dependent made ready inherits the cause of the acceptance that released it. `self`: caused by the binding's steerer task.
+
+### `POST /api/tasks/:id/escalate`
+Body `{ "reason": string }` (nonblank, at most 500 characters). `escalate_to_user`: the tree's steerer hands a member's wait to the user now. Allowed only for a request whose `Stage-Caller-Session` belongs to the active steerer of the task's tree; otherwise 403 `{ "code": "not_steerer" }`. It releases the task's held notification at once, or records a new one when the task needs input and nothing is held; the notification's `note` is `Steerer: <reason>`. Enqueues `hold_escalated`. 200 `Task`. 400 reason. 404 task. 409 `not_waiting` when nothing is held and the task does not need input (or that wait was already answered).
 
 The tree journal records `steering_started`, `steering_replaced` and `steering_ended` events. An acceptance whose caller is the tree's active steerer reads `Completed by steerer #N` (`Reopened by steerer #N`).
 
@@ -1601,11 +1607,12 @@ Shared access records each workspace notification event once, including when no 
   "createdAt": "2026-11-08T10:00:00Z",
   "readAt": null,
   "currentState": "needs_input",
+  "note": null,
   "connectionId": 1,
   "links": { "native": "t3code://threads/env-1/thread-abc" }
 }
 ```
-`event`: `needs_input|ready|done|failed`. `taskId` is null for external sessions or once the task is deleted. `title` and `projectTitle` are snapshots at send time. `currentState` is live and reflects the task state or the observed state of an external session. It is null when unknown.
+`event`: `needs_input|ready|done|failed`. `taskId` is null for external sessions or once the task is deleted. `title` and `projectTitle` are snapshots at send time. `currentState` is live and reflects the task state or the observed state of an external session. It is null when unknown. `note`: why a held notification came late (`Steerer did not answer`, or `Steerer: <reason>` from `escalate_to_user`), else null; push bodies end with it.
 
 Task notifications retain `/tasks/<id>` for group identity and navigation. External notifications open `/?inbox`, with the harness destination in the inbox when available. Historical stored URLs are preserved; emitted destinations derive from task/session identity.
 
@@ -1646,6 +1653,12 @@ Each new inbox row, read, prune, or task transition wakes the stream. It sends r
 - A shared account's filter determines whether each new event arrives unread and can alert that account's devices. All workspace events remain available in shared history. In personal mode, the owner's filter determines which events are recorded and pushed.
 
 - Tasks: a transition into `needs_input` ("Needs input"), `done` ("Done") or `failed` ("Failed") notifies. Stored `url` = `/tasks/<id>` for stable group identity; push destination = the task URL. Other states (incl. `interrupted`) do not.
+- Hold (tree steering, [ADR 0013](adr/0013-tree-steering.md)): a tree member's `needs_input` is held, not recorded, when its tree's `steeringHoldSeconds` is above 0, the tree has an active steerer whose task is `running`, `done` or `needs_input`, and the member's connection offers `respond` or `send`. Both paths hold: the coordinator's transition hook and the observation transaction. A hold is a `notification_holds` row (Task JSON `hold`); the notification row is inserted only at release, because the inbox stream's cursor is id-ordered. `done`, `failed` and `ready` are never held.
+  - The member leaves `needs_input`, or is answered through Stage at the held revision: the hold is cancelled in the same write; nothing notifies.
+  - Expiry (`hold.until`) while still unanswered at the same revision: the notification is recorded with note `Steerer did not answer`, pushed and signalled, and `hold_escalated` is enqueued.
+  - `POST /api/tasks/:id/escalate`: released at once with note `Steerer: <reason>`.
+  - The steerer's binding ends (stopped, replaced, tree finished, task removed), its task stops being `running|done|needs_input`, the member leaves the tree, or the member's connection no longer offers `respond` or `send`: released at once without a note. A connection whose capability check fails keeps its holds until the next check.
+  - A release loop ticks every 5 s and on transitions and tree or steering changes; holds are durable, so a restart releases what came due while down. The filter above applies at release: a muted `needs_input` ends the hold without a row.
 - Ready: a manual tree member with at least one need whose needs all have user acceptance (see "Tree rules") notifies once per readiness episode ("Ready", `url` = `/tasks/<id>`, tag `task-<id>`). Roots and auto members never send it.
 - External sessions: adapters expose an attention feed. Stage also rereads stored active/done sessions to observe their outcomes. Changes into `needs_input|done|failed` notify; the inbox destination is retained. The first pass after startup is silent. Later newly discovered sessions notify only if created after startup. Missing sessions and failed reads preserve the last observation; closing an unowned session does not affect acceptance or dependencies. A task's own session follows "Inferred completion".
 - Needs-input counts combine tasks with unowned, non-child normalized session observations. Historical notification entries and links remain available.
@@ -1746,7 +1759,7 @@ Reply budget per need: `min(4000, max(1000, 8000 / sources))` Unicode characters
 - CLI `stage action ls|run` takes `--connection ID`, `--task ID` or `--project ID --on-connection ID --workspace-id ID`. For example, `stage action run --task 42 label --input - --json` reads the input JSON from stdin. Use `--confirm` for a user-only destructive action.
 - `read_ref {session}` and `stage show --target-connection ID --target-session ID` accept an opaque scoped ID. A scoped reference path is `/connections/:connectionId/sessions/:id`. `list_tasks {originSession}` uses REST query fields `originConnectionId` and `originSessionId`. A bare session id names no connection: pass the connection with it.
 - Journals: `read_journal {taskId?|treeId?, kind?, category?, q?, filterTaskId?, cursor?, limit?}` requires exactly one owner; `filterTaskId` is tree-only. `get_journal_entry {id}` retrieves full text. `append_note {taskId?|treeId?, text, requestId, category?, sourceTaskId?, callerSession?}` records caller session provenance. `get_context` includes `callerTaskId`, current `treeId` and `treeTitle`, and `steeringTreeId` (the tree the caller's task actively steers, else null); refresh it or `get_task` before reading or contributing to a tree.
-- Tree steering: `set_tree_steerer {treeId, prompt, connectionId, workspaceId, title?, executionConfig?, replace?, requestId?, callerSession?}`, `end_tree_steering {treeId, callerSession?}` (both `{tree, task?, warnings}`) and `get_steering_events {treeId, after?, limit?}` (`{events, hasMore}`). CLI `tree steer ID --prompt TEXT --connection ID --workspace-id ID [--title T] [--replace] [--request-id KEY]`, `tree unsteer ID` and `tree steering-events ID [--after N] [--limit N]`. The MCP tool and CLI generate a request ID when omitted.
+- Tree steering: `set_tree_steerer {treeId, prompt, connectionId, workspaceId, title?, executionConfig?, replace?, requestId?, callerSession?}`, `end_tree_steering {treeId, callerSession?}` (both `{tree, task?, warnings}`), `get_steering_events {treeId, after?, limit?}` (`{events, hasMore}`) and `escalate_to_user {taskId, reason, callerSession?}` (`Task`). `update_tree` takes `steeringHoldSeconds`. CLI `tree steer ID --prompt TEXT --connection ID --workspace-id ID [--title T] [--replace] [--request-id KEY]`, `tree unsteer ID`, `tree steering-events ID [--after N] [--limit N]`, `task escalate ID --reason TEXT` and `tree edit ID --hold DURATION` (a whole-second duration such as `5m`, or `0`/`off`). The MCP tool and CLI generate a request ID when omitted.
 - CLI: `stage task notes ID [list] [--kind notes|events|all --category C --q Q --limit N --cursor C]`; `stage tree notes ID` adds `--task ID` filtering. Append with `stage task notes ID add --text TEXT [--category C --request-id KEY]`, or `stage tree notes ID add --text TEXT --source-task ID`; `--text -` reads stdin. CLI generates a request key when omitted; supply `--request-id` to retry across invocations. `stage task notes ID get ENTRY_ID` and `stage tree notes ID get ENTRY_ID` retrieve full entries. Task creation/adoption use `--initial-note` / `initialNote`; task edit has no notes field. Schedule `--notes` remains a template.
 - A project ID or title supplies planning context. A caller's session and cwd supply context and provenance.
 - CLI `stage projects ls --json` lists destination selectors. Task and schedule commands use `--connection ID --workspace-id ID`. The `--binding` flag and MCP binding selectors were removed.

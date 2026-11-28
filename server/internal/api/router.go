@@ -32,6 +32,9 @@ type Deps struct {
 	Store  *db.Store
 	Engine *engine.Engine
 	Push   *notify.Notifier
+	// Holds releases held notifications; escalate_to_user goes through it
+	// (nil: escalate is 503).
+	Holds  *notify.Holds
 	Logger *slog.Logger
 	// Inbox wakes GET /api/notifications/stream (nil = a private hub).
 	Inbox *notify.Hub
@@ -237,6 +240,7 @@ func NewRouter(deps Deps) http.Handler {
 	agent("GET /api/tasks/{id}/requests", s.taskRequests)
 	agent("POST /api/tasks/{id}/requests/{rid}", s.respondRequest)
 	agent("POST /api/tasks/{id}/messages", s.sendMessage)
+	agent("POST /api/tasks/{id}/escalate", s.escalateTask)
 	agent("POST /api/tasks/{id}/duplicate", s.duplicateTask)
 	agent("POST /api/tasks/{id}/archive", s.archiveTask)
 	agent("POST /api/tasks/{id}/unarchive", s.unarchiveTask)
@@ -437,7 +441,10 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	var forbidden actionForbidden
 	var self selfForbidden
 	var answered *db.AlreadyAnsweredError
+	var notSteerer *db.NotSteererError
 	switch {
+	case errors.As(err, &notSteerer):
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": notSteerer.Msg, "code": "not_steerer"})
 	case errors.As(err, &answered):
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error": answered.Error(), "code": "already_answered", "state": answered.State, "stateRevision": answered.StateRevision,

@@ -67,10 +67,11 @@ func harnessEnv(t *testing.T, other execution.Adapter) *env {
 	svc := engine.NewWithAdapters(store, harness.MustRegistry(t3.Descriptor, opencode.Descriptor), adapters, log)
 	runner := release.NewRunner(store, svc.Coordinator, log)
 	svc.Coordinator.OnTransition = runner.OnTransition
+	push := notify.New(store, "https://stage.test", log)
 	h := api.NewRouter(api.Deps{
 		Config:    config.Config{},
 		Harnesses: harness.MustRegistry(t3.Descriptor, opencode.Descriptor),
-		Store:     store, Engine: svc, Push: notify.New(store, "https://stage.test", log), Logger: log,
+		Store:     store, Engine: svc, Push: push, Holds: notify.NewHolds(push), Logger: log,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -210,7 +211,7 @@ func TestToolList(t *testing.T) {
 		"list_snippets", "get_snippet", "create_snippet", "update_snippet", "delete_snippet", "delete_attachment",
 		"get_completion_preview", "complete_task", "reopen_task", "get_opening_prompt", "list_requests", "respond_request", "send_message",
 		"list_workspace_sources", "add_workspace",
-		"set_tree_steerer", "end_tree_steering", "get_steering_events",
+		"set_tree_steerer", "end_tree_steering", "get_steering_events", "escalate_to_user",
 	}
 	// Every expected tool is registered once; other tools may join.
 	slices.Sort(names)

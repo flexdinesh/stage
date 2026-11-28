@@ -58,7 +58,8 @@ SELECT t.id, t.project_id, p.title, t.title, t.prompt,
        'source',CASE WHEN t.binding_id IS NULL AND b.id IS NOT NULL THEN 'primary' ELSE 'chosen' END,'externalId',t.workspace_pin->>'externalId')
       WHEN t.launch_attempt>0 AND b.id IS NOT NULL THEN jsonb_build_object('bindingId',b.id,'path',b.workspace,'externalId',b.external_project_id,'source',CASE WHEN t.binding_id IS NULL THEN 'primary' ELSE 'chosen' END)
  END,
- (SELECT jsonb_build_object('treeId',s.tree_id,'active',s.ended_at IS NULL,'endedAt',s.ended_at,'endReason',s.end_reason) FROM tree_steerers s WHERE s.task_id=t.id ORDER BY s.id DESC LIMIT 1)
+ (SELECT jsonb_build_object('treeId',s.tree_id,'active',s.ended_at IS NULL,'endedAt',s.ended_at,'endReason',s.end_reason) FROM tree_steerers s WHERE s.task_id=t.id ORDER BY s.id DESC LIMIT 1),
+ (SELECT jsonb_build_object('until',h.hold_until,'steererTaskId',s.task_id) FROM notification_holds h JOIN tree_steerers s ON s.id=h.steerer_id WHERE h.task_id=t.id AND h.state='held')
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 JOIN harness_connections hc ON hc.id = t.connection_id
@@ -85,7 +86,7 @@ func scanTask(row rowScanner) (store.Task, error) {
 		&t.UpdatedAt, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginSessionTitle, &t.Handoff, &t.Attachments,
 		&t.StateSince, &t.SessionUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
-		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.StateRevision, &t.AnsweredRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID, &t.BindingID, &t.WorkspacePin, &t.Workspace, &t.Steering)
+		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.StateRevision, &t.AnsweredRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID, &t.BindingID, &t.WorkspacePin, &t.Workspace, &t.Steering, &t.Hold)
 	if err != nil {
 		return store.Task{}, notFound(err)
 	}
