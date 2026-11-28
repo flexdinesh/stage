@@ -93,8 +93,7 @@ type Client interface {
 	// archive). T3 validates it: an archived thread cannot settle, a running
 	// one cannot settle, an archived one cannot archive again.
 	OrganizeThread(ctx context.Context, threadID, action string) error
-	// Capabilities calls orchestrator_capabilities. Returns all providers
-	// unfiltered; callers drop providers with non-empty Constraints.
+	// Capabilities reads orchestrator_capabilities and MCP tools/list.
 	Capabilities(ctx context.Context) (Catalog, error)
 }
 
@@ -369,6 +368,7 @@ const (
 // assistant_message, proposed_plan) by global timeline position.
 type ReadItemsInput struct {
 	ThreadID      string
+	Activity      bool   // newest first, including commands and other tool items
 	AfterPosition *int   // nil = from the start (T3 rejects -1)
 	Limit         int    // 1..MaxItemsPerRead; 0 = T3 default (50)
 	MaxChars      int    // per item, 1..MaxItemChars; 0 = T3 default (20000)
@@ -502,6 +502,7 @@ type LaunchResult struct {
 // Catalog is orchestrator_capabilities.
 type Catalog struct {
 	Providers []Provider
+	Tools     []string
 }
 
 type Provider struct {

@@ -7,10 +7,12 @@ import { statusSlots } from "../status.ts";
 import type { ConnectionRowProps, HarnessSlots } from "../types.ts";
 import { disconnectAvailability, t3DisconnectPrompt } from "./onboarding.ts";
 import { T3_STATUS, T3_STATUS_KEY, useT3Status } from "./queries.ts";
+import { T3ThreadDetails } from "./Session.tsx";
 import { T3ConnectionPanel, useDisconnectT3 } from "./Setup.tsx";
 import { t3RowDetail, t3Summary } from "./status.ts";
 
 export const T3_SLOTS: HarnessSlots = {
+  session: { HeaderExtra: T3ThreadDetails },
   Setup: T3ConnectionPanel,
   Row: T3Row,
   ...statusSlots(T3_STATUS),

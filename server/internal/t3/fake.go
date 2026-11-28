@@ -11,9 +11,8 @@ import (
 )
 
 // Fake is an in-memory Client for tests and local dev. Launched threads start
-// "running"; drive them with SetThread. SendMessage queues as T3's mode
-// queue does: an idle thread starts a run, a running one runs the message
-// after its current run completes.
+// "running"; drive them with SetThread. SendMessage can steer the active
+// turn or queue a new one.
 type Fake struct {
 	mu          sync.Mutex
 	now         func() time.Time
@@ -139,7 +138,7 @@ func NewFake() *Fake {
 		sends:    map[string]bool{},
 		queued:   map[string]int{},
 		requests: map[string][]*fakeRequest{},
-		Catalog: Catalog{Providers: []Provider{{
+		Catalog: Catalog{Tools: []string{"t3_pending_request", "t3_thread_read", "t3_thread_send"}, Providers: []Provider{{
 			ProviderInstanceID: "claude",
 			DriverKind:         "claude",
 			DisplayName:        "Claude",
@@ -441,9 +440,12 @@ func (f *Fake) ReadItems(_ context.Context, in ReadItemsInput) (ItemPage, error)
 			}
 			continue
 		}
-		if it.Position > after && slices.Contains(messageItemTypes, it.Type) {
+		if it.Position > after && (in.Activity || slices.Contains(messageItemTypes, it.Type)) {
 			matching = append(matching, it)
 		}
+	}
+	if in.Activity && in.AfterPosition == nil {
+		slices.Reverse(matching)
 	}
 	page := ItemPage{Thread: detail, HasMore: len(matching) > limit}
 	if len(matching) > limit {
@@ -473,8 +475,8 @@ func (f *Fake) ReadItems(_ context.Context, in ReadItemsInput) (ItemPage, error)
 	return page, nil
 }
 
-// AddItem appends a timeline item to a thread (any type; only message types
-// are readable) and returns its position. Zero Status means completed.
+// AddItem appends a timeline item to a thread and returns its position.
+// Zero Status means completed.
 func (f *Fake) AddItem(threadID string, it TimelineItem) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -600,8 +602,6 @@ func launchResult(d *ThreadDetail) LaunchResult {
 }
 
 // SendMessage replays a clientRequestId already sent (nothing new runs).
-// Any mode queues: an idle thread starts a run, a running one gets one
-// more run after the current one.
 func (f *Fake) SendMessage(_ context.Context, threadID, message string, mode SendMode, clientRequestID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -612,13 +612,19 @@ func (f *Fake) SendMessage(_ context.Context, threadID, message string, mode Sen
 	if t.Archived {
 		return &ToolError{Tool: "t3_thread_send", Code: "thread_not_sendable", Message: "Thread " + threadID + " is archived."}
 	}
+	if clientRequestID != "" && f.sends[clientRequestID] {
+		return nil
+	}
+	if mode == SendSteer && t.ActiveRunID == "" {
+		return &ToolError{Tool: "t3_thread_send", Code: "thread_not_sendable", Message: "Thread " + threadID + " has no running turn that can be steered."}
+	}
 	if clientRequestID != "" {
-		if f.sends[clientRequestID] {
-			return nil
-		}
 		f.sends[clientRequestID] = true
 	}
 	f.Sent = append(f.Sent, FakeSend{ThreadID: threadID, Message: message, Mode: mode, ClientRequestID: clientRequestID})
+	if mode == SendSteer {
+		return nil
+	}
 	if t.ActiveRunID != "" {
 		f.queued[threadID]++
 		return nil

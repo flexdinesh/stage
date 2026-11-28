@@ -69,7 +69,9 @@ export function ActivitySection({
                 {view.files.map((file) => (
                   <li key={file.path} className="flex items-baseline justify-between gap-3 py-1 font-mono text-meta">
                     <span className="wrap-anywhere">{file.path}</span>
-                    <span className="shrink-0 text-muted tabular">{file.added} {file.removed}</span>
+                    {file.countsUnknown ? null : (
+                      <span className="shrink-0 text-muted tabular">{file.added} {file.removed}</span>
+                    )}
                   </li>
                 ))}
               </ul>

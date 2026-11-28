@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf16"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
@@ -329,6 +331,9 @@ func (c *MCPClient) ReadItems(ctx context.Context, in ReadItemsInput) (ItemPage,
 		return ItemPage{}, ErrNotFound
 	}
 	args := map[string]any{"threadId": in.ThreadID, "view": "messages", "runLimit": 1}
+	if in.Activity {
+		args["view"] = "activity"
+	}
 	if in.AfterPosition != nil && *in.AfterPosition >= 0 {
 		args["afterPosition"] = *in.AfterPosition
 	}
@@ -349,6 +354,15 @@ func (c *MCPClient) ReadItems(ctx context.Context, in ReadItemsInput) (ItemPage,
 		return ItemPage{}, err
 	}
 	page := out.toItemPage()
+	// Older T3 versions only page forward. If the default activity page
+	// ends before the thread's last item, jump to the recent window.
+	if in.Activity && in.AfterPosition == nil && in.ItemID == "" && page.HasMore && page.NextPosition != nil {
+		limit := min(in.Limit, MaxItemsPerRead)
+		if after := page.Thread.ItemCount - limit - 1; limit > 0 && after >= 0 && *page.NextPosition < page.Thread.ItemCount-1 {
+			in.AfterPosition = &after
+			return c.ReadItems(ctx, in)
+		}
+	}
 	c.noteEnvironment(environmentFromLink(page.Thread.Link))
 	return page, nil
 }
@@ -528,5 +542,16 @@ func (c *MCPClient) Capabilities(ctx context.Context) (Catalog, error) {
 	if err := c.call(ctx, "orchestrator_capabilities", map[string]any{}, &out); err != nil {
 		return Catalog{}, err
 	}
-	return out.toCatalog(), nil
+	catalog := out.toCatalog()
+	err := c.request(ctx, "tools/list", true, func(ctx context.Context, cs *mcp.ClientSession) error {
+		catalog.Tools = nil
+		for tool, err := range cs.Tools(ctx, nil) {
+			if err != nil {
+				return err
+			}
+			catalog.Tools = append(catalog.Tools, tool.Name)
+		}
+		return nil
+	})
+	return catalog, err
 }

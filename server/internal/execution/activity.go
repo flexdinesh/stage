@@ -57,10 +57,11 @@ type PlanStep struct {
 }
 
 type FileChange struct {
-	Path      string `json:"path"`
-	Additions int    `json:"additions"`
-	Deletions int    `json:"deletions"`
-	Status    string `json:"status"` // added, modified, deleted or empty
+	Path          string `json:"path"`
+	Additions     int    `json:"additions"`
+	Deletions     int    `json:"deletions"`
+	Status        string `json:"status"` // added, modified, deleted or empty
+	CountsUnknown bool   `json:"countsUnknown,omitempty"`
 }
 
 // ActivityReader reads the session's bounded recent activity (OpActivity).

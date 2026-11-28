@@ -57,6 +57,7 @@ func TestGuardedSendFirstAnswerWins(t *testing.T) {
 		t.Fatalf("started task revision %d", a.StateRevision)
 	}
 	rev := e.needsInput(a.ID)
+	e.endT3Turn(a.ExternalSessionID)
 	messages := fmt.Sprintf("/api/tasks/%d/messages", a.ID)
 	body := map[string]any{"text": "go", "expectedStateRevision": rev}
 
@@ -105,6 +106,7 @@ func TestGuardedSendFirstAnswerWins(t *testing.T) {
 		t.Fatalf("refused message reached the harness: %+v", e.fake.Sent)
 	}
 	// Without the precondition a follow-up goes as before.
+	e.endT3Turn(a.ExternalSessionID)
 	e.must("POST", messages, map[string]string{"text": "unguarded"}, 200, nil)
 	if len(e.fake.Sent) != 2 {
 		t.Fatalf("unguarded follow-up: %+v", e.fake.Sent)
@@ -117,6 +119,7 @@ func TestGuardedSendFirstAnswerWins(t *testing.T) {
 	if rev <= *got.AnsweredRevision {
 		t.Fatalf("new wait revision %d, answered %d", rev, *got.AnsweredRevision)
 	}
+	e.endT3Turn(a.ExternalSessionID)
 	e.must("POST", messages, map[string]any{"text": "again", "expectedStateRevision": rev}, 200, nil)
 }
 
@@ -166,6 +169,7 @@ func TestAnswerRecordsCallerCause(t *testing.T) {
 	caller := db.SessionRef{ConnectionID: e.store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: *steerer.ExternalSessionID}
 	headers := map[string]string{buildinfo.APIVersionHeader: apiVersion, agentctx.CallerHeader: fmt.Sprintf("%d:%s", caller.ConnectionID, caller.ExternalSessionID)}
 	rev := e.needsInput(a.ID)
+	e.endT3Turn(a.ExternalSessionID)
 	if rec := raw(t, e.h, "POST", fmt.Sprintf("/api/tasks/%d/messages", a.ID), headers, map[string]any{"text": "go", "expectedStateRevision": rev}, nil); rec.Code != 200 {
 		t.Fatalf("send: %d %s", rec.Code, rec.Body)
 	}

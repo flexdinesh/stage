@@ -262,6 +262,10 @@ func printActivity(w io.Writer, a execution.Activity) {
 	if len(a.Files) > 0 {
 		fmt.Fprintln(w, "Files")
 		for _, file := range a.Files {
+			if file.CountsUnknown {
+				fmt.Fprintf(w, "  %s\n", file.Path)
+				continue
+			}
 			fmt.Fprintf(w, "  %s  +%d -%d %s\n", file.Path, file.Additions, file.Deletions, file.Status)
 		}
 	}

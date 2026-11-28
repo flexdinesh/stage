@@ -13,6 +13,16 @@ import (
 	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
+func (e *env) endT3Turn(thread *string) {
+	e.t.Helper()
+	if thread == nil {
+		e.t.Fatal("no T3 thread")
+	}
+	if err := e.fake.SetStatus(*thread, t3.StatusCompleted); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
 // T3 answers its threads' questions and takes follow-ups through the
 // generic routes: questions map to question requests (option labels in,
 // T3 option values out), a request no longer pending is 404, an answer
@@ -119,8 +129,12 @@ func TestT3Interaction(t *testing.T) {
 	if err := e.fake.ResolveRequest(thread, aid, "resolved"); err != nil {
 		t.Fatal(err)
 	}
+	if code, body := e.raw("POST", messages, `{"text":"hello"}`); code != 409 || body["code"] != "session_busy" {
+		t.Fatalf("send during the turn: %d %v", code, body)
+	}
+	e.endT3Turn(a.ExternalSessionID)
 	e.must("POST", messages, map[string]string{"text": "hello"}, 200, nil)
-	// Queued, with a fresh request ID per API call (T3 deduplicates by it).
+	// Native queue mode starts a new turn with a fresh request ID.
 	if len(e.fake.Sent) != 1 || e.fake.Sent[0].ThreadID != thread || e.fake.Sent[0].Message != "hello" || e.fake.Sent[0].Mode != t3.SendQueue ||
 		!strings.HasPrefix(e.fake.Sent[0].ClientRequestID, "stage-send:") {
 		t.Fatalf("sent: %+v", e.fake.Sent)
@@ -175,7 +189,7 @@ func TestRespondRefusesOwnSession(t *testing.T) {
 		reached   int
 	}{
 		{fmt.Sprintf("/api/tasks/%d/requests/q1", a.ID), "answer its own session's request", map[string]any{"option": "allow"}, 404},
-		{fmt.Sprintf("/api/tasks/%d/messages", a.ID), "message its own session", map[string]any{"text": "hello"}, 200},
+		{fmt.Sprintf("/api/tasks/%d/messages", a.ID), "message its own session", map[string]any{"text": "hello", "delivery": "queue"}, 200},
 	} {
 		direct := map[string]string{buildinfo.APIVersionHeader: apiVersion, agentctx.CallerHeader: own}
 		if rec := raw(t, e.h, "POST", c.path, direct, c.body, &out); rec.Code != 403 || out.Code != "self_action_forbidden" || !strings.Contains(out.Error, c.msg) {

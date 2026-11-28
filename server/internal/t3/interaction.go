@@ -26,8 +26,7 @@ const (
 	busyRequest   = "T3 is waiting on a request. Answer it first."
 )
 
-// refusedArchived: Send to an archived thread.
-const refusedArchived = "This T3 thread is archived; T3 takes no messages for it."
+const turnEnded = "The turn ended; send instead."
 
 // Requests are the thread's pending user-input questions, one question
 // request each. A request answered while they are read is left out.
@@ -194,14 +193,11 @@ func labelValue(q Question, v string) (string, bool) {
 	return v, false
 }
 
-// Send sends the thread a message in T3's queue mode: an idle thread starts
-// a new turn and a running one takes it when its current turn ends (never
-// steered). m.RequestID is T3's clientRequestId, so a retry sends once. A
-// thread waiting on a request takes no message (*execution.Busy); one T3
-// won't send to (archived, or its worktree can't be restored) is
-// *execution.Refused.
+// Send uses T3's explicit steer and queue modes. The same native queue
+// mode starts a new turn for Send and queues the next turn for Queue.
 func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m execution.Message) error {
-	if err := m.Delivery.RequireSend(); err != nil {
+	op, err := m.Delivery.Operation()
+	if err != nil {
 		return err
 	}
 	if ref.ConnectionID != a.ConnectionID {
@@ -214,10 +210,7 @@ func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m executio
 	if err != nil {
 		return err
 	}
-	if d.Archived {
-		return &execution.Refused{Reason: refusedArchived}
-	}
-	if d.PendingRequestCount > 0 {
+	if !d.Archived && d.PendingRequestCount > 0 {
 		ids, err := a.Client.ListPendingQuestions(ctx, ref.ExternalSessionID)
 		switch {
 		case err != nil:
@@ -227,12 +220,31 @@ func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m executio
 		}
 		return &execution.Busy{Reason: busyQuestions}
 	}
-	err = a.Client.SendMessage(ctx, ref.ExternalSessionID, m.Text, SendQueue, m.RequestID)
+	mode := SendQueue
+	if !d.Archived {
+		switch {
+		case op == execution.OpSend && d.ActiveRunID != "":
+			return &execution.Busy{Reason: "A turn is running; steer or queue instead."}
+		case op != execution.OpSend && d.ActiveRunID == "":
+			return &execution.Busy{Reason: turnEnded}
+		}
+	}
+	if op == execution.OpSteer {
+		mode = SendSteer
+	}
+	err = a.Client.SendMessage(ctx, ref.ExternalSessionID, m.Text, mode, m.RequestID)
+	return sendError(err)
+}
+
+func sendError(err error) error {
 	var te *ToolError
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return execution.ErrNotFound
-	case errors.As(err, &te) && te.Code == "thread_not_sendable":
+	case errors.As(err, &te):
+		if te.Code == "thread_not_sendable" && strings.Contains(te.Message, "has no running turn that can be steered") {
+			return &execution.Busy{Reason: te.Message}
+		}
 		return &execution.Refused{Reason: te.Message}
 	}
 	return err
