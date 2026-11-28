@@ -32,4 +32,7 @@ type Snippets interface {
 	// Update applies the set fields (none: Get).
 	Update(ctx context.Context, id int64, p SnippetPatch) (Snippet, error)
 	Delete(ctx context.Context, id int64) error
+	// EnsureByName returns the snippet named name, creating a global one
+	// with body when none exists (names are unique across scopes).
+	EnsureByName(ctx context.Context, name, body string) (Snippet, error)
 }

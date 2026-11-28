@@ -210,6 +210,15 @@ it allocates the id, so ids commit in order per tree and a cursor
 (`after`) never skips a lower id committed later; a binding ended
 meanwhile gets no event. SQLite's single writer gives both by construction.
 
+`steering_launch_context(task_id, attempt, brief)` freezes the steering
+brief an active steerer's launch attempt appended, like
+`journal_launch_context`: the first brief stored for an attempt wins and a
+same-attempt retry reads it back; a new attempt stores its own. The
+playbook it carries is the snippet named `steering-playbook`, created on
+first composition (`INSERT … ON CONFLICT (name) DO NOTHING`, then read
+back, so concurrent launches agree) rather than seeded by a migration, so
+data copies and baselines carry no default row.
+
 ## Journal events
 
 Rows derived from a change are written by Go in `internal/db`

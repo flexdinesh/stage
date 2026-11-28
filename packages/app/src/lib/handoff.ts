@@ -1,4 +1,4 @@
-import type { Handoff, Task } from "../api/types.ts";
+import type { Handoff, SteeringBrief, Task } from "../api/types.ts";
 
 type Needs = Pick<Task, "needs">;
 
@@ -30,4 +30,9 @@ export function recordedSource(h: Pick<Handoff, "sourceTaskId" | "session" | "so
 /** One-line summary of a sent handoff: "1,234 chars appended to the prompt". */
 export function handoffSummary(h: Pick<Handoff, "text">): string {
   return `${h.text.length.toLocaleString("en-US")} chars appended to the prompt`;
+}
+
+/** One-line summary of a steering brief: "6,234 chars appended to the prompt, frozen for attempt 2". */
+export function steeringSummary(s: SteeringBrief): string {
+  return `${handoffSummary({ text: s.brief })}, frozen for attempt ${s.attempt}`;
 }
