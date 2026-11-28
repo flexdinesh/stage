@@ -134,6 +134,9 @@ type ActionRequest struct {
 	Session *SessionRef      `json:"session,omitempty"`
 	Project *ActionWorkspace `json:"project,omitempty"`
 	Input   json.RawMessage  `json:"input"`
+	// Confirmed: the caller confirmed the action's confirm text for this
+	// request (Stage-Action-Confirmed). An owner may require it.
+	Confirmed bool `json:"confirmed,omitempty"`
 }
 
 type ActionResult struct {

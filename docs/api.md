@@ -633,7 +633,7 @@ Stage checks the request before the harness sees it:
 | --- | --- |
 | 400 | missing `requestId` or `sourceId`, invalid input, missing confirmation, or a harness validation error |
 | 404 | unknown or forgotten connection, unknown source, or unknown `projectId` |
-| 409 | retired or unavailable connection, `workspaceAdd` or the source unavailable (`operation_unavailable` with the reason), or `membership_failed` |
+| 409 | retired or unavailable connection, `workspaceAdd` or the source unavailable (`operation_unavailable` with the reason), `harness_busy` (the harness changed nothing, for example Claude Code holding its state lock; retry), or `membership_failed` |
 | 502 | harness failure, or `workspace_not_listed` when the next inventory refresh does not list the returned workspace |
 | 504 | `outcome_uncertain`: a lost worker reply, the 5-minute deadline, or the harness could not confirm |
 
@@ -649,11 +649,11 @@ Agent responses omit `path`, `message` and `facts`.
 Each success records a `workspace_added` project event on the group with
 the actor and a `workspace_add` cause carrying `requestId` and the caller
 session. A `membership_failed` 409 means the workspace was added but not
-moved; retrying with the same `requestId` is safe. OpenCode adds existing
-folders ([source `folder`](execution.md#adding-folders)). Codex trusts
-folders ([source `trust`](execution.md#codex-adapter)). The other shipped
-harnesses declare the operation unavailable with "Adding workspaces from
-Stage is not supported for <name> yet."
+moved; retrying with the same `requestId` is safe. T3 adds folders, clones
+and new projects ([T3 workspace sources](execution.md#t3-workspace-sources)).
+OpenCode adds existing folders ([source `folder`](execution.md#adding-folders)).
+Codex trusts folders ([source `trust`](execution.md#codex-adapter)). Claude
+Code trusts folders ([source `trust`](execution.md#claude-code-adapter)).
 
 ### Retired workspace routes
 
@@ -973,7 +973,10 @@ Choice launch options may supply `valueLabels`, keyed by their string values. Th
 The task ID resolves to its linked session on its actual connection.
 Both project action routes require the exact workspace on the named
 connection and check its current membership in the project. A workspace
-that no longer belongs to the project returns 404. The selected
+that no longer belongs to the project returns 404. A listed workspace its
+harness will not launch in (`blockedReason`) still takes project actions,
+since one may fix it, and a successful project action refreshes the
+connection's inventory. The selected
 workspace determines the action's capabilities and target. Lists return
 an array of declarations, including unavailable actions with their reasons.
 
@@ -998,6 +1001,9 @@ The app and ordinary CLI use user policy on Stage's trusted deployment
 boundary. Caller or permission fields in action input grant no rights.
 User-only destructive actions require confirmation. The CLI uses
 `--confirm` and a confirmed client sends `Stage-Action-Confirmed: 1`.
+The owner receives that confirmation for every action and may require
+it: Claude Code's project action `trust` answers 400 without it, from
+people and agents alike (MCP `run_action` `confirmed`).
 
 Success returns `{message, facts?, link?, replaced?, journalError?}`.
 `replaced` is the retired connection ID when applicable. A successful
@@ -1651,7 +1657,7 @@ Reply budget per need: `min(4000, max(1000, 8000 / sources))` Unicode characters
 - Projects: `create_project {title}` and `update_project {id, title?, archived?}` (omitted keeps its value; at least one) return the project summary; `get_project_events {id}` returns `{events}`. CLI `projects add --title T` and `projects edit ID [--title T] [--archived true|false]`. `preview_membership {connectionId, workspaceId, targetProjectId?}` (omitted: a new group titled after the workspace) returns the preview with `previewToken`, changing nothing; `set_membership` takes the same inputs plus `previewToken` and fails on a changed preview: preview again. Responses omit raw paths.
 - Workspaces ([ADR 0012](adr/0012-harness-workspace-add.md)): `list_workspace_sources {connectionId}` returns `{availability, sources}`. `add_workspace {connectionId, sourceId, input?, requestId, projectId?, confirmed?}` returns the [add result](#add-a-workspace) without paths. CLI `stage workspaces sources --connection ID` and `stage workspaces add --connection ID --source S [--input JSON|-] [--project P] [--request-id KEY] [--confirm]`; without `--request-id` the CLI derives a stable key from the connection, source, input and project, so rerunning the same command retries safely. A 504 `outcome_uncertain` means retry with the same key.
 - Snippets and images: `list_snippets` (`{snippets}`), `get_snippet {id}`, `create_snippet {name, body, projectId?}` (omitted: global), `update_snippet {id, name?, body?, projectId?}` (omitted keeps; `projectId: null` makes it global), `delete_snippet {id}` and `delete_attachment {id}` (a staged upload or a backlog task's image; both `{deleted, id}`). The CLI runs them with `stage call`.
-- `list_actions` and `run_action` take exactly one of `connectionId`, `taskId` or `projectId`. A project also requires `onConnectionId` and `workspaceId`. `run_action` takes `actionId` and optional `input`. Both tools use agent policy with or without caller provenance.
+- `list_actions` and `run_action` take exactly one of `connectionId`, `taskId` or `projectId`. A project also requires `onConnectionId` and `workspaceId`. `run_action` takes `actionId`, optional `input` and optional `confirmed` (sends `Stage-Action-Confirmed: 1`; set it only after the user agreed to the action's `confirm` text, which an action such as Claude Code's `trust` requires). Both tools use agent policy with or without caller provenance.
 - CLI `stage action ls|run` takes `--connection ID`, `--task ID` or `--project ID --on-connection ID --workspace-id ID`. For example, `stage action run --task 42 label --input - --json` reads the input JSON from stdin. Use `--confirm` for a user-only destructive action.
 - `read_ref {session}` and `stage show --target-connection ID --target-session ID` accept an opaque scoped ID. A scoped reference path is `/connections/:connectionId/sessions/:id`. `list_tasks {originSession}` uses REST query fields `originConnectionId` and `originSessionId`. A bare session id names no connection: pass the connection with it.
 - Journals: `read_journal {taskId?|treeId?, kind?, category?, q?, filterTaskId?, cursor?, limit?}` requires exactly one owner; `filterTaskId` is tree-only. `get_journal_entry {id}` retrieves full text. `append_note {taskId?|treeId?, text, requestId, category?, sourceTaskId?, callerSession?}` records caller session provenance. `get_context` includes `callerTaskId`, current `treeId` and `treeTitle`; refresh it or `get_task` before reading or contributing to a tree.

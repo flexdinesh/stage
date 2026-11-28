@@ -211,7 +211,7 @@ func TestWorkspacesCarryClaudeTrust(t *testing.T) {
 	if got := rows[f.Home].Trust.Reason; !strings.Contains(got, "home folder one session at a time") {
 		t.Fatalf("home reason %q", got)
 	}
-	if got := rows[declined].Trust.Reason; got != "Not trusted in Claude Code. Run claude in this folder once and accept the trust prompt, then refresh." {
+	if got := rows[declined].Trust.Reason; got != "Not trusted in Claude Code. Use Trust in Claude Code, or run claude in this folder once and accept the trust prompt." {
 		t.Fatalf("untrusted reason %q", got)
 	}
 

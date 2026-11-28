@@ -113,7 +113,7 @@ func (s *server) resolveActionSite(r *http.Request, target execution.ActionTarge
 }
 
 func (s *server) projectActionWorkspace(ctx context.Context, site actionSite) (*execution.ActionWorkspace, error) {
-	workspace, err := s.Store.ResolveDestination(ctx, site.connectionID, site.workspaceID)
+	workspace, err := s.Store.ResolveListedWorkspace(ctx, site.connectionID, site.workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -313,6 +313,7 @@ func (s *server) runAction(r *http.Request, site actionSite, setupRoute bool) (e
 		}
 	}
 	site.request.ID, site.request.Input = action.ID, body
+	site.request.Confirmed = r.Header.Get("Stage-Action-Confirmed") == "1"
 	if site.connectionID != 0 && !s.Store.ConnectionActive(site.connectionID) {
 		return result, db.ConnectionRetired()
 	}
@@ -381,7 +382,21 @@ func (s *server) runAction(r *http.Request, site actionSite, setupRoute bool) (e
 	if site.request.Session != nil {
 		s.journalAction(ctx, r, site, caller, &result)
 	}
+	if site.request.Project != nil {
+		s.refreshAfterProjectAction(ctx, site.connectionID)
+	}
 	return result, nil
+}
+
+// refreshAfterProjectAction re-reads the connection's inventory, since a
+// project action can change a workspace (a trusted folder can launch). The
+// action already ran, so a failure is logged, not returned.
+func (s *server) refreshAfterProjectAction(ctx context.Context, connection int64) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if _, err := s.refreshWorkspaces(ctx, connection); err != nil {
+		s.log.Warn("refresh workspaces after project action", "connection", connection, "err", err)
+	}
 }
 
 func (s *server) journalAction(ctx context.Context, r *http.Request, site actionSite, caller execution.Caller, result *execution.ActionResult) {

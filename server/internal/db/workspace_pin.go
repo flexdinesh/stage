@@ -42,7 +42,20 @@ func (s *Store) ResolveDestination(ctx context.Context, connection int64, select
 	})
 }
 
+// ResolveListedWorkspace resolves a selector like ResolveDestination but
+// also returns a listed row its harness will not launch in (BlockedReason):
+// project actions target listed rows, and one may fix what blocks it.
+func (s *Store) ResolveListedWorkspace(ctx context.Context, connection int64, selector string) (Workspace, error) {
+	return read(ctx, s, func(tx store.Tx) (Workspace, error) {
+		return resolveWorkspace(ctx, tx, connection, selector, true)
+	})
+}
+
 func resolveDestination(ctx context.Context, tx store.Tx, connection int64, selector string) (Workspace, error) {
+	return resolveWorkspace(ctx, tx, connection, selector, false)
+}
+
+func resolveWorkspace(ctx context.Context, tx store.Tx, connection int64, selector string, blocked bool) (Workspace, error) {
 	if connection <= 0 || selector == "" {
 		return Workspace{}, DestinationRequired()
 	}
@@ -62,7 +75,7 @@ func resolveDestination(ctx context.Context, tx store.Tx, connection int64, sele
 		if status.RefreshedAt == nil || status.LastError != nil {
 			break
 		}
-		if row.BlockedReason != "" {
+		if row.BlockedReason != "" && !blocked {
 			return Workspace{}, DestinationBlocked(row.BlockedReason)
 		}
 		row.WorkspaceID = selector

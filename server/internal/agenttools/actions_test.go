@@ -18,10 +18,16 @@ func TestActionToolsApplyAgentPolicyAndReturnStructuredResults(t *testing.T) {
 	var requests atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
-		if r.Header.Get("Stage-Action-Agent") != "1" || r.Header.Get("Stage-Action-Confirmed") != "" {
+		if r.Header.Get("Stage-Action-Agent") != "1" || r.Header.Get("Stage-Action-Confirmed") != "" && r.URL.Path != "/api/projects/8/actions/trust" {
 			t.Errorf("headers %v", r.Header)
 		}
 		switch r.Method + " " + r.URL.RequestURI() {
+		case "POST /api/projects/8/actions/trust?connectionId=4&workspaceId=ws_exact":
+			// confirmed: the agent relays the user's confirmation.
+			if r.Header.Get("Stage-Action-Confirmed") != "1" {
+				t.Errorf("confirmation not sent: %v", r.Header)
+			}
+			json.NewEncoder(w).Encode(execution.ActionResult{Message: "Trusted"})
 		case "GET /api/projects/8/actions?connectionId=4&workspaceId=ws_exact":
 			if got := r.Header.Get("Stage-Caller-Session"); got != "" {
 				t.Errorf("unexpected provenance %q", got)
@@ -69,6 +75,10 @@ func TestActionToolsApplyAgentPolicyAndReturnStructuredResults(t *testing.T) {
 	if msg := call(t, cs, "run_action", map[string]any{"connectionId": 4, "actionId": "user-only"}, nil); !strings.Contains(msg, "only to users") {
 		t.Fatalf("action error %q", msg)
 	}
+	mustCall(t, cs, "run_action", map[string]any{"projectId": 8, "onConnectionId": 4, "workspaceId": "ws_exact", "actionId": "trust", "confirmed": true}, &result)
+	if result.Message != "Trusted" {
+		t.Fatalf("confirmed result %+v", result)
+	}
 	for _, args := range []map[string]any{
 		{"actionId": "inspect"},
 		{"actionId": "inspect", "taskId": 2, "connectionId": 4},
@@ -76,7 +86,7 @@ func TestActionToolsApplyAgentPolicyAndReturnStructuredResults(t *testing.T) {
 		{"actionId": "inspect", "taskId": 2, "onConnectionId": 4},
 		{"actionId": "inspect", "taskId": 2, "workspaceId": "ws_exact"},
 		{"actionId": "inspect", "taskId": 2, "input": []string{"invalid"}},
-		{"actionId": "inspect", "taskId": 2, "confirmed": true},
+		{"actionId": "inspect", "taskId": 2, "confirmed": "yes"},
 	} {
 		if msg := call(t, cs, "run_action", args, nil); msg == "" {
 			t.Fatalf("accepted invalid arguments %+v", args)
@@ -85,7 +95,7 @@ func TestActionToolsApplyAgentPolicyAndReturnStructuredResults(t *testing.T) {
 	if msg := call(t, cs, "list_actions", map[string]any{"projectId": 8, "onConnectionId": 4}, nil); !strings.Contains(msg, "workspaceId from list_projects") {
 		t.Fatalf("missing project workspace: %q", msg)
 	}
-	if got := requests.Load(); got != 3 {
+	if got := requests.Load(); got != 4 {
 		t.Fatalf("action requests %d", got)
 	}
 }

@@ -90,7 +90,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		},
 		"ActionRequest": execution.ActionRequest{
 			ID: "clear", Target: execution.TargetSession, Session: &ref, Project: &execution.ActionWorkspace{ExternalProjectID: "p", Directory: "/w"},
-			Input: json.RawMessage(`{"scope":"c"}`),
+			Input: json.RawMessage(`{"scope":"c"}`), Confirmed: true,
 		},
 		"ActionWorkspace": execution.ActionWorkspace{ExternalProjectID: "p", Directory: "/w"},
 		"Intent": execution.Intent{

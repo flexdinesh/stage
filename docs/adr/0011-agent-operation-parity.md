@@ -80,7 +80,10 @@ without raw workspace paths, including the fresh preview in a 409
 | Launch-link | Attaches an unconfirmed launch to a session a person identified. |
 | Account, admin, inbox, push and device bindings | Belong to a person ([ADR 0009](0009-shared-access.md#principals-and-endpoint-policy)). |
 
-User-only declared actions keep their caller policy.
+User-only declared actions keep their caller policy. An action an agent
+may run can still require the confirmation a person gives: MCP
+`run_action` relays it as `confirmed` (Claude Code's `trust`, [ADR
+0012](0012-harness-workspace-add.md) decision 8).
 
 ## Consequences and risks
 

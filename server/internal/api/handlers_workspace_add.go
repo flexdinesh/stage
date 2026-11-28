@@ -288,6 +288,7 @@ func (s *server) recordWorkspaceAdded(ctx context.Context, r *http.Request, resu
 func workspaceAddError(name string, err error) error {
 	var (
 		invalid     *execution.Invalid
+		busy        *execution.Busy
 		uncertain   *execution.OutcomeUncertain
 		unavailable *remote.UnavailableError
 		conflict    *db.ConflictError
@@ -304,6 +305,9 @@ func workspaceAddError(name string, err error) error {
 		return &remote.UnavailableError{Code: remote.CodeMachineOffline, Message: "The Stage worker is offline. The request was not sent."}
 	case errors.As(err, &invalid):
 		return db.Invalid("%s", invalid.Reason)
+	case errors.As(err, &busy):
+		// The harness changed nothing; a retry is safe.
+		return &db.ConflictError{Code: "harness_busy", Msg: busy.Reason}
 	case errors.Is(err, execution.ErrUnavailable):
 		return &db.ConflictError{Code: "operation_unavailable", Msg: name + " cannot add workspaces right now."}
 	default:

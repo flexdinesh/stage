@@ -46,8 +46,15 @@ type Options struct {
 	// still runs (default: signal 0); tests of a fake CLI, whose pids are
 	// made up, report false.
 	ProcessAlive func(pid int) bool
-	Now          func() time.Time
-	Logger       *slog.Logger
+	// Inventory is the machine's filesystem evidence (machine.LocalOps):
+	// the trust source and action check Claude's trust rule with it. Nil:
+	// trusting folders from Stage is unavailable.
+	Inventory Inventory
+	// StateLockWait bounds the wait for Claude's lock on its state file
+	// (default 12s, past a dead holder's stale lock).
+	StateLockWait time.Duration
+	Now           func() time.Time
+	Logger        *slog.Logger
 }
 
 // Adapter is the Claude Code execution.Adapter for one connection.
@@ -74,13 +81,23 @@ type Adapter struct {
 	sendMu sync.Mutex
 	wakeMu sync.Mutex
 	waking map[string]time.Time
+
+	// trustMu serializes trust writes (trust.go).
+	trustMu   sync.Mutex
+	inventory Inventory
+	lockWait  time.Duration
+	// beforeRename runs before a trust write's final check (tests).
+	beforeRename func()
 }
 
 var (
-	_ execution.Adapter      = (*Adapter)(nil)
-	_ execution.Correlator   = (*Adapter)(nil)
-	_ execution.LinkResolver = (*Adapter)(nil)
-	_ execution.EventSource  = (*Adapter)(nil)
+	_ execution.Adapter           = (*Adapter)(nil)
+	_ execution.Correlator        = (*Adapter)(nil)
+	_ execution.LinkResolver      = (*Adapter)(nil)
+	_ execution.EventSource       = (*Adapter)(nil)
+	_ execution.WorkspaceAdder    = (*Adapter)(nil)
+	_ execution.Actor             = (*Adapter)(nil)
+	_ execution.WorkspaceFeatures = (*Adapter)(nil)
 )
 
 // New builds the adapter; it runs nothing until called.
@@ -103,9 +120,13 @@ func New(o Options) *Adapter {
 	if o.ProcessAlive == nil {
 		o.ProcessAlive = processAlive
 	}
+	if o.StateLockWait == 0 {
+		o.StateLockWait = stateLockStale + 2*time.Second
+	}
 	return &Adapter{
 		conn: o.Connection, cli: o.CLI, identity: o.Identity, launchWait: o.LaunchWait, now: o.Now, log: o.Logger,
 		hooks: o.Hooks, imageRoot: o.ImageRoot, settleDelays: o.SettleDelays, alive: o.ProcessAlive,
+		inventory: o.Inventory, lockWait: o.StateLockWait,
 		roster: &roster{cli: o.CLI, ttl: o.RosterTTL, now: o.Now},
 		logs:   &transcripts{now: o.Now},
 	}
@@ -226,12 +247,14 @@ func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 			execution.OpRespond:       a.hooksRunning(),
 			execution.OpSend:          available,
 			execution.OpSessionRename: {Reason: "Claude Code has no rename interface."},
-			execution.OpWorkspaceAdd:  execution.WorkspaceAddNotSupported(Descriptor.Name),
+			execution.OpWorkspaceAdd:  a.trustAvailability(),
 		},
-		Models:      slices.Clone(models),
-		Options:     []execution.Option{effort, worktree},
-		Permissions: slices.Clone(permissions),
-		Modes:       []execution.Choice{},
+		WorkspaceSources: []execution.WorkspaceSource{a.trustSource()},
+		Actions:          []execution.Action{a.trustAction(a.trustAvailability())},
+		Models:           slices.Clone(models),
+		Options:          []execution.Option{effort, worktree},
+		Permissions:      slices.Clone(permissions),
+		Modes:            []execution.Choice{},
 	}, nil
 }
 
@@ -279,7 +302,7 @@ func (c *CLI) claudeJSON(configDir string) string {
 // filesystem root). Its home folder is trusted one interactive session at a
 // time, so a background session there needs a saved record above it.
 const (
-	untrustedReason = "Not trusted in Claude Code. Run claude in this folder once and accept the trust prompt, then refresh."
+	untrustedReason = "Not trusted in Claude Code. Use Trust in Claude Code, or run claude in this folder once and accept the trust prompt."
 	homeReason      = "Claude Code trusts the home folder one session at a time, so Stage can't start sessions here. Use a project folder."
 )
 
@@ -350,21 +373,13 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 			paths[dir] = at
 		}
 	}
-	var records []string
-	for dir, raw := range projects {
+	for dir := range projects {
 		add(dir, st.ModTime().UTC())
-		var project struct {
-			Trusted json.RawMessage `json:"hasTrustDialogAccepted"`
-		}
-		// Claude looks keys up verbatim, so a record is the key as written.
-		if json.Unmarshal(raw, &project) == nil && string(project.Trusted) == "true" && filepath.IsAbs(dir) {
-			records = append(records, dir)
-		}
 	}
 	for _, entry := range entries {
 		add(entry.Cwd, time.Time{})
 	}
-	slices.Sort(records)
+	records := trustRecords(projects)
 	trust := &execution.TrustRule{Records: records, Reason: untrustedReason}
 	home := filepath.Clean(a.cli.claudeHome())
 	everyFolder := sandboxed(a.cli.getenv("CLAUDE_CODE_SANDBOXED"))

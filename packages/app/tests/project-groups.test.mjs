@@ -16,7 +16,7 @@ test("same-title current groups remain distinct from each other and from project
   assert.deepEqual([...duplicateGroupTitles(current)], ["build"]);
 });
 
-test("project actions require a current, available workspace in that exact group", () => {
+test("project actions require a current, listed workspace in that exact group", () => {
   const workspace = { workspaceId: "ws_lab", connectionId: 5, catalogState: "listed", path: "/lab", title: "Lab" };
   const row = { ...workspace, available: true, projectId: 7, groupProjectId: 8 };
   assert.equal(canRunProjectActions(8, workspace, [row]), true);
@@ -28,14 +28,16 @@ test("project actions require a current, available workspace in that exact group
   assert.equal(canRunProjectActions(8, workspace, undefined), false);
 });
 
-test("a listed workspace the harness won't start in carries its reason; other states don't", () => {
-  const reason = "Not trusted in Claude Code. Run claude in this folder once and accept the trust prompt, then refresh.";
+test("a listed workspace the harness won't start in carries its reason and keeps its project actions", () => {
+  const reason = "Not trusted in Claude Code. Use Trust in Claude Code, or run claude in this folder once and accept the trust prompt.";
   const workspace = { workspaceId: "ws_lab", connectionId: 5, catalogState: "listed", path: "/lab", title: "Lab", blockedReason: reason };
   assert.equal(groupWorkspaceBlocked(workspace), reason);
   assert.equal(groupWorkspaceBlocked({ ...workspace, blockedReason: "" }), null);
   assert.equal(groupWorkspaceBlocked({ ...workspace, catalogState: "missing" }), null);
   const row = { ...workspace, available: false, reason, groupProjectId: 8 };
-  assert.equal(canRunProjectActions(8, workspace, [row]), false);
+  assert.equal(canRunProjectActions(8, workspace, [row]), true);
+  assert.equal(canRunProjectActions(7, workspace, [row]), false);
+  assert.equal(canRunProjectActions(8, { ...workspace, catalogState: "missing" }, [row]), false);
 });
 
 test("project summaries describe the group workspace count when there are several", () => {

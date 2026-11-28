@@ -30,6 +30,13 @@
   option (`claude --bg -w stage-<requestId>`); predecessor bases are
   removed, so E10 is history and `worktree.baseRef` `head` is no longer
   passed.
+- **Amended** 2026-11-28 by #488 ([ADR 0012](0012-harness-workspace-add.md)
+  decision 8): Stage can trust a folder for Claude Code. The "Untrusted
+  directory" row's documented fix, `projects[<dir>].hasTrustDialogAccepted`,
+  is written by the adapter for one folder per explicit, confirmed request
+  (workspace source and project action `trust`), under Claude's state lock.
+  Launches stay `claude --bg`. See
+  [execution](../execution.md#claude-code-adapter).
 - **Sources:** probes of the local `claude` CLI on Linux x86_64 with a
   claude.ai (Max) login, 2026-11-25, in scratch directories with haiku
   prompts. The CLI auto-updated from 2.1.331 to 2.1.332 two minutes in;
