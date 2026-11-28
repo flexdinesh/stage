@@ -187,6 +187,66 @@ func runTree(ctx context.Context, env Env, args []string) error {
 			return err
 		}
 		return c.out(res, func(w io.Writer) { success(w, "Deleted tree %d and its tasks", id) })
+	case "steer":
+		var a agenttools.SetTreeSteererArgs
+		var f configFlags
+		c.fs.StringVar(&f.prompt, "prompt", "", "the steerer's prompt (- = stdin)")
+		c.fs.StringVar(&f.promptFile, "prompt-file", "", "read the prompt from a file")
+		c.fs.StringVar(&a.Title, "title", "", "steerer task title (default Steer: <tree title>)")
+		c.fs.Int64Var(&a.ConnectionID, "connection", 0, "destination connection ID (its harness must offer send)")
+		c.fs.StringVar(&a.WorkspaceID, "workspace-id", "", "exact workspace ID from projects ls")
+		c.fs.StringVar(&a.WorkspaceID, "workspace", "", "same as --workspace-id")
+		c.fs.BoolVar(&a.Replace, "replace", false, "replace the current steerer (ends it and stops its session)")
+		c.fs.StringVar(&a.RequestID, "request-id", "", "idempotency key (default: a new one)")
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		id, err := c.oneID()
+		if err != nil {
+			return err
+		}
+		if a.Prompt, _, err = f.readPrompt(c); err != nil {
+			return err
+		}
+		if strings.TrimSpace(a.Prompt) == "" {
+			return usagef("--prompt is required")
+		}
+		a.TreeID = id
+		res, err := c.ops().SetTreeSteerer(ctx, a)
+		if err != nil {
+			return err
+		}
+		return c.out(res, func(w io.Writer) { printSteerer(w, res) })
+	case "unsteer":
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		id, err := c.oneID()
+		if err != nil {
+			return err
+		}
+		res, err := c.ops().EndTreeSteering(ctx, agenttools.TreeSteeringArgs{TreeID: id})
+		if err != nil {
+			return err
+		}
+		return c.out(res, func(w io.Writer) { printSteerer(w, res) })
+	case "steering-events":
+		var a agenttools.SteeringEventsArgs
+		c.fs.Int64Var(&a.After, "after", 0, "events after this event id")
+		c.fs.IntVar(&a.Limit, "limit", 0, "at most this many (1-200, default 50)")
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		id, err := c.oneID()
+		if err != nil {
+			return err
+		}
+		a.TreeID = id
+		res, err := c.ops().GetSteeringEvents(ctx, a)
+		if err != nil {
+			return err
+		}
+		return c.out(res, func(w io.Writer) { printSteeringEvents(w, res) })
 	case "dissolve":
 		if err := c.parse(rest); err != nil {
 			return err

@@ -190,6 +190,26 @@ subscriptions. Database copy preserves receipts, filters, VAPID keys, and
 personal subscriptions. It skips session-bound subscriptions together
 with the transient credentials.
 
+## Tree steering
+
+`tree_steerers` binds a steerer task to a tree ([ADR 0013](adr/0013-tree-steering.md)):
+partial unique indexes allow one active binding (`ended_at` null) per tree
+and per task; `(tree_id, request_id)` makes the set request replayable
+(`request_digest` compares content). An ended binding keeps its row with
+`end_reason` (`replaced`, `stopped`, `tree_finished`, `task_removed`); a
+deleted steerer task nulls `task_id` and its active binding ends first
+(`task_removed`). `delivered_through`, `last_delivered_at` and `last_error`
+belong to the later delivery dispatcher and stay at their defaults today.
+
+`steering_events` is the durable outbox. A member change enqueues its event
+in the same `Write` as the change, only while a binding is active, so it
+commits and rolls back with it. The caller session and its owning task
+(`caused_by_*`) record who made the change. On Postgres, an insert takes a
+per-tree transaction advisory lock and rechecks the active binding before
+it allocates the id, so ids commit in order per tree and a cursor
+(`after`) never skips a lower id committed later; a binding ended
+meanwhile gets no event. SQLite's single writer gives both by construction.
+
 ## Journal events
 
 Rows derived from a change are written by Go in `internal/db`
@@ -208,6 +228,8 @@ migration 0026 (#399).
 | Needs (`addNeed`, `keepNeeds`, `inheritNeeds`, `dropNeeds`, `detachMembers`) | `needs_changed` (`Added` or `Removed need #N`) in the dependent's tree, by task then need; none for a standalone task |
 | Acceptance (`insertAcceptance`) | `task_acceptances.source_session_id` = the task's session |
 | Handoff (`recordHandoff`) | source session: the evidence's session, else none (a bare legacy thread id names no connection, #420) |
+| Steering binding (`bindSteerer`, `endSteerer`) | `steering_started` (or `steering_replaced`, naming the old steerer) on the tree; `steering_ended` with its reason, except a replacement; a `steering_started` or `steering_ended` steering event |
+| Steering events (`enqueueSteering`, from `addTaskEventType`, `insertNote`, `setMembership`, `changeTreeStatus`, `recordAcceptance`) | one `steering_events` row per member transition, answer, readiness, membership change, acceptance, blocker or decision note and tree status change, while the tree has an active steerer ([Tree steering](#tree-steering)) |
 
 - **Attribution:** new work records the admitted actor and known cause with
   each event in the same transaction. Existing creator IDs retain their
@@ -312,6 +334,8 @@ records through the released cursor. The main requests a resample.
 | Journal append | `AppendNote` | `requestId` idempotent per owner; same key with other content is 409 | the owner's row lock (task or tree), then read, compare, insert; unique `(owner, request_id)` as a backstop | `JournalConcurrentRetryAndPagination`, `ConcurrentNoteRequestIDConflict` |
 | Pairing redeem | `RedeemPairing` | a code redeems once, before expiry | expiry read, then one `UPDATE ... WHERE redeemed_at IS NULL`: the loser updates no row | `RedeemPairingConcurrentSingleWinner` |
 | Launch checkpoint | `SaveCheckpoint` | checkpoints of one attempt apply in order | one `UPDATE ... WHERE revision = $expected`: a stale writer updates no row (409) | none yet |
+| Steering binding | `SetTreeSteerer`, `EndTreeSteering` | one active steerer per tree, a task steers at most one tree; idempotent `requestId` | tree row lock, then the replaced steerer task's; partial unique indexes as a backstop (a loser is 409 `steerer_exists`) | `ConcurrentSteererBind` |
+| Steering event ids | `enqueueSteering` | a per-tree cursor never skips an event committed later | per-tree transaction advisory lock at insert (class `0x53746572`, tree id), then the active binding rechecked | `ConcurrentSteeringCursor` |
 | Project identity | inventory refresh, resolve/apply, bind/unbind, primary, decline, adoption, merge, split and dismissals | placement sees all connections and serializes with evidence and binding changes | `Projects().LockIdentity` first. SQLite single writer, Postgres transaction advisory lock | `ConcurrentImportAcrossConnections` |
 
 Adoption refreshes the verified live workspace inventory under the identity
@@ -589,6 +613,9 @@ and paging. (Thread search was removed with API v3.)
   (`addTaskEventType`, from != to); a guarded send or respond sets
   `answered_revision` in the same write as its event. Existing rows start
   at 0 and unanswered; copies carry both unchanged.
+  Paired migration 0052 `tree_steering` adds `tree_steerers` and
+  `steering_events` ([Tree steering](#tree-steering)). New tables, no
+  backfill; copies carry both with their id sequences.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -1078,6 +1105,7 @@ by Go decode) and is `jsonb`.
 | `execution_observations.observation` | Queried: `json_extract` in execution, acceptance, notifications, push, tasks | `jsonb` |
 | `tasks`/`schedules.execution_config`, `harness_connections.new_task_config`, `notification_preferences.notify_events` | Queried (decoded) | `jsonb` |
 | `harness_settings.settings`, `harness_secrets.value` | JSON objects and opaque values compared by value | `jsonb` |
+| `steering_events.payload` | Queried (decoded by readers of the feed) | `jsonb` |
 | `execution_attempts.intent`, `checkpoint`, `observed_session` | Queried (decoded; the checkpoint is opaque adapter state) | `jsonb` |
 | `tasks`/`schedules.model_options`, `threads.pull_requests`, `threads.recent_runs`, `question_responses.answers` | Dropped (see Columns) | none |
 | `tasks.workspace`, `schedules.workspace` | Dropped (0034, #420; moved into `execution_config` options by 0033) | none |

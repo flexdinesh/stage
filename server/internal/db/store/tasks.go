@@ -57,6 +57,8 @@ type Task struct {
 	WorkspaceID     string            `json:"workspaceId,omitempty"`
 	WorkspacePin    *WorkspacePin     `json:"-"`
 	Workspace       *TaskWorkspace    `json:"workspace"`
+	// Steering: the task's latest steerer binding (nil: it never steered).
+	Steering *TaskSteering `json:"steering"`
 	// Harness of the connection; ConnectionActive is false once its
 	// instance was replaced (ConnectionLabel names that instance).
 	Harness                 string      `json:"harness"`

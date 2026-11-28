@@ -22,6 +22,8 @@ type Tree struct {
 	// Deletable: no recorded work, including from members that left.
 	Deletable         bool      `json:"deletable"`
 	JournalActivityAt time.Time `json:"-"`
+	// Steerer: the tree's active steerer (nil: none; ADR 0013).
+	Steerer *TreeSteerer `json:"steerer"`
 }
 
 // TreeEdge: TaskID needs NeedID.

@@ -53,8 +53,12 @@ func (e *AlreadyAnsweredError) Error() string {
 	return fmt.Sprintf("Already answered: the task is %s at state revision %d.", e.State, e.StateRevision)
 }
 
-// InvalidError: invalid input (400).
-type InvalidError struct{ Msg string }
+// InvalidError: invalid input (400). Code, when set, is a machine-readable
+// reason (error body "code").
+type InvalidError struct {
+	Msg  string
+	Code string
+}
 
 func (e *InvalidError) Error() string { return e.Msg }
 

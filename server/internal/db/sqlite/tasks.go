@@ -54,7 +54,8 @@ SELECT t.id, t.project_id, p.title, t.title, t.prompt,
       WHEN t.workspace_pin IS NOT NULL THEN json_object('bindingId',COALESCE(b.id,0),'path',json_extract(t.workspace_pin,'$.root'),
        'source',CASE WHEN t.binding_id IS NULL AND b.id IS NOT NULL THEN 'primary' ELSE 'chosen' END,'externalId',json_extract(t.workspace_pin,'$.externalId'))
       WHEN t.launch_attempt>0 AND b.id IS NOT NULL THEN json_object('bindingId',b.id,'path',b.workspace,'externalId',b.external_project_id,'source',CASE WHEN t.binding_id IS NULL THEN 'primary' ELSE 'chosen' END)
- END
+ END,
+ (SELECT json_object('treeId',s.tree_id,'active',json(CASE WHEN s.ended_at IS NULL THEN 'true' ELSE 'false' END),'endedAt',s.ended_at,'endReason',s.end_reason) FROM tree_steerers s WHERE s.task_id=t.id ORDER BY s.id DESC LIMIT 1)
 FROM tasks t
 JOIN projects p ON p.id = t.project_id
 JOIN harness_connections hc ON hc.id = t.connection_id
@@ -81,7 +82,7 @@ func scanTask(row rowScanner) (store.Task, error) {
 		&t.UpdatedAt, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginSessionTitle, &t.Handoff, &t.Attachments,
 		&t.StateSince, &t.SessionUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
-		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.StateRevision, &t.AnsweredRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID, &t.BindingID, &t.WorkspacePin, &t.Workspace)
+		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.StateRevision, &t.AnsweredRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID, &t.BindingID, &t.WorkspacePin, &t.Workspace, &t.Steering)
 	if err != nil {
 		return store.Task{}, notFound(err)
 	}

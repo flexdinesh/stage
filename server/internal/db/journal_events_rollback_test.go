@@ -190,3 +190,70 @@ func TestHandoffWithoutSourceSession(t *testing.T) {
 		t.Fatalf("handoff session %s, want none", got)
 	}
 }
+
+func steeringEventCount(t *testing.T, pool *sqlite.DB) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(`SELECT count(*) FROM steering_events`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// Steering events commit with the write that causes them and roll back with
+// it (ADR 0013).
+func TestSteeringEventsCommitAndRollBack(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(ctx context.Context, tx store.Tx, f derivedFixture) error
+	}{
+		{"task event", func(ctx context.Context, tx store.Tx, f derivedFixture) error {
+			from := StateBacklog
+			return addTaskEvent(ctx, tx, f.a, &from, StateFailed, "boom")
+		}},
+		{"note", func(ctx context.Context, tx store.Tx, f derivedFixture) error {
+			_, err := insertNote(ctx, tx, JournalOwner{TaskID: &f.a}, AppendNoteInput{Text: "stuck", Category: "blocker", RequestID: "r"}, nil)
+			return err
+		}},
+		{"tree status", func(ctx context.Context, tx store.Tx, f derivedFixture) error {
+			return setTreeStatus(ctx, tx, f.tree, TreeDone)
+		}},
+		{"membership", func(ctx context.Context, tx store.Tx, f derivedFixture) error {
+			return setMembership(ctx, tx, f.l, &f.tree)
+		}},
+		{"acceptance", func(ctx context.Context, tx store.Tx, f derivedFixture) error {
+			id := int64(99)
+			return recordAcceptance(ctx, tx, f.a, 1, &id, "task_completed", "Completed")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, ctx, pool := connectionStore(t)
+			f := newDerivedFixture(t, s, ctx)
+			if err := s.e.Write(ctx, func(tx store.Tx) error {
+				_, err := bindSteerer(ctx, tx, f.tree, f.d, "bind", "x", nil)
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before := steeringEventCount(t, pool)
+			err := s.e.Write(ctx, func(tx store.Tx) error {
+				if err := tc.run(ctx, tx, f); err != nil {
+					return err
+				}
+				return errRollback
+			})
+			if !errors.Is(err, errRollback) {
+				t.Fatalf("write: %v", err)
+			}
+			if got := steeringEventCount(t, pool); got != before {
+				t.Fatalf("rollback left %d steering events, want %d", got, before)
+			}
+			if err := s.e.Write(ctx, func(tx store.Tx) error { return tc.run(ctx, tx, f) }); err != nil {
+				t.Fatal(err)
+			}
+			if got := steeringEventCount(t, pool); got != before+1 {
+				t.Fatalf("committed %d steering events, want 1", got-before)
+			}
+		})
+	}
+}

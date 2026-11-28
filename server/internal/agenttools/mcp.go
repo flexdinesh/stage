@@ -120,6 +120,9 @@ func NewServer(o *Ops) *mcp.Server {
 	add(s, o, "remove_from_tree", "Take a task out of its tree; its dependents take over its needs. The task stays.", nil, o.RemoveFromTree)
 	add(s, o, "set_needs", "Replace a backlog task's needs ([] clears them); a task outside a tree joins the needs' tree.", nil, o.SetNeeds)
 	add(s, o, "start_tree", "Start every ready member of a tree (manual trees, ready roots).", nil, o.StartTree)
+	add(s, o, "set_tree_steerer", "Give a tree a steerer: Stage creates a standalone task with your prompt, binds it to the tree and launches it. The steerer hears about member changes (get_steering_events) and acts on them; it is never a member. One per tree: replace ends and stops the current one. The connection's harness must offer send.", nil, o.SetTreeSteerer)
+	add(s, o, "end_tree_steering", "Stop steering a tree: end its steerer binding and stop the steerer's session.", nil, o.EndTreeSteering)
+	add(s, o, "get_steering_events", "Read a tree's steering events after a cursor, oldest first: member state changes, answers, acceptances, notes, tree status and steering changes. self marks events the steerer caused.", ro, o.GetSteeringEvents)
 	add(s, o, "adopt_session", "Track a top-level harness session as a task (default: your own session) so it can be a tree node; stage never starts it. Returns the existing task when one owns the session.", nil, o.AdoptSession)
 
 	add(s, o, "list_schedules", "List recurring schedules (next fire first).", ro, o.ListSchedules)

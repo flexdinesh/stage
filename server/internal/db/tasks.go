@@ -310,6 +310,13 @@ func (s *Store) DeleteTask(ctx context.Context, id int64) error {
 		if err := spliceOut(ctx, tx, id); err != nil {
 			return err
 		}
+		if steerer, err := tx.Steering().ActiveByTask(ctx, id); err == nil {
+			if err := endSteerer(ctx, tx, steerer, store.SteeringTaskRemoved); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, ErrNotFound) {
+			return err
+		}
 		return tx.Tasks().Delete(ctx, id)
 	})
 }

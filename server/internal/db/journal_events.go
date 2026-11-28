@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -138,9 +139,11 @@ func addTaskEventType(ctx context.Context, tx store.Tx, taskID int64, from *Task
 		st.RecordedWork = true
 	}
 	if st.RecordedWork && st.TreeID != nil {
-		return tx.Trees().MarkRecordedWork(ctx, *st.TreeID, nil)
+		if err := tx.Trees().MarkRecordedWork(ctx, *st.TreeID, nil); err != nil {
+			return err
+		}
 	}
-	return nil
+	return steerTaskEvent(ctx, tx, st.TreeID, taskID, from, to, detail, eventType)
 }
 
 // insertNote writes a note; it protects its task and tree, and stamps the
@@ -165,7 +168,7 @@ func insertNote(ctx context.Context, tx store.Tx, o JournalOwner, in AppendNoteI
 			return JournalEntry{}, err
 		}
 	}
-	return e, nil
+	return e, steerNote(ctx, tx, tree, e, sourceID)
 }
 
 // treeEvent journals event on tree.
@@ -230,13 +233,21 @@ func changeTreeStatus(ctx context.Context, tx store.Tx, id int64, status TreeSta
 	if err != nil || !applied || old == status {
 		return err
 	}
-	return treeEvent(ctx, tx, id, "tree_status_changed", fmt.Sprintf("%s -> %s", old, status))
+	if err := treeEvent(ctx, tx, id, "tree_status_changed", fmt.Sprintf("%s -> %s", old, status)); err != nil {
+		return err
+	}
+	return enqueueSteering(ctx, tx, id, SteerTreeStatus, nil, func() (map[string]any, error) {
+		return map[string]any{"from": string(old), "to": string(status)}, nil
+	})
 }
 
 // setMembership puts the task in tree (nil: none). A change is journaled in
 // both trees, counted in their membership revisions (carrying the task's
 // recorded work), and archives the tree it emptied.
 func setMembership(ctx context.Context, tx store.Tx, taskID int64, tree *int64) error {
+	if err := steererNotMember(ctx, tx, taskID, tree); err != nil {
+		return err
+	}
 	st, err := tx.Tasks().JournalState(ctx, taskID)
 	if err != nil {
 		return err
@@ -260,6 +271,9 @@ func setMembership(ctx context.Context, tx store.Tx, taskID int64, tree *int64) 
 		}
 	}
 	if err := tx.Trees().BumpMembership(ctx, touched, st.RecordedWork); err != nil {
+		return err
+	}
+	if err := steerMembership(ctx, tx, taskID, st.Title, old, tree); err != nil {
 		return err
 	}
 	if old == nil {
@@ -367,4 +381,306 @@ func recordHandoff(ctx context.Context, tx store.Tx, taskID int64, h Handoff) er
 		sourceID = &id
 	}
 	return tx.Attempts().RecordHandoff(ctx, taskID, h, sourceID)
+}
+
+// ---- Tree steering (ADR 0013) ----
+//
+// Steering events are enqueued here, in the Write of the change that
+// caused them, and only while the tree has an active steerer binding.
+
+// Steering event kinds.
+const (
+	SteerMemberNeedsInput  = "member_needs_input"
+	SteerMemberDone        = "member_done"
+	SteerMemberFailed      = "member_failed"
+	SteerMemberInterrupted = "member_interrupted"
+	SteerMemberCancelled   = "member_cancelled"
+	SteerMemberReady       = "member_ready"
+	SteerMemberAdded       = "member_added"
+	SteerMemberRemoved     = "member_removed"
+	SteerMemberAccepted    = "member_accepted"
+	SteerMemberReopened    = "member_reopened"
+	SteerMemberAnswered    = "member_answered"
+	SteerNote              = "note"
+	SteerTreeStatus        = "tree_status"
+	SteerStarted           = "steering_started"
+	SteerEnded             = "steering_ended"
+)
+
+// steerReplyRunes caps member_done's reply excerpt.
+const steerReplyRunes = 600
+
+// ReadyDetail is the task event detail of a readiness episode (MarkReady).
+const ReadyDetail = "ready: needs completed"
+
+type steeringCauseKey struct{}
+
+// withSteeringCause makes c the cause of the steering events ctx enqueues,
+// for derived chains with no caller session of their own (a dependent made
+// ready by an acceptance inherits the acceptance's caller).
+func withSteeringCause(ctx context.Context, c CallerSession) context.Context {
+	return context.WithValue(ctx, steeringCauseKey{}, c)
+}
+
+// steeringCausedBy is the caller session and its task that caused the
+// events ctx enqueues (nil, nil: none).
+func steeringCausedBy(ctx context.Context) (*SessionRef, *int64) {
+	c, ok := ctx.Value(steeringCauseKey{}).(CallerSession)
+	if !ok {
+		if c, ok = CallerSessionFrom(ctx); !ok {
+			return nil, nil
+		}
+	}
+	var ref *SessionRef
+	if c.Ref != (SessionRef{}) {
+		r := c.Ref
+		ref = &r
+	}
+	var task *int64
+	if c.TaskID != 0 {
+		id := c.TaskID
+		task = &id
+	}
+	return ref, task
+}
+
+// enqueueSteering appends a steering event on tree when it has an active
+// steerer; payload builds the event's payload only then. Event ids are
+// allocated under the tree's event lock, after which the binding is checked
+// again: an event never follows its binding's end.
+func enqueueSteering(ctx context.Context, tx store.Tx, tree int64, kind string, task *int64, payload func() (map[string]any, error)) error {
+	st := tx.Steering()
+	if _, err := st.Active(ctx, tree); errors.Is(err, ErrNotFound) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return insertSteeringEvent(ctx, tx, tree, kind, task, payload)
+}
+
+// insertSteeringEvent locks tree's events and appends one to its active
+// binding (none: nothing).
+func insertSteeringEvent(ctx context.Context, tx store.Tx, tree int64, kind string, task *int64, payload func() (map[string]any, error)) error {
+	st := tx.Steering()
+	if err := st.LockEvents(ctx, tree); err != nil {
+		return err
+	}
+	s, err := st.Active(ctx, tree)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var p map[string]any
+	if payload != nil {
+		if p, err = payload(); err != nil {
+			return err
+		}
+	}
+	ref, by := steeringCausedBy(ctx)
+	_, err = st.InsertEvent(ctx, store.NewSteeringEvent{TreeID: tree, SteererID: s.ID, Kind: kind, TaskID: task, Payload: p, CausedBy: ref, CausedByTask: by})
+	return err
+}
+
+// steerTaskEvent enqueues the steering event a task event implies, in the
+// task's tree: a state it entered, an answer to it, or a readiness episode.
+func steerTaskEvent(ctx context.Context, tx store.Tx, tree *int64, taskID int64, from *TaskState, to TaskState, detail, eventType string) error {
+	if tree == nil || from == nil {
+		return nil
+	}
+	kind := ""
+	extra := map[string]any{}
+	cause := WorkAttribution(ctx).Cause
+	switch {
+	case *from != to:
+		kind = map[TaskState]string{
+			StateNeedsInput: SteerMemberNeedsInput, StateDone: SteerMemberDone, StateFailed: SteerMemberFailed,
+			StateInterrupted: SteerMemberInterrupted, StateCancelled: SteerMemberCancelled,
+		}[to]
+	case eventType == "session_response":
+		kind, extra["via"] = SteerMemberAnswered, "respond"
+		if cause != nil && cause.RequestID != "" {
+			extra["requestId"] = cause.RequestID
+		}
+	case cause != nil && cause.Kind == "session_message":
+		kind, extra["via"] = SteerMemberAnswered, "send"
+	case to == StateBacklog && detail == ReadyDetail:
+		kind = SteerMemberReady
+	}
+	if kind == "" {
+		return nil
+	}
+	return enqueueSteering(ctx, tx, *tree, kind, &taskID, func() (map[string]any, error) {
+		t, err := tx.Tasks().Get(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		extra["title"] = t.Title
+		switch kind {
+		case SteerMemberNeedsInput:
+			extra["stateRevision"] = t.StateRevision
+		case SteerMemberDone:
+			if t.SessionIdentityID == nil {
+				break
+			}
+			o, err := tx.Observations().Get(ctx, *t.SessionIdentityID)
+			if errors.Is(err, ErrNotFound) {
+				break
+			}
+			if err != nil {
+				return nil, err
+			}
+			if o.Reply != nil {
+				reply := []rune(o.Reply.Text)
+				extra["replyTruncated"] = o.Reply.Truncated || len(reply) > steerReplyRunes
+				if len(reply) > steerReplyRunes {
+					reply = reply[:steerReplyRunes]
+				}
+				extra["reply"] = string(reply)
+			}
+		case SteerMemberFailed, SteerMemberInterrupted:
+			if t.LastError != nil {
+				extra["error"] = *t.LastError
+			}
+		}
+		return extra, nil
+	})
+}
+
+// steerNote enqueues a blocker or decision note on a member task or on the
+// tree itself.
+func steerNote(ctx context.Context, tx store.Tx, tree *int64, e JournalEntry, sourceID *int64) error {
+	if tree == nil || (e.Category != "blocker" && e.Category != "decision") {
+		return nil
+	}
+	if _, named := CallerSessionFrom(ctx); !named && e.SourceSession != nil {
+		c := CallerSession{Ref: *e.SourceSession}
+		if sourceID != nil {
+			owner, err := tx.Tasks().BySessionID(ctx, *sourceID)
+			if err != nil && !errors.Is(err, ErrNotFound) {
+				return err
+			}
+			c.TaskID = owner
+		}
+		ctx = withSteeringCause(ctx, c)
+	}
+	return enqueueSteering(ctx, tx, *tree, SteerNote, e.TaskID, func() (map[string]any, error) {
+		text := []rune(e.Text)
+		p := map[string]any{"noteId": e.ID, "category": e.Category, "truncated": len(text) > steerReplyRunes}
+		if len(text) > steerReplyRunes {
+			text = text[:steerReplyRunes]
+		}
+		p["text"] = string(text)
+		return p, nil
+	})
+}
+
+// steerMembership enqueues member_removed in the tree the task left and
+// member_added in the tree it joined.
+func steerMembership(ctx context.Context, tx store.Tx, taskID int64, title string, old, tree *int64) error {
+	payload := func() (map[string]any, error) { return map[string]any{"title": title}, nil }
+	if old != nil {
+		if err := enqueueSteering(ctx, tx, *old, SteerMemberRemoved, &taskID, payload); err != nil {
+			return err
+		}
+	}
+	if tree != nil {
+		return enqueueSteering(ctx, tx, *tree, SteerMemberAdded, &taskID, payload)
+	}
+	return nil
+}
+
+// steerAcceptance enqueues member_accepted (event task_completed) or
+// member_reopened for an acceptance change of member id at revision.
+func steerAcceptance(ctx context.Context, tx store.Tx, id, revision int64, acceptanceID *int64) error {
+	tree, err := tx.Tasks().TreeID(ctx, id)
+	if err != nil || tree == nil {
+		return err
+	}
+	kind := SteerMemberReopened
+	if acceptanceID != nil {
+		kind = SteerMemberAccepted
+	}
+	return enqueueSteering(ctx, tx, *tree, kind, &id, func() (map[string]any, error) {
+		t, err := tx.Tasks().Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		p := map[string]any{"title": t.Title, "revision": revision}
+		if acceptanceID != nil {
+			p["acceptanceId"] = *acceptanceID
+		}
+		return p, nil
+	})
+}
+
+// steererNotMember refuses task joining tree while it steers tree.
+func steererNotMember(ctx context.Context, tx store.Tx, taskID int64, tree *int64) error {
+	if tree == nil {
+		return nil
+	}
+	s, err := tx.Steering().ActiveByTask(ctx, taskID)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if s.TreeID == *tree {
+		return SteererNotMember(taskID, *tree)
+	}
+	return nil
+}
+
+// SteererNotMember: a tree's steerer cannot be its member (400
+// steerer_not_member, ADR 0013).
+func SteererNotMember(taskID, tree int64) error {
+	return &InvalidError{Msg: fmt.Sprintf("Task %d steers tree %d, so it cannot be a member of it.", taskID, tree), Code: "steerer_not_member"}
+}
+
+// bindSteerer binds task as tree's active steerer, enqueues steering_started
+// and journals steering_started (or steering_replaced, when replaced names
+// the steerer task it replaced).
+func bindSteerer(ctx context.Context, tx store.Tx, tree, task int64, requestID, digest string, replaced *int64) (int64, error) {
+	member, err := tx.Tasks().TreeID(ctx, task)
+	if err != nil {
+		return 0, err
+	}
+	if member != nil && *member == tree {
+		return 0, SteererNotMember(task, tree)
+	}
+	id, err := tx.Steering().Bind(ctx, tree, task, requestID, digest, WorkAttribution(ctx))
+	if err != nil {
+		return 0, err
+	}
+	if err := insertSteeringEvent(ctx, tx, tree, SteerStarted, &task, nil); err != nil {
+		return 0, err
+	}
+	if replaced != nil {
+		return id, treeEvent(ctx, tx, tree, "steering_replaced", fmt.Sprintf("Steerer #%d replaced by #%d", *replaced, task))
+	}
+	return id, treeEvent(ctx, tx, tree, "steering_started", fmt.Sprintf("Steering by #%d started", task))
+}
+
+// endSteerer ends binding s with reason, enqueuing steering_ended before
+// the end; a replace (reason replaced) journals with the new binding.
+func endSteerer(ctx context.Context, tx store.Tx, s store.Steerer, reason store.SteeringEndReason) error {
+	task := s.TaskID
+	if err := insertSteeringEvent(ctx, tx, s.TreeID, SteerEnded, &task, func() (map[string]any, error) {
+		return map[string]any{"reason": string(reason)}, nil
+	}); err != nil {
+		return err
+	}
+	ended, err := tx.Steering().End(ctx, s.ID, reason)
+	if err != nil {
+		return err
+	}
+	if !ended {
+		return Conflict("Steering changed. Refresh the tree.")
+	}
+	if reason == store.SteeringReplaced {
+		return nil
+	}
+	return treeEvent(ctx, tx, s.TreeID, "steering_ended", fmt.Sprintf("Steering by #%d ended (%s)", task, reason))
 }

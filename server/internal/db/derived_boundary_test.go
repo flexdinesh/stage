@@ -18,6 +18,7 @@ var derivedWrites = map[string]map[string]string{
 	"Acceptances": {"Insert": "insertAcceptance"},
 	"Attempts":    {"RecordHandoff": "recordHandoff"},
 	"Threads":     {"Mirror": "mirrorThread"},
+	"Steering":    {"InsertEvent": "enqueueSteering", "Bind": "bindSteerer", "End": "endSteerer"},
 	"Trees": {
 		"Insert": "insertTree", "Update": "updateTree", "SetStatus": "setTreeStatus",
 		"ArchiveDissolved": "archiveDissolved", "ArchiveIfEmpty": "setMembership",
