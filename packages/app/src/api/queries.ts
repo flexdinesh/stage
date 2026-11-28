@@ -1,4 +1,4 @@
-import { keepPreviousData, queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, queryOptions, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useApi } from "../platform/context.tsx";
 import { ApiError, type ArchivedFilter, type HarnessApi } from "./client.ts";
@@ -286,9 +286,9 @@ export const useTasks = (q: TaskListQuery = {}, { live = true }: { live?: boolea
   });
 };
 
-export const useTask = (id: number) => {
+export const useTask = (id: number, enabled = true) => {
   const api = useApi();
-  return useQuery({ queryKey: [...keys.task, id], queryFn: () => api.task(id), refetchInterval: POLL.live });
+  return useQuery({ queryKey: [...keys.task, id], queryFn: () => api.task(id), refetchInterval: POLL.live, enabled });
 };
 
 /** Declarations for the current session. A new attempt gets fresh controls and action state. */
@@ -355,6 +355,19 @@ export const useJournal = (owner: JournalOwner, q: Omit<JournalQuery, "cursor"> 
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     refetchInterval: (query) => pollFirstPage(query.state.data?.pages.length, POLL.live),
     subscribed: active,
+    retry: false,
+  });
+};
+
+/** A tree's steering feed, oldest first, a page at a time (`after` cursor); the first page polls while shown. */
+export const useSteeringEvents = (treeId: number) => {
+  const api = useApi();
+  return useInfiniteQuery({
+    queryKey: [...keys.tree, treeId, "steering-events"],
+    queryFn: ({ pageParam }) => api.steeringEvents(treeId, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.hasMore ? last.events.at(-1)?.id : undefined),
+    refetchInterval: (query) => pollFirstPage(query.state.data?.pages.length, POLL.live),
     retry: false,
   });
 };
@@ -545,6 +558,24 @@ export function useConnectionOperation(connectionId: number, op: OperationId, en
   const caps = useConnectionCapabilities(connectionId, enabled);
   const o = caps.data?.operations[op];
   return { offered: caps.live && o?.available === true, known: caps.live && (caps.isSuccess || caps.isError), reason: o?.available === false && o.reason !== undefined && o.reason !== "" ? o.reason : null };
+}
+
+/**
+ * Why each of `connectionIds` does not offer operation `op` (the harness's reason, else a generic one), by id; a
+ * connection still being read, or one that offers it, is absent. Reads the same cached capabilities as
+ * useConnectionOperation.
+ */
+export function useConnectionsOperationBlock(connectionIds: readonly number[], op: OperationId, enabled: boolean, fallback: string): ReadonlyMap<number, string> {
+  const api = useApi();
+  const results = useQueries({ queries: connectionIds.map((id) => ({ ...connectionCapabilityOptions(api, id), enabled: enabled && id > 0 })) });
+  const blocked = new Map<number, string>();
+  results.forEach((r, i) => {
+    const id = connectionIds[i];
+    const o = r.data?.operations[op];
+    if (id === undefined || r.data === undefined || o?.available === true) return;
+    blocked.set(id, o?.reason?.trim() || fallback);
+  });
+  return blocked;
 }
 
 /**

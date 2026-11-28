@@ -701,6 +701,28 @@ export interface Task {
   treeStatus: TreeStatus | null;
   /** Server eligibility: deletable only when no recorded work, launch or session exists. */
   deletable: boolean;
+  /** The task's latest steerer binding; null when it never steered a tree (ADR 0013). */
+  steering: TaskSteering | null;
+  /** Its held needs-input notification: the tree's steerer answers first; null when none is held. */
+  hold: TaskHold | null;
+}
+
+/** Why a steerer binding ended. */
+export type SteeringEndReason = "replaced" | "stopped" | "tree_finished" | "task_removed";
+
+/** A task's latest steerer binding. */
+export interface TaskSteering {
+  treeId: number;
+  active: boolean;
+  endedAt?: string;
+  endReason?: SteeringEndReason;
+}
+
+/** A held needs-input notification: it reaches the user at `until` unless answered first. */
+export interface TaskHold {
+  until: string;
+  /** The steerer that can answer; null once that task is deleted. */
+  steererTaskId: number | null;
 }
 
 export interface WorkAttribution {
@@ -858,6 +880,70 @@ export interface Tree {
   updatedAt: string;
   /** Server eligibility: deletion must not discard recorded work, including departed members. */
   deletable: boolean;
+  /** The tree's active steerer; null when none (ADR 0013). */
+  steerer: TreeSteerer | null;
+  /** How long a member's needs-input notification waits for the steerer (0 off, at most 3600). */
+  steeringHoldSeconds: number;
+}
+
+/** A tree's active steerer and its delivery progress. */
+export interface TreeSteerer {
+  taskId: number;
+  title: string;
+  /** The steerer task's state. */
+  state: TaskState;
+  /** When it was bound. */
+  since: string;
+  /** The last steering event a digest covered. */
+  deliveredThrough: number;
+  /** The last digest sent; null before any. */
+  lastDeliveredAt: string | null;
+  /** Why the last delivery failed (`steerer not running` while it can't take updates); null after a delivery. */
+  lastError: string | null;
+  /** Events the next digest carries. */
+  pending: number;
+}
+
+/** One row of a tree's steering feed. */
+export interface SteeringEvent {
+  id: number;
+  treeId: number;
+  /** The binding it belongs to. */
+  steererId: number;
+  kind: string;
+  /** The member (the steerer for steering_started and steering_ended); null for tree-level events. */
+  taskId: number | null;
+  payload: Record<string, unknown>;
+  causedBy: { session: SessionRef | null; taskId: number | null } | null;
+  /** Caused by the binding's steerer task. */
+  self: boolean;
+  createdAt: string;
+}
+
+export interface SteeringEventPage {
+  events: SteeringEvent[];
+  hasMore: boolean;
+}
+
+export interface SetSteererRequest {
+  prompt: string;
+  title?: string;
+  connectionId: number;
+  workspaceId: string;
+  executionConfig?: ExecutionConfig;
+  replace?: boolean;
+  requestId: string;
+}
+
+export interface SetSteererResponse {
+  tree: TreeDetail;
+  task: Task;
+  warnings: string[];
+}
+
+export interface EndSteeringResponse {
+  tree: TreeDetail;
+  warnings: string[];
 }
 
 /** taskId needs needId. */
@@ -928,6 +1014,8 @@ export interface UpdateTreeRequest {
   title?: string;
   startMode?: StartMode;
   status?: TreeStatus;
+  /** 0 (off) to 3600. */
+  steeringHoldSeconds?: number;
 }
 
 /** Trees page and API view: active (open, with an incomplete member), done (marked done or all members completed), archived, all. */
@@ -1339,6 +1427,8 @@ export interface Notification {
   readAt: string | null;
   /** Live: the task's state, or the external session's. null = unknown, and always for tree and schedule rows. */
   currentState: TaskState | null;
+  /** Why a held notification came late ("Steerer did not answer", "Steerer: <reason>"); null otherwise. */
+  note: string | null;
 }
 
 export interface NotificationPage {

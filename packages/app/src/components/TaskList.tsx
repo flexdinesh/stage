@@ -9,7 +9,9 @@ import { canStart, isWaiting, waitTarget } from "../lib/tasks.ts";
 import { HarnessName } from "./HarnessName.tsx";
 import { taskClosedLabel, treeTaskPath } from "../lib/trees.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
-import { IconChainLink, IconClock, IconRepeat, IconTree } from "./icons.tsx";
+import { IconChainLink, IconClock, IconRepeat, IconSteer, IconTree } from "./icons.tsx";
+import { heldChip } from "../lib/steering.ts";
+import { useNow } from "../lib/now.ts";
 import { CompletionButton } from "./Completion.tsx";
 import { useCompletionLinger, useQuickComplete, useUndoComplete } from "./QuickComplete.tsx";
 import { LastWordLine } from "./LastWord.tsx";
@@ -122,16 +124,20 @@ interface RowChip {
 }
 
 /**
- * The row's one chip: closed rows lead with "archived" / "tree done" / "tree archived"; then the one-shot start time
- * while timed, "needs #3 #5" while blocked on its needs, else the schedule that spawned it, else the agent session that
- * created it.
+ * The row's one chip: closed rows lead with "archived" / "tree done" / "tree archived"; then "Steerer · 4m" while its
+ * needs input is held for the tree's steerer (linking the steerer); then the one-shot start time while timed, "needs #3
+ * #5" while blocked on its needs, else the schedule that spawned it, else the agent session that created it.
  */
-function rowChip(task: Task): RowChip | null {
+function rowChip(task: Task, now: number): RowChip | null {
   const closed = taskClosedLabel(task);
   if (closed !== null)
     return task.archivedAt !== null || task.treeId === null
       ? { to: `/tasks/${task.id}`, label: closed, title: `Archived ${dateTime(task.archivedAt ?? "")}`, icon: null }
       : { to: `/trees/${task.treeId}`, label: closed, title: `In ${closed}: ${task.treeTitle ?? task.treeId}`, icon: <IconTree /> };
+  if (task.state === "needs_input" && task.hold !== null) {
+    const { label, title } = heldChip(task.hold, now);
+    return { to: `/tasks/${task.hold.steererTaskId ?? task.id}`, label, title, icon: <IconSteer /> };
+  }
   if (task.state === "backlog" && task.startAt !== null) {
     const tz = browserTimeZone();
     const when = wallTime(task.startAt, tz, { short: true });
@@ -226,7 +232,9 @@ export function TaskRow({
   const { start, block } = useStartTask(task);
   const since = task.launchedAt ?? task.createdAt;
   const showStart = !hideStart && canStart(task) && !isWaiting(task);
-  const chip = rowChip(task);
+  // A held wait's countdown moves on its own.
+  const now = useNow(15_000, task.state === "needs_input" && task.hold !== null);
+  const chip = rowChip(task, now);
   // A closed tree's row chip already links it.
   const treeLink = showTree && task.treeId !== null && taskClosedLabel(task) === null ? task.treeId : null;
   const needsInput = task.state === "needs_input";

@@ -29,6 +29,9 @@ import { OpeningPrompt, PromptPanel } from "../components/PromptPanel.tsx";
 import { TaskStateBadge, taskStateLabel } from "../components/StateBadge.tsx";
 import { ImageStrip } from "../components/Images.tsx";
 import { NoTreePanel, TreeBar, TreePanel } from "../components/trees/TreePanel.tsx";
+import { SteeringPanel } from "../components/SteeringPanel.tsx";
+import { heldAlert } from "../lib/steering.ts";
+import { useNow } from "../lib/now.ts";
 import { TaskFormModal } from "../components/TaskForm.tsx";
 import {
   Alert,
@@ -197,6 +200,9 @@ function TaskBody({ task }: { task: TaskDetail }) {
   const archived = task.archivedAt !== null;
 
   const waiting = task.state === "needs_input";
+  // A held wait: the tree's steerer answers first; the countdown moves on its own.
+  const held = waiting ? task.hold : null;
+  const now = useNow(15_000, held !== null);
   // A replaced connection keeps Start / Stop visible but disabled, with the reason.
   const retired = isRetired(task);
   const live = { ...task, connectionActive: true };
@@ -305,7 +311,9 @@ function TaskBody({ task }: { task: TaskDetail }) {
         {task.tree === null ? null : <TreeBar task={task} tree={task.tree} />}
         {waiting ? (
           <Alert tone="need" actions={action === null ? undefined : openInApp(answerable || replyLeads ? "secondary" : "primary", "max-md:hidden")}>
-            {answerable
+            {held !== null
+              ? `${heldAlert(held, now)}${unlisted !== "" ? ` ${unlisted}` : ""}`
+              : answerable
               ? `${kindName(task.harness)} is waiting for your answer.`
               : replyLeads
                 ? replyPrompt(kindName(task.harness))
@@ -423,7 +431,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
           </div>
           <div className="flex min-w-0 flex-col gap-3.5">
             <StatePanel task={task} className="max-lg:hidden" />
-            {task.tree === null ? <NoTreePanel task={task} /> : <TreePanel task={task} tree={task.tree} />}
+            {task.steering === null ? null : <SteeringPanel task={task} steering={task.steering} />}
+            {task.tree !== null ? <TreePanel task={task} tree={task.tree} /> : task.steering?.active === true ? null : <NoTreePanel task={task} />}
             <SessionPanel task={task} />
             <UsagePanel task={task} />
             <ConfigPanel task={task} />

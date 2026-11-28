@@ -1,10 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useApi } from "../platform/context.tsx";
-import { useConnectionCapabilities, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
+import { useConnectionCapabilities, useConnectionsOperationBlock, useHarnesses, usePreferences, useInvalidateWork, useProjects, useSchedulePreview } from "../api/queries.ts";
 import {
   type ExecutionConfig,
   type Schedule,
+  type SetSteererResponse,
   type StartMode as TreeStartMode,
   type Task,
 } from "../api/types.ts";
@@ -32,8 +33,10 @@ import { handoffHint } from "../lib/handoff.ts";
 import { isFullyEditable } from "../lib/tasks.ts";
 import { blockedStartModes, scheduleBody, scheduleUpdateBody, taskCreateBody, taskUpdateBody, taskWorkspaceLocation, type TaskTemplate, type TreeStartChoice } from "../lib/taskForm.ts";
 import { operationReason } from "../lib/launch.ts";
+import { mintSteerRequestId } from "../lib/steering.ts";
+import { nextRequestKey, type RequestKey } from "../lib/workspaceAdd.ts";
 import { HandoffToggle } from "./Handoff.tsx";
-import { LaunchBlockAlert, useOperationGate } from "./LaunchGate.tsx";
+import { BlockedReason, LaunchBlockAlert, useOperationGate } from "./LaunchGate.tsx";
 import { ImageDropzone, ImageStrip, useImageSet } from "./Images.tsx";
 import { ProjectCombobox } from "./ProjectSelect.tsx";
 import { HarnessFields, harnessDefaults, incompatibleSettings } from "./HarnessFields.tsx";
@@ -100,6 +103,22 @@ interface FormState {
 
 /** What the drawer saved: a task, or (Repeat) a schedule. */
 export type Saved = { kind: "task"; task: Task } | { kind: "schedule"; schedule: Schedule };
+
+/** What a save did: the drawer's own outcomes, or (steering mode) the steerer it set. */
+type Outcome = Saved | { kind: "steerer"; result: SetSteererResponse };
+
+/**
+ * The tree's steerer drawer (ADR 0013): a standalone task Stage binds to the tree and starts now. Replacing prefills
+ * the intent, destination and config from the steerer it replaces.
+ */
+export interface SteeringPrefill {
+  treeId: number;
+  treeTitle: string;
+  /** The steerer being replaced (sent with `replace: true`). */
+  replacing?: Task;
+}
+
+const SEND_UNSUPPORTED = "This connection does not support sending messages.";
 
 /** The task-shaped config shared by tasks and schedules. */
 type Template = Pick<
@@ -202,17 +221,23 @@ interface TaskFormProps {
   defaultMode?: StartMode;
   /** New task: join this tree, needing these members. */
   defaultTree?: TreePrefill;
+  /** Steering mode: the drawer sets this tree's steerer instead of saving a task. */
+  steering?: SteeringPrefill;
   onClose: () => void;
   onSaved?: (saved: Saved) => void;
+  /** Steering mode: the steerer was set (`warnings`: what the server could not do, e.g. stop the old session). */
+  onSteered?: (result: SetSteererResponse) => void;
 }
 
 /** Create (no `task`/`schedule`) or edit form in a drawer. A new one waits for preferences (usually cached) to start on the default connection. */
 export function TaskFormModal(props: TaskFormProps) {
   const prefs = usePreferences();
-  if (props.task !== undefined || props.schedule !== undefined || props.duplicate !== undefined) return <TaskFormDrawer {...props} defaultConnection={null} />;
+  if (props.task !== undefined || props.schedule !== undefined || props.duplicate !== undefined || props.steering?.replacing !== undefined) {
+    return <TaskFormDrawer {...props} defaultConnection={null} />;
+  }
   if (prefs.isPending) {
     return (
-      <Drawer title={props.defaultMode === "repeat" ? "New schedule" : "New task"} onClose={props.onClose} wide>
+      <Drawer title={props.steering !== undefined ? "Add steerer" : props.defaultMode === "repeat" ? "New schedule" : "New task"} onClose={props.onClose} wide>
         <Muted>Loading defaults…</Muted>
       </Drawer>
     );
@@ -227,13 +252,19 @@ function TaskFormDrawer({
   defaultProjectId,
   defaultMode,
   defaultTree,
+  steering,
   onClose,
   onSaved,
+  onSteered,
   defaultConnection,
 }: TaskFormProps & { defaultConnection: number | null }) {
   const api = useApi();
   const [copySource] = useState(duplicate);
-  const [s, setS] = useState(() => copySource === undefined
+  // Steering mode starts now (a steerer is never parked); a replacement keeps the old steerer's intent.
+  const [steerSource] = useState(steering?.replacing);
+  const [s, setS] = useState(() => steering !== undefined
+    ? { ...initialState(undefined, undefined, undefined, "now", undefined), prompt: steerSource?.prompt ?? "" }
+    : copySource === undefined
     ? initialState(task, schedule, defaultProjectId, defaultMode, defaultTree)
     : { ...initialState(undefined, undefined, copySource.projectId, "backlog", undefined), ...fromTemplate(copySource) });
   // The task and form state as the form opened: a save sends only what differs from them.
@@ -243,9 +274,13 @@ function TaskFormDrawer({
   const invalidate = useInvalidateWork();
   const existing = opened?.task ?? openedSchedule;
   const full = task === undefined || isFullyEditable(task);
-  const source = existing ?? copySource;
+  const source = existing ?? copySource ?? steerSource;
   const savedId = source?.workspaceId || null;
-  const savedWorkspace = opened?.task.workspace ?? copySource?.workspace;
+  const savedWorkspace = opened?.task.workspace ?? copySource?.workspace ?? steerSource?.workspace;
+  // A steerer needs `send` (Stage delivers its updates as messages): other connections list with the harness's reason.
+  const { activeList } = useHarnesses();
+  const connectionIds = useMemo(() => activeList.map((c) => c.id), [activeList]);
+  const sendBlocks = useConnectionsOperationBlock(connectionIds, "send", steering !== undefined, SEND_UNSUPPORTED);
   const destination = useTaskDestination({
     initialConnection: source?.connectionId ?? defaultConnection,
     initialWorkspace: savedId === null ? null : {
@@ -254,6 +289,7 @@ function TaskFormDrawer({
     allowPrefill: source === undefined,
     projectId: defaultProjectId,
     enabled: full,
+    ...(steering === undefined ? {} : { connectionBlocks: { chip: "can't send", reasons: sendBlocks } }),
   });
   const { connection, workspaceId, selected, connectionName } = destination;
   const bound = selected !== undefined;
@@ -276,12 +312,16 @@ function TaskFormDrawer({
     images.ids.some((id) => !existing.attachments?.some((attachment) => attachment.id === id));
   // Start options: all for a new task, timing only for a backlog task without needs, none otherwise (or for a schedule).
   const needs = task?.needs ?? [];
-  const modes: readonly StartMode[] = copySource !== undefined || defaultMode === "repeat" ? []
+  const modes: readonly StartMode[] = copySource !== undefined || steering !== undefined || defaultMode === "repeat" ? []
     : isNew ? newModes(defaultTree) : task !== undefined && full && needs.length === 0 ? ["backlog", "at"] : [];
   const operationGate = useOperationGate();
   const block = bound && full ? operationGate(connection, "launch") : null;
   const scopedBlock = bound && full ? operationReason("launch", caps.data, caps.error) : null;
   const launchable = bound && block === null && scopedBlock === null;
+  // Steering: why the chosen connection can't host a steerer (still checking reads as a reason too, so Save waits).
+  const steerBlock = steering === undefined || connection === 0 ? null
+    : sendBlocks.get(connection) ?? (bound ? operationReason("send", caps.data, caps.error) : null);
+  const steerRequest = useRef<RequestKey | null>(null);
   // Still reading the chosen workspace's launch support: the Workspace line says so, so the form does not move. Only
   // a final answer (unsupported or an error) takes a Hint row of its own.
   const checkingLaunch = block === null && scopedBlock !== null && caps.data === undefined && caps.error === null;
@@ -322,7 +362,21 @@ function TaskFormDrawer({
   }
 
   const save = useMutation({
-    mutationFn: async (): Promise<Saved> => {
+    mutationFn: async (): Promise<Outcome> => {
+      if (steering !== undefined) {
+        const title = s.title.trim();
+        const body = {
+          prompt: s.prompt,
+          ...(title === "" ? {} : { title }),
+          connectionId: connection,
+          workspaceId: selected?.workspaceId ?? "",
+          executionConfig: effectiveConfig,
+          ...(steerSource === undefined ? {} : { replace: true }),
+        };
+        // Same content, same key: a retry after a lost response replays instead of launching twice.
+        steerRequest.current = nextRequestKey(steerRequest.current, JSON.stringify(body), mintSteerRequestId);
+        return { kind: "steerer", result: await api.setTreeSteerer(steering.treeId, { ...body, requestId: steerRequest.current.id }) };
+      }
       if (copySource !== undefined) {
         const body = { ...template(), workspaceId: selected?.workspaceId ?? null, attachmentIds: images.ids };
         return { kind: "task", task: await api.duplicateTask(copySource.id, body) };
@@ -364,8 +418,9 @@ function TaskFormDrawer({
 
   const missing = [
     showPlanningProject && projectId === undefined && "project for backlog",
-    s.title.trim() === "" && "title",
-    full && s.prompt.trim() === "" && "prompt",
+    steering === undefined && s.title.trim() === "" && "title",
+    full && s.prompt.trim() === "" && (steering === undefined ? "prompt" : "intent"),
+    steerBlock !== null && "a connection that can send",
     full && (isNew || destinationChanged) && !destination.canPlan && "connection",
     full && requiresLaunch && !bound && "workspace",
     full && requiresLaunch && bound && !launchable && "available launch connection",
@@ -386,7 +441,8 @@ function TaskFormDrawer({
     e?.preventDefault();
     if (!blocked) save.mutate(undefined, { onSuccess: (saved) => {
       void invalidate();
-      onSaved?.(saved);
+      if (saved.kind === "steerer") onSteered?.(saved.result);
+      else onSaved?.(saved);
       onClose();
     } });
   };
@@ -397,11 +453,14 @@ function TaskFormDrawer({
     submit();
   };
 
-  const title = copySource !== undefined ? `Duplicate task #${copySource.id}` : schedule !== undefined ? "Edit schedule"
+  const title = steering !== undefined ? (steerSource === undefined ? "Add steerer" : `Replace steerer #${steerSource.id}`)
+    : copySource !== undefined ? `Duplicate task #${copySource.id}` : schedule !== undefined ? "Edit schedule"
     : task !== undefined ? `Edit task #${task.id}` : mode === "repeat" ? "New schedule" : "New task";
   const startLabel = startMs === null ? null : wallTime(new Date(startMs).toISOString(), s.tz, { short: true, now });
   const primaryLabel =
-    mode === "repeat"
+    steering !== undefined
+      ? steerSource === undefined ? "Start steerer" : "Replace steerer"
+      : mode === "repeat"
       ? "Save schedule"
       : mode === "at" && startLabel !== null
         ? `Save · starts ${startLabel}`
@@ -416,10 +475,12 @@ function TaskFormDrawer({
       <Meta small className="min-w-0 flex-1 max-md:basis-full empty:hidden md:text-right">
         {missing.length > 0 ? `required: ${missing.join(", ")}` : null}
       </Meta>
-      <Button variant="primary" busy={save.isPending} disabled={blocked} onClick={() => submit()} className="ml-auto">
-        {primaryLabel}
-        <kbd className="hidden border border-current/40 px-1 font-mono text-label leading-4 md:inline">Ctrl ↵</kbd>
-      </Button>
+      <BlockedReason reason={steerBlock ?? undefined} className="ml-auto">
+        <Button variant="primary" busy={save.isPending} disabled={blocked} onClick={() => submit()} className="ml-auto">
+          {primaryLabel}
+          <kbd className="hidden border border-current/40 px-1 font-mono text-label leading-4 md:inline">Ctrl ↵</kbd>
+        </Button>
+      </BlockedReason>
     </>
   );
 
@@ -446,6 +507,21 @@ function TaskFormDrawer({
         )}
         {schedule === undefined ? null : (
           <Alert tone="plain">Changes apply to future runs. Tasks this schedule already started keep their config.</Alert>
+        )}
+        {steering === undefined ? null : (
+          <Alert tone="plain">
+            {steerSource === undefined ? (
+              <>
+                Steers <span className="font-medium">{steering.treeTitle}</span>: a standalone task that starts now, hears about every
+                member change and answers and accepts members. It never joins the tree.
+              </>
+            ) : (
+              <>
+                Replaces steerer <span className="font-mono tabular">#{steerSource.id}</span>: its session stops and the new steerer
+                starts now on <span className="font-medium">{steering.treeTitle}</span>.
+              </>
+            )}
+          </Alert>
         )}
         <TaskDestinationFields
           destination={destination}
@@ -475,12 +551,18 @@ function TaskFormDrawer({
         {showPlanningProject ? <ErrorText error={projects.error} /> : null}
         {block === null ? null : <LaunchBlockAlert block={block} />}
         {bound && block === null && scopedBlock !== null && !checkingLaunch ? <Hint>{scopedBlock}</Hint> : null}
-        <Field label="Title">
-          {(id) => <Input id={id} data-autofocus={full ? undefined : true} value={s.title} onChange={(e) => set({ title: e.target.value })} />}
+        {steerBlock !== null && sendBlocks.has(connection) ? <Hint>{steerBlock}</Hint> : null}
+        <Field label="Title" hint={steering === undefined ? undefined : "Optional."}>
+          {(id) => <Input id={id} data-autofocus={full ? undefined : true} value={s.title} onChange={(e) => set({ title: e.target.value })}
+            {...(steering === undefined ? {} : { placeholder: `Steer: ${steering.treeTitle}` })} />}
         </Field>
-        <Field label="Prompt" hint={full ? "Type / to insert a snippet." : undefined}>
+        <Field label={steering === undefined ? "Prompt" : "Intent"}
+          hint={steering !== undefined ? "What the steerer drives the tree toward. Stage adds the tree, its notes and the playbook. Type / to insert a snippet."
+            : full ? "Type / to insert a snippet." : undefined}>
           {(id) =>
-            full ? (
+            steering !== undefined ? (
+              <SnippetTextarea id={id} rows={8} value={s.prompt} onValueChange={(prompt) => set({ prompt })} projectId={snippetProject} />
+            ) : full ? (
               <div className="flex min-w-0 flex-col gap-2">
                 <ImageDropzone set={images} label="Prompt images" disabled={!acceptsImages}>
                   <SnippetTextarea
@@ -569,7 +651,7 @@ function TaskFormDrawer({
             error={previewError}
           />
         ) : null}
-        {task === undefined && copySource === undefined ? (
+        {task === undefined && copySource === undefined && steering === undefined ? (
           <Field
             label={mode === "repeat" ? "Notes template" : "Initial note"}
             hint={mode === "repeat" ? "Starts each spawned task's journal." : "Optional. Appended once to the new task's journal."}

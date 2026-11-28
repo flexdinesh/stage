@@ -4,6 +4,8 @@ import type { TreeSummary } from "../../api/types.ts";
 import { dateTime, relativeTime, shortDate } from "../../lib/format.ts";
 import { closedLabel, nextActionText, rollupLabel, treeClosed, treeMetaParts, treeProjectLabel, treeRollup, type Rollup } from "../../lib/trees.ts";
 import { RowCopyLink } from "../StageLinks.tsx";
+import { IconSteer } from "../icons.tsx";
+import { steererPhase } from "../../lib/steering.ts";
 import { BlockedReason, useStartReadyTasks } from "../LaunchGate.tsx";
 import { Button, Chip, DisclosureButton, InlineError, MetaLine, Row, RowList, Skeleton, SkeletonBar, TextLink, buttonClass, cx, errorText, toneClass } from "../ui.tsx";
 
@@ -131,6 +133,12 @@ export function TreeRow({ tree, tasks }: { tree: TreeSummary; tasks?: { open: bo
             </Chip>
           )}
           {chip === null ? null : <Chip {...(tree.closedAt === null ? {} : { title: dateTime(tree.closedAt) })}>{chip}</Chip>}
+          {tree.steerer === null ? null : (
+            <Chip title={`Steered by #${tree.steerer.taskId} ${tree.steerer.title}`}>
+              <IconSteer />
+              {steererPhase(tree.steerer.state) === "stopped" ? "steerer stopped" : "steered"}
+            </Chip>
+          )}
         </div>
         <p className="mt-0.5 font-mono text-meta text-fg [overflow-wrap:anywhere]">{treeProjectLabel(tree)}</p>
         <MetaLine className="mt-0.5 tabular">

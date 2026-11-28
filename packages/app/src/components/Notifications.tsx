@@ -300,6 +300,7 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
         </TextLink>
         <IconButton variant="ghost" small onClick={onDismiss} label="Dismiss notification" icon={IconClose} className="-my-1 -mr-1.5" />
       </div>
+      <NotificationNote note={n.note} />
       <div className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1.5">
         <div className="flex min-w-0 items-center gap-2">
           <NotificationEventBadge event={n.event} subject={notificationSubject(n)} />
@@ -546,6 +547,7 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
           )}
         </div>
       </div>
+      <NotificationNote note={n.note} className="mt-0.5" />
       <RowRequestLine action={answer.action} className="mt-1" />
       <div className="mt-1 flex items-center justify-between gap-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-meta text-muted">
@@ -596,6 +598,12 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
       </div>
     </div>
   );
+}
+
+/** Why a held notification came late (the tree's steerer did not answer, or escalated with a reason). */
+function NotificationNote({ note, className }: { note: string | null; className?: string }) {
+  if (note === null || note.trim() === "") return null;
+  return <p className={cx("font-mono text-meta break-words text-muted", className)}>{note}</p>;
 }
 
 function MetaDot({ className }: { className?: string }) {

@@ -21,12 +21,14 @@ function workspaceChoice(row: Workspace & { workspaceId: string }): WorkspaceCho
   return { id: row.workspaceId, label: row.title || detail, detail };
 }
 
-export function useTaskDestination({ initialConnection, initialWorkspace, allowPrefill, projectId, enabled }: {
+export function useTaskDestination({ initialConnection, initialWorkspace, allowPrefill, projectId, enabled, connectionBlocks }: {
   initialConnection: number | null;
   initialWorkspace: WorkspaceChoice | null;
   allowPrefill: boolean;
   projectId: number | undefined;
   enabled: boolean;
+  /** Connections this work can't use, with the harness's reason (a steerer needs `send`): listed, not choosable. */
+  connectionBlocks?: { chip: string; reasons: ReadonlyMap<number, string> };
 }) {
   const api = useApi();
   const client = useQueryClient();
@@ -80,10 +82,14 @@ export function useTaskDestination({ initialConnection, initialWorkspace, allowP
   }
 
   const machineLabel = (c: HarnessConnection) => machines.find((m) => m.id === c.machineId)?.label || `Machine #${c.machineId}`;
-  const describe = (c: HarnessConnection): ComboboxOption => ({
-    value: String(c.id), label: harnesses.kindName(c.harness), tag: machineLabel(c), detail: c.label || undefined,
-    chip: c.id === initialConnection && allowPrefill ? "default" : !c.configured ? "disconnected" : undefined,
-  });
+  const describe = (c: HarnessConnection): ComboboxOption => {
+    const refused = connectionBlocks?.reasons.get(c.id);
+    return {
+      value: String(c.id), label: harnesses.kindName(c.harness), tag: machineLabel(c), detail: c.label || undefined,
+      chip: refused !== undefined ? connectionBlocks?.chip : c.id === initialConnection && allowPrefill ? "default" : !c.configured ? "disconnected" : undefined,
+      ...(refused === undefined ? {} : { disabled: true, note: refused }),
+    };
+  };
   const connectionOptions = harnesses.activeList.map(describe);
   if (connection > 0 && picked?.active !== true) {
     connectionOptions.push(picked === undefined

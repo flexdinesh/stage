@@ -9,7 +9,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { IconClose } from "../icons.tsx";
+import { IconCheck, IconClose } from "../icons.tsx";
 import { IconButton } from "./button.tsx";
 import { cx } from "./cx.ts";
 import { Kbd } from "./tone.tsx";
@@ -329,6 +329,8 @@ const MENU_ALIGN = {
   above: "[bottom:anchor(top)] [left:anchor(left)] [top:auto] mb-1 [position-try-fallbacks:flip-inline]",
 } as const;
 
+const MENU_ITEMS = '[role="menuitem"],[role="menuitemradio"]';
+
 /**
  * A menu of actions in the top layer, anchored under its trigger (light-dismiss, Esc). Opening focuses the first
  * item; arrows (wrapping), Home and End move; closing returns focus to the trigger. Children are `MenuItem`s.
@@ -354,11 +356,11 @@ export function Menu({
       role="menu"
       aria-label={label}
       style={{ positionAnchor: menu.anchor }}
-      onKeyDown={rovingKeyDown('[role="menuitem"]')}
+      onKeyDown={rovingKeyDown(MENU_ITEMS)}
       onToggle={(e) => {
         const el = e.currentTarget;
         if (e.newState === "open") {
-          requestAnimationFrame(() => el.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus());
+          requestAnimationFrame(() => el.querySelector<HTMLElement>(MENU_ITEMS.split(",").map((s) => `${s}:not(:disabled)`).join(","))?.focus());
         } else if (el.contains(document.activeElement)) {
           document.getElementById(menu.triggerId)?.focus();
         }
@@ -373,7 +375,8 @@ export function Menu({
 /**
  * One menu action. `reason` disables it and says why; `danger` sets it in Fault Red. `detail` is the full reason
  * behind a short one: the hover title and screen-reader text, and shown in place of the short reason on a phone (no
- * hover there).
+ * hover there). `checked` makes it one choice of a group in a `MenuGroup` (`menuitemradio`): the current one
+ * leads with an Ink check, the others keep its space.
  */
 export function MenuItem({
   onSelect,
@@ -381,6 +384,7 @@ export function MenuItem({
   reason,
   detail,
   leading,
+  checked,
   children,
 }: {
   onSelect: () => void;
@@ -389,6 +393,8 @@ export function MenuItem({
   detail?: string | null;
   /** Mono Slate text before the label (a history entry's kind). */
   leading?: ReactNode;
+  /** A choice in a group: whether it is the current value. */
+  checked?: boolean;
   children: ReactNode;
 }) {
   const disabled = reason !== undefined && reason !== null;
@@ -396,7 +402,8 @@ export function MenuItem({
   const item = (
     <button
       type="button"
-      role="menuitem"
+      role={checked === undefined ? "menuitem" : "menuitemradio"}
+      aria-checked={checked}
       disabled={disabled}
       onClick={(e) => {
         e.currentTarget.closest<HTMLElement>("[popover]")?.hidePopover();
@@ -408,6 +415,7 @@ export function MenuItem({
       )}
     >
       <span className={cx("flex min-w-0 items-center gap-2", disabled && "opacity-45")}>
+        {checked === undefined ? null : <span className={cx("inline-flex w-4 shrink-0", !checked && "invisible")}><IconCheck size={14} /></span>}
         {leading === undefined ? null : <span className="shrink-0 font-mono text-meta-sm text-muted">{leading}</span>}
         <span className="min-w-0 truncate">{children}</span>
       </span>
@@ -421,6 +429,18 @@ export function MenuItem({
   );
   // Not every browser shows a disabled button's title, so the hover title sits on a wrapper.
   return full === null ? item : <div title={full}>{item}</div>;
+}
+
+/** A labelled group of `checked` items: one choice of a setting inside a menu, headed by its Label. */
+export function MenuGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div role="group" aria-label={label}>
+      <div aria-hidden className="px-3 pt-1.5 pb-1 label-caps text-muted">
+        {label}
+      </div>
+      {children}
+    </div>
+  );
 }
 
 export function MenuSeparator() {

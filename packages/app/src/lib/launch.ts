@@ -43,10 +43,10 @@ function retryMeta(failed: number, retryAt: string | null, since: string | null,
 /** Why a task's connection cannot launch it right now. */
 export type LaunchBlockKind = "disconnected" | "offline" | "negotiating" | "needs_update" | "unreachable" | "unbound" | "operation";
 
-export type SessionOperation = "launch" | "stop" | "adopt";
+export type SessionOperation = "launch" | "stop" | "adopt" | "send";
 
-const operationTarget = { launch: "start this task", stop: "stop this task", adopt: "track sessions" };
-const operationName = { launch: "starting tasks", stop: "stopping tasks", adopt: "tracking sessions" };
+const operationTarget = { launch: "start this task", stop: "stop this task", adopt: "track sessions", send: "send messages" };
+const operationName = { launch: "starting tasks", stop: "stopping tasks", adopt: "tracking sessions", send: "sending messages" };
 
 /** An operation is usable only when the connection has explicitly advertised it. */
 export function operationReason(op: SessionOperation, capabilities: Capabilities | undefined, error: Error | null = null): string | null {
