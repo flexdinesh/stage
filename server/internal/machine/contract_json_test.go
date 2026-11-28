@@ -104,7 +104,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		"Request": execution.Request{ID: "q", Kind: "question", Title: "Pick", Detail: "one", Preview: "go test", Options: []execution.Choice{choice}, TextOption: "c",
 			Questions: []execution.Question{{ID: "0", Header: "H", Prompt: "Which?", Options: []execution.QuestionOption{{Label: "A", Description: "a"}}, Multi: true, Custom: true}}, CreatedAt: at},
 		"Response": execution.Response{Option: "c", Text: "because", Answers: map[string][]string{"0": {"A"}}},
-		"Message":  execution.Message{Text: "hi"},
+		"Message":  execution.Message{Text: "hi", RequestID: "steering-1-7"},
 		// Connector setup (harness.Connector).
 		"Summary": harness.Summary{ConnectionID: 7, Configured: true, Connected: true, LastError: "e"},
 		"Status": harness.Status{

@@ -120,13 +120,15 @@ func TestT3Interaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.must("POST", messages, map[string]string{"text": "hello"}, 200, nil)
-	if len(e.fake.Sent) != 1 || e.fake.Sent[0] != (t3.FakeSend{ThreadID: thread, Message: "hello", Mode: t3.SendAuto}) {
+	// Queued, with a fresh request ID per API call (T3 deduplicates by it).
+	if len(e.fake.Sent) != 1 || e.fake.Sent[0].ThreadID != thread || e.fake.Sent[0].Message != "hello" || e.fake.Sent[0].Mode != t3.SendQueue ||
+		!strings.HasPrefix(e.fake.Sent[0].ClientRequestID, "stage-send:") {
 		t.Fatalf("sent: %+v", e.fake.Sent)
 	}
 	if err := e.fake.SetThread(thread, func(d *t3.ThreadDetail) { d.Archived = true }); err != nil {
 		t.Fatal(err)
 	}
-	if code, body := e.raw("POST", messages, `{"text":"again"}`); code != 409 || body["code"] != "session_busy" || !strings.Contains(fmt.Sprint(body["error"]), "archived") {
+	if code, body := e.raw("POST", messages, `{"text":"again"}`); code != 409 || body["code"] != "session_refused" || !strings.Contains(fmt.Sprint(body["error"]), "archived") {
 		t.Fatalf("send to archived: %d %v", code, body)
 	}
 

@@ -113,11 +113,14 @@ func (s *server) sendMessage(w http.ResponseWriter, r *http.Request) error {
 	if _, refused, err := s.selfAction(w, r, id, "An agent cannot message its own session."); err != nil || refused {
 		return err
 	}
-	var in execution.Message
+	// The body is text only: the coordinator gives each call its request ID.
+	var in struct {
+		Text string `json:"text"`
+	}
 	if err := decodeStrict(r, &in); err != nil {
 		return err
 	}
-	t, err := s.Engine.Coordinator.Send(r.Context(), id, in)
+	t, err := s.Engine.Coordinator.Send(r.Context(), id, execution.Message{Text: in.Text})
 	if err != nil {
 		return err
 	}

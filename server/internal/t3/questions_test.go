@@ -179,10 +179,10 @@ func TestFakePendingRequests(t *testing.T) {
 	if d.PendingRequestCount != 3 || !reflect.DeepEqual(ids, []string{r1, r2}) {
 		t.Fatalf("count=%d ids=%v", d.PendingRequestCount, ids)
 	}
-	if err := f.RespondPendingQuestion(ctx, th.ThreadID, r1, map[string]Answer{"scope": TextAnswer("Server")}); err != nil {
+	if err := f.RespondPendingQuestion(ctx, th.ThreadID, r1, map[string]Answer{"scope": TextAnswer("Server"), "extras": ValuesAnswer([]string{"Docs"}), "strict": TextAnswer("Yes")}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.RespondPendingQuestion(ctx, th.ThreadID, r1, map[string]Answer{"scope": TextAnswer("Server")}); !errors.Is(err, ErrRequestAnswered) {
+	if err := f.RespondPendingQuestion(ctx, th.ThreadID, r1, map[string]Answer{"scope": TextAnswer("Server"), "extras": ValuesAnswer([]string{"Docs"}), "strict": TextAnswer("Yes")}); !errors.Is(err, ErrRequestAnswered) {
 		t.Fatalf("second respond = %v", err)
 	}
 	_ = f.ResolveRequest(th.ThreadID, r2, "expired")

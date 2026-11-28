@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
@@ -23,6 +26,9 @@ const (
 	busyRequest   = "T3 is waiting on a request. Answer it first."
 )
 
+// refusedArchived: Send to an archived thread.
+const refusedArchived = "This T3 thread is archived; T3 takes no messages for it."
+
 // Requests are the thread's pending user-input questions, one question
 // request each. A request answered while they are read is left out.
 func (a *Adapter) Requests(ctx context.Context, ref execution.SessionRef) ([]execution.Request, error) {
@@ -36,6 +42,7 @@ func (a *Adapter) Requests(ctx context.Context, ref execution.SessionRef) ([]exe
 	if err != nil {
 		return nil, err
 	}
+	seen := a.asked.seen(ref.ExternalSessionID, ids, time.Now())
 	out := make([]execution.Request, 0, len(ids))
 	for _, id := range ids {
 		pq, err := a.Client.ReadPendingQuestion(ctx, ref.ExternalSessionID, id)
@@ -45,9 +52,43 @@ func (a *Adapter) Requests(ctx context.Context, ref execution.SessionRef) ([]exe
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, questionRequest(pq))
+		req := questionRequest(pq)
+		req.CreatedAt = seen[id]
+		out = append(out, req)
 	}
 	return out, nil
+}
+
+// askedRequests remembers when this process first listed each pending
+// request (T3 reports no request time), per thread.
+type askedRequests struct {
+	mu sync.Mutex
+	at map[string]map[string]time.Time // thread id -> request id -> first seen
+}
+
+// seen records ids as the thread's pending requests at now, forgetting the
+// thread's requests no longer listed, and returns when each was first seen.
+func (r *askedRequests) seen(thread string, ids []string, now time.Time) map[string]time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	prev := r.at[thread]
+	next := make(map[string]time.Time, len(ids))
+	for _, id := range ids {
+		if t, ok := prev[id]; ok {
+			next[id] = t
+		} else {
+			next[id] = now
+		}
+	}
+	if r.at == nil {
+		r.at = map[string]map[string]time.Time{}
+	}
+	if len(next) == 0 {
+		delete(r.at, thread)
+	} else {
+		r.at[thread] = next
+	}
+	return maps.Clone(next)
 }
 
 // gone: the request (or its thread) is no longer pending.
@@ -153,9 +194,12 @@ func labelValue(q Question, v string) (string, bool) {
 	return v, false
 }
 
-// Send sends the thread a message in T3's auto mode: an idle thread starts
-// a new turn and a running one is steered. A thread waiting on a request
-// takes no message (*execution.Busy), nor does one T3 won't send to.
+// Send sends the thread a message in T3's queue mode: an idle thread starts
+// a new turn and a running one takes it when its current turn ends (never
+// steered). m.RequestID is T3's clientRequestId, so a retry sends once. A
+// thread waiting on a request takes no message (*execution.Busy); one T3
+// won't send to (archived, or its worktree can't be restored) is
+// *execution.Refused.
 func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m execution.Message) error {
 	if ref.ConnectionID != a.ConnectionID {
 		return execution.ErrUnavailable
@@ -167,6 +211,9 @@ func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m executio
 	if err != nil {
 		return err
 	}
+	if d.Archived {
+		return &execution.Refused{Reason: refusedArchived}
+	}
 	if d.PendingRequestCount > 0 {
 		ids, err := a.Client.ListPendingQuestions(ctx, ref.ExternalSessionID)
 		switch {
@@ -177,13 +224,13 @@ func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m executio
 		}
 		return &execution.Busy{Reason: busyQuestions}
 	}
-	err = a.Client.SendMessage(ctx, ref.ExternalSessionID, m.Text, SendAuto)
+	err = a.Client.SendMessage(ctx, ref.ExternalSessionID, m.Text, SendQueue, m.RequestID)
 	var te *ToolError
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return execution.ErrNotFound
 	case errors.As(err, &te) && te.Code == "thread_not_sendable":
-		return &execution.Busy{Reason: te.Message}
+		return &execution.Refused{Reason: te.Message}
 	}
 	return err
 }

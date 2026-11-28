@@ -18,6 +18,7 @@ type Adapter struct {
 	Client       Client
 	ConnectionID int64
 	replies      sync.Map
+	asked        askedRequests
 }
 
 // NewAdapter is the adapter of the original T3 connection (tests).

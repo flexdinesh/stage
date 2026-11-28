@@ -375,7 +375,7 @@ func TestToolErrorMapsNotFound(t *testing.T) {
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
-	err = c.SendMessage(ctx, "x", "hi", SendAuto)
+	err = c.SendMessage(ctx, "x", "hi", SendQueue, "")
 	var te *ToolError
 	if !errors.As(err, &te) || te.Code != "thread_not_sendable" || errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v", err)
@@ -657,8 +657,12 @@ func TestClosedSessionRetriesOnlyIdempotentTools(t *testing.T) {
 	f := newFakeT3(t)
 	capabilitiesTool(f)
 	var sends atomic.Int32
-	f.tool("t3_thread_send", func(map[string]any) (*mcp.CallToolResult, error) {
+	var sent sync.Map // clientRequestId -> mode
+	f.tool("t3_thread_send", func(args map[string]any) (*mcp.CallToolResult, error) {
 		sends.Add(1)
+		if id, ok := args["clientRequestId"].(string); ok {
+			sent.Store(id, args["mode"])
+		}
 		return structured(`{"ok":true}`), nil
 	})
 	c := newTestClient(t, f, f.adminToken, NewMemoryTokenStore())
@@ -674,9 +678,20 @@ func TestClosedSessionRetriesOnlyIdempotentTools(t *testing.T) {
 		_ = cs.Close() // connection closed while still the client's session
 	}
 	closeUnderneath()
-	err := c.SendMessage(ctx, "th-1", "hi", SendAuto)
+	err := c.SendMessage(ctx, "th-1", "hi", SendQueue, "")
 	if !errors.Is(err, mcp.ErrConnectionClosed) || sends.Load() != 0 {
 		t.Fatalf("send on closed session: err=%v sends=%d (must not retry)", err, sends.Load())
+	}
+	if _, err := c.Capabilities(ctx); err != nil { // reconnects
+		t.Fatal(err)
+	}
+	closeUnderneath()
+	// A send T3 deduplicates by clientRequestId reconnects and retries.
+	if err := c.SendMessage(ctx, "th-1", "hi", SendQueue, "stage-send:1"); err != nil || sends.Load() != 1 {
+		t.Fatalf("send with clientRequestId on closed session: err=%v sends=%d", err, sends.Load())
+	}
+	if mode, ok := sent.Load("stage-send:1"); !ok || mode != "queue" {
+		t.Fatalf("send args: mode=%v ok=%v", mode, ok)
 	}
 	if _, err := c.Capabilities(ctx); err != nil { // reconnects
 		t.Fatal(err)
@@ -698,6 +713,7 @@ func TestClosedSessionRetriesOnlyIdempotentTools(t *testing.T) {
 		{"t3_thread_launch", map[string]any{"clientRequestId": "task-1-1"}, true},
 		{"t3_thread_launch", map[string]any{}, false},
 		{"t3_thread_send", nil, false},
+		{"t3_thread_send", map[string]any{"clientRequestId": "stage-send:1"}, true},
 		{"t3_thread_interrupt", nil, false},
 		{"t3_project_clone", nil, false},
 		{"t3_project_create", nil, false},

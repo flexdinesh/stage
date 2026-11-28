@@ -399,8 +399,10 @@ type Rejected struct{ Reason string }
 func (e *Rejected) Error() string { return e.Reason }
 
 // Refused: Stage will not track this session (another harness wraps it,
-// e.g. a Claude session T3 started: harness.Wraps). Reason says where to
-// track it instead. It is a decision, not a failure: the API answers 409.
+// e.g. a Claude session T3 started: harness.Wraps; Reason says where to
+// track it instead), or the harness will never take a message for it
+// (Interactive.Send to an archived T3 thread). It is a decision, not a
+// failure: the API answers 409 session_refused.
 type Refused struct{ Reason string }
 
 func (e *Refused) Error() string { return e.Reason }

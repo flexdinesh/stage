@@ -622,8 +622,8 @@ func (c *MCPClient) call(ctx context.Context, tool string, args map[string]any, 
 }
 
 // retrySafe reports whether running tool twice is harmless: reads,
-// launches deduplicated by clientRequestId, and project updates that only
-// set a title or the archived flag.
+// launches, sends and updates deduplicated by clientRequestId, and project
+// updates that only set a title or the archived flag.
 func retrySafe(tool string, args map[string]any) bool {
 	switch tool {
 	case "t3_project_update":
@@ -636,7 +636,7 @@ func retrySafe(tool string, args map[string]any) bool {
 	case "t3_thread_read", "t3_thread_list", "t3_thread_search", "t3_project_list", "orchestrator_capabilities",
 		"t3_attachment_prepare_upload": // a duplicate pending upload just expires
 		return true
-	case "t3_thread_launch", "t3_thread_update":
+	case "t3_thread_launch", "t3_thread_update", "t3_thread_send":
 		id, ok := args["clientRequestId"].(string)
 		return ok && id != ""
 	case "t3_pending_request":

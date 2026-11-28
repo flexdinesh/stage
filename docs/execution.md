@@ -794,9 +794,13 @@ T3 implements `Interactive` over its MCP (`server/internal/t3/interaction.go`).
   their ID, header, prompt and multi-select, are `custom` unless T3
   disallows free answers, and their options keep label, description and
   preview. A request answered while Stage reads it is left out. T3 reports
-  no request time, so `createdAt` is zero. T3's MCP neither lists nor
-  answers permission requests: they are answered in T3, and the descriptor
-  declares `unlistedRequests` ("Approve permission requests in T3.").
+  no request time, so `createdAt` is when this Stage process first listed
+  the request (in memory: a restart resets it to the next listing). T3's
+  MCP neither lists nor answers permission requests: they are answered in
+  T3, and the descriptor declares `unlistedRequests` ("Approve permission
+  requests in T3."). So a T3 task can read `needs_input` with no
+  answerable requests: it waits on a permission request, and Open in T3 is
+  the way to approve it.
 - **Respond.** Stage answers by option label or one custom text. The adapter
   sends T3's option value for a valued option and checks the answers by
   T3's client rules (every question, arrays only for multi-select, custom
@@ -804,13 +808,31 @@ T3 implements `Interactive` over its MCP (`server/internal/t3/interaction.go`).
   text without answers, or T3 refusing the answer is `*Invalid` (400). A
   request already answered, expired, unknown, or on a missing thread is
   `ErrNotFound` (404).
-- **Send.** `t3_thread_send` in mode `auto`: an idle thread starts a new
-  turn and a running one is steered (T3 queues when it can't steer). The
-  app still waits for a running task's turn to end; agents, the CLI and the
-  API can steer. A thread with any pending request takes no message
-  (`*Busy`, 409 `session_busy`: answer its questions first, or approve its
-  permission request in T3), nor does one T3 won't send to
-  (`thread_not_sendable`, such as an archived thread).
+- **Send.** `t3_thread_send` in mode `queue`, always ([ADR 0013](adr/0013-tree-steering.md#send-semantics)):
+  an idle thread starts a new turn, and a running one takes the message as
+  a new turn once its current turn ends. Stage never steers or restarts a
+  turn. The message's `RequestID` is T3's `clientRequestId`: the coordinator
+  sets a fresh `stage-send:<random>` per API call, a steering delivery
+  passes its own stable ID, and T3 returns the first send's message and run
+  for a repeat, so a send lost on a closed connection is retried once. A
+  thread with any pending request takes no message (`*Busy`, 409
+  `session_busy`: answer its questions first, or approve its permission
+  request in T3). An archived thread, or any other thread T3 won't send to
+  (`thread_not_sendable`: archived, or its worktree can't be restored), is
+  `*Refused` (409 `session_refused`).
+- **Live check** (2026-11-28, local T3 from source at `9f83ba58`, throwaway
+  scratch thread): an idle send reported `delivery: started`; a send while
+  a turn ran reported `queued` and ran as the next run only after that run
+  completed; a repeat with the same `clientRequestId` returned the same
+  message and run; a send while the thread waited on a question was
+  accepted by T3 as `queued` (Stage refuses it first with `*Busy`, so the
+  question is answered before the next turn); answering the question by
+  option label (T3 takes the label when the option has no value) resumed
+  the turn and the queued message ran after it; a send to the archived
+  thread failed `thread_not_sendable` ("is archived and cannot receive
+  messages"). T3 deduplicates per MCP
+  client (its message id embeds the client), so the ID covers retries from
+  one Stage connection.
 
 ### T3 workspace sources
 
