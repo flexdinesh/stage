@@ -176,11 +176,36 @@ func (s *Service) Send(ctx context.Context, id int64, m execution.Message, expec
 	return s.send(ctx, id, m, expected, nil)
 }
 
-// SendRecorded is Send, unguarded, for a sender that records the send
-// itself: after the harness took m, record runs (instead of the
-// FollowUpSent event) with a context that outlives the caller's; its error
-// is returned. Steering delivery records its digest this way (ADR 0013).
+// SendRecorded delivers a steering digest as a new turn. Use the native
+// queue when a turn is active and the connection declares it. Older
+// adapters can still implement queueing on Send. The caller records
+// delivery in place of the ordinary message event.
 func (s *Service) SendRecorded(ctx context.Context, id int64, m execution.Message, record func(context.Context) error) (db.Task, error) {
+	t, err := s.store.GetTask(ctx, id)
+	if err != nil {
+		return t, err
+	}
+	active := t.State == db.StateRunning
+	if t.State == db.StateNeedsInput && t.Session != nil {
+		obs, err := s.store.Observation(ctx, *t.Session)
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return t, err
+		}
+		active = obs.Active
+	}
+	if active && t.Session != nil {
+		a, err := s.conns.Catalog(t.Session.ConnectionID)
+		if err != nil {
+			return t, err
+		}
+		features, err := a.Features(ctx)
+		if err != nil {
+			return t, harnessErr(err)
+		}
+		if features.Operations[execution.OpQueue].Available {
+			m.Delivery = execution.DeliveryQueue
+		}
+	}
 	return s.send(ctx, id, m, nil, record)
 }
 

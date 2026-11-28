@@ -14,6 +14,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
 	"github.com/flexdinesh/stage/server/internal/execution"
+	"github.com/flexdinesh/stage/server/internal/t3"
 )
 
 // task preview, then task complete with its revision and evidence version;
@@ -86,6 +87,9 @@ func TestTaskSendExpectRevision(t *testing.T) {
 	if len(h.fake.Sent) != 0 {
 		t.Fatalf("refused message sent: %+v", h.fake.Sent)
 	}
+	if err := h.fake.SetStatus(*a.ExternalSessionID, t3.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
 	if code, stdout, stderr := h.run("", "task", "send", id, "--text", "go", "--expect-revision", fmt.Sprint(rev)); code != 0 {
 		t.Fatalf("send: %d %s %s", code, stdout, stderr)
 	}
@@ -106,16 +110,22 @@ func TestTaskSessionSurfaceCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := fmt.Sprint(a.ID)
-	for _, mode := range []struct{ flag, reason string }{{"--steer", "Steer in T3"}, {"--queue", "Queue in T3"}} {
-		if code, _, stderr := h.run("", "task", "send", id, "--text", "hello", mode.flag); code != 1 || !strings.Contains(stderr, mode.reason) {
+	for _, mode := range []struct {
+		flag   string
+		native t3.SendMode
+	}{{"--steer", t3.SendSteer}, {"--queue", t3.SendQueue}} {
+		if code, _, stderr := h.run("", "task", "send", id, "--text", "hello", mode.flag); code != 0 {
 			t.Fatalf("task send %s: %d %s", mode.flag, code, stderr)
+		}
+		if n := len(h.fake.Sent); n == 0 || h.fake.Sent[n-1].Mode != mode.native {
+			t.Fatalf("task send %s: %+v", mode.flag, h.fake.Sent)
 		}
 	}
 	if code, _, stderr := h.run("", "task", "send", id, "--text", "hello", "--steer", "--queue"); code != 2 || !strings.Contains(stderr, "mutually exclusive") {
 		t.Fatalf("conflicting flags: %d %s", code, stderr)
 	}
-	if len(h.fake.Sent) != 0 {
-		t.Fatalf("unavailable delivery reached the harness: %+v", h.fake.Sent)
+	if len(h.fake.Sent) != 2 {
+		t.Fatalf("conflicting delivery flags reached the harness: %+v", h.fake.Sent)
 	}
 	if a.Session == nil {
 		t.Fatal("started task has no session")
@@ -134,7 +144,10 @@ func TestTaskSessionSurfaceCommands(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(client.SessionActivity{Activity: execution.Activity{
 			Items: []execution.ActivityItem{{ID: "one", At: now, Kind: "command", Title: "Run tests", Preview: "go test"}},
 			Plan:  []execution.PlanStep{{Text: "Check result", Status: "done"}},
-			Files: []execution.FileChange{{Path: "work.go", Additions: 2, Deletions: 1, Status: "modified"}},
+			Files: []execution.FileChange{
+				{Path: "work.go", Additions: 2, Deletions: 1, Status: "modified"},
+				{Path: "path-only.go", CountsUnknown: true},
+			},
 		}})
 	}))
 	defer srv.Close()
@@ -144,6 +157,9 @@ func TestTaskSessionSurfaceCommands(t *testing.T) {
 		if code != 0 || !strings.Contains(stdout, want) {
 			t.Fatalf("activity missing %q: %d %s %s", want, code, stdout, stderr)
 		}
+	}
+	if !strings.Contains(stdout, "  path-only.go\n") {
+		t.Fatalf("activity should list the path alone: %s", stdout)
 	}
 	code, stdout, stderr = h.run("", "task", "activity", "1", "--attempt", "0", "--limit", "5", "--json")
 	out := decode[client.SessionActivity](t, stdout)

@@ -76,13 +76,24 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	}
 	yes := execution.Availability{Available: true}
 	out := execution.Capabilities{Operations: map[execution.Op]execution.Availability{}, Models: []execution.Model{}}
-	for _, op := range []execution.Op{execution.OpLaunch, execution.OpStop, execution.OpAdopt, execution.OpOpening, execution.OpReply, execution.OpAttention, execution.OpImages, execution.OpSessionSearch, execution.OpSessionRename, execution.OpRespond, execution.OpSend} {
+	for _, op := range []execution.Op{execution.OpLaunch, execution.OpStop, execution.OpAdopt, execution.OpOpening, execution.OpReply, execution.OpAttention, execution.OpImages, execution.OpSessionSearch, execution.OpSessionRename} {
 		out.Operations[op] = yes
 	}
 	out.Operations[execution.OpWorkspaceAdd] = yes
-	out.Operations[execution.OpSteer] = execution.Availability{Reason: "Steer in T3: open the thread there."}
-	out.Operations[execution.OpQueue] = execution.Availability{Reason: "Queue in T3: open the thread there."}
-	out.Operations[execution.OpActivity] = execution.Availability{Reason: "Recent activity is in T3."}
+	declare := func(op execution.Op, verb string, tools ...string) {
+		for _, tool := range tools {
+			if !slices.Contains(c.Tools, tool) {
+				out.Operations[op] = execution.Availability{Reason: "Update T3 to " + verb + " in Stage."}
+				return
+			}
+		}
+		out.Operations[op] = yes
+	}
+	declare(execution.OpRespond, "answer questions", "t3_pending_request")
+	declare(execution.OpSend, "send", "t3_thread_send", "t3_thread_read")
+	declare(execution.OpSteer, "steer", "t3_thread_send", "t3_thread_read")
+	declare(execution.OpQueue, "queue", "t3_thread_send", "t3_thread_read")
+	declare(execution.OpActivity, "see recent activity", "t3_thread_read")
 	out.Operations[execution.OpDirectoryBrowse] = execution.Availability{Reason: "T3 does not expose folder browsing to Stage; type the path."}
 	out.WorkspaceSources = workspaceSources()
 	for _, mode := range []string{"approval-required", "auto-accept-edits", "auto", "full-access"} {

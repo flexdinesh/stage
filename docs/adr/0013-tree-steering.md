@@ -54,16 +54,17 @@ of `Interactive` is already generic.
 
 ### Send semantics
 
-Every harness has the same send contract: a message is delivered when the
-session's current turn ends (queued), or refused with `execution.Busy`
-(409 `session_busy`). Stage never interrupts or steers a turn mid-way.
+A tree digest is delivered as a new turn or refused with `execution.Busy`
+(409 `session_busy`). While the steerer runs, Stage selects the declared
+`queue` operation where available ([ADR 0014](0014-session-surface.md#d4-operations)).
+Adapters with an older send contract may still queue through `send`.
 
 ### Per-harness interaction
 
 | Harness | Send | Respond |
 | --- | --- | --- |
 | Claude Code | Done: idle-only resume (ADR 0005 decision 18). | Done: hooks. |
-| T3 | Send mode `queue` with `clientRequestId` (today `auto`, which steers a running turn). | Questions through `t3_pending_request`. Approvals stay unavailable: T3's MCP cannot list or answer them. |
+| T3 | Native mode `queue` with `clientRequestId`, via Stage's `queue` while running or `send` after the turn ends. | Questions through `t3_pending_request`. Permission approvals use Open in T3. |
 | OpenCode | Send waits for idle. [ADR 0014](0014-session-surface.md#d4-operations) | Permission reply (once, always, reject) and form reply. Forms with external or conditional fields stay in OpenCode. |
 | Codex | When idle: `thread/resume` then `turn/start`. Busy while a turn is active; no `turn/steer`. | `thread/resume` replays pending server requests: `commandExecution` and `fileChange` approvals, `requestUserInput`. |
 
@@ -211,7 +212,7 @@ onto the jobs queue is a possible later migration.
   Busy.
 - At-least-once delivery means a steerer can see a digest twice. The
   `through=N` tag lets it skip what it has seen.
-- Follow-ups wait for the current turn to end. OpenCode also offers
+- Follow-ups wait for the current turn to end. OpenCode and T3 offer
   explicit Steer and Queue under [ADR 0014](0014-session-surface.md#d4-operations).
 - A Stage-completed steerer has a system actor. Reopen undoes it, and it
   never fires for failed or interrupted runs.

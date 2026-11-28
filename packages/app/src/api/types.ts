@@ -1137,6 +1137,7 @@ export interface FileChange {
   path: string;
   additions: number;
   deletions: number;
+  countsUnknown?: boolean;
   status: "added" | "modified" | "deleted" | "";
 }
 

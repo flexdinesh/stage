@@ -57,7 +57,7 @@ func TestT3InteractionOnTheWorker(t *testing.T) {
 	if err := in.Respond(t.Context(), ref, id, execution.Response{Answers: map[string][]string{"q": {"A"}}}); !errors.Is(err, execution.ErrNotFound) {
 		t.Fatal("answered", err)
 	}
-	if err := in.Send(t.Context(), ref, execution.Message{Text: "hi", RequestID: "steering-1-7"}); err != nil {
+	if err := in.Send(t.Context(), ref, execution.Message{Text: "hi", Delivery: execution.DeliveryQueue, RequestID: "steering-1-7"}); err != nil {
 		t.Fatal(err)
 	}
 	// The request ID crosses the worker protocol.

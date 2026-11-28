@@ -583,15 +583,14 @@ its hook receiver. T3 supplies both for its questions and messages
 ([T3 interaction](#t3-interaction)). OpenCode supplies both for its
 permissions, the forms Stage can show and messages
 ([OpenCode interaction](#opencode-interaction)). Codex supplies both for
-command and file-change approvals, its `requestUserInput` questions and
+command, file-change and permission approvals on tracked active threads and
 messages to an idle thread ([Codex adapter](#codex-adapter)). A harness that can wait on requests
 it can't list declares `unlistedRequests` on its descriptor with where to
 answer them; the app then shows that instead of a Reply composer when a
 needs-input session lists none. [Interaction API](api.md#session-interaction-api-v6)
 
 `Interactive.Send` receives a `Message.Delivery`. `send` (also empty)
-starts a new turn after the previous one ends. T3 and OpenCode currently
-also accept a follow-up into their native queues while running. `steer`
+starts a new turn after the previous one ends. `steer`
 injects into a running turn. `queue` admits a message during a running
 turn for the harness to deliver as the next turn. The coordinator checks
 the corresponding operation. Adapters return `Invalid` for an unsupported
@@ -626,8 +625,9 @@ loser's later send queues behind it or is `Busy`. Send and respond record
 the caller session as `Cause.Session` and the target as `Cause.TaskID`.
 
 Steering delivery ([ADR 0013](adr/0013-tree-steering.md#delivery)) sends
-as Stage itself (no caller session) through `SendRecorded`: the same send,
-unguarded, with `Message.RequestID` `steering-<binding>-<through>` so a
+as Stage itself (no caller session) through `SendRecorded`. It uses the
+declared `queue` operation during an active turn where available and `send` otherwise.
+It dispatches unguarded with `Message.RequestID` `steering-<binding>-<through>` so a
 redelivery is one message on harnesses that deduplicate (T3, OpenCode,
 Codex), and its own record (the binding's delivery and the steerer event
 "Steering update sent (through #N)") in place of "Follow-up sent from
@@ -852,7 +852,10 @@ workspace row. The Stage group keeps its title.
 
 ### T3 interaction
 
-T3 implements `Interactive` over its MCP (`server/internal/t3/interaction.go`).
+T3 implements `Interactive` and `ActivityReader` over its MCP. Stage
+declares the operations from `tools/list`: `t3_pending_request` for
+`respond`, `t3_thread_send` and `t3_thread_read` for delivery, and
+`t3_thread_read` for `activity`. A missing tool gives an Update T3 reason.
 
 - **Requests.** `t3_pending_request` lists a thread's pending user-input
   requests; each is read and becomes one `question` request. Questions keep
@@ -873,18 +876,28 @@ T3 implements `Interactive` over its MCP (`server/internal/t3/interaction.go`).
   text without answers, or T3 refusing the answer is `*Invalid` (400). A
   request already answered, expired, unknown, or on a missing thread is
   `ErrNotFound` (404).
-- **Send.** `t3_thread_send` in mode `queue`, always ([ADR 0013](adr/0013-tree-steering.md#send-semantics)):
-  an idle thread starts a new turn, and a running one takes the message as
-  a new turn once its current turn ends. Stage never steers or restarts a
-  turn. The message's `RequestID` is T3's `clientRequestId`: the coordinator
+- **Send, steer and queue.** `t3_thread_send` takes mode `queue` for
+  Send after the turn ends or Queue during an active turn. Steer uses
+  mode `steer` during an active turn. T3 decides whether it can accept
+  the message at delivery time. The message's `RequestID` is T3's
+  `clientRequestId`: the coordinator
   sets a fresh `stage-send:<random>` per API call, a steering delivery
   passes its own stable ID, and T3 returns the first send's message and run
   for a repeat, so a send lost on a closed connection is retried once. A
   thread with any pending request takes no message (`*Busy`, 409
   `session_busy`: answer its questions first, or approve its permission
-  request in T3). An archived thread, or any other thread T3 won't send to
-  (`thread_not_sendable`: archived, or its worktree can't be restored), is
-  `*Refused` (409 `session_refused`).
+  request in T3). A native refusal keeps T3's message (`session_refused`).
+  If the turn ends before T3 can steer, its refusal is `session_busy`.
+- **Recent activity.** A bounded `t3_thread_read` activity page supplies
+  local timeline items, the latest visible todo list and changed-file
+  paths with counts where reported. Thread details include provider instance,
+  model, runtime and interaction modes, branch and worktree. T3-backed
+  Codex and Claude Code threads use this same contract.
+- **Permission approval follow-up.** Before using the WebSocket
+  `thread.approval.respond` API, verify its availability and stable
+  contract, how Stage's paired credential can authenticate, how pending
+  approvals are discovered and correlated, and which decisions can be
+  safely relayed with stale-request and replay handling.
 - **Live check** (2026-11-28, local T3 from source at `9f83ba58`, throwaway
   scratch thread): an idle send reported `delivery: started`; a send while
   a turn ran reported `queued` and ran as the next run only after that run
@@ -898,6 +911,12 @@ T3 implements `Interactive` over its MCP (`server/internal/t3/interaction.go`).
   messages"). T3 deduplicates per MCP
   client (its message id embeds the client), so the ID covers retries from
   one Stage connection.
+- On T3 0.1.13, Stage's full-access OAuth client sent to a scratch thread
+  in `full-access` runtime and `default` interaction mode, steered and
+  queued in an active turn, and read a bounded activity page. That client
+  also answered a scratch thread's question in `plan` mode. A pending
+  command approval appeared in activity and was absent from the question
+  list.
 
 ### T3 workspace sources
 

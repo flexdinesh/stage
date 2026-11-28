@@ -66,7 +66,7 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 	}
 	item := execution.ActivityItem{ID: "i", At: at, Kind: "command", Title: "Run tests", Text: "passed", Status: "done", Preview: "go test"}
 	step := execution.PlanStep{Text: "Verify", Status: "in_progress"}
-	file := execution.FileChange{Path: "work.go", Additions: 2, Deletions: 1, Status: "modified"}
+	file := execution.FileChange{Path: "work.go", Additions: 2, Deletions: 1, Status: "modified", CountsUnknown: true}
 	samples := map[string]any{
 		// Adapter contract (execution.Adapter and its optional interfaces).
 		"SessionRef":   ref,

@@ -582,17 +582,31 @@ func (c *MCPClient) dropSession(cs *mcp.ClientSession) {
 // server lost the session (ErrSessionMissing: request refused), or the
 // connection closed and the tool is idempotent (retrySafe).
 func (c *MCPClient) call(ctx context.Context, tool string, args map[string]any, out any) error {
+	var res *mcp.CallToolResult
+	err := c.request(ctx, tool, retrySafe(tool, args), func(ctx context.Context, cs *mcp.ClientSession) error {
+		var err error
+		res, err = cs.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return decodeToolResult(tool, res, out)
+}
+
+// request applies the transport and authentication retry policy to MCP
+// requests. Decode tool errors after the transport succeeds.
+func (c *MCPClient) request(ctx context.Context, method string, safe bool, invoke func(context.Context, *mcp.ClientSession) error) error {
 	for attempt := 0; ; attempt++ {
 		rec := &authRecord{}
 		actx := context.WithValue(ctx, authRecordKey{}, rec)
 		cs, err := c.sessionFor(actx)
-		var res *mcp.CallToolResult
 		if err == nil {
-			res, err = cs.CallTool(actx, &mcp.CallToolParams{Name: tool, Arguments: args})
-		}
-		if err == nil {
-			c.clearRejected(ctx)
-			return decodeToolResult(tool, res, out)
+			err = invoke(actx, cs)
+			if err == nil {
+				c.clearRejected(ctx)
+				return nil
+			}
 		}
 		if errors.Is(err, ErrNotConnected) || ctx.Err() != nil {
 			return err
@@ -610,14 +624,14 @@ func (c *MCPClient) call(ctx context.Context, tool string, args map[string]any, 
 		}
 		var wire *jsonrpc.Error
 		if errors.As(err, &wire) {
-			return fmt.Errorf("t3 %s: %w", tool, err)
+			return fmt.Errorf("t3 %s: %w", method, err)
 		}
 		c.dropSession(cs)
-		if attempt == 0 && retrySafe(tool, args) && (errors.Is(err, mcp.ErrSessionMissing) ||
+		if attempt == 0 && safe && (errors.Is(err, mcp.ErrSessionMissing) ||
 			errors.Is(err, mcp.ErrConnectionClosed)) {
 			continue
 		}
-		return fmt.Errorf("t3 %s: %w", tool, err)
+		return fmt.Errorf("t3 %s: %w", method, err)
 	}
 }
 

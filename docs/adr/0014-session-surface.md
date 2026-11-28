@@ -72,9 +72,7 @@ shared session view and can add its own sections.
   state does not fit. Timeline events omit message text.
 - HTTP, MCP and CLI have operation parity and apply the
   `self_action_forbidden` guard.
-- OpenCode's mode split ships in task 04. Until task 05 ships, T3
-  `send` still uses its native queue while running and explicit
-  `steer` and `queue` are unavailable.
+- The mode split ships for OpenCode in task 04 and T3 in task 05.
 
 ### D5. Native delivery
 
@@ -136,7 +134,7 @@ shared session view and can add its own sections.
 | Harness | `respond` | `send` | `steer` | `queue` | `activity` | `queueManage` |
 | --- | --- | --- | --- | --- | --- | --- |
 | OpenCode (shipped in 04) | Permissions (once/always/reject) and forms | Idle prompt | Prompt with `steer` | Prompt with `queue` | `/message`, `/diff`, `Session.Info` | `/inbox` (task 09) |
-| T3 | Questions only (`t3_pending_request`) | `t3_thread_send` for a new turn | `t3_thread_send` with `steer` | `t3_thread_send` with `queue` | `t3_thread_read` activity | `t3_queue` |
+| T3 (shipped in 05) | Questions via `t3_pending_request`. Permission approvals use **Open in T3**. | `t3_thread_send` with `queue` after the turn ends | `t3_thread_send` with `steer` | `t3_thread_send` with `queue` while a turn runs | `t3_thread_read` activity | `t3_queue` (task 09) |
 | Codex | Command, file-change and permissions approvals on tracked active threads through `thread/resume` and a held subscription (task 06, Codex 0.172+) | `turn/start` | `turn/steer` | Unavailable (experimental) | `thread/items/list` | Unavailable |
 | Claude Code | Existing `PermissionRequest` hooks | Existing send between turns | `PostToolUse` `additionalContext` | `Stop` block | Transcript | Unavailable |
 

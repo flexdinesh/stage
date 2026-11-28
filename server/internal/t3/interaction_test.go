@@ -151,15 +151,23 @@ func TestSendQueuesWithRequestID(t *testing.T) {
 	a := NewAdapter(f)
 	ref := interactionThread(t, f)
 	thread := ref.ExternalSessionID
+	var busy *execution.Busy
+	if err := a.Send(t.Context(), ref, execution.Message{Text: "too soon"}); !errors.As(err, &busy) {
+		t.Fatal("send while running", err)
+	}
+	if err := a.Send(t.Context(), ref, execution.Message{Text: "now", Delivery: execution.DeliverySteer, RequestID: "r0"}); err != nil {
+		t.Fatal("steer", err)
+	}
 	// Running: queued behind the current run, never steered.
-	if err := a.Send(t.Context(), ref, execution.Message{Text: "next", RequestID: "r1"}); err != nil {
+	msg := execution.Message{Text: "next", Delivery: execution.DeliveryQueue, RequestID: "r1"}
+	if err := a.Send(t.Context(), ref, msg); err != nil {
 		t.Fatal("running", err)
 	}
 	if d, _ := f.ReadThread(t.Context(), thread); d.RunCount != 1 || d.Status != StatusRunning {
 		t.Fatalf("a queued message started a run: %+v", d)
 	}
 	// A retry with the same request ID sends once.
-	if err := a.Send(t.Context(), ref, execution.Message{Text: "next", RequestID: "r1"}); err != nil {
+	if err := a.Send(t.Context(), ref, msg); err != nil {
 		t.Fatal("retry", err)
 	}
 	_ = f.SetStatus(thread, StatusCompleted)
@@ -167,6 +175,11 @@ func TestSendQueuesWithRequestID(t *testing.T) {
 		t.Fatalf("the queued message did not run after the turn: %+v", d)
 	}
 	_ = f.SetStatus(thread, StatusCompleted)
+	for _, delivery := range []execution.Delivery{execution.DeliverySteer, execution.DeliveryQueue} {
+		if err := a.Send(t.Context(), ref, execution.Message{Text: "too late", Delivery: delivery}); !errors.As(err, &busy) || busy.Reason != turnEnded {
+			t.Fatalf("%s after the turn: %v", delivery, err)
+		}
+	}
 	// Idle: starts a new turn.
 	if err := a.Send(t.Context(), ref, execution.Message{Text: "follow up", RequestID: "r2"}); err != nil {
 		t.Fatal("idle", err)
@@ -174,9 +187,35 @@ func TestSendQueuesWithRequestID(t *testing.T) {
 	if d, _ := f.ReadThread(t.Context(), thread); d.RunCount != 3 || d.Status != StatusRunning {
 		t.Fatalf("idle send did not start a run: %+v", d)
 	}
-	want := []FakeSend{{thread, "next", SendQueue, "r1"}, {thread, "follow up", SendQueue, "r2"}}
+	want := []FakeSend{{thread, "now", SendSteer, "r0"}, {thread, "next", SendQueue, "r1"}, {thread, "follow up", SendQueue, "r2"}}
 	if !reflect.DeepEqual(f.Sent, want) {
 		t.Fatalf("sent: %+v", f.Sent)
+	}
+}
+
+func TestSendNativeRefusalAndRace(t *testing.T) {
+	f := NewFake()
+	ref := interactionThread(t, f)
+	msg := execution.Message{Text: "hello", Delivery: execution.DeliverySteer}
+	for _, tc := range []struct {
+		code, reason string
+		busy         bool
+	}{
+		{"permission_denied", "This thread uses a broader runtime mode.", false},
+		{"thread_not_sendable", "The thread is settled.", false},
+		{"thread_not_sendable", "Thread a has no running turn that can be steered.", true},
+	} {
+		a := NewAdapter(sendFails{f, &ToolError{Tool: "t3_thread_send", Code: tc.code, Message: tc.reason}})
+		err := a.Send(t.Context(), ref, msg)
+		var busy *execution.Busy
+		var refused *execution.Refused
+		if tc.busy {
+			if !errors.As(err, &busy) || busy.Reason != tc.reason {
+				t.Errorf("%s: %v", tc.reason, err)
+			}
+		} else if !errors.As(err, &refused) || refused.Reason != tc.reason {
+			t.Errorf("%s: %v", tc.reason, err)
+		}
 	}
 }
 
@@ -193,10 +232,14 @@ func TestSendRefusals(t *testing.T) {
 	}
 	_ = f.ResolveRequest(thread, q, "resolved")
 	ap, _ := f.AddApproval(thread)
+	if rs, err := a.Requests(t.Context(), ref); err != nil || len(rs) != 0 {
+		t.Fatalf("permission leaked into requests: %+v %v", rs, err)
+	}
 	if err := a.Send(t.Context(), ref, msg); !errors.As(err, &busy) || busy.Reason != busyApproval {
 		t.Fatal("approval pending", err)
 	}
 	_ = f.ResolveRequest(thread, ap, "resolved")
+	_ = f.SetStatus(thread, StatusCompleted)
 	// T3 refusing the thread (its worktree can't be restored) is final.
 	var refused *execution.Refused
 	notSendable := NewAdapter(sendFails{f, &ToolError{Tool: "t3_thread_send", Code: "thread_not_sendable", Message: "Worktree is gone."}})
@@ -204,7 +247,7 @@ func TestSendRefusals(t *testing.T) {
 		t.Fatal("not sendable", err)
 	}
 	_ = f.SetThread(thread, func(d *ThreadDetail) { d.Archived = true })
-	if err := a.Send(t.Context(), ref, msg); !errors.As(err, &refused) || refused.Reason != refusedArchived {
+	if err := a.Send(t.Context(), ref, msg); !errors.As(err, &refused) || refused.Reason != "Thread "+thread+" is archived." {
 		t.Fatal("archived", err)
 	}
 	if err := a.Send(t.Context(), execution.SessionRef{ConnectionID: 1, ExternalSessionID: "missing"}, msg); !errors.Is(err, execution.ErrNotFound) {
@@ -279,14 +322,29 @@ func TestFakeRespondValidates(t *testing.T) {
 	}
 }
 
-func TestFeaturesOfferRespondAndSend(t *testing.T) {
-	c, err := NewAdapter(NewFake()).Features(t.Context())
+func TestFeaturesGateSessionSurface(t *testing.T) {
+	f := NewFake()
+	a := NewAdapter(f)
+	c, err := a.Features(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, op := range []execution.Op{execution.OpRespond, execution.OpSend} {
+	for _, op := range []execution.Op{execution.OpRespond, execution.OpSend, execution.OpSteer, execution.OpQueue, execution.OpActivity} {
 		if !c.Operations[op].Available {
 			t.Errorf("%s: %+v", op, c.Operations[op])
+		}
+	}
+	f.Catalog.Tools = []string{"t3_thread_read"}
+	c, err = a.Features(t.Context())
+	if err != nil || !c.Operations[execution.OpActivity].Available {
+		t.Fatal(c.Operations, err)
+	}
+	for op, verb := range map[execution.Op]string{
+		execution.OpRespond: "answer questions", execution.OpSend: "send",
+		execution.OpSteer: "steer", execution.OpQueue: "queue",
+	} {
+		if got := c.Operations[op]; got.Available || got.Reason != "Update T3 to "+verb+" in Stage." {
+			t.Errorf("%s: %+v", op, got)
 		}
 	}
 }
