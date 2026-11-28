@@ -1,8 +1,6 @@
 import { Suspense, lazy } from "react";
-import { useHarnesses } from "../api/queries.ts";
-import type { TaskState, TaskDetail } from "../api/types.ts";
+import type { TaskState, TaskSessionSnapshot } from "../api/types.ts";
 import { Hint, Panel, RelTime, cx, linkClass, CopyButton } from "./ui.tsx";
-import { useSessionDestination } from "../lib/hostState.ts";
 
 // marked + DOMPurify load only when a reply is shown.
 const ReplyMarkdown = lazy(() => import("./ReplyMarkdown.tsx"));
@@ -13,30 +11,25 @@ const PREVIEW_STATES: readonly TaskState[] = ["needs_input", "done"];
 /**
  * The session's latest assistant reply (read-only glance; the harness stays the place to talk). Hidden until sync has read one.
  */
-export function LastWordPanel({ task }: { task: TaskDetail }) {
-  const reply = task.finalReply;
-  const word = reply ? { ...reply, at: reply.updatedAt } : undefined;
-  const name = useHarnesses().kindName(task.harness);
-  const destination = useSessionDestination();
-  if (!word) return null;
-  const href = destination(task);
+export function LastWordPanel({ reply, harness, href }: { reply: TaskSessionSnapshot["reply"] | undefined; harness: string; href: string | null }) {
+  if (reply == null) return null;
   return (
     <Panel
       title="Last word"
-      meta={<RelTime at={word.at} className="tabular" />}
-      actions={<CopyButton text={word.text} label="Copy" />}
+      meta={<RelTime at={reply.updatedAt} className="tabular" />}
+      actions={<CopyButton text={reply.text} label="Copy" />}
     >
-      <Suspense fallback={<div className="prose-reply whitespace-pre-wrap">{word.text}</div>}>
-        <ReplyMarkdown text={word.text} refs />
+      <Suspense fallback={<div className="prose-reply whitespace-pre-wrap">{reply.text}</div>}>
+        <ReplyMarkdown text={reply.text} refs />
       </Suspense>
-      {word.truncated ? (
+      {reply.truncated ? (
         <Hint className="mt-3 border-t border-line pt-2.5">
           Excerpt.{" "}
           {href === null ? (
-            `Full reply in ${name}`
+            `Full reply in ${harness}`
           ) : (
             <a href={href} className={cx(linkClass("rest"), "text-fg")}>
-              Full reply in {name}
+              Full reply in {harness}
             </a>
           )}
         </Hint>

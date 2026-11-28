@@ -1,15 +1,13 @@
 import { Fragment } from "react";
-import type { TaskDetail } from "../api/types.ts";
-import { isActive } from "../lib/tasks.ts";
+import type { Usage } from "../api/types.ts";
 import { usageRows } from "../lib/usage.ts";
 import { Detail, Details, Panel } from "./ui.tsx";
 
-/** What the task's current session consumed, when its harness reports it; hidden otherwise. */
-export function UsagePanel({ task }: { task: TaskDetail }) {
-  const usage = task.usage;
-  if (usage === undefined) return null;
+/** What this session consumed, when its harness reports it. */
+export function UsagePanel({ usage, live }: { usage: Usage | null | undefined; live: boolean }) {
+  if (usage == null) return null;
   return (
-    <Panel title="Usage" meta={isActive(task) ? "so far" : undefined}>
+    <Panel title="Usage" meta={live ? "so far" : undefined}>
       <Details>
         {usageRows(usage).map((row) => (
           <Detail key={row.label} label={row.label}>

@@ -329,7 +329,15 @@ session link (web first, then native).
 input tokens, cache read and write tokens, output tokens, finished-turn
 working time (0 when unknown) and the harness's reported cost (null if
 absent). Stage keeps the last reported usage when an update omits it and
-does not estimate cost. Task detail shows the current session's usage.
+does not estimate cost. The Session tab shows the usage of the selected attempt.
+
+Task detail opens on the Task tab. The Session tab shows the current session
+and links to recorded attempts. Only the current session can receive requests
+or messages. Its composer selects the declared `steer` and `queue` operations
+while a turn runs and `send` after it ends. The Recent activity panel reads
+bounded harness activity and polls while the current turn runs or waits for
+input with the tab visible. Past attempts use the recorded observation and read
+activity by that attempt's reference.
 
 ### Polling, streams and attention
 

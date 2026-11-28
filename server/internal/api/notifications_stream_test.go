@@ -177,7 +177,7 @@ func TestNotificationStreamReplay(t *testing.T) {
 	ev := nextSSE(t, events, true)
 	got := decodeEvent[streamRow](t, ev, "notification")
 	want := streamRow{ID: taskRow, Event: "needs_input", Read: false, Tag: fmt.Sprintf("task-%d", tk.ID),
-		Title: "Needs input", Body: "Say OK · " + project, URL: fmt.Sprintf("/tasks/%d", tk.ID)}
+		Title: "Needs input", Body: "Say OK · " + project, URL: fmt.Sprintf("/tasks/%d/session", tk.ID)}
 	if got.CreatedAt.IsZero() || ev.id != fmt.Sprint(taskRow) {
 		t.Fatalf("createdAt/id %+v %s", got, ev.id)
 	}

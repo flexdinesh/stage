@@ -17,10 +17,10 @@ import {
   pickOther,
   previewLines,
   requestSummary,
-  requestsPath,
   respondFailure,
   rowRequestAction,
 } from "../src/lib/requests.ts";
+import { requestsPath } from "../src/lib/taskSession.ts";
 
 const opt = (id, label = id, available = true) => ({ id, label, available });
 const approval = (id, options = [opt("allow", "Allow"), opt("always:0", "Always allow `Bash(npm test)` in this project"), opt("deny", "Deny")]) => ({
@@ -141,7 +141,7 @@ test("a 409 already_answered is a lost guarded answer, shown as a status; other 
 test("copy and anchor", () => {
   assert.equal(answeredText("Claude Code"), "Answered · waiting for Claude Code");
   assert.equal(expiredText("Claude Code"), "Already answered in Claude Code or expired");
-  assert.equal(requestsPath(12), "/tasks/12#requests");
+  assert.equal(requestsPath(12), "/tasks/12/session#requests");
 });
 
 test("an option's note hides a blank description or one repeating its label", () => {

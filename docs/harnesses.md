@@ -294,6 +294,11 @@ See the [action and facts API](api.md#declared-actions-and-facts).
   the other declared actions. A kind without a custom slot uses the
   [generic renderer](../packages/app/src/harnesses/generic.tsx) for settings,
   action fields and confirmation, availability, facts and fixes.
+  Optional `HarnessSlots.session` entries extend the shared Session view
+  with `HeaderExtra` and `Sections`. Each receives the task, selected
+  attempt summary, bounded activity when available and a current-attempt
+  flag. Render harness-specific activity `details` in that slot. Gate
+  session writes on the current flag and the declared operation.
 - **CLI, one additional file.** Add `server/internal/cli/slots_<kind>.go`
   and register a status printer in `init`, following the
   [OpenCode slot](../server/internal/cli/slots_opencode.go). The generic

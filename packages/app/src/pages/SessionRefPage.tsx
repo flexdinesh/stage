@@ -5,6 +5,7 @@ import { useInvalidateWork } from "../api/queries.ts";
 import { IconBack } from "../components/icons.tsx";
 import { Button, ErrorText, PageHeader, SkeletonRows, buttonClass } from "../components/ui.tsx";
 import { useApi } from "../platform/context.tsx";
+import { taskSessionPath } from "../lib/taskSession.ts";
 
 /**
  * A session link (`/connections/<c>/sessions/<id>`, or historical `/sessions/<id>`): opens the task that owns the
@@ -30,12 +31,12 @@ export function SessionRefPage() {
     mutationFn: (scope: number) => api.adoptSession({ connectionId: scope, externalSessionId: sessionId }),
     onSuccess: async (task) => {
       await invalidate();
-      await navigate(`/tasks/${task.id}`, { replace: true });
+      await navigate(taskSessionPath(task.id), { replace: true });
     },
   });
   if (valid && resolved.isPending) return <SkeletonRows />;
   const taskId = resolved.data?.taskId ?? null;
-  if (taskId !== null) return <Navigate replace to={`/tasks/${taskId}`} />;
+  if (taskId !== null) return <Navigate replace to={taskSessionPath(taskId, resolved.data?.attempt)} />;
   // A 400 is a link that names no session here (no connection, or not this connection's).
   const failed = resolved.error !== null && !(resolved.error instanceof ApiError && resolved.error.status === 400);
   return (

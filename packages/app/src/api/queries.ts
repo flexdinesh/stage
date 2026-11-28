@@ -291,6 +291,33 @@ export const useTask = (id: number, enabled = true) => {
   return useQuery({ queryKey: [...keys.task, id], queryFn: () => api.task(id), refetchInterval: POLL.live, enabled });
 };
 
+/** Read the recorded snapshot for an explicitly selected past attempt. */
+export function useTaskSession(taskId: number, attempt: number | undefined) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ["task-session", taskId, attempt],
+    queryFn: () => api.taskSession(taskId, attempt ?? 0),
+    enabled: attempt !== undefined,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+}
+
+/** React Query pauses interval refetches while the document is hidden. */
+export function useTaskActivity(taskId: number, attempt: number | undefined, live: boolean, enabled = true, currentAttempt?: number) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ["task-activity", taskId, attempt, currentAttempt],
+    queryFn: async () => (await api.getActivity(taskId, attempt === undefined ? {} : { attempt })).activity,
+    enabled,
+    retry: false,
+    refetchInterval: live ? POLL.live : false,
+    refetchOnWindowFocus: live,
+    refetchOnReconnect: live,
+  });
+}
+
 /** Declarations for the current session. A new attempt gets fresh controls and action state. */
 export function useTaskActions(task: { id: number; launchAttempt: number; externalSessionId: string | null }, enabled: boolean) {
   const api = useApi();
@@ -596,7 +623,7 @@ export function useSessionRequests({ taskId, connectionId, needsInput }: { taskI
     retry: false,
   });
   const ready = !live || (respond.known && (!respondable || q.isSuccess || q.isError));
-  return { requests: live && respondable ? (q.data?.requests ?? NO_REQUESTS) : NO_REQUESTS, error: q.error, ready };
+  return { requests: live && respondable ? (q.data?.requests ?? NO_REQUESTS) : NO_REQUESTS, error: live && respondable ? q.error : null, ready };
 }
 
 /** Answers one of a task's requests; the task, its requests and the inbox refresh either way (a 404 means it was answered elsewhere). */

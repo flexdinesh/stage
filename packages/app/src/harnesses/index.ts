@@ -8,10 +8,21 @@ import { CLAUDE_SLOTS } from "./claude/index.tsx";
 import { CODEX_SLOTS } from "./codex/index.tsx";
 import { GENERIC_SLOTS } from "./generic.tsx";
 import { OPENCODE_SLOTS } from "./opencode/index.tsx";
+import { SESSION_FIXTURE_KIND, SESSION_FIXTURE_SLOTS } from "./sessionFixture.tsx";
 import { T3_SLOTS } from "./t3/index.tsx";
-import type { ConnectionStatus, HarnessSlots, MachineConnection } from "./types.ts";
+import type { ConnectionStatus, HarnessSlots, MachineConnection, SessionSlots } from "./types.ts";
 
-export type { ConnectionRowProps, ConnectionStatus, HarnessSlots, MachineConnection } from "./types.ts";
+export type { ConnectionRowProps, ConnectionStatus, HarnessSlots, MachineConnection, SessionSlotProps, SessionSlots } from "./types.ts";
+export { FIXTURE_ACTIVITY, FIXTURE_DELIVERY } from "./sessionFixture.tsx";
+
+declare global {
+  interface ImportMetaEnv {
+    DEV: boolean;
+  }
+  interface ImportMeta {
+    readonly env: ImportMetaEnv;
+  }
+}
 
 // Read lazily: the entries' modules import shared components that import this registry back.
 const registered = (): readonly (readonly [Harness, HarnessSlots])[] => [
@@ -23,7 +34,12 @@ const registered = (): readonly (readonly [Harness, HarnessSlots])[] => [
 
 /** A kind's entry, or the generic one. */
 export function harnessSlots(kind: Harness): HarnessSlots {
+  if (import.meta.env.DEV && kind === SESSION_FIXTURE_KIND) return { ...GENERIC_SLOTS, session: SESSION_FIXTURE_SLOTS };
   return registered().find(([k]) => k === kind)?.[1] ?? GENERIC_SLOTS;
+}
+
+export function harnessSessionSlots(kind: Harness): SessionSlots | undefined {
+  return harnessSlots(kind).session;
 }
 
 /** Every status query key prefix (each entry's, and the generic one for `kinds`), for a refresh after Sync now. */

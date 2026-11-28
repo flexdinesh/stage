@@ -58,10 +58,12 @@ func NotificationKey(n Notification) string {
 	return "notification:" + strconv.FormatInt(n.ID, 10)
 }
 
-// subjectURL: `/<kind>s/` followed by one or more ASCII digits only (the
-// stored URL keeps a deleted subject's group).
+// subjectURL reads the numeric identity from a stored subject destination.
 func subjectURL(u, kind string) (string, bool) {
 	id, ok := strings.CutPrefix(u, "/"+kind+"s/")
+	if kind == "task" {
+		id = strings.TrimSuffix(id, "/session")
+	}
 	if !ok || id == "" {
 		return "", false
 	}

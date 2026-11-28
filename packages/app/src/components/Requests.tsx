@@ -3,14 +3,13 @@
 // in / Copy resume command) keeps answering, and an answer given there first makes Stage's a 404 ("already answered"). Task-detail
 // answers are guarded by the task's state revision: the first answer wins and a later one is 409 `already_answered`.
 // Logic: lib/requests.ts; queries: api/queries.ts useSessionRequests, useRespondRequest.
-import { Fragment, useEffect, useId, useRef, useState } from "react";
-import { Link, useLocation } from "react-router";
+import { Fragment, useId, useState } from "react";
+import { Link } from "react-router";
 import { useRespondRequest } from "../api/queries.ts";
 import type { HarnessChoice, RequestQuestion, RequestResponse, SessionRequest } from "../api/types.ts";
 import {
   ALREADY_ANSWERED,
   PREVIEW_LINES,
-  REQUESTS_ANCHOR,
   allAnswered,
   alreadyAnswered,
   answeredText,
@@ -25,13 +24,13 @@ import {
   previewLines,
   requestOptions,
   requestSummary,
-  requestsPath,
   respondFailure,
   rowRequestAction,
   type QuestionDraft,
   type QuestionsDraft,
   type RowRequestAction,
 } from "../lib/requests.ts";
+import { requestsPath } from "../lib/taskSession.ts";
 import { Button, Checkbox, ChoiceRow, DisclosureButton, ErrorText, Input, Panel, Radio, buttonClass, cx, rowClass } from "./ui.tsx";
 
 /** A request's state once answered here: sent (the harness has yet to move on), or no longer pending. */
@@ -238,39 +237,28 @@ export function RequestCard({
 
 /**
  * Task detail: every pending request of the task's session, under the needs-input alert. Answered requests stay in
- * place with their outcome while the task still needs input. `#requests` scrolls here and focuses it.
+ * place with their outcome while the task still needs input.
  */
 export function RequestsPanel({
   taskId,
   requests,
   harness,
-  needsInput,
   stateRevision,
 }: {
   taskId: number;
   requests: readonly SessionRequest[];
   harness: string;
-  needsInput: boolean;
   /** The task's revision these requests belong to: answers are guarded by it (first answer wins). */
   stateRevision: number;
 }) {
   const respond = useRespondRequest(taskId);
   const [resolved, setResolved] = useState<ReadonlyMap<string, { request: SessionRequest; outcome: RequestOutcome }>>(new Map());
   const [failed, setFailed] = useState<{ id: string; error: unknown } | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
-  const { hash } = useLocation();
   const open = requests.filter((r) => !resolved.has(r.id));
   const pendingCount = open.length;
-  const shown = needsInput ? [...open, ...resolved.values()] : [];
-  const visible = shown.length > 0;
+  const shown = [...open, ...resolved.values()];
 
-  useEffect(() => {
-    if (hash !== `#${REQUESTS_ANCHOR}` || !visible) return;
-    ref.current?.scrollIntoView({ block: "start" });
-    ref.current?.focus({ preventScroll: true });
-  }, [hash, visible]);
-
-  if (!visible) return null;
+  if (shown.length === 0) return null;
   const answer = (request: SessionRequest) => (response: RequestResponse) => {
     setFailed(null);
     respond.mutate(
@@ -283,26 +271,24 @@ export function RequestsPanel({
     );
   };
   return (
-    <div id={REQUESTS_ANCHOR} ref={ref} tabIndex={-1} className="scroll-mt-4 focus:outline-none">
-      <Panel title="Requests" meta={`${pendingCount} pending`} flush>
-        {shown.map((entry) => {
-          const request = "outcome" in entry ? entry.request : entry;
-          const outcome = "outcome" in entry ? entry.outcome : null;
-          const pending = respond.isPending && respond.variables.requestId === request.id;
-          return (
-            <RequestCard
-              key={request.id}
-              request={request}
-              harness={harness}
-              outcome={outcome}
-              busy={pending}
-              error={failed?.id === request.id ? failed.error : null}
-              onRespond={answer(request)}
-            />
-          );
-        })}
-      </Panel>
-    </div>
+    <Panel title="Requests" meta={`${pendingCount} pending`} flush>
+      {shown.map((entry) => {
+        const request = "outcome" in entry ? entry.request : entry;
+        const outcome = "outcome" in entry ? entry.outcome : null;
+        const pending = respond.isPending && respond.variables.requestId === request.id;
+        return (
+          <RequestCard
+            key={request.id}
+            request={request}
+            harness={harness}
+            outcome={outcome}
+            busy={pending}
+            error={failed?.id === request.id ? failed.error : null}
+            onRespond={answer(request)}
+          />
+        );
+      })}
+    </Panel>
   );
 }
 

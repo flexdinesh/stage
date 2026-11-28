@@ -4,7 +4,7 @@
 import type { QueryClient, UseQueryOptions } from "@tanstack/react-query";
 import type { ComponentType, ReactNode } from "react";
 import type { HarnessApi } from "../api/client.ts";
-import type { Harness, HarnessDescriptor, HarnessStatus, Machine } from "../api/types.ts";
+import type { Activity, Harness, HarnessDescriptor, HarnessStatus, Machine, TaskDetail, TaskSessionSummary } from "../api/types.ts";
 import type { ConnectionChip, StatusRead, StatusView } from "../lib/connections.ts";
 
 /** A machine's harness calls and its scoped query key. */
@@ -48,6 +48,7 @@ export interface ConnectionRowProps {
 
 /** One harness's slots. A kind without an entry gets the generic one (generic.tsx). */
 export interface HarnessSlots {
+  session?: SessionSlots;
   /** The Manage drawer's setup panel(s) on the harness scope's machine; each places its NewTaskDefaults. */
   Setup: ComponentType<{ descriptor: HarnessDescriptor }>;
   /** Its Settings > Connections row (name, where, state, Manage, Disconnect). */
@@ -62,4 +63,16 @@ export interface HarnessSlots {
   Presentation: ComponentType<{ kind: Harness; enabled: boolean; children: (status: HarnessStatus | undefined) => ReactNode }>;
   /** Actions currently rendered by the setup panel itself. */
   handledSetupActions: (id: string) => boolean;
+}
+
+export interface SessionSlotProps {
+  task: TaskDetail;
+  session: TaskSessionSummary;
+  activity: Activity | undefined;
+  current: boolean;
+}
+
+export interface SessionSlots {
+  HeaderExtra?: ComponentType<SessionSlotProps>;
+  Sections?: ComponentType<SessionSlotProps>;
 }

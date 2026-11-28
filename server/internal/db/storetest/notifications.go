@@ -40,8 +40,12 @@ func caseNotificationRecipients(t *testing.T, open Factory) {
 	const group = "task:7"
 	insert := func(ctx context.Context, event db.NotificationEvent, at *time.Time) int64 {
 		t.Helper()
+		url := "/tasks/7"
+		if event == db.EventNeedsInput {
+			url += "/session"
+		}
 		id, err := s.InsertNotification(ctx, db.NewNotification{
-			Event: event, Title: "Task", URL: "/tasks/7", ObservedAt: at,
+			Event: event, Title: "Task", URL: url, ObservedAt: at,
 		})
 		if err != nil {
 			t.Fatal(err)

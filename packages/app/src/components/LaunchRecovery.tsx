@@ -3,17 +3,13 @@ import { useMutation } from "@tanstack/react-query";
 import { useApi } from "../platform/context.tsx";
 import { useHarnesses, useInvalidateWork } from "../api/queries.ts";
 import type { Task, LaunchLinkPreview } from "../api/types.ts";
-import { resumeCommand } from "../lib/harnesses.ts";
 import { launchNotice } from "../lib/launch.ts";
-import { useSessionDestination } from "../lib/hostState.ts";
-import { SessionActionButton } from "./SessionAction.tsx";
-import { Alert, AppButton, Button, ErrorText, Field, Input } from "./ui.tsx";
+import { Alert, Button, ErrorText, Field, Input } from "./ui.tsx";
 
 export function LaunchRecovery({ task }: { task: Task }) {
   const api = useApi();
   const invalidate = useInvalidateWork();
   const { kindName } = useHarnesses();
-  const destination = useSessionDestination();
   const [link, setLink] = useState("");
   const [editing, setEditing] = useState(false);
   const [preview, setPreview] = useState<{ link: string; value: LaunchLinkPreview } | null>(null);
@@ -32,11 +28,6 @@ export function LaunchRecovery({ task }: { task: Task }) {
   const name = kindName(task.harness);
   const notice = launchNotice(task, name);
   const seen = task.launch?.session ?? null;
-  // The session Stage already knows needs no pasted link; Open goes straight to it.
-  const seenLinks = seen === null ? null : { ...(seen.links === undefined ? {} : { links: seen.links }), ...(task.connectionActive === undefined ? {} : { connectionActive: task.connectionActive }) };
-  const open = seenLinks === null ? null : destination(seenLinks);
-  // No destination to open: the command that resumes it in the harness's own client, when it has one.
-  const resume = seenLinks === null || open !== null ? null : resumeCommand(seenLinks);
   return (
     <Alert tone="need">
       <div className="flex min-w-0 flex-col gap-3">
@@ -44,16 +35,6 @@ export function LaunchRecovery({ task }: { task: Task }) {
           <p className="font-medium">{notice.title}</p>
           {notice.session === null ? <p className="text-small">{notice.body}</p> : <p className="break-words text-small">{notice.session}</p>}
         </div>
-        {open === null ? null : (
-          <div>
-            <AppButton href={open} variant="primary">Open in {name}</AppButton>
-          </div>
-        )}
-        {resume === null || seen === null ? null : (
-          <div>
-            <SessionActionButton action={{ kind: "resume", command: resume }} name={name} connectionId={seen.connectionId} />
-          </div>
-        )}
         {notice.reason === null && notice.meta === null ? null : (
           <div className="flex flex-col gap-1">
             {notice.reason === null ? null : <p className="break-words font-mono text-meta">{notice.reason}</p>}

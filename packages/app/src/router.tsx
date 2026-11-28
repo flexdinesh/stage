@@ -10,7 +10,8 @@ import { MorePage } from "./pages/MorePage.tsx";
 import { NotFoundPage } from "./pages/NotFoundPage.tsx";
 import { ProjectDetailPage } from "./pages/ProjectDetailPage.tsx";
 import { ProjectsPage } from "./pages/ProjectsPage.tsx";
-import { TaskDetailPage } from "./pages/TaskDetailPage.tsx";
+import { TaskDetailPage, TaskRoute } from "./pages/TaskDetailPage.tsx";
+import { SessionRoute } from "./components/session/SessionView.tsx";
 import { TasksPage } from "./pages/TasksPage.tsx";
 import { TreesPage } from "./pages/TreesPage.tsx";
 
@@ -39,7 +40,14 @@ const workRoutes: RouteObject[] = [
           { path: "trees/:id", ...lazyPage(async () => (await import("./pages/TreeDetailPage.tsx")).TreeDetailPage) },
           { path: "projects", element: <ProjectsPage /> },
           { path: "projects/:id", element: <ProjectDetailPage /> },
-          { path: "tasks/:id", element: <TaskDetailPage /> },
+          {
+            path: "tasks/:id",
+            element: <TaskDetailPage />,
+            children: [
+              { index: true, element: <TaskRoute /> },
+              { path: "session/:attempt?", element: <SessionRoute /> },
+            ],
+          },
           { path: "schedules", ...lazyPage(async () => (await import("./pages/SchedulesPage.tsx")).SchedulesPage) },
           { path: "schedules/:id", ...lazyPage(async () => (await import("./pages/ScheduleDetailPage.tsx")).ScheduleDetailPage) },
           { path: "connections/:connectionId/sessions/:sessionId", ...lazyPage(async () => (await import("./pages/SessionRefPage.tsx")).SessionRefPage) },

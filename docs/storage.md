@@ -175,6 +175,8 @@ receipts through the foreign key. PostgreSQL serializes event ID allocation
 until commit so a stream cursor cannot skip a late commit with a lower ID.
 
 Inbox history and stream replay include retained events for every account.
+Task notification URLs with or without a trailing `/session` resolve to the
+same task group key when the task ID is absent from the record.
 Each account sees its own receipt timestamp. An event without a receipt reads
 as of its creation time. Read actions update that account's unread receipts.
 Delivery requires an unread receipt. Joining or changing a filter affects

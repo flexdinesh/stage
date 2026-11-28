@@ -76,7 +76,7 @@ export function optionResponse(option: string, text = ""): RequestResponse {
 /**
  * A row's answer action. `inline`: exactly one pending approval, answered on the row with its first option (proceed)
  * and, when it offers more, its last (decline); the rest stay on the task. `answer`: a question or several requests,
- * answered on the task (`/tasks/:id#requests`). Null: nothing pending.
+ * answered on the task's Session tab. Null: nothing pending.
  */
 export type RowRequestAction =
   | { kind: "inline"; request: SessionRequest; proceed: HarnessChoice; decline: HarnessChoice | null }
@@ -100,9 +100,6 @@ export function requestSummary(r: Pick<SessionRequest, "title" | "preview">): st
 }
 
 /** The task-detail anchor of its requests panel. */
-export const REQUESTS_ANCHOR = "requests";
-
-export const requestsPath = (taskId: number) => `/tasks/${taskId}#${REQUESTS_ANCHOR}`;
 
 /** A failed answer: `expired` when the request is no longer pending (answered in the harness, timed out), else an error to show. */
 export const respondFailure = (error: unknown): "expired" | "error" => (error instanceof ApiError && error.status === 404 ? "expired" : "error");

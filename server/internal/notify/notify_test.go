@@ -238,7 +238,7 @@ func TestPayload(t *testing.T) {
 		want Payload
 	}{
 		{"task needs input", event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateNeedsInput}},
-			Payload{Title: "Needs input", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
+			Payload{Title: "Needs input", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d/session", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
 		{"task failed", event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateFailed}},
 			Payload{Title: "Failed", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
 		{"session with Stage project", event{session: &workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "Fix bug & test", To: db.StateNeedsInput}},
@@ -274,7 +274,9 @@ func TestPayloadFor(t *testing.T) {
 	}{
 		{"task needs input with session", db.Notification{ID: 1, Event: db.EventNeedsInput, TaskID: &task, ExternalSessionID: &sessionID,
 			Title: "Say OK", ProjectTitle: &project, URL: "/tasks/7", CreatedAt: created},
-			Payload{Title: "Needs input", Body: "Say OK · stage", URL: "/tasks/7", Tag: "task-7", Badge: 3}},
+			Payload{Title: "Needs input", Body: "Say OK · stage", URL: "/tasks/7/session", Tag: "task-7", Badge: 3}},
+		{"deleted task waiting for input keeps its URL group", db.Notification{ID: 10, Event: db.EventNeedsInput, Title: "Gone", URL: "/tasks/9/session"},
+			Payload{Title: "Needs input", Body: "Gone", URL: "/tasks/9/session", Tag: "task-9", Badge: 3}},
 		{"older task run finished, no session", db.Notification{ID: 2, Event: db.EventDone, TaskID: &task, Title: "Say OK", ProjectTitle: &project, URL: "/tasks/7"},
 			Payload{Title: "Run finished", Body: "Say OK · stage", URL: "/tasks/7", Tag: "task-7", Badge: 3}},
 		{"task completed", db.Notification{ID: 6, Event: db.EventCompleted, TaskID: &task, ExternalSessionID: &sessionID, Title: "Say OK", ProjectTitle: &project, URL: "/tasks/7"},
@@ -418,7 +420,7 @@ func TestInboxRecordedWithoutSubscriptions(t *testing.T) {
 	}
 	session, tk := got[0], got[1] // newest first
 	if tk.Event != db.EventNeedsInput || tk.TaskID == nil || *tk.TaskID != task.ID || tk.Title != "Say OK" ||
-		tk.ProjectTitle == nil || *tk.ProjectTitle != "stage" || tk.URL != fmt.Sprintf("/tasks/%d", task.ID) ||
+		tk.ProjectTitle == nil || *tk.ProjectTitle != "stage" || tk.URL != fmt.Sprintf("/tasks/%d/session", task.ID) ||
 		tk.CurrentState == nil || *tk.CurrentState != db.StateNeedsInput || tk.ReadAt != nil {
 		t.Fatalf("task notification %+v", tk)
 	}
@@ -546,8 +548,7 @@ func TestNotificationNavigationWithExternalSessionID(t *testing.T) {
 		payload, record, err := n.payload(ctx, e)
 		wantPayload, wantRecord := want, want
 		if e.task != nil {
-			// Task notifications keep the task path.
-			wantPayload, wantRecord = fmt.Sprintf("/tasks/%d", task.ID), fmt.Sprintf("/tasks/%d", task.ID)
+			wantPayload, wantRecord = fmt.Sprintf("/tasks/%d/session", task.ID), fmt.Sprintf("/tasks/%d/session", task.ID)
 		}
 		if err != nil || payload.URL != wantPayload || record.URL != wantRecord {
 			t.Fatalf("payload=%+v record=%+v err=%v", payload, record, err)
