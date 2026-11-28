@@ -128,3 +128,16 @@ export function newServicePrompt(address: string, old: Pick<HarnessConnection, "
   const tasks = old === undefined ? "its tasks keep" : `its ${count(old.tasks, "task")} ${old.tasks === 1 ? "keeps its" : "keep their"}`;
   return `${address} is a different OpenCode service. Connect it as a new service? ${who} becomes read-only: ${tasks} last state and its project bindings need rebinding.`;
 }
+
+/**
+ * The connected card's notes on answering and messaging OpenCode sessions from Stage, in OpenCode's words, one per
+ * operation the connection offers (`respond`, `send`); none while neither is offered.
+ */
+export function interactionNotes(offered: { respond: boolean; send: boolean }): string[] {
+  const notes: string[] = [];
+  if (offered.respond) {
+    notes.push("Permissions and questions of OpenCode sessions can be answered on the task, or in OpenCode. Forms with conditional or external fields are answered in OpenCode.");
+  }
+  if (offered.send) notes.push("A follow-up sent while OpenCode works waits for its run to end.");
+  return notes;
+}

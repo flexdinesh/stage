@@ -1,5 +1,6 @@
 // Package opencodetest is a fake OpenCode V2 service for tests: health and
-// contract, HTTP Basic auth, pairing codes and session tokens, session
+// contract (permission and form replies and prompt delivery included unless
+// WithoutInteraction), HTTP Basic auth, pairing codes and session tokens, session
 // update (title and archive, session.update), and project listing and
 // rename (project.update).
 package opencodetest
@@ -34,6 +35,9 @@ type Server struct {
 	mcpFail  int
 	// noUpdate drops session.update from the contract (an older service).
 	noUpdate bool
+	// noInteraction drops the permission and form replies and the prompt's
+	// delivery from the contract (an older service).
+	noInteraction bool
 	// archived: known session IDs and whether each is archived.
 	archived map[string]bool
 	// projects: GET /api/project, in insertion order (AddProject).
@@ -109,6 +113,15 @@ func (s *Server) WithoutSessionUpdate() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.noUpdate = true
+}
+
+// WithoutInteraction serves a contract without session.permission.reply,
+// session.form.reply and the prompt's delivery (an older service): no
+// respond, no send.
+func (s *Server) WithoutInteraction() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noInteraction = true
 }
 
 // AddProject lists a git project; archived marks it archived in OpenCode.
@@ -249,9 +262,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": version, "hostname": "fake", "pid": 42})
 	case r.URL.Path == "/openapi.json":
 		s.mu.Lock()
-		update, projectUpdate := !s.noUpdate, !s.noProjectUpdate
+		update, projectUpdate, interaction := !s.noUpdate, !s.noProjectUpdate, !s.noInteraction
 		s.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(spec(update, projectUpdate))
+		_ = json.NewEncoder(w).Encode(spec(update, projectUpdate, interaction))
 	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/session/"):
 		s.patchSession(w, r, strings.TrimPrefix(r.URL.Path, "/api/session/"))
 	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/project/"):
@@ -362,13 +375,17 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // spec is the contract the adapter's health check requires, with
-// session.update unless update is false and project.update unless
-// projectUpdate is false.
-func spec(update, projectUpdate bool) map[string]any {
+// session.update unless update is false, project.update unless
+// projectUpdate is false, and the permission and form replies and the
+// prompt's delivery unless interaction is false.
+func spec(update, projectUpdate, interaction bool) map[string]any {
 	bodies := map[string][]string{
 		"/api/worktree":                   {"projectID", "from", "name"},
 		"/api/session":                    {"id", "location", "metadata"},
 		"/api/session/{sessionID}/prompt": {"id", "text", "metadata"},
+	}
+	if interaction {
+		bodies["/api/session/{sessionID}/prompt"] = append(bodies["/api/session/{sessionID}/prompt"], "delivery")
 	}
 	paths := map[string]map[string]any{}
 	for _, op := range []struct{ method, path, id string }{
@@ -400,6 +417,22 @@ func spec(update, projectUpdate bool) map[string]any {
 			operation["requestBody"] = map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"properties": props}}}}
 		}
 		paths[op.path][op.method] = operation
+	}
+	if interaction {
+		for path, op := range map[string]struct {
+			id     string
+			fields []string
+		}{
+			"/api/session/{sessionID}/permission/{requestID}/reply": {"session.permission.reply", []string{"decision", "message"}},
+			"/api/session/{sessionID}/form/{formID}/reply":          {"session.form.reply", []string{"answer"}},
+		} {
+			props := map[string]any{}
+			for _, f := range op.fields {
+				props[f] = map[string]any{}
+			}
+			paths[path] = map[string]any{"post": map[string]any{"operationId": op.id,
+				"requestBody": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"properties": props}}}}}}
+		}
 	}
 	if update {
 		paths["/api/session/{sessionID}"]["patch"] = map[string]any{

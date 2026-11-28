@@ -3,7 +3,7 @@
 // Disconnect, and the Advanced drawer. Logic lives in opencode.ts.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useState, type FormEvent } from "react";
-import { invalidateConnectionChange, useHarnesses } from "../../api/queries.ts";
+import { invalidateConnectionChange, useConnectionOperation, useHarnesses } from "../../api/queries.ts";
 import type { HarnessStatus, ReplacedConnection } from "../../api/types.ts";
 import { activeOn } from "../../lib/harnesses.ts";
 import { usePlatform } from "../../platform/context.tsx";
@@ -15,6 +15,7 @@ import { Alert, Button, ConfirmInline, Drawer, ErrorText, Field, Hint, Input, Mu
 import { OPENCODE_KIND, openCodeApi, openCodeDetails } from "./api.ts";
 import {
   advancedChanges,
+  interactionNotes,
   isAuthRequired,
   isInstanceChanged,
   isInstanceReturned,
@@ -275,6 +276,7 @@ function Connection({ info, check, advanced }: { info: OpenCodeStatus; check: ()
       {info.webClient && info.webClient !== browser ? (
         <BrowserSetupHint key={info.webClient + "|" + browser} client={info.webClient} service={browser} />
       ) : null}
+      <InteractionNotes />
       <ConfirmConnectionAction action={{
         prompt: OPENCODE_DISCONNECT_PROMPT,
         busy: disconnect.isPending,
@@ -286,6 +288,21 @@ function Connection({ info, check, advanced }: { info: OpenCodeStatus; check: ()
         {info.state === "rejected" && info.auth === "basic" ? null : <Button small onClick={advanced}>Advanced</Button>}
       </ConfirmConnectionAction>
     </div>
+  );
+}
+
+/** Where OpenCode sessions' permissions, questions and follow-ups are answered, for the operations this connection offers. */
+function InteractionNotes() {
+  const connection = activeOn(useHarnesses().list, OPENCODE_KIND, useScopeMachineId());
+  const id = connection?.id ?? 0;
+  const respond = useConnectionOperation(id, "respond", connection !== undefined);
+  const send = useConnectionOperation(id, "send", connection !== undefined);
+  const notes = interactionNotes({ respond: respond.offered, send: send.offered });
+  if (notes.length === 0) return null;
+  return (
+    <ul className="flex list-none flex-col gap-1 text-small text-muted">
+      {notes.map((note) => <li key={note}>{note}</li>)}
+    </ul>
   );
 }
 

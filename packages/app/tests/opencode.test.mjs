@@ -4,6 +4,7 @@ import { ApiError } from "../src/api/client.ts";
 import { normalizeOpenCodeStatus, openCodeApi } from "../src/harnesses/opencode/api.ts";
 import {
   advancedChanges,
+  interactionNotes,
   isAuthRequired,
   localNote,
   openCodeChip,
@@ -152,4 +153,13 @@ test("older servers without pairing fields read as Basic or none, with no local 
   assert.deepEqual(normalizeOpenCodeStatus(base), base, "a current server passes through");
   assert.equal(auth, "local");
   assert.equal(local.available, true);
+});
+
+test("interaction notes follow the operations the connection offers", () => {
+  assert.deepEqual(interactionNotes({ respond: false, send: false }), []);
+  const both = interactionNotes({ respond: true, send: true });
+  assert.equal(both.length, 2);
+  assert.match(both[0], /^Permissions and questions .* answered in OpenCode\.$/);
+  assert.match(both[1], /waits for its run to end/);
+  assert.deepEqual(interactionNotes({ respond: false, send: true }), [both[1]]);
 });
