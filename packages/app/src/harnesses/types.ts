@@ -74,5 +74,6 @@ export interface SessionSlotProps {
 
 export interface SessionSlots {
   HeaderExtra?: ComponentType<SessionSlotProps>;
+  activityModelInHeader?: boolean;
   Sections?: ComponentType<SessionSlotProps>;
 }

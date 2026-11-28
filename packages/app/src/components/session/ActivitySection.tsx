@@ -17,7 +17,7 @@ const ITEM_ICON: Record<ActivityItem["kind"], typeof IconMessage> = {
 const ITEM_TONE: Record<Exclude<ActivityItem["status"], "">, ChipTone> = { running: "run", done: "done", failed: "bad" };
 
 export function ActivitySection({
-  activity, loading = false, offline = false, error, harness, href,
+  activity, loading = false, offline = false, error, harness, href, showModel = true,
 }: {
   activity: Activity | undefined;
   loading?: boolean;
@@ -25,12 +25,13 @@ export function ActivitySection({
   error?: unknown;
   harness: string;
   href: string | null;
+  showModel?: boolean;
 }) {
   const view = activity === undefined ? undefined : activityView(activity);
   return (
     <Panel
       title="Recent activity"
-      meta={activity?.model || undefined}
+      meta={showModel ? activity?.model || undefined : undefined}
       flush
       actions={href === null ? undefined : (
         <a href={href} className={`${linkClass("rest")} inline-flex items-center gap-1 text-meta`}>

@@ -134,12 +134,12 @@ func TestLiveClaude(t *testing.T) {
 		}
 		return in, o
 	}
-	await := func(ref execution.SessionRef, want string) execution.Observation {
+	awaitState := func(ref execution.SessionRef, want, previousExecution string) execution.Observation {
 		t.Helper()
 		deadline := time.Now().Add(3 * time.Minute)
 		for {
 			o, err := a.Observe(ctx, ref)
-			if err == nil && o.State == want {
+			if err == nil && o.State == want && (previousExecution == "" || (o.ExecutionID != "" && o.ExecutionID != previousExecution)) {
 				return o
 			}
 			if time.Now().After(deadline) {
@@ -147,6 +147,10 @@ func TestLiveClaude(t *testing.T) {
 			}
 			time.Sleep(2 * time.Second)
 		}
+	}
+	await := func(ref execution.SessionRef, want string) execution.Observation {
+		t.Helper()
+		return awaitState(ref, want, "")
 	}
 
 	// Root: a reply, found again by its marker; the first prompt opens it.
@@ -178,7 +182,7 @@ func TestLiveClaude(t *testing.T) {
 		t.Fatalf("send: %v", err)
 	}
 	pushed(o.Session, "running")
-	followed := await(o.Session, "done")
+	followed := awaitState(o.Session, "done", done.ExecutionID)
 	if followed.Reply == nil || !strings.Contains(followed.Reply.Text, "stage follow-up ok") || followed.ExecutionID == done.ExecutionID || followed.Links.Command != done.Links.Command {
 		t.Fatalf("follow-up %+v", followed)
 	}
@@ -195,6 +199,32 @@ func TestLiveClaude(t *testing.T) {
 	removed := await(o.Session, "idle")
 	if removed.Closed == nil || removed.Closed.Signal != execution.ClosedArchived || removed.Reply == nil || !strings.Contains(removed.Reply.Text, "stage follow-up ok") {
 		t.Fatalf("removed %+v", removed)
+	}
+
+	// Two steers must arrive on the two tool hooks, leaving the queued
+	// message for Stop. No marker from the delivery text is in the prompt.
+	_, guided := launch("live-delivery", plain, "root", "bypassPermissions", "Run exactly one foreground Bash command: sleep 12. After it finishes, follow any instructions from Stage's tool hooks. If none arrived, reply with exactly: stage unsteered.")
+	for _, message := range []execution.Message{
+		{Delivery: execution.DeliverySteer, Text: "In your reply after Bash, include the exact text stage-steer-post-use and follow the other Stage tool hook if present."},
+		{Delivery: execution.DeliverySteer, Text: "Also include the exact text stage-steer-post-batch in your reply after Bash."},
+		{Delivery: execution.DeliveryQueue, Text: "Without using tools, reply with exactly: stage-queue-at-stop"},
+	} {
+		if err := a.Send(ctx, guided.Session, message); err != nil {
+			t.Fatalf("live delivery %s: %v", message.Delivery, err)
+		}
+	}
+	finished := await(guided.Session, "done")
+	if finished.Reply == nil || !strings.Contains(finished.Reply.Text, "stage-queue-at-stop") {
+		t.Fatalf("queued reply: %+v", finished.Reply)
+	}
+	activity, err := a.Activity(ctx, guided.Session, execution.ActivityQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(activity.Items, func(item execution.ActivityItem) bool {
+		return item.Kind == "message_agent" && strings.Contains(item.Text, "stage-steer-post-use") && strings.Contains(item.Text, "stage-steer-post-batch")
+	}) {
+		t.Fatalf("tool-hook steering missing from assistant reply: %+v", activity.Items)
 	}
 
 	// An image reaches Claude as a file it reads without a permission

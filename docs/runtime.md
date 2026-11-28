@@ -231,7 +231,7 @@ two owners lock different inodes.
 | `*.lock` files | the server | never (they are empty or informational) |
 | Default socket dir, data dir | the server | never |
 | `<data dir>/backups/stage-schema*.db` | the server, before a migration | the server, keeping the newest 3 |
-| `<data dir>/claude/hooks-settings.json` and `hooks-settings-head.json` (worker: `<worker dir>/claude/`) | the server (or worker) with its first Claude Code adapter | never: Claude sessions read it again whenever they wake ([Claude Code hooks](#claude-code-hooks)) |
+| `<data dir>/claude/hooks-settings-v1.json`, earlier hooks settings files, and `delivery-v1-<session UUID>` markers (worker: `<worker dir>/claude/`) | the server (or worker) with its Claude Code adapter | kept for sessions that wake again ([Claude Code hooks](#claude-code-hooks)) |
 | `<data dir>/claude/images/stage-<requestId>/` (worker: `<worker dir>/claude/images/`) | a Claude Code launch with images ([execution.md](execution.md#claude-code-adapter)) | a rejected launch (its own folder); any launch with images, for folders older than 30 days |
 
 ## Shutdown
@@ -762,22 +762,24 @@ adapter and keeps it until shutdown ([execution.md](execution.md#claude-code-ada
 It is not one of the [listeners](#one-process-many-listeners): it serves
 only `POST /hooks` on `127.0.0.1` (never another interface), requires
 `Authorization: Bearer <token>` (constant-time compare; 401 otherwise),
-reads at most 1 MiB, answers 204 with no body before any work, and never
-logs or stores a hook's body. The one exception is a `PermissionRequest`
-naming a tool: it stays open (Claude waits up to 3600 s; Stage lifts the
+reads at most 1 MiB, and never logs or stores a hook's body. Observation
+hooks get 204. Tool and Stop hooks receive a JSON delivery decision when
+they take a pending message, or 204 when they pass through. A
+`PermissionRequest` naming a tool stays open (Claude waits up to 3600 s; Stage lifts the
 listener's 10 s read and write bounds for it) as a request the user can
 answer in Stage, with its tool input in memory only, until answered (200
 with Claude's decision) or released (204: answered in Claude, superseded,
 the session stopped waiting, or shutdown); Claude shows its own prompt
 meanwhile ([execution.md](execution.md#claude-code-adapter)).
-`<state dir>/hooks-settings.json` (dir `0700`, file `0600`, written atomically when its content changes) is the Claude
+`<state dir>/hooks-settings-v1.json` (dir `0700`, file `0600`, written atomically when its content changes) is the Claude
 settings file every launch passes with `--settings`: one HTTP hook per
 event, all with that URL and token (timeout 5 s, `PermissionRequest`
 3600 s). It also allows `Read(//<state dir>/images/**)` so sessions
-read their launch images without a prompt. `hooks-settings-head.json`
-(the predecessor-base variant earlier versions wrote beside it) is
-rewritten with the same content when it exists, for the sessions launched
-with it, and never created. Claude saves the file's path with each
+read their launch images without a prompt. The earlier `hooks-settings.json`
+and `hooks-settings-head.json` files keep their original event set and
+are updated when they exist. A private `delivery-v1-<session UUID>` marker
+records eligibility across restarts. Pending deliveries are held in memory
+and lost on restart. Claude saves the file's path with each
 session and reads it again when it wakes the session, so the file always
 names the current listener. A restart keeps the token and binds the port
 the file names when it is free; otherwise it takes a free port and
@@ -785,8 +787,8 @@ rewrites the file, and sessions launched before reach the new port when
 they next wake. While no listener answers (Stage stopped), Claude records a
 non-blocking hook error in the session and the turn goes on; polling
 catches up. When the receiver cannot open (no state dir, the folder or
-port), launches carry no hooks, approvals are answered in Claude Code only,
-and the setup status says why.
+port), launches carry no hooks. Approvals, steering and queueing take place
+in Claude Code, and the setup status says why.
 
 ## Codex connection
 

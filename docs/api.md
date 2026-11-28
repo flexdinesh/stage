@@ -1107,8 +1107,11 @@ or reporting it unavailable, answers 409 `{"code": "operation_unavailable"}`
 with the reason, and nothing else is limited. Claude Code offers `respond`
 (its approvals and questions, through the hook its launches carry) and
 `send` (a follow-up to a finished background session, or one whose turn
-ended asking you: [execution.md](execution.md#claude-code-adapter)); T3
-offers `respond` for thread questions, `send` after a turn ends, `steer`
+ended asking you), plus `steer` and `queue` while a working background
+session has Stage's versioned hooks. It offers `activity` from the owning
+machine's transcript. [Claude Code adapter](execution.md#claude-code-adapter)
+
+T3 offers `respond` for thread questions, `send` after a turn ends, `steer`
 and `queue` while a turn runs, and `activity` where its MCP advertises the
 tools. The descriptor's `unlistedRequests` directs permission approvals
 to Open in T3. [T3 interaction](execution.md#t3-interaction)
@@ -1157,11 +1160,14 @@ prevented; Stage sees it only as the task's next state.
 
   A successful delivery records its event without the text, polls the session once and returns 200 `Task`. Unknown delivery or invalid input returns 400. An agent's own-session write returns 403 `self_action_forbidden`. A missing operation returns 409 `operation_unavailable` with its reason. A turn or session unable to take the message now returns 409 `session_busy` with guidance. A final harness refusal, such as an archived thread, returns 409 `session_refused`. A guarded message that lost returns 409 `already_answered`. Stage assigns a fresh request ID for harnesses that deduplicate delivery.
 
+  Claude Code's `steer` and `queue` receipt means the hook receiver has accepted the message. Each session holds up to eight such messages in memory and returns `session_busy` when full. Session end, removal, or a Stage restart discards undelivered messages.
+
 - `GET /api/tasks/:id/activity?attempt=N&limit=N` (operation `activity`, the caller's own task included). Returns 200 `{"activity": {items, plan, files, model, truncated, details?, at}}` for the selected session. Omit `attempt` for the current session, or pass a nonnegative attempt number. 404 when the attempt has no recorded session. Stage reads the selected ref through its connection's declared operation. A nonnegative integer limit defaults to 30 when omitted or zero and caps at 100. Items are the newest N, oldest first. Each item has `id`, `at`, `kind` (`message_user`, `message_agent`, `reasoning`, `tool`, `command`, `file_change`, `plan`, `event`), `title` (up to 200 runes), `text` (up to 2000 runes), `status` (`running`, `done`, `failed` or empty) and `preview` (command, path or URL). `plan` is the current list of `{text, status}` with `pending`, `in_progress` or `done`. `files` lists changed files as `{path, additions, deletions, status}` with `added`, `modified`, `deleted` or empty. `model` is the current model label and `at` is the snapshot time. `truncated` means older items exist or harness-specific `details` was dropped for exceeding 16 KiB. Invalid adapter data returns 502. Stage reads this view live from the harness.
 
   A file with `countsUnknown: true` supplies a path without reliable totals.
   T3 activity `details` includes `providerInstance`, `model`,
   `runtimeMode`, `interactionMode`, `branch` and `worktree`.
+  Claude Code details can contain `permissionMode`, `effort` and `worktree` (path) when reported.
 
 ### `POST /api/tasks/:id/duplicate`
 New `backlog` task with the same project, title, prompt, images (copied), execution config (launch options included); no copied notes, no tree, no needs, no start time, no schedule.
@@ -1469,6 +1475,7 @@ The server and workers roll forward together at API v9. Layer 07 raises the inde
 - Session surface contracts (additive, no version bump, [ADR 0014](adr/0014-session-surface.md)). Connections declare `steer`, `queue` and `activity`. Session messages accept `delivery` and the activity route returns a bounded session view. Worker kinds `adapter.deliver` and `adapter.activity` gate the new calls. MCP and CLI expose the same contracts.
 - Codex approvals use the existing request and response schemas and worker kinds. Tracked active threads list command, file-change and permission approvals. Permission approvals use the option IDs `turn`, `session` and `decline`. Use the options each request returns. Experimental Codex questions are answered through the resume command.
 - OpenCode declares native session delivery and activity with compatible V2 OpenAPI. During a running turn, choose `steer` or `queue`. The default `send` now requires an idle session. Permissions and forms use the existing request routes. [OpenCode interaction](execution.md#opencode-interaction)
+- Claude Code session delivery and activity (additive, no version bump). `steer` and `queue` use versioned launch hooks. `activity` reads the transcript on the machine running the session.
 - Task session history (additive, no version bump). Migration 0057 preserves session links by attempt. Task detail and MCP `get_task` expose `sessions`, and `GET /api/tasks/:id/sessions/:attempt` reads the cached snapshot. Activity accepts an attempt over HTTP, MCP and CLI. Historical session references return the owning task and attempt.
 - T3 declares question responses, idle Send, active Steer and Queue, and recent activity from its advertised MCP tools. A T3 Send during a turn returns `session_busy`. Activity file entries can carry `countsUnknown`.
 - Needs-input task notifications store and push `/tasks/<id>/session`. Task group keys and push tags keep the same IDs. Historical notification records keep their stored URLs.

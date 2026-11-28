@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,7 +26,7 @@ import (
 
 // Push events (ADR 0005 decision 16): every session Stage launches gets
 // Claude HTTP hooks (`--settings <file>`) that POST to a private listener on
-// 127.0.0.1. A hook only wakes Stage: the adapter reads the session list
+// 127.0.0.1. A hook can wake Stage: the adapter reads the session list
 // and transcript again (Events). Polling stays the reconciliation, so a
 // hook that never arrives (Stage down, a policy blocking HTTP hooks) only
 // delays.
@@ -38,18 +39,23 @@ import (
 // answer in Claude still wins; every way the hook ends without a Stage
 // answer leaves Claude's prompt in place. Open requests are memory only.
 
-// HookEvents are the Claude hook events Stage subscribes to.
-var HookEvents = []string{"Stop", "StopFailure", "Notification", "PermissionRequest", "SessionEnd", "UserPromptSubmit"}
+var observationHookEvents = []string{"Stop", "StopFailure", "Notification", "PermissionRequest", "SessionEnd", "UserPromptSubmit"}
+
+// HookEvents are the Claude hook events new Stage launches subscribe to.
+var HookEvents = append(slices.Clone(observationHookEvents), "PostToolUse", "PostToolBatch")
 
 // HooksFile is the Claude settings file, in the hooks' state directory,
 // that every launch passes with --settings. Claude stores the path with a
 // session's saved options and reads the file again when it wakes the
 // session, so the file always names the current listener.
-const HooksFile = "hooks-settings.json"
+const HooksFile = "hooks-settings-v1.json"
+
+// Earlier launches keep their original hooks when Claude wakes them.
+const legacyHooksFile = "hooks-settings.json"
 
 // legacyHeadFile is the settings file earlier versions passed for a
 // launch with a predecessor base. Sessions launched with it read it again
-// when they wake, so an existing one keeps HooksFile's content.
+// when they wake, so an existing one keeps the current listener address.
 const legacyHeadFile = "hooks-settings-head.json"
 
 const (
@@ -111,10 +117,11 @@ type Hooks struct {
 	now       func() time.Time
 	io        time.Duration
 
-	mu      sync.Mutex
-	sub     *Subscription
-	last    time.Time
-	pending map[string][]*pendingRequest // by session id
+	mu         sync.Mutex
+	sub        *Subscription
+	last       time.Time
+	pending    map[string][]*pendingRequest // by session id
+	deliveries map[string]*deliveryInbox    // by session id
 }
 
 // pendingRequest is one open PermissionRequest hook.
@@ -183,6 +190,9 @@ func OpenHooks(o HooksOptions) (*Hooks, error) {
 	path := filepath.Join(o.Dir, HooksFile)
 	port, token := readHookSettings(path)
 	if token == "" {
+		port, token = readHookSettings(filepath.Join(o.Dir, legacyHooksFile))
+	}
+	if token == "" {
 		var b [32]byte
 		if _, err := rand.Read(b[:]); err != nil {
 			return nil, fmt.Errorf("Stage couldn't make a token for its Claude Code hooks (%v).", err)
@@ -204,7 +214,8 @@ func OpenHooks(o HooksOptions) (*Hooks, error) {
 		_ = ln.Close()
 		return nil, fmt.Errorf("Stage couldn't open its local hook port (unexpected address %s).", ln.Addr())
 	}
-	h := &Hooks{path: path, imageRoot: o.ImageRoot, url: "http://127.0.0.1:" + strconv.Itoa(tcp.Port) + hookPath, token: token, ln: ln, now: o.Now, io: o.IOTimeout, pending: map[string][]*pendingRequest{}}
+	h := &Hooks{path: path, imageRoot: o.ImageRoot, url: "http://127.0.0.1:" + strconv.Itoa(tcp.Port) + hookPath,
+		token: token, ln: ln, now: o.Now, io: o.IOTimeout, pending: map[string][]*pendingRequest{}, deliveries: map[string]*deliveryInbox{}}
 	if err := h.writeSettings(o.Dir); err != nil {
 		_ = ln.Close()
 		return nil, fmt.Errorf("Stage couldn't write its Claude Code hook settings (%v).", err)
@@ -279,10 +290,12 @@ func (h *Hooks) Unsubscribe(s *Subscription) {
 }
 
 // Reset ends the current subscription: the setup replaced or removed the
-// connection's adapter. Hooks arriving meanwhile are accepted and dropped.
+// connection's adapter and drops queued deliveries. Hooks arriving
+// meanwhile are accepted.
 func (h *Hooks) Reset() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	clear(h.deliveries)
 	if h.sub != nil {
 		h.sub.end()
 		h.sub = nil
@@ -312,15 +325,15 @@ type hookInput struct {
 	ToolName         string            `json:"tool_name"`
 	ToolInput        json.RawMessage   `json:"tool_input"`
 	Suggestions      []json.RawMessage `json:"permission_suggestions"`
+	StopHookActive   bool              `json:"stop_hook_active"`
 }
 
 // eventPermissionRequest is the hook Stage can answer.
 const eventPermissionRequest = "PermissionRequest"
 
 // ServeHTTP accepts a hook: POST /hooks with Stage's bearer token and a
-// JSON body naming a session. It answers 204 with no body (Claude reads no
-// decision from it) before anything else happens, except a
-// PermissionRequest naming a tool: that one stays open as a request (hold).
+// JSON body naming a session. It returns a delivery decision at a tool or
+// Stop boundary, holds a PermissionRequest, or answers 204 with no decision.
 func (h *Hooks) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != hookPath {
 		http.NotFound(w, r)
@@ -349,7 +362,28 @@ func (h *Hooks) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "hook input names no session", http.StatusBadRequest)
 		return
 	}
-	h.deliver(Nudge{Session: in.Session, Event: in.Event, NotificationType: in.NotificationType, At: h.now()})
+	versioned := r.Header.Get(hookVersionHeader) == hookVersion
+	if versioned && in.Event == "UserPromptSubmit" {
+		// A launch may be correlated after --bg returned an uncertain result.
+		// Its authenticated versioned hook independently records eligibility.
+		_ = h.markDeliveryHooks(in.Session)
+	}
+	if in.Event == "SessionEnd" {
+		h.clearDeliveries(in.Session)
+	}
+	var output deliveryHookOutput
+	var hasDelivery bool
+	if versioned {
+		output, hasDelivery = h.deliveryOutput(in)
+	}
+	// Activity is polled. Tool boundaries and a Stop that continues the
+	// turn do not announce a roster state change.
+	h.accept(Nudge{Session: in.Session, Event: in.Event, NotificationType: in.NotificationType, At: h.now()}, !hasDelivery && !isToolHook(in.Event))
+	if hasDelivery {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(output)
+		return
+	}
 	if in.Event == eventPermissionRequest && in.ToolName != "" {
 		h.hold(w, r, in)
 		return
@@ -509,13 +543,13 @@ func (h *Hooks) authorized(header string) bool {
 	return ok && subtle.ConstantTimeCompare([]byte(got), []byte(h.token)) == 1
 }
 
-// deliver queues n for the subscribed adapter; with none, or a full
-// queue, it is dropped (polling reconciles).
-func (h *Hooks) deliver(n Nudge) {
+// accept records an accepted hook and optionally wakes the adapter. A full
+// nudge channel drops the wake-up; polling reconciles.
+func (h *Hooks) accept(n Nudge, wake bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.last = n.At
-	if h.sub == nil {
+	if !wake || h.sub == nil {
 		return
 	}
 	select {
@@ -550,21 +584,29 @@ type httpHook struct {
 // no matcher. PermissionRequest waits up to permissionTimeout for an
 // answer in Stage; Claude prompts meanwhile.
 func HookSettings(hookURL, token string) ([]byte, error) {
-	return hookSettings(hookURL, token, "")
+	return hookSettings(hookURL, token, "", true)
 }
 
 // hookSettings is HookSettings with, for an image root, its ReadRule.
-func hookSettings(hookURL, token string, imageRoot string) ([]byte, error) {
+func hookSettings(hookURL, token string, imageRoot string, versioned bool) ([]byte, error) {
 	f := settingsFile{Hooks: map[string][]hookMatcher{}}
 	if imageRoot != "" {
 		f.Permissions = &permissionSettings{Allow: []string{ReadRule(imageRoot)}}
 	}
-	for _, e := range HookEvents {
+	events := observationHookEvents
+	if versioned {
+		events = HookEvents
+	}
+	for _, e := range events {
 		timeout := hookTimeout
 		if e == eventPermissionRequest {
 			timeout = permissionTimeout
 		}
-		f.Hooks[e] = []hookMatcher{{Hooks: []httpHook{{Type: "http", URL: hookURL, Headers: map[string]string{"Authorization": "Bearer " + token}, Timeout: timeout}}}}
+		headers := map[string]string{"Authorization": "Bearer " + token}
+		if versioned {
+			headers[hookVersionHeader] = hookVersion
+		}
+		f.Hooks[e] = []hookMatcher{{Hooks: []httpHook{{Type: "http", URL: hookURL, Headers: headers, Timeout: timeout}}}}
 	}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
@@ -598,25 +640,33 @@ func readHookSettings(path string) (int, string) {
 	return 0, ""
 }
 
-// writeSettings writes the settings file (0600, in a 0700 dir) when its
-// content changed, atomically, so it names the current listener; an
-// existing legacyHeadFile gets the same content (never created).
+// writeSettings updates the listener address for new and earlier launches.
+// Files are private and replaced atomically only when their content changes.
 func (h *Hooks) writeSettings(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	b, err := hookSettings(h.url, h.token, h.imageRoot)
+	b, err := hookSettings(h.url, h.token, h.imageRoot, true)
 	if err != nil {
 		return err
 	}
 	if err := writeFile0600(dir, h.path, b); err != nil {
 		return err
 	}
-	legacy := filepath.Join(dir, legacyHeadFile)
-	if _, err := os.Stat(legacy); err != nil {
-		return nil
+	for _, name := range []string{legacyHooksFile, legacyHeadFile} {
+		legacy := filepath.Join(dir, name)
+		if _, err := os.Stat(legacy); err != nil {
+			continue
+		}
+		b, err := hookSettings(h.url, h.token, h.imageRoot, false)
+		if err != nil {
+			return err
+		}
+		if err := writeFile0600(dir, legacy, b); err != nil {
+			return err
+		}
 	}
-	return writeFile0600(dir, legacy, b)
+	return nil
 }
 
 // writeFile0600 replaces path (in dir) with b, atomically, unless it

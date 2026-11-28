@@ -32,16 +32,14 @@ func transcriptHas(t *testing.T, f *claudetest.Fake, id, text string) bool {
 	return strings.Contains(string(b), text)
 }
 
-func TestSendRejectsUnsupportedDelivery(t *testing.T) {
+func TestSendRejectsUnknownDelivery(t *testing.T) {
 	f := claudetest.New(t)
 	a := f.Adapter(conn)
 	ref := execution.SessionRef{ConnectionID: conn, ExternalSessionID: "unused"}
-	for _, mode := range []execution.Delivery{execution.DeliverySteer, execution.DeliveryQueue} {
-		var invalid *execution.Invalid
-		err := a.Send(t.Context(), ref, execution.Message{Text: "do not send", Delivery: mode})
-		if !errors.As(err, &invalid) {
-			t.Fatalf("%s delivery: %v", mode, err)
-		}
+	var invalid *execution.Invalid
+	err := a.Send(t.Context(), ref, execution.Message{Text: "do not send", Delivery: "later"})
+	if !errors.As(err, &invalid) {
+		t.Fatalf("unknown delivery: %v", err)
 	}
 	if calls := f.Read().Calls; len(calls) != 0 {
 		t.Fatalf("invalid delivery reached Claude Code: %+v", calls)
@@ -121,7 +119,9 @@ func TestSendWithoutProcessAndToAQuestion(t *testing.T) {
 	}
 	ref, id := o.Session, o.Session.ExternalSessionID
 	f.Reply(id, "Which color?", true)
-	f.Update(func(s *fakestate.State) { s.Sessions[0].State, s.Sessions[0].Status, s.Sessions[0].PID = "blocked", "", 0 })
+	f.Update(func(s *fakestate.State) {
+		s.Sessions[0].State, s.Sessions[0].Status, s.Sessions[0].PID = "blocked", "", 0
+	})
 	if err := a.Send(t.Context(), ref, execution.Message{Text: "teal"}); err != nil {
 		t.Fatal(err)
 	}

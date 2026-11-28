@@ -457,6 +457,8 @@ First panel in the Task tab’s main column. Preserve mono text, Copy, six-line 
 
 Full conversations stay in the harness. Where the harness declares `activity`, Session shows a bounded Recent activity panel. It has a plan checklist, changed files with addition and deletion counts, and ruled feed rows with kind icons, mono previews, status and relative time. Truncation adds “Older activity in {harness}”. “Full transcript in {harness}” reuses the header destination. The current session polls every five seconds while visible and running or waiting for input. A past attempt reads activity once per visit. [Session surface](docs/adr/0014-session-surface.md)
 
+The Claude Code session slot puts the reported model, permission mode and effort in the header as wrapping mono metadata. Missing values are omitted.
+
 ### Alert
 Tinted callout: tone border at 50%, tone fill at 9% over surface, a 7px square marker, 13px text, actions right. `need` for waiting-on-you, `bad` for errors.
 

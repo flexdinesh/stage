@@ -246,9 +246,9 @@ func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 			execution.OpSessionSearch:   available,
 			execution.OpRespond:         a.hooksRunning(),
 			execution.OpSend:            available,
-			execution.OpSteer:           {Reason: "Claude Code takes messages once its turn ends."},
-			execution.OpQueue:           {Reason: "Claude Code takes messages once its turn ends."},
-			execution.OpActivity:        {Reason: "Recent activity is in Claude Code."},
+			execution.OpSteer:           a.deliveryAvailability(),
+			execution.OpQueue:           a.deliveryAvailability(),
+			execution.OpActivity:        available,
 			execution.OpSessionRename:   {Reason: "Claude Code has no rename interface."},
 			execution.OpWorkspaceAdd:    a.trustAvailability(),
 			execution.OpDirectoryBrowse: {Reason: "Type the path."},
@@ -463,6 +463,9 @@ func (a *Adapter) read(ctx context.Context, id string, fresh bool) (session, err
 func (a *Adapter) readListed(ctx context.Context, id string, es []Entry) (session, error) {
 	s := session{id: id}
 	s.entry, s.listed = findSession(es, id)
+	if !s.listed && a.hooks != nil {
+		a.hooks.clearDeliveries(id)
+	}
 	if p, ok := transcriptPath(a.projects(ctx), s.entry.Cwd, id); ok {
 		if t, err := a.logs.read(p); err == nil {
 			s.transcript, s.hasLog, s.logPath = t, true, p
@@ -624,6 +627,9 @@ func (a *Adapter) Stop(ctx context.Context, ref execution.SessionRef) error {
 			return execution.ErrNotFound
 		}
 		return exitError("stop", res)
+	}
+	if a.hooks != nil {
+		a.hooks.clearDeliveries(s.id)
 	}
 	return nil
 }

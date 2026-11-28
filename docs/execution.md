@@ -1252,8 +1252,8 @@ to run on that machine.
   keeps a retry from reusing an earlier attempt's worktree. Claude takes
   one `--settings`: the hooks file, which carries the image root's read
   rule (Images). Without hooks it is inline JSON with the read rule for
-  images, else none. An existing `hooks-settings-head.json` also receives the
-  current hook settings because sessions using that file read it on wake.
+  images, else none. Earlier settings paths keep their original set of
+  events and receive the current listener address when it changes.
   An unsupported config, an image type outside PNG, JPEG, GIF or WebP,
   a missing folder or executable, images without an image root, and Claude's `Workspace not
   trusted` refusal are `Rejected` (the task returns to backlog with the
@@ -1331,15 +1331,13 @@ to run on that machine.
 - **Push** ([ADR 0005](adr/0005-claude-code-harness.md) decision 16): the
   adapter is an `execution.EventSource`. The machine's hook receiver
   (`claudecode.Hooks`, opened with the first adapter, kept until shutdown)
-  listens on `127.0.0.1` and writes `<state dir>/hooks-settings.json`
+  listens on `127.0.0.1` and writes `<state dir>/hooks-settings-v1.json`
   (`<data dir>/claude` on the main server, `<worker dir>/claude` on a
   worker; [runtime.md](runtime.md#claude-code-hooks)): one Claude HTTP hook
   per event (`Stop`, `StopFailure`, `Notification`, `PermissionRequest`,
-  `SessionEnd`, `UserPromptSubmit`) with a bearer token. Every launch passes
-  the file with `--settings`. A hook is a wake-up: Stage answers 204 at
-  once and reads only `session_id`, `hook_event_name` and
-  `notification_type` (a `PermissionRequest` naming a tool is also held
-  for an answer: Approvals and questions, below); Events then reads the session list (one read taken
+  `SessionEnd`, `UserPromptSubmit`, `PostToolUse`, `PostToolBatch`) with a
+  bearer token. Every launch passes the file with `--settings`. An
+  observation hook receives 204 and wakes Events, which reads the session list (one read taken
   after the hook, shared) and transcript, again after 250 ms, 500 ms, 1 s
   and 2 s until the list shows what the event announces (Stop, StopFailure,
   SessionEnd: not running; PermissionRequest, a `permission_prompt`
@@ -1350,7 +1348,7 @@ to run on that machine.
   listener moves, and sessions whose hooks are blocked by policy
   (`allowedHttpHookUrls`, `disableAllHooks`, `allowManagedHooksOnly`). Replacing or removing the
   adapter (connect, the command setting, disconnect) ends its
-  subscription; hooks meanwhile are answered and dropped. The setup status
+  subscription and clears pending deliveries. The setup status
   reports `details.events` ([api.md](api.md#harness-connections-api-v6)).
 - **Usage** from the transcript ([ADR 0005](adr/0005-claude-code-harness.md)
   decision 17): turns are the typed user prompts on the main chain (the
@@ -1455,11 +1453,30 @@ to run on that machine.
   resumable). While a send delivers (at most 15 s) the session's `stopped`
   entry observes as running, so a blocked session stopped to wake records
   no interrupted. Text only, at most 32 KiB.
+- **Steering and queueing** ([ADR 0014](adr/0014-session-surface.md)).
+  A background session launched with Stage's versioned settings can take
+  messages while its fresh roster entry shows a working turn. Stage keeps
+  at most eight pending messages per session, up to 32 KiB each. After a
+  tool runs, `PostToolUse` or `PostToolBatch` supplies the oldest pending
+  steer as `additionalContext` for Claude's next model request. An eligible
+  `Stop` takes the oldest pending message, of either mode, as a `block`
+  reason. A Stop with `stop_hook_active` set or an empty list passes through.
+  Earlier launches and sessions without the version marker return Busy
+  with the resume command. A finished turn returns Busy with guidance to
+  Send. Session end or observed removal clears pending messages. A Stage
+  restart loses messages still awaiting a hook. A blocked or missing
+  receiver leaves Claude Code's own session controls available. [Claude Code hook reference](https://code.claude.com/docs/en/hooks)
+- **Activity** reads the transcript on the server or worker that runs
+  Claude Code. It returns a bounded feed of messages, reasoning titles
+  and tools, with Bash commands and file changes identified. It also
+  returns the latest TodoWrite plan, counts from Edit and Write patches,
+  the latest model and available permission mode, effort and worktree
+  metadata. The Session view uses this for current and past attempts.
 - **Approvals and questions** ([ADR 0005](adr/0005-claude-code-harness.md)
   decision 8, E11). The push receiver (`claudecode.Hooks`, above) also holds
   each `PermissionRequest` hook naming a tool (its hook timeout is 3600 s,
   the others 5 s) after nudging, with its tool, input and suggestions in
-  memory; every other hook still gets 204 at once. With no receiver,
+  memory. With no receiver,
   respond is unavailable ("Answer in Claude Code"). A hook request stays open until the
   user answers in Stage, the session list shows the session no longer
   waiting (answered in Claude), a newer request of the session supersedes

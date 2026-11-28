@@ -139,6 +139,11 @@ and gives an update reason for each unavailable operation. Set
 `FileChange.CountsUnknown` when the harness
 can report a path but cannot supply counts for its changes.
 
+Claude Code delivers through its documented tool and Stop hooks. Its hook
+receiver holds a bounded, memory-only list of pending deliveries. Read
+transcript activity on the owning machine. The same adapter methods serve
+local and worker calls. [Claude Code adapter](execution.md#claude-code-adapter)
+
 ### Workspace and session selection
 
 [ADR 0010](adr/0010-harness-workspaces-and-logical-projects.md) defines

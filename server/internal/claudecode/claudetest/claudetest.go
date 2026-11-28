@@ -179,7 +179,17 @@ func (f *Fake) HookedAdapter(connection int64, h *claudecode.Hooks) *claudecode.
 // It returns the HTTP status.
 func (f *Fake) Hook(id, event string, extra map[string]any) int {
 	f.t.Helper()
-	return f.HookAs(id, id, event, extra)
+	return f.HookResponse(id, event, extra).Status
+}
+
+// HookResponse posts a hook and returns the response Claude would read.
+func (f *Fake) HookResponse(id, event string, extra map[string]any) *HookCall {
+	f.t.Helper()
+	c := f.post(id, id, event, extra).Wait(f.t, 5*time.Second)
+	if c.Err != nil {
+		f.t.Fatal(c.Err)
+	}
+	return c
 }
 
 // HookAs posts event naming session id through the hook settings session
@@ -296,6 +306,7 @@ func Post(url string, headers map[string]string, body []byte) *HookCall {
 			c.Err = err
 			return
 		}
+		req.Close = true
 		req.Header.Set("Content-Type", "application/json")
 		for k, v := range headers {
 			req.Header.Set(k, v)

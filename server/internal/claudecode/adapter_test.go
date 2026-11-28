@@ -202,7 +202,8 @@ func TestImagesThroughHookSettings(t *testing.T) {
 	if err != nil || !strings.Contains(string(plain), `"Read(/`+f.ImageRoot()+`/**)"`) || strings.Contains(string(plain), "worktree") {
 		t.Fatalf("%s: %s %v", h.SettingsPath(), plain, err)
 	}
-	if b, err := os.ReadFile(legacy); err != nil || string(b) != string(plain) {
+	if b, err := os.ReadFile(legacy); err != nil || !strings.Contains(string(b), `"Read(/`+f.ImageRoot()+`/**)"`) ||
+		strings.Contains(string(b), "worktree") || strings.Contains(string(b), "PostToolUse") || !strings.Contains(string(b), `"PermissionRequest"`) {
 		t.Fatalf("legacy head settings %s %v", b, err)
 	}
 	if s := f.Session(o.Session.ExternalSessionID); s.State != "working" {

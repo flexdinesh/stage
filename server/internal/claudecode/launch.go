@@ -141,7 +141,8 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, _ execution.C
 	}
 	call, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	res, err := a.cli.Launch(call, in.Directory, Args(in, att, a.launchSettings(len(att.Paths) > 0))...)
+	settings := a.launchSettings(len(att.Paths) > 0)
+	res, err := a.cli.Launch(call, in.Directory, Args(in, att, settings)...)
 	var start *StartError
 	if errors.As(err, &start) {
 		return reject(fmt.Sprintf("Stage can't run %s (%v). Check the Claude command in Settings.", a.cli.Bin, start.Err))
@@ -159,7 +160,13 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, _ execution.C
 	if !ok {
 		return execution.Observation{}, fmt.Errorf("claude --bg printed no session id: %s", excerpt(res.Stdout))
 	}
-	return a.awaitListed(ctx, short)
+	o, err := a.awaitListed(ctx, short)
+	if err == nil && a.hooks != nil && settings == a.hooks.SettingsPath() {
+		if err := a.hooks.markDeliveryHooks(o.Session.ExternalSessionID); err != nil {
+			a.log.Warn("claude: record session hook version", "session", o.Session.ExternalSessionID, "err", err)
+		}
+	}
+	return o, err
 }
 
 // attach prunes old image folders and writes the launch's images under the
