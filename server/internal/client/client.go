@@ -228,6 +228,9 @@ type TaskDetail struct {
 	Tree   *TreeDetail    `json:"tree"` // the task's tree (null outside one)
 	// CurrentHandoffs: what the current launch attempt appended, one per need.
 	CurrentHandoffs []db.Handoff `json:"currentHandoffs"`
+	// CurrentSteering: the steering brief the current launch attempt
+	// appended (nil: none).
+	CurrentSteering *db.SteeringBrief `json:"currentSteering"`
 }
 
 // TreeDetail is a tree with its members, edges and levels.

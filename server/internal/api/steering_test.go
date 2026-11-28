@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
@@ -246,5 +247,86 @@ func TestTreeSteeringStopFailureWarns(t *testing.T) {
 	e.must("DELETE", steerer, nil, 200, &stopped)
 	if len(stopped.Warnings) != 1 || stopped.Tree.Steerer != nil {
 		t.Fatalf("stop with failed stop %+v", stopped)
+	}
+}
+
+type steeringBriefTask struct {
+	task
+	CurrentSteering *struct {
+		Attempt int    `json:"attempt"`
+		Brief   string `json:"brief"`
+	} `json:"currentSteering"`
+}
+
+func (e *env) steeringBriefTask(id int64) steeringBriefTask {
+	e.t.Helper()
+	var out steeringBriefTask
+	e.must("GET", fmt.Sprintf("/api/tasks/%d", id), nil, 200, &out)
+	return out
+}
+
+// An active steerer's launch appends the steering brief between the prompt
+// and the journal block, frozen per attempt and shown as currentSteering;
+// a relaunch recomposes it; other tasks carry none.
+func TestSteeringBriefAtLaunch(t *testing.T) {
+	e := newEnv(t)
+	p := e.project("/w/brief")
+	tr, a := e.steeringTree(p.ID, "Ship it")
+	if got := e.steeringBriefTask(a.ID); got.CurrentSteering != nil {
+		t.Fatalf("member before launch: %+v", got.CurrentSteering)
+	}
+	e.must("POST", fmt.Sprintf("/api/trees/%d/journal", tr.ID), map[string]any{"text": "merge order: member first", "category": "decision", "requestId": "d1"}, 201, nil)
+	var res steererResponse
+	e.must("POST", fmt.Sprintf("/api/trees/%d/steerer", tr.ID), e.steerBody(p.ID, "s1", nil), 201, &res)
+	st := res.Task.ID
+
+	msg := e.lastMessage()
+	brief, journal := strings.Index(msg, "<stage-steering-brief tree="), strings.Index(msg, "<stage-journal>")
+	if !strings.HasPrefix(msg, "steer the tree\n\n") || brief < 0 || journal < brief {
+		t.Fatalf("launch prompt order:\n%s", msg)
+	}
+	got := e.steeringBriefTask(st)
+	if got.CurrentSteering == nil || got.CurrentSteering.Attempt != 1 || !strings.Contains(msg, got.CurrentSteering.Brief) {
+		t.Fatalf("currentSteering %+v", got.CurrentSteering)
+	}
+	for _, want := range []string{
+		fmt.Sprintf("You steer Stage tree #%d \"Ship it\"", tr.ID),
+		fmt.Sprintf("as task #%d.", st),
+		fmt.Sprintf("- #%d \"member\": backlog", a.ID),
+		"merge order: member first",
+		"## Reviews",
+	} {
+		if !strings.Contains(got.CurrentSteering.Brief, want) {
+			t.Fatalf("brief misses %q:\n%s", want, got.CurrentSteering.Brief)
+		}
+	}
+	var snippets struct {
+		Snippets []db.Snippet `json:"snippets"`
+	}
+	e.must("GET", "/api/snippets", nil, 200, &snippets)
+	if !slices.ContainsFunc(snippets.Snippets, func(s db.Snippet) bool { return s.Name == "steering-playbook" && s.ProjectID == nil }) {
+		t.Fatalf("playbook snippet not created: %+v", snippets)
+	}
+	if got := e.steeringBriefTask(a.ID); got.CurrentSteering != nil {
+		t.Fatalf("member carries a brief: %+v", got.CurrentSteering)
+	}
+
+	// A new attempt recomposes from the tree as it is then.
+	e.must("POST", fmt.Sprintf("/api/trees/%d/journal", tr.ID), map[string]any{"text": "second thoughts", "requestId": "d2"}, 201, nil)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/stop", st), nil, 200, nil)
+	e.must("POST", fmt.Sprintf("/api/tasks/%d/start", st), nil, 200, nil)
+	again := e.steeringBriefTask(st)
+	if again.CurrentSteering == nil || again.CurrentSteering.Attempt != 2 || !strings.Contains(again.CurrentSteering.Brief, "second thoughts") || !strings.Contains(e.lastMessage(), again.CurrentSteering.Brief) {
+		t.Fatalf("relaunch brief %+v", again.CurrentSteering)
+	}
+
+	// Once steering stops, a relaunch carries no brief.
+	e.must("DELETE", fmt.Sprintf("/api/trees/%d/steerer", tr.ID), nil, 200, nil)
+	e.poll()
+	if code, b := e.raw("POST", fmt.Sprintf("/api/tasks/%d/start", st), ""); code != 200 {
+		t.Fatalf("relaunch ended steerer: %d %v (state %s)", code, b, e.getTask(st).State)
+	}
+	if got := e.steeringBriefTask(st); got.CurrentSteering != nil || strings.Contains(e.lastMessage(), "<stage-steering-brief") {
+		t.Fatalf("ended steerer relaunch: %+v", got.CurrentSteering)
 	}
 }

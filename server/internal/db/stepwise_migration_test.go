@@ -100,6 +100,18 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	50: {{"existing workspace is not blocked until refreshed", seedV0046HistoricalWorkspaceProject, checkV0050BlockedReason}},
 	51: {{"existing task starts at revision 0, unanswered", seedV0040SharedAccess, checkV0051StateRevision}},
 	52: {{"one active steerer per tree and per task", seedV0040SharedAccess, checkV0052TreeSteering}},
+	53: {{"one steering brief per task attempt", seedV0040SharedAccess, checkV0053SteeringLaunchContext}},
+}
+
+func checkV0053SteeringLaunchContext(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	mustExec(t, pool, `INSERT INTO steering_launch_context(task_id,attempt,brief) VALUES(6,1,'b1'),(6,2,'b2')`)
+	if _, err := pool.Exec(`INSERT INTO steering_launch_context(task_id,attempt,brief) VALUES(6,1,'again')`); err == nil {
+		t.Fatal("second brief for one attempt accepted")
+	}
+	wantRows(t, pool, `SELECT task_id,attempt,brief FROM steering_launch_context ORDER BY attempt`, "6|1|b1", "6|2|b2")
+	mustExec(t, pool, `DELETE FROM tasks WHERE id=6`)
+	wantRows(t, pool, `SELECT count(*) FROM steering_launch_context`, "0")
 }
 
 func checkV0051StateRevision(t *testing.T, pool *sqlite.DB) {

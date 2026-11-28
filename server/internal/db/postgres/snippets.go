@@ -85,3 +85,10 @@ func (r snippets) Delete(ctx context.Context, id int64) error {
 	}
 	return err
 }
+
+func (r snippets) EnsureByName(ctx context.Context, name, body string) (store.Snippet, error) {
+	if _, err := r.Exec(ctx, `INSERT INTO snippets (name, body) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING`, name, body); err != nil {
+		return store.Snippet{}, err
+	}
+	return scanSnippet(r.QueryRow(ctx, `SELECT `+snippetCols+` FROM snippets s WHERE s.name = $1`, name))
+}

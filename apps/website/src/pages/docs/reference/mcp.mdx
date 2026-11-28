@@ -180,7 +180,7 @@ When a task with needs starts, its launch prompt gets one block per accepted nee
 - `handoff: false` on `create_task` or `update_task` turns it off (CLI `--handoff=false`). Omitted keeps the task's value.
 - The reply cap per need is `min(4000, max(1000, 8000 / needs))` Unicode characters.
 - Handoff uses the saved accepted snapshot in Stage, without a live source-harness read. Missing replies remain missing; storage errors block launch.
-- `get_task` returns `handoff` and `currentHandoffs` (one per need). `stage task show` prints `handoff  on|off` for tasks with needs and the current attempt's records.
+- `get_task` returns `handoff` and `currentHandoffs` (one per need), and `currentSteering` (`{attempt, brief}`, the steering brief a steerer's launch appended, or null). `stage task show` prints `handoff  on|off` for tasks with needs, the current attempt's records and a `steering brief` line.
 
 A dependent's worktree starts where its own launch options say, never from a need's branch: the handoff names the branch each need reported, and the agent works from there.
 

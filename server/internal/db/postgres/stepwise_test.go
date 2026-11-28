@@ -66,6 +66,22 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	50: {{name: "existing workspace is not blocked until refreshed", seed: seedV0046HistoricalWorkspaceProject, check: checkV0050BlockedReason}},
 	51: {{name: "existing task starts at revision 0, unanswered", seed: seedV0040SharedAccess, check: checkV0051StateRevision}},
 	52: {{name: "one active steerer per tree and per task", seed: seedV0040SharedAccess, check: checkV0052TreeSteering}},
+	53: {{name: "one steering brief per task attempt", seed: seedV0040SharedAccess, check: checkV0053SteeringLaunchContext}},
+}
+
+func checkV0053SteeringLaunchContext(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	if _, err := pool.Exec(`INSERT INTO steering_launch_context(task_id,attempt,brief) VALUES(6,1,'b1'),(6,2,'b2')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(`INSERT INTO steering_launch_context(task_id,attempt,brief) VALUES(6,1,'again')`); err == nil {
+		t.Fatal("second brief for one attempt accepted")
+	}
+	wantPGRows(t, pool, `SELECT task_id::text || '|' || attempt::text || '|' || brief FROM steering_launch_context ORDER BY attempt`, "6|1|b1", "6|2|b2")
+	if _, err := pool.Exec(`DELETE FROM tasks WHERE id=6`); err != nil {
+		t.Fatal(err)
+	}
+	wantPGRows(t, pool, `SELECT count(*)::text FROM steering_launch_context`, "0")
 }
 
 func checkV0051StateRevision(t *testing.T, pool *sql.DB) {

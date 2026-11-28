@@ -118,6 +118,10 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	if e != nil {
 		return t, e
 	}
+	steering, e := s.prepareSteering(ctx, t)
+	if e != nil {
+		return t, e
+	}
 	journal, e := s.store.JournalLaunchContext(ctx, t, journalInstructions(t, s.attribution(t.Harness), s.httpAPI(t.ConnectionID), s.CLI))
 	if e != nil {
 		return t, e
@@ -125,6 +129,9 @@ func (s *Service) launch(ctx context.Context, id int64, detail string, automatic
 	prompt := t.Prompt
 	if handoff != "" {
 		prompt += "\n\n" + handoff
+	}
+	if steering != "" {
+		prompt += "\n\n" + steering
 	}
 	prompt += "\n\n" + journal
 	images, e := s.store.TaskAttachments(ctx, id)

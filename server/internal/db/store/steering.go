@@ -53,6 +53,13 @@ type TaskSteering struct {
 	EndReason *SteeringEndReason `json:"endReason,omitempty"`
 }
 
+// SteeringBrief is Task detail's currentSteering: the steering brief the
+// current launch attempt appended.
+type SteeringBrief struct {
+	Attempt int    `json:"attempt"`
+	Brief   string `json:"brief"`
+}
+
 // NewSteeringEvent is one outbox row.
 type NewSteeringEvent struct {
 	TreeID    int64
@@ -113,4 +120,9 @@ type Steering interface {
 	InsertEvent(ctx context.Context, e NewSteeringEvent) (int64, error)
 	// Events are tree's events after id after, ascending, at most limit.
 	Events(ctx context.Context, treeID, after int64, limit int) ([]SteeringEvent, error)
+	// LaunchBrief is the steering brief frozen for the task's launch
+	// attempt (ErrNotFound: none).
+	LaunchBrief(ctx context.Context, taskID int64, attempt int) (string, error)
+	// SetLaunchBrief freezes brief for the attempt (a unique violation: one is frozen).
+	SetLaunchBrief(ctx context.Context, taskID int64, attempt int, brief string) error
 }

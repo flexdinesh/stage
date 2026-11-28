@@ -11,7 +11,7 @@ import { FollowUpPanel } from "../components/FollowUp.tsx";
 import { followUpView, mayFollowUp, replyPrompt } from "../lib/followup.ts";
 import { type TaskDetail, type TaskEvent } from "../api/types.ts";
 import { CopyLinkPair } from "../components/StageLinks.tsx";
-import { HandoffRecord } from "../components/Handoff.tsx";
+import { HandoffRecord, SteeringBriefRecord } from "../components/Handoff.tsx";
 import { IconArrowRight } from "../components/icons.tsx";
 import { JournalPanel } from "../components/Journal.tsx";
 import { AcceptedResult } from "../components/Completion.tsx";
@@ -412,6 +412,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
                 {task.currentHandoffs.map((h) => (
                   <HandoffRecord key={`${h.attempt}:${h.sourceTaskId ?? h.session?.externalSessionId}`} handoff={h} />
                 ))}
+                {task.currentSteering === null ? null : <SteeringBriefRecord steering={task.currentSteering} />}
               </PromptPanel>
             )}
             {task.acceptances.map((acceptance) => <AcceptedResult key={acceptance.id} acceptance={acceptance} current={acceptance.id === task.acceptanceId} harness={task.harness} />)}

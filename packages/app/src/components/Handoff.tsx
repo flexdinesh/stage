@@ -1,7 +1,7 @@
 import { useId } from "react";
-import type { Handoff } from "../api/types.ts";
+import type { Handoff, SteeringBrief } from "../api/types.ts";
 import { dateTime } from "../lib/format.ts";
-import { handoffSummary, recordedSource } from "../lib/handoff.ts";
+import { handoffSummary, recordedSource, steeringSummary } from "../lib/handoff.ts";
 import { browserTimeZone, wallTime } from "../lib/schedules.ts";
 import { RefText } from "./StageLinks.tsx";
 import { Checkbox, ChoiceRow, CopyButton, Hint, SubHeading } from "./ui.tsx";
@@ -48,6 +48,20 @@ export function HandoffRecord({ handoff }: { handoff: Handoff }) {
       <details>
         <summary className="cursor-pointer text-small text-muted hover:text-fg">Handoff text</summary>
         <pre className="mt-2 max-h-96 overflow-auto font-mono text-small leading-relaxed whitespace-pre-wrap"><RefText text={handoff.text} /></pre>
+      </details>
+    </section>
+  );
+}
+
+/** A steerer's launch brief: the same ruled, collapsed section as a handoff (context, not state). */
+export function SteeringBriefRecord({ steering }: { steering: SteeringBrief }) {
+  return (
+    <section className="flex min-w-0 flex-col gap-2 border-t border-line pt-3" aria-label="Steering brief">
+      <SubHeading title="Steering brief" meta={`attempt ${steering.attempt}`} actions={<CopyButton text={steering.brief} label="Copy brief" />} />
+      <p className="font-mono text-meta text-muted">{steeringSummary(steering)}</p>
+      <details>
+        <summary className="cursor-pointer text-small text-muted hover:text-fg">Brief text</summary>
+        <pre className="mt-2 max-h-96 overflow-auto font-mono text-small leading-relaxed whitespace-pre-wrap"><RefText text={steering.brief} /></pre>
       </details>
     </section>
   );

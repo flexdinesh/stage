@@ -27,6 +27,9 @@ type taskDetailJSON struct {
 	// CurrentHandoffs: what the current launch attempt appended, one per
 	// need (empty when none).
 	CurrentHandoffs []db.Handoff `json:"currentHandoffs"`
+	// CurrentSteering: the steering brief the current launch attempt
+	// appended (null: none; ADR 0013).
+	CurrentSteering *db.SteeringBrief `json:"currentSteering"`
 }
 
 // reportedJSON is where a session's harness says it works; "" when it does not say.

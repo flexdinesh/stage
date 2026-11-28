@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { handoffHint, handoffSource, handoffSummary, pendingHandoffNote, recordedSource } from "../src/lib/handoff.ts";
+import { handoffHint, handoffSource, handoffSummary, pendingHandoffNote, recordedSource, steeringSummary } from "../src/lib/handoff.ts";
 
 const task = (extra = {}) => ({ state: "backlog", handoff: true, needs: [], ...extra });
 
@@ -32,4 +32,8 @@ test("recorded source prefers the task number, then the title, then the external
 
 test("summary counts the appended characters", () => {
   assert.equal(handoffSummary({ text: "x".repeat(1234) }), "1,234 chars appended to the prompt");
+});
+
+test("steering summary counts the brief and names its attempt", () => {
+  assert.equal(steeringSummary({ attempt: 2, brief: "x".repeat(6234) }), "6,234 chars appended to the prompt, frozen for attempt 2");
 });

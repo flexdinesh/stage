@@ -125,3 +125,14 @@ func steeringCause(conn *int64, ext *string, task *int64) *store.SteeringCause {
 	}
 	return c
 }
+
+func (r steering) LaunchBrief(ctx context.Context, taskID int64, attempt int) (string, error) {
+	var brief string
+	err := r.QueryRow(ctx, `SELECT brief FROM steering_launch_context WHERE task_id=$1 AND attempt=$2`, taskID, attempt).Scan(&brief)
+	return brief, notFound(err)
+}
+
+func (r steering) SetLaunchBrief(ctx context.Context, taskID int64, attempt int, brief string) error {
+	_, err := r.Exec(ctx, `INSERT INTO steering_launch_context(task_id,attempt,brief) VALUES($1,$2,$3)`, taskID, attempt, brief)
+	return err
+}

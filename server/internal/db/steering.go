@@ -18,7 +18,12 @@ type (
 	SteeringEndReason = store.SteeringEndReason
 	TreeSteerer       = store.TreeSteerer
 	TaskSteering      = store.TaskSteering
+	SteeringBrief     = store.SteeringBrief
 )
+
+// SteeringPlaybookName names the global snippet whose body is the steering
+// playbook appended to every steering brief.
+const SteeringPlaybookName = "steering-playbook"
 
 const (
 	SteeringReplaced     = store.SteeringReplaced
@@ -173,4 +178,58 @@ func (s *Store) SteeringEvents(ctx context.Context, tree, after int64, limit int
 		return nil
 	})
 	return events, more, err
+}
+
+// SteeringLaunchContext freezes the steering brief for the task's launch
+// attempt: the first proposal wins and same-attempt retries reuse it.
+func (s *Store) SteeringLaunchContext(ctx context.Context, task Task, proposed string) (string, error) {
+	var result string
+	err := s.e.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): start each run from scratch.
+		result = ""
+		ls, err := tx.Tasks().LaunchState(ctx, task.ID)
+		if err != nil {
+			return err
+		}
+		if task.LaunchAttempt != ls.Attempt || ls.Attempt < 1 {
+			return Conflict("launch attempt changed")
+		}
+		result, err = tx.Steering().LaunchBrief(ctx, task.ID, ls.Attempt)
+		if !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		if err := tx.Steering().SetLaunchBrief(ctx, task.ID, ls.Attempt, proposed); err != nil {
+			return err
+		}
+		result = proposed
+		return nil
+	})
+	return result, err
+}
+
+// CurrentSteering is the steering brief frozen for the attempt (nil: none).
+func (s *Store) CurrentSteering(ctx context.Context, taskID int64, attempt int) (*SteeringBrief, error) {
+	if attempt < 1 {
+		return nil, nil
+	}
+	return read(ctx, s, func(tx store.Tx) (*SteeringBrief, error) {
+		brief, err := tx.Steering().LaunchBrief(ctx, taskID, attempt)
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return &SteeringBrief{Attempt: attempt, Brief: brief}, nil
+	})
+}
+
+// SteeringPlaybook is the body of the snippet named SteeringPlaybookName,
+// created as a global snippet from fallback when missing. A user's snippet
+// of that name, in any scope, is used as is.
+func (s *Store) SteeringPlaybook(ctx context.Context, fallback string) (string, error) {
+	sn, err := write(ctx, s, func(tx store.Tx) (Snippet, error) {
+		return tx.Snippets().EnsureByName(ctx, SteeringPlaybookName, fallback)
+	})
+	return sn.Body, err
 }

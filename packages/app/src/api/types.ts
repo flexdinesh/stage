@@ -761,6 +761,15 @@ export interface TaskDetail extends Task {
   /** Tasks the task's origin session created; null without an origin session. */
   /** Handoff records of the current launch attempt, one per need; empty when none. */
   currentHandoffs: Handoff[];
+  /** The steering brief the current launch attempt appended (an active steerer's); null when none. */
+  currentSteering: SteeringBrief | null;
+}
+
+/** A steerer's launch brief, frozen per attempt (ADR 0013). */
+export interface SteeringBrief {
+  attempt: number;
+  /** The appended <stage-steering-brief> block. */
+  brief: string;
 }
 
 export interface AcceptedEvidence {

@@ -234,6 +234,9 @@ func printHandoff(w io.Writer, d client.TaskDetail) {
 			fmt.Fprintf(w, "  handoff  skipped from %s (attempt %d): %s\n", from, h.Attempt, reason)
 		}
 	}
+	if s := d.CurrentSteering; s != nil {
+		fmt.Fprintf(w, "  steering brief  attempt %d, %d chars\n", s.Attempt, len([]rune(s.Brief)))
+	}
 }
 
 // needLabels is "#3 #5".

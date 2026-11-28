@@ -296,6 +296,9 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 		if out.CurrentHandoffs, err = s.Store.GetHandoffs(ctx, id, task.LaunchAttempt); err != nil {
 			return err
 		}
+		if out.CurrentSteering, err = s.Store.CurrentSteering(ctx, id, task.LaunchAttempt); err != nil {
+			return err
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 	return nil

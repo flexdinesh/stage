@@ -103,6 +103,7 @@ newline and 日本語', 1, '{"externalId":"next","root":"/next"}', 1)`,
 	`INSERT INTO journal_entries (kind, tree_id, text, event_type, to_tree_id) VALUES ('event', 1, 'moved', 'task_moved', 1)`,
 	`UPDATE journal_entries SET attribution = '{ "actor": { "kind": "human", "userId": 2 } }' WHERE kind = 'note'`,
 	`INSERT INTO journal_launch_context (task_id, attempt, instructions) VALUES (1, 1, 'context')`,
+	`INSERT INTO steering_launch_context (task_id, attempt, brief, created_at) VALUES (1, 1, 'brief', '2026-01-01T00:00:00.000000Z')`,
 	`INSERT INTO task_launch_claims (task_id, attempt) VALUES (1, 1)`,
 	`INSERT INTO task_launch_destinations (task_id, attempt, connection_id, external_project_id, workspace, binding_id, binding_revision) VALUES
 	  (1, 1, 1, 'ext-1', '/w', 1, 1), (2, 1, 1, 'unbound', '/unbound', NULL, 0)`,
