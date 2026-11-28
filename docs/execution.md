@@ -508,8 +508,9 @@ a `workspace_added` project event.
 
 On workers the operation requires the `workspaceAdder` trait and the
 `adapter.workspaceAdd` request kind, negotiated on the existing channel.
-OpenCode adds existing folders ([Adding folders](#adding-folders)). The
-other shipped harnesses declare the operation unavailable for now.
+OpenCode adds existing folders ([Adding folders](#adding-folders)). Codex
+trusts folders ([Codex adapter](#codex-adapter)). The other shipped
+harnesses declare the operation unavailable for now.
 [Workspace add API](api.md#add-a-workspace)
 
 ### Interaction
@@ -1096,7 +1097,9 @@ back; the purge is what removes them.
 unix control socket; `internal/codexsetup` is its connection setup. Design
 and live gate evidence: [ADR 0006](adr/0006-codex-app-server-harness.md).
 Codex owns threads, models, login and project trust. Stage stores no Codex
-credentials and never writes Codex's config. On a worker (`workersetup`) the
+credentials and never edits Codex's files; it changes Codex's config only
+through the app server, when a person or agent trusts a folder
+([ADR 0012](adr/0012-harness-workspace-add.md)). On a worker (`workersetup`) the
 setup runs on that machine, with that machine's `codex`, login and daemon,
 when the worker allows local harnesses; its settings live on the main
 server's `harness_settings` row for that machine
@@ -1111,6 +1114,22 @@ server's `harness_settings` row for that machine
   is importable (the machine's ops decide, `ImportInCheckout`; trust a
   project in Codex to list it). No launch options: a session runs in the
   project checkout.
+- **Workspace add.** One source, `trust` ("Trust folder"): an absolute
+  `path` on the Codex host and the confirmation "Codex will trust this
+  folder: it applies the folder's Codex project config. This also applies
+  to the Codex CLI." The adapter cleans the path and requires
+  `fs/getMetadata` to report a directory. A folder `config/read` already
+  trusts is `existing`. Otherwise `config/batchWrite` upserts key path
+  `projects` with `{<path>: {trust_level: "trusted"}}`: the path stays one
+  key (an unquoted `projects.<path>.trust_level` key path splits on dots),
+  and other projects and fields are kept. A prior `untrusted` entry becomes
+  trusted. The write sends the user layer's `expectedVersion` and retries
+  once on `configVersionConflict`. `configLayerReadonly` and
+  `configValidationError` are invalid input with Codex's message;
+  `okOverridden` adds a warn fact; a lost reply is `OutcomeUncertain`.
+  Stage re-reads `config/read`: a folder a higher layer keeps untrusted is
+  invalid input naming the override. Codex's experimental `project/*` API
+  (create, import, list) is a future option; Stage does not use it.
 - **Launch (`reserved`).** Validation rejects before any effect (an
   unknown option such as `worktree`, missing directory, non-image attachment, invalid option or
   permission). `thread/start`, checkpoint the thread id, best-effort

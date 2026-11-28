@@ -146,4 +146,31 @@ type accountResponse struct {
 
 type configResponse struct {
 	Config map[string]json.RawMessage `json:"config"`
+	// Layers: only with includeLayers.
+	Layers []configLayer `json:"layers"`
+}
+
+// configLayer is one config layer; Version is what a write's
+// expectedVersion compares against.
+type configLayer struct {
+	Name struct {
+		Type    string  `json:"type"`
+		Profile *string `json:"profile"`
+	} `json:"name"`
+	Version string `json:"version"`
+}
+
+// configWriteResponse answers config/batchWrite. Status: ok or
+// okOverridden (a higher layer still decides the value).
+type configWriteResponse struct {
+	Status   string `json:"status"`
+	Version  string `json:"version"`
+	Override *struct {
+		Message string `json:"message"`
+	} `json:"overriddenMetadata"`
+}
+
+// fsMetadata answers fs/getMetadata.
+type fsMetadata struct {
+	IsDirectory bool `json:"isDirectory"`
 }

@@ -53,15 +53,24 @@ type Server struct {
 	Path      string
 	CodexHome string
 
-	mu       sync.Mutex
-	ln       net.Listener
-	srv      *http.Server
-	clients  map[*wsClient]bool
-	threads  map[string]*Thread
-	seq      int
-	now      int64
-	models   []map[string]any
-	projects map[string]string
+	mu      sync.Mutex
+	ln      net.Listener
+	srv     *http.Server
+	clients map[*wsClient]bool
+	threads map[string]*Thread
+	seq     int
+	now     int64
+	models  []map[string]any
+	// projects is the user config's projects table; configVersion its
+	// layer version (config.go).
+	projects      map[string]map[string]any
+	configVersion int
+	// concurrentWrites: the next batch writes find another client's write
+	// first; readonlyConfig refuses writes; overrides are a higher layer's
+	// trust levels with its message.
+	concurrentWrites int
+	readonlyConfig   bool
+	overrides        map[string]override
 	// SignedOut: account/read reports no account.
 	signedOut   bool
 	unsupported map[string]bool
@@ -98,7 +107,7 @@ func New(t testing.TB) *Server {
 	s := &Server{
 		Path: filepath.Join(dir, "s.sock"), CodexHome: "/home/u/.codex",
 		clients: map[*wsClient]bool{}, threads: map[string]*Thread{}, now: 1_795_000_000,
-		projects: map[string]string{}, unsupported: map[string]bool{}, drop: map[string]int{}, calls: map[string]int{},
+		projects: map[string]map[string]any{}, overrides: map[string]override{}, unsupported: map[string]bool{}, drop: map[string]int{}, calls: map[string]int{},
 		mcpServers: []map[string]any{MCPServer("stage", "")},
 		rateLimits: map[string]any{"primary": Window(12, 300, 1_795_003_600), "secondary": Window(30, 10080, 1_795_300_000)},
 		models: []map[string]any{
@@ -217,8 +226,15 @@ func Window(used float64, mins, resetsAt int64) map[string]any {
 // Calls is how often method ran.
 func (s *Server) Calls(method string) int { s.mu.Lock(); defer s.mu.Unlock(); return s.calls[method] }
 
-// Trust records a trusted project path in config.
-func (s *Server) Trust(path, level string) { s.mu.Lock(); s.projects[path] = level; s.mu.Unlock() }
+// Trust sets a project's trust level in the user config.
+func (s *Server) Trust(path, level string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.projects[path] == nil {
+		s.projects[path] = map[string]any{}
+	}
+	s.projects[path]["trust_level"] = level
+}
 
 // AddThread adds a persisted thread (another client's: adoption tests).
 func (s *Server) AddThread(th Thread) *Thread {
@@ -407,6 +423,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 type rpcError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 func invalid(format string, args ...any) *rpcError {
@@ -463,11 +480,13 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		}
 		return map[string]any{"ordinaryUsageAllowed": true, "rateLimits": snap, "rateLimitsByLimitId": map[string]any{"codex": snap}, "rateLimitResetCredits": nil, "accountId": nil, "rateLimitUpsell": nil}, nil
 	case "config/read":
-		projects := map[string]any{}
-		for path, level := range s.projects {
-			projects[path] = map[string]string{"trust_level": level}
-		}
-		return map[string]any{"config": map[string]any{"model": "gpt-test", "projects": projects}, "origins": map[string]any{}}, nil
+		var includeLayers bool
+		_ = json.Unmarshal(p["includeLayers"], &includeLayers)
+		return s.configRead(includeLayers), nil
+	case "config/batchWrite":
+		return s.configBatchWrite(raw)
+	case "fs/getMetadata":
+		return fsMetadata(str("path"))
 	case "thread/start":
 		s.seq++
 		s.now++
