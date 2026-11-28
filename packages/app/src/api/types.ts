@@ -635,6 +635,8 @@ export interface Task {
   connectionLabel: string;
   acceptanceId: number | null;
   acceptanceRevision: number;
+  /** Counts the task's real state transitions; a guarded answer names the one it answers (first answer wins). */
+  stateRevision: number;
   completedAt: string | null;
   /** Provenance of the current acceptance; null while open. */
   completionProvenance: Provenance | null;
@@ -979,6 +981,8 @@ export interface RequestResponse {
 /** A follow-up message into a task's session (POST /tasks/:id/messages); nonblank, at most 32 KiB. */
 export interface SendMessageRequest {
   text: string;
+  /** Guards a reply: the task's `stateRevision` while it needs input (409 `already_answered` when it moved on or was answered first). */
+  expectedStateRevision?: number;
 }
 
 export interface AdoptSessionRequest {

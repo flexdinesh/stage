@@ -407,9 +407,7 @@ func (s *server) refreshAfterProjectAction(ctx context.Context, connection int64
 func (s *server) journalAction(ctx context.Context, r *http.Request, site actionSite, caller execution.Caller, result *execution.ActionResult) {
 	var source *execution.SessionRef
 	if caller == execution.CallerAgent {
-		if ref, err := agentctx.ParseSession(r.Header.Get(agentctx.CallerHeader)); err == nil {
-			source = &ref
-		}
+		source = db.CallerRef(r.Context())
 	}
 	// Even if the client stopped waiting, record the successful dispatch.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)

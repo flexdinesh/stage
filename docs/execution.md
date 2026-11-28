@@ -570,6 +570,25 @@ it can't list declares `unlistedRequests` on its descriptor with where to
 answer them; the app then shows that instead of a Reply composer when a
 needs-input session lists none. [Interaction API](api.md#session-interaction-api-v6)
 
+Send has one contract on every harness: a message is delivered when the
+session's current turn ends, or refused with `Busy` (409 `session_busy`)
+or, when the harness will never take it, `Refused` (409
+`session_refused`). Stage never interrupts or steers a turn mid-way
+([ADR 0013](adr/0013-tree-steering.md#send-semantics)).
+
+First answer wins ([ADR 0013](adr/0013-tree-steering.md#first-answer-wins)):
+`tasks.state_revision` counts real state transitions, and a send or
+respond with `expectedStateRevision` is guarded. The coordinator takes the
+task's lock, re-reads it and requires `needs_input` at that revision, not
+yet answered (`answered_revision`), else 409 `already_answered`. It holds
+the lock through the harness call and the record, which sets
+`answered_revision` in the same write as the event, then observes the
+session after unlocking. Without the revision nothing is locked or
+required. The user, the steerer and other agents race only through Stage:
+an answer typed directly in the harness cannot be prevented, and the
+loser's later send queues behind it or is `Busy`. Send and respond record
+the caller session as `Cause.Session` and the target as `Cause.TaskID`.
+
 ### Actions and facts
 
 A declared action is a harness-owned operation Stage relays. `execution.Action`

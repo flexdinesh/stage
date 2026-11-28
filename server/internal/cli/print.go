@@ -126,6 +126,7 @@ func waitsOn(needs []int64, start *time.Time) string {
 
 func printTask(w io.Writer, t client.Task) {
 	fmt.Fprintf(w, "task %d  %s  [%s]  %s\n", t.ID, t.Title, t.State, t.ProjectTitle)
+	fmt.Fprintf(w, "  state revision %d\n", t.StateRevision)
 	model, permission, mode := "harness default", "", ""
 	if !t.ConnectionActive && t.ConnectionID > 0 {
 		fmt.Fprintf(w, "  replaced connection %d (%s): history only\n", t.ConnectionID, t.ConnectionLabel)

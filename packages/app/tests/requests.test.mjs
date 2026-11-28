@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ApiError } from "../src/api/client.ts";
 import {
+  ALREADY_ANSWERED,
   allAnswered,
+  alreadyAnswered,
   answeredText,
   answersResponse,
   draftOf,
@@ -125,6 +127,15 @@ test("a 404 means answered elsewhere or expired; anything else is an error to sh
   assert.equal(respondFailure(new ApiError(404, "request \"r\" is no longer pending")), "expired");
   assert.equal(respondFailure(new ApiError(400, "bad")), "error");
   assert.equal(respondFailure(new Error("network")), "error");
+});
+
+test("a 409 already_answered is a lost guarded answer, shown as a status; other refusals are errors", () => {
+  assert.equal(alreadyAnswered(new ApiError(409, "Already answered", "already_answered")), true);
+  assert.equal(alreadyAnswered(new ApiError(409, "T3 is working", "session_busy")), false);
+  assert.equal(alreadyAnswered(new ApiError(404, "no longer pending")), false);
+  assert.equal(alreadyAnswered(new Error("network")), false);
+  assert.equal(respondFailure(new ApiError(409, "Already answered", "already_answered")), "error");
+  assert.equal(ALREADY_ANSWERED, "Already answered, by the steerer or in the harness.");
 });
 
 test("copy and anchor", () => {

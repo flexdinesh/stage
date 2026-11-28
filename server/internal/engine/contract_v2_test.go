@@ -383,19 +383,19 @@ func TestContractInteraction(t *testing.T) {
 			t.Fatal("question round trip", rs[1])
 		}
 		var invalid *db.InvalidError
-		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q1", execution.Response{}); !errors.As(err, &invalid) {
+		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q1", execution.Response{}, nil); !errors.As(err, &invalid) {
 			t.Fatal("empty response accepted", err)
 		}
-		if _, err := svc.Coordinator.Respond(ctx, task.ID, "missing", execution.Response{Option: "yes"}); !errors.Is(err, db.ErrNotFound) {
+		if _, err := svc.Coordinator.Respond(ctx, task.ID, "missing", execution.Response{Option: "yes"}, nil); !errors.Is(err, db.ErrNotFound) {
 			t.Fatal("unknown request", err)
 		}
-		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q1", execution.Response{Option: "bad"}); !errors.As(err, &invalid) || invalid.Msg != "pick allow or deny" {
+		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q1", execution.Response{Option: "bad"}, nil); !errors.As(err, &invalid) || invalid.Msg != "pick allow or deny" {
 			t.Fatal("invalid answer", err)
 		}
-		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q1", execution.Response{Option: "yes"}); err != nil || f.responses["q1"].Option != "yes" {
+		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q1", execution.Response{Option: "yes"}, nil); err != nil || f.responses["q1"].Option != "yes" {
 			t.Fatal(err, f.responses)
 		}
-		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q2", execution.Response{Answers: map[string][]string{"0": {"Red", "teal"}}}); err != nil || len(f.responses["q2"].Answers["0"]) != 2 {
+		if _, err := svc.Coordinator.Respond(ctx, task.ID, "q2", execution.Response{Answers: map[string][]string{"0": {"Red", "teal"}}}, nil); err != nil || len(f.responses["q2"].Answers["0"]) != 2 {
 			t.Fatal("answers", err, f.responses)
 		}
 		page, err := store.ReadJournal(ctx, db.JournalOwner{TaskID: &task.ID}, db.JournalQuery{Kind: "events"})
@@ -405,7 +405,7 @@ func TestContractInteraction(t *testing.T) {
 		}) {
 			t.Fatalf("approval attribution: %+v, %v", page.Entries, err)
 		}
-		if _, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: "also update docs"}); err != nil || len(f.messages) != 1 {
+		if _, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: "also update docs"}, nil); err != nil || len(f.messages) != 1 {
 			t.Fatal(err, f.messages)
 		}
 		f.respondOff = "read-only session"
@@ -419,7 +419,7 @@ func TestContractInteraction(t *testing.T) {
 		if _, err := dsvc.Coordinator.StartTask(ctx, dtask.ID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := dsvc.Coordinator.Send(ctx, dtask.ID, execution.Message{Text: "hi"}); !errors.As(err, &ce) || ce.Code != "operation_unavailable" {
+		if _, err := dsvc.Coordinator.Send(ctx, dtask.ID, execution.Message{Text: "hi"}, nil); !errors.As(err, &ce) || ce.Code != "operation_unavailable" {
 			t.Fatal("non-interactive harness", err)
 		}
 	})

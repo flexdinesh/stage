@@ -302,6 +302,7 @@ type project struct {
 
 type task struct {
 	ID                int64       `json:"id"`
+	StateRevision     int64       `json:"stateRevision"`
 	ProjectID         int64       `json:"projectId"`
 	ProjectTitle      string      `json:"projectTitle"`
 	Title             string      `json:"title"`

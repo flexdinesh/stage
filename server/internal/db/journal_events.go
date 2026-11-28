@@ -49,6 +49,13 @@ func (s *Store) RecordSessionAction(ctx context.Context, taskID int64, ref Sessi
 // RecordTaskOperation records a dispatched operation against the same task
 // session and re-arms polling. The harness call itself happens before this write.
 func (s *Store) RecordTaskOperation(ctx context.Context, id int64, ref SessionRef, event, detail string) error {
+	return s.RecordTaskAnswer(ctx, id, ref, event, detail, nil)
+}
+
+// RecordTaskAnswer is RecordTaskOperation that also records answered (when
+// set) as the task's answered state revision, in the same write (ADR 0013
+// first answer wins).
+func (s *Store) RecordTaskAnswer(ctx context.Context, id int64, ref SessionRef, event, detail string, answered *int64) error {
 	return s.e.Write(ctx, func(tx store.Tx) error {
 		if err := tx.Tasks().Lock(ctx, id); err != nil {
 			return err
@@ -62,6 +69,11 @@ func (s *Store) RecordTaskOperation(ctx context.Context, id int64, ref SessionRe
 		}
 		if _, err := tx.Tasks().Touch(ctx, id); err != nil {
 			return err
+		}
+		if answered != nil {
+			if err := tx.Tasks().SetAnswered(ctx, id, *answered); err != nil {
+				return err
+			}
 		}
 		return addTaskEventType(ctx, tx, id, &task.State, task.State, detail, nil, event)
 	})
@@ -105,6 +117,11 @@ func addTaskEventType(ctx context.Context, tx store.Tx, taskID int64, from *Task
 	case *from != to:
 		kind = "task_state_changed"
 		text += fmt.Sprintf(" (%s -> %s)", *from, to)
+		// Every state write journals here, so this counts each real
+		// transition once (ADR 0013 first answer wins).
+		if err := tx.Tasks().BumpStateRevision(ctx, taskID); err != nil {
+			return err
+		}
 	}
 	if eventType != "" {
 		kind = eventType

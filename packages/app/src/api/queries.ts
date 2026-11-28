@@ -5,7 +5,7 @@ import { ApiError, type ArchivedFilter, type HarnessApi } from "./client.ts";
 import { useHarnessApi, useHarnessScope, useScopedKey } from "./harnessScope.tsx";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
 import { POLL, pollFirstPage } from "../lib/polling.ts";
-import type { ExecutionConfig, Harness, RequestResponse, SessionRequest, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OperationId, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, TaskListQuery, TreeListQuery } from "./types.ts";
+import type { ExecutionConfig, Harness, RequestResponse, SendMessageRequest, SessionRequest, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OperationId, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   /** A harness's generic status (`[...harnessStatus, kind]`); a harness with its own status reader keeps its own key (src/harnesses/). */
@@ -573,7 +573,8 @@ export function useRespondRequest(taskId: number) {
   const api = useApi();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ requestId, response }: { requestId: string; response: RequestResponse }) => api.respondRequest(taskId, requestId, response),
+    mutationFn: ({ requestId, response, expectedStateRevision }: { requestId: string; response: RequestResponse; expectedStateRevision?: number }) =>
+      api.respondRequest(taskId, requestId, response, expectedStateRevision),
     onSettled: () =>
       Promise.all([
         qc.invalidateQueries({ queryKey: [...keys.requests, taskId] }),
@@ -583,12 +584,15 @@ export function useRespondRequest(taskId: number) {
   });
 }
 
-/** Sends a task's session a follow-up message; the task and the inbox refresh either way (409 `session_busy` names why it can't take one now). */
+/**
+ * Sends a task's session a follow-up message; the task and the inbox refresh either way (409 `session_busy` names why it can't take one
+ * now; 409 `already_answered` when a reply guarded by `expectedStateRevision` lost).
+ */
 export function useSendMessage(taskId: number) {
   const api = useApi();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (text: string) => api.sendMessage(taskId, { text }),
+    mutationFn: (body: SendMessageRequest) => api.sendMessage(taskId, body),
     onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: keys.notifications }), invalidateWork(qc)]),
   });
 }

@@ -242,7 +242,8 @@ function TaskBody({ task }: { task: TaskDetail }) {
         draft={draft}
         onDraft={setDraft}
         onSend={(text) =>
-          sendMessage.mutate(text, {
+          // A Reply answers this wait: guard it by the task's revision so the first answer wins.
+          sendMessage.mutate(replyLeads ? { text, expectedStateRevision: task.stateRevision } : { text }, {
             onSuccess: () => {
               // Keep whatever was typed while it sent.
               setDraft((d) => (d === text ? "" : d));
@@ -311,7 +312,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
                 : `${kindName(task.harness)} needs input${unlisted !== "" ? `. ${unlisted}` : action?.kind === "resume" ? ". Answer it in a terminal with the resume command." : ""}`}
           </Alert>
         ) : null}
-        <RequestsPanel taskId={task.id} requests={requests} harness={kindName(task.harness)} needsInput={task.state === "needs_input"} />
+        <RequestsPanel taskId={task.id} requests={requests} harness={kindName(task.harness)} needsInput={task.state === "needs_input"} stateRevision={task.stateRevision} />
         {replyLeads ? composer : null}
         {retired ? <Alert tone="plain">{retiredNotice(task, kindName(task.harness))}</Alert> : null}
         {block === null ? null : <LaunchBlockAlert block={block} tone="plain" />}

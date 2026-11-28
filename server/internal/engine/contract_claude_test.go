@@ -132,7 +132,7 @@ func TestContractClaudeFollowUp(t *testing.T) {
 		store, svc, task, _ := claudeSetup(t, p, f)
 		ctx := t.Context()
 		done := claudeFinish(t, store, svc, f, task)
-		got, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: "now add tests"})
+		got, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: "now add tests"}, nil)
 		if err != nil || got.State != db.StateRunning || *got.Session != *done.Session {
 			t.Fatalf("send %+v %v", got, err)
 		}
@@ -144,11 +144,11 @@ func TestContractClaudeFollowUp(t *testing.T) {
 			t.Fatalf("events %+v %v", evs, err)
 		}
 		var ce *db.ConflictError
-		if _, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: "and docs"}); !errors.As(err, &ce) || ce.Code != "session_busy" || !strings.Contains(ce.Msg, "is working") {
+		if _, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: "and docs"}, nil); !errors.As(err, &ce) || ce.Code != "session_busy" || !strings.Contains(ce.Msg, "is working") {
 			t.Fatalf("busy: %v", err)
 		}
 		var invalid *db.InvalidError
-		if _, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: strings.Repeat("x", coordinator.MaxMessage+1)}); !errors.As(err, &invalid) {
+		if _, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: strings.Repeat("x", coordinator.MaxMessage+1)}, nil); !errors.As(err, &invalid) {
 			t.Fatalf("oversized: %v", err)
 		}
 	})

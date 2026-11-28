@@ -48,7 +48,7 @@ SELECT t.id, t.project_id, p.title, t.title, t.prompt,
   t.archived_at, tr.status, ` + unstartedSQL + `,
   t.connection_id,t.session_id,t.origin_session_id,
  (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.session_id),
- (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),(SELECT provenance FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config,
+ (SELECT json_object('connectionId',connection_id,'externalSessionId',external_id) FROM session_identities WHERE id=t.origin_session_id),t.acceptance_id,t.acceptance_revision,t.state_revision,t.answered_revision,(SELECT accepted_at FROM task_acceptances a WHERE a.id=t.acceptance_id),(SELECT provenance FROM task_acceptances a WHERE a.id=t.acceptance_id),t.execution_config,
  hc.harness,hc.active,hc.label,t.created_by_user_id,t.source_machine_id,t.binding_id,t.workspace_pin,
  CASE WHEN d.task_id IS NOT NULL THEN json_object('bindingId',COALESCE(d.binding_id,0),'path',d.workspace,'source','pinned','externalId',d.external_project_id)
       WHEN t.workspace_pin IS NOT NULL THEN json_object('bindingId',COALESCE(b.id,0),'path',json_extract(t.workspace_pin,'$.root'),
@@ -81,7 +81,7 @@ func scanTask(row rowScanner) (store.Task, error) {
 		&t.UpdatedAt, &t.StartAt, &t.StartTz, &t.ScheduleID, &t.ScheduleTitle,
 		&t.OriginSessionTitle, &t.Handoff, &t.Attachments,
 		&t.StateSince, &t.SessionUpdatedAt, &t.ArchivedAt, &t.TreeStatus, &t.Deletable,
-		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID, &t.BindingID, &t.WorkspacePin, &t.Workspace)
+		&t.ConnectionID, &t.SessionIdentityID, &t.OriginSessionIdentityID, &t.Session, &t.OriginSession, &t.AcceptanceID, &t.AcceptanceRevision, &t.StateRevision, &t.AnsweredRevision, &t.CompletedAt, &t.CompletionProvenance, &t.ExecutionConfig, &t.Harness, &t.ConnectionActive, &t.ConnectionLabel, &t.CreatedBy, &t.SourceMachineID, &t.BindingID, &t.WorkspacePin, &t.Workspace)
 	if err != nil {
 		return store.Task{}, notFound(err)
 	}
@@ -335,6 +335,16 @@ func (r tasks) SetArchived(ctx context.Context, id int64, archived bool) error {
 func (r tasks) Unarchive(ctx context.Context, id int64) (bool, error) {
 	tag, err := r.Exec(ctx, `UPDATE tasks SET archived_at = NULL WHERE id = $1 AND archived_at IS NOT NULL`, id)
 	return err == nil && tag.RowsAffected() > 0, err
+}
+
+func (r tasks) BumpStateRevision(ctx context.Context, id int64) error {
+	_, err := r.Exec(ctx, `UPDATE tasks SET state_revision = state_revision + 1 WHERE id = $1`, id)
+	return err
+}
+
+func (r tasks) SetAnswered(ctx context.Context, id int64, revision int64) error {
+	_, err := r.Exec(ctx, `UPDATE tasks SET answered_revision = $2 WHERE id = $1`, id, revision)
+	return err
 }
 
 func (r tasks) Touch(ctx context.Context, id int64) (bool, error) {

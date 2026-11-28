@@ -64,6 +64,11 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	48: {{name: "proven group memberships and historical work retained", seed: seedProjectGroups, check: checkProjectGroups}},
 	49: {{name: "project events keep history and accept workspace_added", seed: seedV0049ProjectEvents, check: checkV0049ProjectEvents}},
 	50: {{name: "existing workspace is not blocked until refreshed", seed: seedV0046HistoricalWorkspaceProject, check: checkV0050BlockedReason}},
+	51: {{name: "existing task starts at revision 0, unanswered", seed: seedV0040SharedAccess, check: checkV0051StateRevision}},
+}
+
+func checkV0051StateRevision(t *testing.T, pool *sql.DB) {
+	wantPGRows(t, pool, `SELECT id::text || '|' || state_revision::text || '|' || COALESCE(answered_revision::text,'NULL') FROM tasks WHERE id=6`, "6|0|NULL")
 }
 
 func seedV0049ProjectEvents(t *testing.T, pool *sql.DB) {

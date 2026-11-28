@@ -72,17 +72,27 @@ func (c *Client) Requests(ctx context.Context, id int64) ([]execution.Request, e
 	return out.Requests, err
 }
 
-// Respond answers a pending request of a task's session.
-func (c *Client) Respond(ctx context.Context, id int64, requestID string, in execution.Response, caller *db.SessionRef) (Task, error) {
+// Respond answers a pending request of a task's session. expected
+// (expectedStateRevision, nil: unguarded) makes it a guarded answer: 409
+// already_answered when the task moved on or was answered first.
+func (c *Client) Respond(ctx context.Context, id int64, requestID string, in execution.Response, expected *int64, caller *db.SessionRef) (Task, error) {
 	var out Task
-	err := c.doCaller(ctx, http.MethodPost, taskPath(id, "requests/"+url.PathEscape(requestID)), in, caller, &out)
+	body := struct {
+		execution.Response
+		ExpectedStateRevision *int64 `json:"expectedStateRevision,omitempty"`
+	}{in, expected}
+	err := c.doCaller(ctx, http.MethodPost, taskPath(id, "requests/"+url.PathEscape(requestID)), body, caller, &out)
 	return out, err
 }
 
-// SendMessage sends a task's session a message.
-func (c *Client) SendMessage(ctx context.Context, id int64, in execution.Message, caller *db.SessionRef) (Task, error) {
+// SendMessage sends a task's session a message; expected as in Respond.
+func (c *Client) SendMessage(ctx context.Context, id int64, in execution.Message, expected *int64, caller *db.SessionRef) (Task, error) {
 	var out Task
-	err := c.doCaller(ctx, http.MethodPost, taskPath(id, "messages"), in, caller, &out)
+	body := struct {
+		execution.Message
+		ExpectedStateRevision *int64 `json:"expectedStateRevision,omitempty"`
+	}{in, expected}
+	err := c.doCaller(ctx, http.MethodPost, taskPath(id, "messages"), body, caller, &out)
 	return out, err
 }
 

@@ -28,8 +28,8 @@ Coding agents with a shell use the CLI by default: it costs no context until use
 | `stage task complete ID --revision N --evidence-version V [--note TEXT] [--request-id KEY]` | complete another task with the preview's values |
 | `stage task reopen ID --revision N [--request-id KEY]` | reopen a completed task |
 | `stage task requests ID` | what the task's session waits on |
-| `stage task respond ID RID [--option O] [--text T] [--answers JSON]` | answer one request |
-| `stage task send ID --text TEXT` | message the task's session |
+| `stage task respond ID RID [--option O] [--text T] [--answers JSON] [--expect-revision N]` | answer one request |
+| `stage task send ID --text TEXT [--expect-revision N]` | message the task's session |
 | `stage task opening-prompt ID [--full]` | an adopted task's opening prompt |
 
 `complete`, `reopen`, `respond` and `send` refuse your own task or session.

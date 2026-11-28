@@ -1,15 +1,18 @@
 // Answering a session's pending requests in Stage: the task-detail panel (every approval and question) and a row's
 // quick answer (one approval inline, else a link to the panel). The harness stays authoritative: its own client (Open
-// in / Copy resume command) keeps answering, and an answer given there first makes Stage's a 404 ("already answered").
+// in / Copy resume command) keeps answering, and an answer given there first makes Stage's a 404 ("already answered"). Task-detail
+// answers are guarded by the task's state revision: the first answer wins and a later one is 409 `already_answered`.
 // Logic: lib/requests.ts; queries: api/queries.ts useSessionRequests, useRespondRequest.
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 import { useRespondRequest } from "../api/queries.ts";
 import type { HarnessChoice, RequestQuestion, RequestResponse, SessionRequest } from "../api/types.ts";
 import {
+  ALREADY_ANSWERED,
   PREVIEW_LINES,
   REQUESTS_ANCHOR,
   allAnswered,
+  alreadyAnswered,
   answeredText,
   answersResponse,
   draftOf,
@@ -182,6 +185,19 @@ function QuestionsForm({ request, busy, onRespond }: { request: SessionRequest; 
   );
 }
 
+/**
+ * An answer's failure under its controls: a guarded answer that lost (409 `already_answered`) reads as a mono status line, like the other
+ * outcomes, since nothing went wrong and the draft stays; anything else is the bad Alert.
+ */
+export function AnswerError({ error }: { error: unknown }) {
+  if (!alreadyAnswered(error)) return <ErrorText error={error} />;
+  return (
+    <p className="font-mono text-meta text-muted" role="status">
+      {ALREADY_ANSWERED}
+    </p>
+  );
+}
+
 /** One request: what it asks, then its answer controls, or the outcome once answered here. */
 export function RequestCard({
   request,
@@ -215,7 +231,7 @@ export function RequestCard({
       ) : (
         <ApprovalActions request={request} harness={harness} busy={busy} onRespond={onRespond} />
       )}
-      <ErrorText error={error} />
+      <AnswerError error={error} />
     </article>
   );
 }
@@ -224,7 +240,20 @@ export function RequestCard({
  * Task detail: every pending request of the task's session, under the needs-input alert. Answered requests stay in
  * place with their outcome while the task still needs input. `#requests` scrolls here and focuses it.
  */
-export function RequestsPanel({ taskId, requests, harness, needsInput }: { taskId: number; requests: readonly SessionRequest[]; harness: string; needsInput: boolean }) {
+export function RequestsPanel({
+  taskId,
+  requests,
+  harness,
+  needsInput,
+  stateRevision,
+}: {
+  taskId: number;
+  requests: readonly SessionRequest[];
+  harness: string;
+  needsInput: boolean;
+  /** The task's revision these requests belong to: answers are guarded by it (first answer wins). */
+  stateRevision: number;
+}) {
   const respond = useRespondRequest(taskId);
   const [resolved, setResolved] = useState<ReadonlyMap<string, { request: SessionRequest; outcome: RequestOutcome }>>(new Map());
   const [failed, setFailed] = useState<{ id: string; error: unknown } | null>(null);
@@ -245,7 +274,7 @@ export function RequestsPanel({ taskId, requests, harness, needsInput }: { taskI
   const answer = (request: SessionRequest) => (response: RequestResponse) => {
     setFailed(null);
     respond.mutate(
-      { requestId: request.id, response },
+      { requestId: request.id, response, expectedStateRevision: stateRevision },
       {
         onSuccess: () => setResolved((m) => new Map(m).set(request.id, { request, outcome: "answered" })),
         onError: (error) =>

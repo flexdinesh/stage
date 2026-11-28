@@ -124,7 +124,9 @@ func NewRouter(deps Deps) http.Handler {
 		handle(humanRoute, pattern, fn)
 	}
 	agent := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
-		handle(agentRoute, pattern, fn)
+		handle(agentRoute, pattern, func(w http.ResponseWriter, r *http.Request) error {
+			return fn(w, s.withCaller(r))
+		})
 	}
 	passive := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
 		handle(passiveHumanRoute, pattern, fn)
@@ -431,7 +433,12 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 	var notListed *workspaceNotListed
 	var forbidden actionForbidden
 	var self selfForbidden
+	var answered *db.AlreadyAnsweredError
 	switch {
+	case errors.As(err, &answered):
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": answered.Error(), "code": "already_answered", "state": answered.State, "stateRevision": answered.StateRevision,
+		})
 	case errors.As(err, &outcome):
 		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": outcome.Error(), "code": "outcome_uncertain"})
 	case errors.As(err, &notListed):
