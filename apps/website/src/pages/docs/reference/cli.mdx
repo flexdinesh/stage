@@ -76,7 +76,7 @@ or `projects split`.
 | `stage tree start ID` | start every ready member |
 | `stage tree done\|archive ID [--undo]` | mark done or archive (`--undo` reopens) |
 | `stage tree rm-tree ID` | delete a tree and its tasks (none started) |
-| `stage tree steer ID --prompt TEXT --connection ID --workspace-id ID [--title T] [--replace]` | give the tree a steerer task and launch it (`--replace` ends the current one) |
+| `stage tree steer ID --prompt TEXT --connection ID --workspace-id ID [--title T] [--execution-config JSON] [--replace]` | give the tree a steerer task and launch it with the harness options (`models ls` shows them; omitted: the connection's pinned model, else the defaults); `--replace` ends the current one and stops its session. [Steer a tree](/docs/guides/steering) |
 | `stage tree unsteer ID` | stop steering (ends the binding, stops the steerer's session) |
 | `stage tree steering-events ID [--after N] [--limit N]` | the tree's steering event feed |
 | `stage tree notes ID ...` | the tree's journal ([Journals](#journals)) |

@@ -54,7 +54,8 @@ func (a *Adapter) wake(id string) func() {
 }
 
 // sendable is nil when s takes a message now: a listed background session
-// that is done, or blocked on a finished turn (it ended asking its user),
+// that is done, working but idle after its turn (idleAfterTurn), or blocked
+// on a finished turn (it ended asking its user),
 // in a folder that still exists. Else *execution.Busy with what to do.
 func (a *Adapter) sendable(s session) error {
 	resume := a.links(s).Command
@@ -73,7 +74,9 @@ func (a *Adapter) sendable(s session) error {
 			return &execution.Busy{Reason: busyWaiting}
 		}
 	case "working":
-		return &execution.Busy{Reason: busyWorking}
+		if !s.idleAfterTurn() {
+			return &execution.Busy{Reason: busyWorking}
+		}
 	default:
 		return &execution.Busy{Reason: "Claude Code doesn't run this session now. Resume it in a terminal: " + resume}
 	}

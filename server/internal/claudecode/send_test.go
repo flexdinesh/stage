@@ -69,6 +69,30 @@ func TestSendWakesFinishedSession(t *testing.T) {
 	}
 }
 
+// Claude lists a session whose agent ended its turn still waiting on
+// something (a steerer waiting for updates) as working with status idle:
+// the turn is over, so it takes a message like a done one.
+func TestSendToWorkingSessionIdleAfterItsTurn(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	o, err := a.Launch(t.Context(), intent(f, "req-idle"), execution.Checkpoint{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, id := o.Session, o.Session.ExternalSessionID
+	f.Reply(id, "Waiting for Stage updates.", true)
+	f.SetState(id, "working", "idle", "")
+	if err := a.Send(t.Context(), ref, execution.Message{Text: "<stage-steering tree=1 through=9>"}); err != nil {
+		t.Fatal(err)
+	}
+	if rs := resumes(f); len(rs) != 1 || !transcriptHas(t, f, id, "through=9") {
+		t.Fatalf("resumes %d", len(rs))
+	}
+	if o, err = a.Observe(t.Context(), ref); err != nil || o.State != "running" {
+		t.Fatalf("%+v %v", o, err)
+	}
+}
+
 // A session whose process already exited (reaped, stopped while done) is
 // woken without a stop; one blocked on a finished turn (it asked its user)
 // takes the message as its answer.
@@ -116,6 +140,9 @@ func TestSendBusy(t *testing.T) {
 		}
 	}
 	busy("working", "is working")
+	f.Reply(id, "Still going", false)
+	f.SetState(id, "working", "idle", "")
+	busy("working, idle before the turn ends", "is working")
 	f.SetState(id, "blocked", "waiting", "permission prompt")
 	busy("permission prompt", "permission prompt or question")
 	f.SetState(id, "blocked", "idle", "input needed")

@@ -1230,7 +1230,11 @@ to run on that machine.
   transcript (`<projectsDirectory>/<cwd with / and . as ->/<uuid>.jsonl`,
   else any project folder). Background sessions map by `state`: `working`
   running, `blocked` needs_input, `done` done, `failed` failed, `stopped`
-  interrupted; a terminal, IDE or SDK session by `status`. Not listed:
+  interrupted; a terminal, IDE or SDK session by `status`. A `working`
+  session with `status: idle` whose transcript shows its turn over is
+  done: Claude keeps `state: working` when the agent ends its turn still
+  waiting on something (a steerer "waiting for Stage updates", seen live
+  with Claude Code 2.1.332 in #551), and nothing runs. Not listed:
   idle with its reply when the transcript exists, else not found. An
   unreadable list is an error, never a state.
 - **Removal closure.** `claude rm` drops a session from the list and keeps
@@ -1376,9 +1380,10 @@ to run on that machine.
   folder, or it could not open).
 - **Follow-ups** ([ADR 0005](adr/0005-claude-code-harness.md) decision 18,
   E12). **Send** reads the session list fresh (one send at a time) and
-  takes a message only for a listed background session that is `done`, or
-  `blocked` on a finished turn (no `waitingFor`, status not `waiting`, the
-  transcript's turn over). Else `Busy` with what to do: working, a
+  takes a message only for a listed background session that is `done`,
+  `working` but idle after its turn (as in Observe), or `blocked` on a
+  finished turn (no `waitingFor`, status not `waiting`, the transcript's
+  turn over). Else `Busy` with what to do: working, a
   permission prompt or question, stopped, failed, removed or interactive
   (with the resume command where one helps), or a folder that is gone. A
   live process is stopped first (`claude stop <short>`), and Send waits
@@ -1498,8 +1503,14 @@ server's `harness_settings` row for that machine
   permission). `thread/start`, checkpoint the thread id, best-effort
   `thread/name/set`, then `turn/start` with `clientUserMessageId` set to the
   request id. Replay reads the checkpointed thread: a first turn carrying
-  the client id (or the prompt) is the admission, no turn starts it, any
-  other turn fails. Stage then unsubscribes; the turn keeps running.
+  the client id (or the prompt) is the admission, no turn starts it, a
+  first turn whose user message is not recorded yet stays uncertain, any
+  other turn fails. Stage then unsubscribes; the turn keeps running. For a
+  moment after `turn/start` Codex answers `thread/turns/list` with -32601
+  "list_turns is not supported yet", then may show the turn in progress on
+  a thread it reports not running (codex-cli 0.172.0, live in #551): the
+  launch's observation retries both for up to 10 s, so a started launch
+  is confirmed instead of failing into a replay.
 - **Observation.** `thread/read`: `active` is running or needs_input (the
   waiting flags); the last turn's outcome is done, failed or interrupted;
   an in-progress turn on a thread the daemon unloaded, or a system error,
@@ -1573,3 +1584,48 @@ and broadcasts `serverRequest/resolved` to subscribers. The send and
 respond gates rerun with `STAGE_CODEX_GATES=1 go test -tags codexlive
 -run TestLiveGate ./internal/codex/` (real model turns on the signed-in
 account in temp directories; threads are deleted afterwards).
+
+## Steering live check
+
+Tree steering ([ADR 0013](adr/0013-tree-steering.md)) was verified live on
+2026-11-29 (task #551) with Claude Code 2.1.332, OpenCode 2.3.2, codex-cli
+0.172.0 and T3 from source, against an isolated dev server
+(`.scratch/dev/<branch>`) and a throwaway Git repository. Four trees, one
+per steerer harness, each held four workers (one per harness) in a Latin
+square over four roles, with a 60 s hold: R1 the steerer answers, R2 the
+user answers first and the steerer's guarded answer must get 409
+`already_answered`, R3 the steerer calls `escalate_to_user`, R4 nobody
+answers until the hold expires. Each steerer was replaced once while
+running, added one follow-up task and accepted every member. Workers ran
+cheap models, steerers mid-tier models.
+
+| Scenario | Claude Code | T3 | OpenCode | Codex |
+| --- | --- | --- | --- | --- |
+| Replace (old session stopped) | yes | yes | yes | yes |
+| R1 steerer answers | yes | yes | yes | yes, after the hold was released |
+| R2 user first, steerer 409 | yes | yes | yes | yes |
+| R3 `escalate_to_user` | yes | yes | yes | no: hold released `steerer_inactive` |
+| R4 hold expiry escalates | yes | yes | yes | no: hold released `steerer_inactive` |
+| Follow-up task added | yes | yes | yes | yes |
+| Final digest, steerer auto-completed | yes | yes | yes | yes |
+
+Gaps found and fixed with it: a Claude background session listed
+`working` with `status: idle` after its turn read running, so a Claude
+steerer never received digests ([Claude Code adapter](#claude-code-adapter),
+ADR 0005 decision 4); a Codex launch read the first turn before Codex could
+list it and reported the launch failed ([Codex adapter](#codex-adapter));
+a steerer's tree notes (`sourceTaskId` set to the steerer) were refused as
+not a member; the launch brief now says to percent-encode request IDs; and
+`stage tree steer` takes `--execution-config`. Open: a Codex steerer reads
+`interrupted` for a moment after a digest is sent, which releases its
+tree's holds as `steerer_inactive` (the Codex column's R3 and R4). Workers
+on a harness without respond escalate at once; every harness here offers
+respond, so that path is covered by the `notify` hold tests only.
+
+To repeat it: start a dev server on a scratch data dir, connect each
+harness, add a throwaway repository as a project on each, then create the
+trees through the HTTP API acting as the user (no agent session variables
+in the environment). Tell steerers in their prompt to use only that
+server's HTTP API, since other Stage servers on the machine have colliding
+task IDs. Remove the harness sessions, worktrees, projects and trust
+entries afterwards with each harness's own tools.

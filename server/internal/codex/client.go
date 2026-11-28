@@ -247,6 +247,14 @@ func unsupported(err error) bool {
 	return re.Code == codeMethodNotFound || (re.Code == codeInvalidRequest && strings.Contains(re.Message, "unknown variant `"+re.Method+"`"))
 }
 
+// notYet reports Codex's answer for a thread whose first turn just started:
+// its turns are not listable for a moment (-32601 "list_turns is not
+// supported yet", codex 0.172.0). It is no evidence about the turn.
+func notYet(err error) bool {
+	var re *RPCError
+	return errors.As(err, &re) && re.Code == codeMethodNotFound && strings.Contains(re.Message, "not supported yet")
+}
+
 // notLoaded reports Codex's answer for a thread it does not know: one
 // never persisted (no first turn) after the daemon restarted, or a
 // foreign id.

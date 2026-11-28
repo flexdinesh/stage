@@ -421,9 +421,21 @@ func TestObserveStatesAndReply(t *testing.T) {
 	if o, err = a.Observe(t.Context(), ref); err != nil || o.State != "done" || o.Active || o.EndedAt == nil || !o.Reply.Truncated || len([]rune(o.Reply.Text)) != 4000 {
 		t.Fatalf("done %+v %v", o, err)
 	}
+	// Claude keeps state working with status idle when the agent ends its
+	// turn still waiting on something: the turn is over, so it reads done.
+	f.SetState(id, "working", "idle", "")
+	if o, err = a.Observe(t.Context(), ref); err != nil || o.State != "done" || o.Active {
+		t.Fatalf("working but idle after its turn %+v %v", o, err)
+	}
 	f.SetState(id, "working", "busy", "")
 	if o, err = a.Observe(t.Context(), ref); err != nil || o.State != "running" || o.Reply != nil {
 		t.Fatalf("working again %+v %v", o, err)
+	}
+	// Idle before the transcript records the turn's end is still running.
+	f.Reply(id, "Still going", false)
+	f.SetState(id, "working", "idle", "")
+	if o, err = a.Observe(t.Context(), ref); err != nil || o.State != "running" {
+		t.Fatalf("idle mid-turn %+v %v", o, err)
 	}
 	f.SetState(id, "failed", "", "")
 	if o, _ = a.Observe(t.Context(), ref); o.State != "failed" {

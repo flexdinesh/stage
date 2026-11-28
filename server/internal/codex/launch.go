@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
@@ -198,23 +199,46 @@ func (a *Adapter) admitted(ctx context.Context, id string, in execution.Intent) 
 	if len(page.Data) == 0 {
 		return false, nil
 	}
+	seen := false
 	for _, it := range page.Data[0].Items {
 		if it.Type != itemUserMessage {
 			continue
 		}
+		seen = true
 		if (it.ClientID != nil && *it.ClientID == in.RequestID) || (it.ClientID == nil && userText(it) == in.Prompt) {
 			return true, nil
 		}
+	}
+	if !seen {
+		// The turn's user message is not recorded yet: no evidence either way.
+		return false, errors.New("the Codex thread's first turn is not readable yet; Stage checks again")
 	}
 	return false, errors.New("the Codex thread has a turn Stage did not start. Review it in Codex, then link it.")
 }
 
 // launched leaves the thread's event stream (the daemon keeps running the
 // turn; status changes still reach Stage) and observes it.
+// Right after turn/start Codex's view settles for a moment: a first turn
+// is not listable (notYet), or the turn shows in progress on a thread it
+// reports not running (errUnsettled). The observation is retried for up to
+// launchSettle, so a started launch is not reported as failed.
 func (a *Adapter) launched(ctx context.Context, id string) (execution.Observation, error) {
 	_ = a.client.call(ctx, "thread/unsubscribe", map[string]any{"threadId": id}, nil)
-	return a.Observe(ctx, a.ref(id))
+	o, err := a.Observe(ctx, a.ref(id))
+	for deadline := time.Now().Add(launchSettle); (notYet(err) || errors.Is(err, errUnsettled)) && time.Now().Before(deadline); {
+		select {
+		case <-ctx.Done():
+			return o, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+		o, err = a.Observe(ctx, a.ref(id))
+	}
+	return o, err
 }
+
+// launchSettle bounds how long a launch waits for its first turn to become
+// listable.
+const launchSettle = 10 * time.Second
 
 // userText joins a user message's text inputs.
 func userText(it item) string {

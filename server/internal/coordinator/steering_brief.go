@@ -161,7 +161,7 @@ func renderSteeringBrief(snap steeringSnapshot, members, notes int, playbook, cl
 
 	fmt.Fprintf(&b, `
 Rules:
-- Use whichever Stage interface you have: the %[3]s CLI (%[3]s call TOOL JSON runs any tool named here), Stage MCP tools, or %[4]s; pass your caller session as <stage-journal> says. HTTP equivalents: get_tree is GET /api/trees/{id}; get_steering_events is GET /api/trees/{id}/steering/events?after=N; send_message is POST /api/tasks/{id}/messages; respond_request is POST /api/tasks/{id}/requests/{requestId}; get_completion_preview is GET /api/tasks/{id}/completion-preview; complete_task is POST /api/tasks/{id}/complete; create_task is POST /api/tasks; escalate_to_user is POST /api/tasks/{id}/escalate.
+- Use whichever Stage interface you have: the %[3]s CLI (%[3]s call TOOL JSON runs any tool named here), Stage MCP tools, or %[4]s; pass your caller session as <stage-journal> says. HTTP equivalents: get_tree is GET /api/trees/{id}; get_steering_events is GET /api/trees/{id}/steering/events?after=N; send_message is POST /api/tasks/{id}/messages; respond_request is POST /api/tasks/{id}/requests/{requestId} (percent-encode requestId: some contain : or %%); get_completion_preview is GET /api/tasks/{id}/completion-preview; complete_task is POST /api/tasks/{id}/complete; create_task is POST /api/tasks; escalate_to_user is POST /api/tasks/{id}/escalate.
 - Answer a member (send_message, respond_request) with expectedStateRevision set to its stateRevision. 409 already_answered means another answer won: re-read the member and move on.
 - Accept a member's result on your own: get_completion_preview, then complete_task with its revision and evidenceVersion.
 - Add follow-up work with create_task, treeId %[1]d and needs.

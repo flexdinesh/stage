@@ -27,9 +27,16 @@ func TestTreeSteerCommands(t *testing.T) {
 	if code, _, stderr := h.run("", "tree", "steer", id, "--connection", "1", "--workspace-id", workspace); code != 2 || !strings.Contains(stderr, "--prompt") {
 		t.Fatalf("steer without prompt: %d %s", code, stderr)
 	}
-	code, stdout, stderr = h.run("watch the tree", "tree", "steer", id, "--prompt", "-", "--connection", "1", "--workspace", workspace)
+	if code, _, stderr := h.run("", "tree", "steer", id, "--prompt", "p", "--connection", "1", "--workspace-id", workspace, "--execution-config", "null"); code != 2 || !strings.Contains(stderr, "--execution-config") {
+		t.Fatalf("steer with a null config: %d %s", code, stderr)
+	}
+	code, stdout, stderr = h.run("watch the tree", "tree", "steer", id, "--prompt", "-", "--connection", "1", "--workspace", workspace,
+		"--execution-config", `{"options":[{"id":"worktree","value":false}]}`)
 	if code != 0 || !strings.Contains(stdout, fmt.Sprintf("Steering tree %d with #", tree.ID)) || !strings.Contains(stdout, "Steer: Steered") {
 		t.Fatalf("steer: %d %s %s", code, stdout, stderr)
+	}
+	if steer, err := h.store.GetTask(t.Context(), h.steererOf(tree.ID)); err != nil || len(steer.ExecutionConfig.Options) != 1 || steer.ExecutionConfig.Options[0].ID != "worktree" {
+		t.Fatalf("steerer config %+v %v", steer.ExecutionConfig, err)
 	}
 	code, stdout, _ = h.run("", "tree", "show", id)
 	if code != 0 || !strings.Contains(stdout, "steered by #") {

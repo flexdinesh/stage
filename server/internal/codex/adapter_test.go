@@ -233,6 +233,24 @@ func TestLaunchRejectsBeforeAnyEffect(t *testing.T) {
 	}
 }
 
+// Codex answers "list_turns is not supported yet" for a moment after a
+// thread's first turn starts: the launch waits it out and reports the
+// running turn instead of an error, and a replay before the turn's user
+// message is readable stays uncertain rather than refusing the thread.
+func TestLaunchWaitsForTheFirstTurnToBeListable(t *testing.T) {
+	r := newRig(t)
+	ctx := t.Context()
+	r.srv.TurnsNotYet(3)
+	var cps checkpoints
+	o, err := r.adapter.Launch(ctx, intent("/w/app"), execution.Checkpoint{}, cps.save)
+	if err != nil || o.State != "running" {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if n := r.srv.Calls("turn/start"); n != 1 {
+		t.Fatalf("turn/start %d", n)
+	}
+}
+
 func TestLaunchStopsWhenCheckpointFails(t *testing.T) {
 	r := newRig(t)
 	cps := checkpoints{fail: true}

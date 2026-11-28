@@ -1,0 +1,120 @@
+---
+title: Steer a tree
+description: Give a tree one agent session that answers its members, accepts their work and adds follow-ups, while you can still answer first and take over.
+showAskAi: false
+---
+
+# Steer a tree
+
+A [tree](/docs/concepts/trees) runs on its own until a member asks a question, finishes or fails. Then it waits for you. **Steering** hands that waiting to an agent: the tree gets one **steerer**, an ordinary task whose session hears about every member change and acts in your place. The steerer answers members, accepts their results, adds follow-up tasks and writes decisions to the tree's journal. You stay in charge: you can answer before the steerer, take over a member, replace the steerer or stop steering at any time.
+
+The steerer uses the same operations as any agent calling Stage ([Agents that queue work](/docs/guides/agents)). Stage adds three things: it tells the steerer what changed, holds your needs-input notifications while the steerer can answer, and finishes the steerer when the tree finishes.
+
+## What you need
+
+- A tree with members (a steerer is never a member: it never blocks or releases a task).
+- A connection whose harness can send messages to a session. All four harnesses can: Claude Code, T3 Code, OpenCode and Codex. A connection that can't is listed but disabled, with the harness's reason.
+
+:::steps
+
+### Add a steerer
+
+Open the tree. The steering strip under its header reads "No steerer". Click **Add steerer** and fill in:
+
+- **Intent**: what the steerer should steer toward, in your words. It becomes the steerer task's prompt. Name the outcome you want and anything it must ask you about.
+- **Connection** and **workspace**: where the steerer's session runs. Pick a workspace where it can read the members' work.
+- The harness's launch options (model, permission and so on). The steerer calls Stage's API, so give it a permission that lets it run commands without asking.
+
+Click **Start steerer**. Stage creates the task (titled `Steer: <tree title>`), binds it to the tree and starts it. The strip then shows the steerer's state, its last update, how many changes are pending and the hold.
+
+From a terminal:
+
+```sh
+stage tree steer 7 --prompt "Ship the API and its client; ask me before changing the schema" \
+  --connection 2 --workspace-id "$WORKSPACE_ID"
+```
+
+An agent uses `set_tree_steerer` ([MCP reference](/docs/reference/mcp)).
+
+### Let it work
+
+At launch the steerer's prompt carries a **steering brief**: the tree's members with their states and last words, its 20 newest notes, the steering rules and your playbook (next section). Task detail shows the brief in the Prompt panel.
+
+After that Stage sends the steerer each change as a short digest wrapped in `<stage-steering tree=7 through=42>`: a member asked something, finished, failed, was answered, accepted or added, a blocker or decision note landed, or the tree's status changed. Changes are batched: a digest goes out 10 seconds after the newest change, and at most 60 seconds after the oldest. It is delivered when the steerer's current turn ends, never in the middle of one. The steerer's own actions are left out.
+
+What the steerer does with a digest is up to it and the playbook. Typically it reads the member's question and answers it, reviews a finished member and completes it in Stage, or adds a follow-up task with `needs` so it starts at the right time.
+
+### Watch it
+
+- The **steering strip** on the tree view: the steerer's state, "Last update 2m ago · 3 pending · hold 5 min", and the last delivery error if one happened (Stage retries on its own).
+- The steerer's **task detail**: a Steering panel with its tree, delivery progress and **Steering events**, the full feed with what each digest covered.
+- The tree's **Activity** tab: steering started, replaced and ended, answers and acceptances with who made them ("Completed by steerer #12").
+- A held member's row shows `Steerer · 4m`: the steerer has the question, and you hear about it in 4 minutes unless it is answered first.
+
+:::
+
+## The playbook
+
+The playbook is how you teach every steerer your way of working. It is the snippet named `steering-playbook`, appended to each steerer's brief. Stage creates it from its default the first time a steerer launches: working with tasks, staying inside your intent, recording decisions, reviewing before accepting, merge order, follow-ups and when to ask you.
+
+Edit it on the **Snippets** page like any snippet. Changes apply to steerers launched afterwards; a running steerer keeps the brief it started with. Delete the snippet to get Stage's default back on the next launch. Stage enforces none of it: merging, review and merge order are the steerer's decisions, guided by the playbook.
+
+## The hold
+
+While a live steerer (running, done, or waiting on you) can answer a member, that member's needs-input notification (push, toast and inbox row) waits for the steerer first. The wait is the tree's **hold**: 5 minutes by default.
+
+- Answered within the hold (by the steerer, you or anyone else): nothing notifies.
+- Still unanswered when it ends: you get the notification with the note "Steerer did not answer".
+- The steerer stops or is replaced: its held notifications reach you at once.
+
+Change it in the tree's **More** menu under **Steerer hold** (Off, 2, 5, 10 or 15 minutes), with `stage tree edit 7 --hold 10m` (`0` or `off` turns it off), or `update_tree` `steeringHoldSeconds` (0 to 3600). Holds survive a Stage restart.
+
+A member whose harness can't take an answer from Stage is never held: its notification reaches you at once.
+
+## Escalation
+
+The steerer brings you in two ways:
+
+- **It asks you.** It ends its turn with a question. Its own task turns to needs input and notifies you like any task. Answer it with **Reply** on its task detail. Digests keep arriving while it waits and remind it that its question is open.
+- **It hands you a member.** It calls `escalate_to_user` with a reason (CLI `stage task escalate`). The held notification reaches you at once with the note `Steerer: <reason>`. Only the tree's active steerer can do this.
+
+## You can always answer first
+
+Both you and the steerer answer the member's current wait, and the first answer wins. If you answer before the steerer, its answer is refused with `already_answered` and it moves on. If the steerer answered first, your Reply or Requests panel shows "Already answered, by the steerer or in the harness." and keeps your draft. An answer typed directly inside the harness can't be guarded: Stage only sees the member's next state.
+
+## Replace or stop
+
+- **Replace** opens the steerer form filled in from the current steerer. The old binding ends, Stage stops the old session (if its harness can stop sessions) and starts the new steerer with a fresh brief.
+- **Stop steering** ends the binding and stops the session. Held notifications reach you, and needs input goes to you again.
+
+A steerer that failed or was interrupted reads "Steerer stopped. Needs input goes to you." with **Replace** and **Stop steering**. Archiving or deleting the steerer task also ends steering.
+
+From a terminal: `stage tree steer 7 ... --replace`, and `stage tree unsteer 7`.
+
+## When the tree finishes
+
+When every member is completed, or you mark the tree done or archive it, Stage sends a final digest asking the steerer for an outcome note, and steering ends. When that turn ends, Stage completes the steerer task for you ("Completed automatically: tree #7 finished"). It never does for a failed or interrupted run. **Reopen** undoes it like any completion.
+
+## Harness support
+
+| Harness | Hosts a steerer | The steerer can answer its members | Answered only in the harness |
+| --- | --- | --- | --- |
+| Claude Code | yes: a message wakes the finished session | permission prompts and questions of sessions Stage started, and follow-ups | prompts that were open when Stage restarted, sessions you track |
+| T3 Code | yes: a message waits for the current turn to end | questions and follow-ups | permission requests |
+| OpenCode | yes: a message waits for the current turn to end | permissions, the forms Stage can show, and follow-ups | forms with conditional or external fields |
+| Codex | yes: a message starts a new turn once the thread is idle | command and file-change approvals, questions, and follow-ups | permission requests, MCP prompts, secret questions |
+
+A member that waits on something only its harness can answer stays held until the hold ends, unless the steerer escalates it. Tell the steerer in its intent or playbook to escalate those at once.
+
+## Limits
+
+- One steerer per tree, and a task steers at most one tree.
+- Stage never interrupts a running turn, the steerer's or a member's: messages wait for the turn to end, or are refused while it runs.
+- At least once: after a restart or a lost reply the steerer can see a digest twice. The `through` number tells it what it has seen.
+- The steerer's work is as good as its model, intent and playbook. Every acceptance is visible in the journal and reversible with Reopen.
+
+## Next steps
+
+- [Trees](/docs/concepts/trees): needs, start modes and handoff.
+- [Journals](/docs/concepts/journals): where the steerer records decisions and outcomes.
+- [MCP reference](/docs/reference/mcp) and [CLI reference](/docs/reference/cli): every steering operation.

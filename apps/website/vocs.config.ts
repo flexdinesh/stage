@@ -62,6 +62,7 @@ export default defineConfig({
         collapsed: false,
         items: [
           { text: 'Your first tree', link: '/docs/guides/first-tree' },
+          { text: 'Steer a tree', link: '/docs/guides/steering' },
           { text: 'Agents that queue work', link: '/docs/guides/agents' },
           { text: 'Answer from your phone', link: '/docs/guides/phone' },
           { text: 'Claude Code', link: '/docs/guides/claude-code' },

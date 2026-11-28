@@ -37,6 +37,10 @@ Handoff is on by default and set per task. It reads results saved in Stage at co
 
 Stage does not start a task from the branch of a task it needs. Each task starts where its own launch options say (the project root, or a new worktree the harness makes), and the handoff names the branch each need reported, so the agent can build on unmerged changes from there.
 
+## Steering
+
+A tree can have one **steerer**: an ordinary task, never a member, whose session hears about every member change and acts on it in your place. It answers members, accepts their results and adds follow-ups, while your needs-input notifications wait for it for a short hold. You can answer first, replace it or stop it at any time, and Stage completes it when the tree finishes. [Steer a tree](/docs/guides/steering)
+
 ## Editing a tree
 
 - **Remove a task**: it is spliced out and its dependents take over its needs (A → X → B becomes A → B). This can make dependents ready at once.
@@ -57,5 +61,6 @@ The Trees page lists trees by their next step. The tree view shows members in le
 ## Next steps
 
 - [Build your first tree](/docs/guides/first-tree): a guided example.
+- [Steer a tree](/docs/guides/steering): let an agent answer and accept members for you.
 - [Journals](/docs/concepts/journals): notes shared across a tree.
 - [Tasks](/docs/concepts/tasks): how completion works.

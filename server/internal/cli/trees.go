@@ -208,6 +208,7 @@ func runTree(ctx context.Context, env Env, args []string) error {
 		c.fs.StringVar(&a.WorkspaceID, "workspace", "", "same as --workspace-id")
 		c.fs.BoolVar(&a.Replace, "replace", false, "replace the current steerer (ends it and stops its session)")
 		c.fs.StringVar(&a.RequestID, "request-id", "", "idempotency key (default: a new one)")
+		f.configInputFlag(c)
 		if err := c.parse(rest); err != nil {
 			return err
 		}
@@ -215,6 +216,10 @@ func runTree(ctx context.Context, env Env, args []string) error {
 		if err != nil {
 			return err
 		}
+		if f.clearConfig {
+			return usagef("--execution-config null only clears a task's configuration on edit")
+		}
+		a.ExecutionConfig = f.executionConfig
 		if a.Prompt, _, err = f.readPrompt(c); err != nil {
 			return err
 		}

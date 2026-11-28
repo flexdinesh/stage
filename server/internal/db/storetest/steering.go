@@ -18,6 +18,7 @@ func init() {
 	register("SteeringEventsOnlyWhileSteered", caseSteeringEventsOnlyWhileSteered)
 	register("SteeringCausedBy", caseSteeringCausedBy)
 	register("SteeringBindingRules", caseSteeringBindingRules)
+	register("SteererTreeNotes", caseSteererTreeNotes)
 	register("ConcurrentSteererBind", caseConcurrentSteererBind)
 	register("ConcurrentSteeringCursor", caseConcurrentSteeringCursor)
 }
@@ -273,6 +274,34 @@ func caseSteeringCausedBy(t *testing.T, open Factory) {
 // caseSteeringBindingRules: one active steerer per tree (replace ends the
 // old one), requestId replay, the steerer never joins the tree it steers,
 // closed trees refuse, and deleting the steerer ends its binding.
+// The tree's active steerer records decisions on the tree as their source
+// task although it is no member (live in #551); a replaced steerer, or one
+// steering another tree, cannot.
+func caseSteererTreeNotes(t *testing.T, open Factory) {
+	s, ctx := setup(t, open)
+	p := mustProject(t, s, ctx, "proj-steer-notes")
+	a := mustTask(t, s, ctx, p.ID, "a", nil)
+	b := mustTask(t, s, ctx, p.ID, "b", nil)
+	tree := mustTree(t, s, ctx, "Noted", db.StartManual, db.TreeMember{TaskID: a.ID})
+	other := mustTree(t, s, ctx, "Other", db.StartManual, db.TreeMember{TaskID: b.ID})
+	first := mustSteer(t, s, ctx, tree.ID, p.ID, "n1", false)
+	note := func(tr, source int64, requestID string) error {
+		_, err := s.AppendNote(ctx, db.JournalOwner{TreeID: &tr}, db.AppendNoteInput{Text: "decided", Category: "decision", RequestID: requestID, SourceTaskID: &source})
+		return err
+	}
+	if err := note(tree.ID, first.TaskID, "steerer"); err != nil {
+		t.Fatalf("active steerer's tree note: %v", err)
+	}
+	var c *db.ConflictError
+	if err := note(other.ID, first.TaskID, "elsewhere"); !errors.As(err, &c) {
+		t.Fatalf("note on a tree it does not steer: %v", err)
+	}
+	mustSteer(t, s, ctx, tree.ID, p.ID, "n2", true)
+	if err := note(tree.ID, first.TaskID, "replaced"); !errors.As(err, &c) {
+		t.Fatalf("replaced steerer's tree note: %v", err)
+	}
+}
+
 func caseSteeringBindingRules(t *testing.T, open Factory) {
 	s, ctx := setup(t, open)
 	p := mustProject(t, s, ctx, "proj-rules")

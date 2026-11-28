@@ -93,6 +93,11 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 	return a.observation(t, last, archived)
 }
 
+// errUnsettled: Codex shows a turn in progress on a thread it reports not
+// running. It happens for a moment after a client that started a turn
+// unsubscribes (live in #551), so it is no evidence of an outcome.
+var errUnsettled = errors.New("codex shows a turn in progress on a thread it is not running; refresh again")
+
 // observation maps a thread snapshot to Stage's states. A turn in progress
 // on a thread the daemon is not running, or a system error, is not
 // evidence of an outcome: it is reported as an error, never a state.
@@ -151,7 +156,7 @@ func (a *Adapter) observation(t thread, last *turn, archived bool) (execution.Ob
 	case turnInterrupted:
 		o.State = "interrupted"
 	case turnInProgress:
-		return o, errors.New("codex shows a turn in progress on a thread it is not running; refresh again")
+		return o, errUnsettled
 	default:
 		return o, fmt.Errorf("unknown codex turn status %q", last.Status)
 	}
