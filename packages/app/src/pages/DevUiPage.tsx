@@ -3,16 +3,18 @@
 import { useState, type ReactNode } from "react";
 import { IconBell, IconClose, IconPlus, IconRefresh, IconSearch } from "../components/icons.tsx";
 import { RequestCard, RowRequestControls, RowRequestLine } from "../components/Requests.tsx";
-import { FollowUpPanel } from "../components/FollowUp.tsx";
+import { ActivitySection } from "../components/session/ActivitySection.tsx";
+import { SessionComposer } from "../components/session/SessionComposer.tsx";
 import { ApiError } from "../api/client.ts";
-import type { ActionResult, Capabilities, ExecutionConfig, HarnessAction, SessionRequest } from "../api/types.ts";
+import type { ActionResult, Capabilities, Delivery, ExecutionConfig, HarnessAction, SessionRequest } from "../api/types.ts";
 import { CapabilityList } from "../components/ConnectionCapabilities.tsx";
 import { HarnessFields } from "../components/HarnessFields.tsx";
 import { SessionToolbarActions } from "../components/SessionToolbarActions.tsx";
 import { LaunchMeta } from "../components/LaunchMeta.tsx";
 import { launchParts } from "../lib/capabilities.ts";
 import { rowRequestAction } from "../lib/requests.ts";
-import { replyPrompt, type FollowUpView } from "../lib/followup.ts";
+import { composerDelivery } from "../lib/sessionComposer.ts";
+import { FIXTURE_ACTIVITY, FIXTURE_DELIVERY } from "../harnesses/index.ts";
 import {
   Alert,
   Button,
@@ -145,12 +147,20 @@ function HarnessFieldsDemo() {
   const [config, setConfig] = useState(SAMPLE_CONFIG);
   return <HarnessFields title="Harness · Codex" config={config} caps={SAMPLE_CAPS} onChange={setConfig} disabled={false} />;
 }
-const BUSY_ERROR = new ApiError(409, "Claude Code is working. Send once it finishes.", "session_busy");
+const BUSY_ERROR = new ApiError(409, "The turn has ended. Send a new message.", "session_busy");
 
 /** One composer with its own draft, as task detail holds it. */
-function FollowUpDemo({ view, initial = "", ...rest }: { view: FollowUpView; initial?: string; sentAt?: string; error?: unknown }) {
+function ComposerDemo({ state, initial = "", unavailable = false, error, sent }: {
+  state: string; initial?: string; unavailable?: boolean; error?: unknown; sent?: Delivery;
+}) {
   const [draft, setDraft] = useState(initial);
-  return <FollowUpPanel view={view} harness="Claude Code" draft={draft} onDraft={setDraft} onSend={noop} {...rest} />;
+  const [receipt, setReceipt] = useState(sent === undefined ? undefined : { delivery: sent, at: FIXTURE_ACTIVITY.at });
+  const operations = unavailable ? { steer: { available: false, reason: "This session cannot be steered." }, queue: { available: false, reason: "Queue messages in Hosted." } } : FIXTURE_DELIVERY;
+  const delivery = composerDelivery(state, operations, { ready: true, count: 0 }, "Hosted");
+  return <SessionComposer harness="Hosted" {...delivery} draft={draft} onDraft={setDraft} result={receipt === undefined ? { error } : { receipt }} onSend={(mode) => {
+    setReceipt({ delivery: mode, at: new Date().toISOString() });
+    setDraft("");
+  }} />;
 }
 
 const SAMPLE_SESSION_ACTIONS: HarnessAction[] = [
@@ -520,12 +530,18 @@ export function DevUiPage() {
         </Panel>
       </Section>
 
-      <Section title="Follow-up" meta="components/FollowUp.tsx · a message into the session">
-        <Alert tone="need">{replyPrompt("Claude Code")}</Alert>
-        <FollowUpDemo view={{ placement: "lead", title: "Reply", busy: false }} />
-        <FollowUpDemo view={{ placement: "after-reply", title: "Follow up", busy: false }} initial="Also add a test for the empty case." />
-        <FollowUpDemo view={{ placement: "after-reply", title: "Follow up", busy: true }} initial="Then open a PR." sentAt="2026-11-25T07:00:00Z" />
-        <FollowUpDemo view={{ placement: "after-reply", title: "Follow up", busy: false }} initial="Run the live test again." error={BUSY_ERROR} />
+      <Section title="Session composer" meta="components/session/SessionComposer.tsx">
+        <ComposerDemo state="running" initial="Also verify the empty response." />
+        <ComposerDemo state="done" sent="send" />
+        <ComposerDemo state="running" unavailable />
+        <ComposerDemo state="running" initial="Run the live test again." error={BUSY_ERROR} />
+      </Section>
+
+      <Section title="Session activity" meta="components/session/ActivitySection.tsx">
+        <ActivitySection activity={FIXTURE_ACTIVITY} harness="Hosted" href={null} />
+        <ActivitySection activity={{ ...FIXTURE_ACTIVITY, items: [], plan: [], files: [], truncated: false }} harness="Hosted" href={null} />
+        <ActivitySection activity={undefined} offline harness="Hosted" href={null} />
+        <ActivitySection activity={undefined} error={new Error("The activity read timed out.")} harness="Hosted" href={null} />
       </Section>
 
       <Section title="Session actions" meta="components/SessionToolbarActions.tsx · declared, beside Open and Stop">

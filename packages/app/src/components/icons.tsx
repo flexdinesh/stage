@@ -16,6 +16,7 @@ import {
   InboxIcon,
   LinkIcon,
   ListChecksIcon,
+  MessageSquareIcon,
   MonitorIcon,
   MoonIcon,
   NetworkIcon,
@@ -27,8 +28,10 @@ import {
   SearchIcon,
   ShipWheelIcon,
   SlidersHorizontalIcon,
+  TerminalIcon,
   SunIcon,
   UsersIcon,
+  WrenchIcon,
   TriangleAlertIcon,
   XIcon,
   type LucideIcon,
@@ -63,6 +66,9 @@ function sharp(Glyph: LucideIcon, defaultSize = 16, filled = false) {
 /** Dashboard: an inbox tray, the work waiting on you. */
 export const IconDashboard = sharp(InboxIcon);
 export const IconTasks = sharp(ListChecksIcon);
+export const IconMessage = sharp(MessageSquareIcon);
+export const IconCommand = sharp(TerminalIcon);
+export const IconTool = sharp(WrenchIcon);
 /** Schedules view: a calendar with a clock. */
 export const IconSchedules = sharp(CalendarClockIcon);
 export const IconSnippets = sharp(FileCodeIcon);

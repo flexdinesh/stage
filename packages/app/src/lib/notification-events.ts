@@ -2,11 +2,12 @@
 // opens, and the account filter's groups. Each label names its subject; "done" never stands alone.
 import type { Notification, NotificationEvent } from "../api/types.ts";
 import type { ChipTone } from "../components/ui/tone.tsx";
+import { taskPath, taskSessionPath } from "./taskSession.ts";
 
 /** What a notification is about. An identity-less row reads as a session's. */
 export type NotificationSubject = "task" | "tree" | "schedule" | "session";
 
-const TASK_URL = /^\/tasks\/\d+$/;
+const TASK_URL = /^\/tasks\/\d+(?:\/session)?$/;
 const SUBJECT_URL = /^\/(trees|schedules)\/\d+$/;
 
 export function notificationSubject(n: Pick<Notification, "event" | "taskId" | "url">): NotificationSubject {
@@ -45,8 +46,8 @@ export const notificationEventLabel = (event: NotificationEvent, subject: Notifi
 export const notificationEventTone = (event: NotificationEvent): ChipTone => TONES[event];
 
 /** Where a row opens: its task, tree or schedule (a deleted tree or schedule keeps its stored page), else the inbox. */
-export function notificationPath(n: Pick<Notification, "taskId" | "treeId" | "scheduleId" | "url">): string {
-  if (n.taskId !== null) return `/tasks/${n.taskId}`;
+export function notificationPath(n: Pick<Notification, "event" | "taskId" | "treeId" | "scheduleId" | "url">): string {
+  if (n.taskId !== null) return n.event === "needs_input" ? taskSessionPath(n.taskId) : taskPath(n.taskId);
   if (n.treeId !== null) return `/trees/${n.treeId}`;
   if (n.scheduleId !== null) return `/schedules/${n.scheduleId}`;
   return SUBJECT_URL.test(n.url) ? n.url : "/?inbox";

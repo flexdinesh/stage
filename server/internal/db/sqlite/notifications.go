@@ -19,6 +19,8 @@ const notificationKeySQL = `CASE
   WHEN n.tree_id IS NOT NULL THEN 'tree:' || n.tree_id
   WHEN n.schedule_id IS NOT NULL THEN 'schedule:' || n.schedule_id
   WHEN n.url GLOB '/tasks/[0-9]*' AND substr(n.url, 8) NOT GLOB '*[^0-9]*' THEN 'task:' || substr(n.url, 8)
+  WHEN n.url GLOB '/tasks/[0-9]*/session' AND substr(n.url, 8, length(n.url) - 15) NOT GLOB '*[^0-9]*'
+    THEN 'task:' || substr(n.url, 8, length(n.url) - 15)
   WHEN n.url GLOB '/trees/[0-9]*' AND substr(n.url, 8) NOT GLOB '*[^0-9]*' THEN 'tree:' || substr(n.url, 8)
   WHEN n.url GLOB '/schedules/[0-9]*' AND substr(n.url, 12) NOT GLOB '*[^0-9]*' THEN 'schedule:' || substr(n.url, 12)
   WHEN n.session_id IS NOT NULL THEN 'session:' || (SELECT connection_id || ':' || external_id FROM session_identities WHERE id=n.session_id)

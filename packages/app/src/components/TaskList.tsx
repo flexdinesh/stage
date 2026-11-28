@@ -15,6 +15,7 @@ import { useNow } from "../lib/now.ts";
 import { CompletionButton } from "./Completion.tsx";
 import { useCompletionLinger, useQuickComplete, useUndoComplete } from "./QuickComplete.tsx";
 import { LastWordLine } from "./LastWord.tsx";
+import { taskPath, taskSessionPath } from "../lib/taskSession.ts";
 import { autoCompletedMeta } from "../lib/completion.ts";
 import { BlockedReason, useStartTask } from "./LaunchGate.tsx";
 import { NodeChip } from "./trees/TreeNode.tsx";
@@ -271,7 +272,7 @@ export function TaskRow({
           <ProjectName projectId={task.projectId} title={task.projectTitle} className="mb-0.5 block break-words md:hidden" />
         ) : null}
         <IdTag id={task.id} title={`Task #${task.id}`} className="mr-1.5" />
-        <TextLink to={`/tasks/${task.id}`} className="text-body font-medium break-words">
+        <TextLink to={needsInput ? taskSessionPath(task.id) : taskPath(task.id)} className="text-body font-medium break-words">
           {task.title}
         </TextLink>
         <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 font-mono text-meta text-muted">

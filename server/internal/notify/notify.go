@@ -372,8 +372,8 @@ func PayloadFor(n db.Notification, badge int) Payload {
 		if n.Event == db.EventDone {
 			p.Title = "Run finished"
 		}
-		if n.ExternalSessionID != nil {
-			p.URL = "/tasks/" + id
+		if n.Event == db.EventNeedsInput || n.ExternalSessionID != nil {
+			p.URL = taskURL(id, n.Event)
 		}
 	case "tree":
 		p.URL = "/trees/" + id
@@ -452,7 +452,15 @@ func notificationRecords(ctx context.Context, store *db.Store, e event) ([]db.Ne
 func taskRecord(ev db.NotificationEvent, t db.Task, session *db.SessionRef) db.NewNotification {
 	project := t.ProjectTitle
 	return db.NewNotification{Event: ev, TaskID: &t.ID, Session: session, Title: t.Title, ProjectTitle: &project,
-		URL: "/tasks/" + strconv.FormatInt(t.ID, 10)}
+		URL: taskURL(strconv.FormatInt(t.ID, 10), ev)}
+}
+
+func taskURL(id string, event db.NotificationEvent) string {
+	url := "/tasks/" + id
+	if event == db.EventNeedsInput {
+		return url + "/session"
+	}
+	return url
 }
 
 // completionRecords: completed while c's acceptance is still the task's

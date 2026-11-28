@@ -18,6 +18,7 @@ test("subject follows the event, then the task identity", () => {
   assert.equal(notificationSubject(row({ event: "completed", taskId: 4 })), "task");
   // A deleted task's row keeps its URL.
   assert.equal(notificationSubject(row({ event: "failed", url: "/tasks/9" })), "task");
+  assert.equal(notificationSubject(row({ url: "/tasks/9/session" })), "task");
   assert.equal(notificationSubject(row({ event: "done" })), "session");
 });
 
@@ -30,7 +31,8 @@ test("done names its subject and never reads as completed", () => {
 });
 
 test("rows open their task, tree or schedule, else the inbox", () => {
-  assert.equal(notificationPath(row({ taskId: 5, url: "/tasks/5" })), "/tasks/5");
+  assert.equal(notificationPath(row({ taskId: 5, url: "/tasks/5" })), "/tasks/5/session");
+  assert.equal(notificationPath(row({ event: "failed", taskId: 5, url: "/tasks/5" })), "/tasks/5");
   assert.equal(notificationPath(row({ event: "tree_completed", treeId: 6, url: "/trees/6" })), "/trees/6");
   assert.equal(notificationPath(row({ event: "schedule_skipped", scheduleId: 7, url: "/schedules/7" })), "/schedules/7");
   // Deleted trees and schedules keep their stored page; anything else opens the inbox.

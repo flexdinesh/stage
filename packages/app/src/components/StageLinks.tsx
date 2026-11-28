@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } fro
 import { createPortal } from "react-dom";
 import { useApi } from "../platform/context.tsx";
 import { useSessionDestination } from "../lib/hostState.ts";
+import { taskSessionPath } from "../lib/taskSession.ts";
 import { keys } from "../api/queries.ts";
 import type { TreeStatus } from "../api/types.ts";
 import {
@@ -191,7 +192,7 @@ function useResolved(ref: StageRef): { data: Resolved | null; failed: boolean } 
                 title: t.sessionTitle || ref.id,
                 state: t.state === undefined ? "session" : taskStateLabel(t.state),
                 tone: t.state === undefined ? "idle" : taskStateTone(t.state),
-                href: t.taskId === null ? destination(t) : `/tasks/${t.taskId}`,
+                href: t.taskId === null ? destination(t) : taskSessionPath(t.taskId, t.attempt),
               },
         failed: session.isError,
       };

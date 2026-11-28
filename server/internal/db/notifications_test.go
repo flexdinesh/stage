@@ -274,9 +274,9 @@ func TestNotificationKeyParity(t *testing.T) {
 		{Event: db.EventScheduleStarted, Title: "Gone schedule", URL: "/schedules/98"},
 		{Event: db.EventScheduleStarted, Title: "Not a schedule", URL: "/schedules/9x"},
 		{Event: db.EventNeedsInput, TaskID: &task.ID, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: other}, Title: "Say OK", URL: fmt.Sprintf("/tasks/%d", task.ID)},
-		{Event: db.EventDone, TaskID: &deleted.ID, Title: "Gone", URL: fmt.Sprintf("/tasks/%d", deleted.ID)},
+		{Event: db.EventNeedsInput, TaskID: &deleted.ID, Title: "Gone", URL: fmt.Sprintf("/tasks/%d/session", deleted.ID)},
 		{Event: db.EventDone, Title: "Old", URL: "/tasks/007"},
-		{Event: db.EventDone, Title: "Not a task", URL: "/tasks/7x"},
+		{Event: db.EventNeedsInput, Title: "Not a task", URL: "/tasks/7x/session"},
 		{Event: db.EventNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Ext", URL: "/sessions/ext-1"},
 		{Event: db.EventFailed, Title: "No identity", URL: "/"},
 	} {

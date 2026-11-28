@@ -20,7 +20,7 @@ const notificationKeySQL = `CASE
   WHEN n.task_id IS NOT NULL THEN 'task:' || n.task_id
   WHEN n.tree_id IS NOT NULL THEN 'tree:' || n.tree_id
   WHEN n.schedule_id IS NOT NULL THEN 'schedule:' || n.schedule_id
-  WHEN n.url ~ '^/tasks/[0-9]+$' THEN 'task:' || substr(n.url, 8)
+  WHEN n.url ~ '^/tasks/[0-9]+(/session)?$' THEN 'task:' || split_part(n.url, '/', 3)
   WHEN n.url ~ '^/trees/[0-9]+$' THEN 'tree:' || substr(n.url, 8)
   WHEN n.url ~ '^/schedules/[0-9]+$' THEN 'schedule:' || substr(n.url, 12)
   WHEN n.session_id IS NOT NULL THEN 'session:' || (SELECT connection_id || ':' || external_id FROM session_identities WHERE id=n.session_id)
