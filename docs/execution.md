@@ -591,6 +591,16 @@ an answer typed directly in the harness cannot be prevented, and the
 loser's later send queues behind it or is `Busy`. Send and respond record
 the caller session as `Cause.Session` and the target as `Cause.TaskID`.
 
+Steering delivery ([ADR 0013](adr/0013-tree-steering.md#delivery)) sends
+as Stage itself (no caller session) through `SendRecorded`: the same send,
+unguarded, with `Message.RequestID` `steering-<binding>-<through>` so a
+redelivery is one message on harnesses that deduplicate (T3, OpenCode,
+Codex), and its own record (the binding's delivery and the steerer event
+"Steering update sent (through #N)") in place of "Follow-up sent from
+Stage". `Busy` leaves the update pending for the next pass; other errors
+back off. A crash between the harness call and the record sends the same
+request again (at least once). [Steering delivery](api.md#steering-delivery)
+
 ### Actions and facts
 
 A declared action is a harness-owned operation Stage relays. `execution.Action`

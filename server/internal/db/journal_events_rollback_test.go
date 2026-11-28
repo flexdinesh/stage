@@ -201,30 +201,32 @@ func steeringEventCount(t *testing.T, pool *sqlite.DB) int {
 }
 
 // Steering events commit with the write that causes them and roll back with
-// it (ADR 0013).
+// it (ADR 0013). Marking the tree done also finishes its steering
+// (tree_finished), in the same write.
 func TestSteeringEventsCommitAndRollBack(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		run  func(ctx context.Context, tx store.Tx, f derivedFixture) error
+		more int // events beyond the one the write causes
 	}{
 		{"task event", func(ctx context.Context, tx store.Tx, f derivedFixture) error {
 			from := StateBacklog
 			return addTaskEvent(ctx, tx, f.a, &from, StateFailed, "boom")
-		}},
+		}, 0},
 		{"note", func(ctx context.Context, tx store.Tx, f derivedFixture) error {
 			_, err := insertNote(ctx, tx, JournalOwner{TaskID: &f.a}, AppendNoteInput{Text: "stuck", Category: "blocker", RequestID: "r"}, nil)
 			return err
-		}},
+		}, 0},
 		{"tree status", func(ctx context.Context, tx store.Tx, f derivedFixture) error {
 			return setTreeStatus(ctx, tx, f.tree, TreeDone)
-		}},
+		}, 1},
 		{"membership", func(ctx context.Context, tx store.Tx, f derivedFixture) error {
 			return setMembership(ctx, tx, f.l, &f.tree)
-		}},
+		}, 0},
 		{"acceptance", func(ctx context.Context, tx store.Tx, f derivedFixture) error {
 			id := int64(99)
 			return recordAcceptance(ctx, tx, f.a, 1, &id, "task_completed", "Completed")
-		}},
+		}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, ctx, pool := connectionStore(t)
@@ -251,8 +253,8 @@ func TestSteeringEventsCommitAndRollBack(t *testing.T) {
 			if err := s.e.Write(ctx, func(tx store.Tx) error { return tc.run(ctx, tx, f) }); err != nil {
 				t.Fatal(err)
 			}
-			if got := steeringEventCount(t, pool); got != before+1 {
-				t.Fatalf("committed %d steering events, want 1", got-before)
+			if got := steeringEventCount(t, pool); got != before+1+tc.more {
+				t.Fatalf("committed %d steering events, want %d", got-before, 1+tc.more)
 			}
 		})
 	}

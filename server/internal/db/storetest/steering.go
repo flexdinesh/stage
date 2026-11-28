@@ -118,7 +118,7 @@ func caseSteeringEventsOnlyWhileSteered(t *testing.T, open Factory) {
 		t.Fatal(err)
 	}
 	events := steeringFeed(t, s, ctx, tree.ID)
-	want := fmt.Sprintf("steering_started#%d member_needs_input#%d note#%d note#%d member_done#%d member_failed#%d tree_status",
+	want := fmt.Sprintf("steering_started#%d member_needs_input#%d note#%d note#%d member_done#%d member_failed#%d tree_status tree_finished",
 		r.TaskID, a.ID, a.ID, b.ID, a.ID, b.ID)
 	if got := kinds(events); got != want {
 		t.Fatalf("events\n got %s\nwant %s", got, want)
@@ -148,7 +148,8 @@ func caseSteeringEventsOnlyWhileSteered(t *testing.T, open Factory) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st := detail.Steerer; st == nil || st.TaskID != r.TaskID || st.Title != "Steer" || st.Pending != int64(len(events)) || st.DeliveredThrough != 0 {
+	// steering_started is delivered at bind (the launch brief covers it).
+	if st := detail.Steerer; st == nil || st.TaskID != r.TaskID || st.Title != "Steer" || st.Pending != int64(len(events)-1) || st.DeliveredThrough != events[0].ID {
 		t.Fatalf("tree steerer %+v", detail.Steerer)
 	}
 	steer, err := s.GetTask(ctx, r.TaskID)
@@ -262,8 +263,9 @@ func caseSteeringCausedBy(t *testing.T, open Factory) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Pending skips the steerer's own events.
-	if detail.Steerer == nil || detail.Steerer.Pending != 2 {
+	// Pending skips the steerer's own events and its start (the launch
+	// brief covers it): member_added only.
+	if detail.Steerer == nil || detail.Steerer.Pending != 1 || detail.Steerer.DeliveredThrough != events[0].ID {
 		t.Fatalf("pending %+v", detail.Steerer)
 	}
 }

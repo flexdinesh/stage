@@ -102,6 +102,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	52: {{"one active steerer per tree and per task", seedV0040SharedAccess, checkV0052TreeSteering}},
 	53: {{"one steering brief per task attempt", seedV0040SharedAccess, checkV0053SteeringLaunchContext}},
 	54: {{"one held notification per task; tree hold defaults to 300", seedV0040SharedAccess, checkV0054NotificationHolds}},
+	55: {{"existing binding has no finish or completion", seedV0055Steerer, checkV0055SteeringFinish}},
 }
 
 func checkV0053SteeringLaunchContext(t *testing.T, pool *sqlite.DB) {
@@ -137,6 +138,22 @@ func checkV0054NotificationHolds(t *testing.T, pool *sqlite.DB) {
 	mustExec(t, pool, `INSERT INTO notifications(event,task_id,title,url,note) VALUES('needs_input',6,'T','/tasks/6','Steerer did not answer')`)
 	wantRows(t, pool, `SELECT state,count(*) FROM notification_holds GROUP BY state ORDER BY state`, "cancelled|1", "held|1")
 	wantRows(t, pool, `SELECT note FROM notifications`, "Steerer did not answer")
+}
+
+func seedV0055Steerer(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	seedV0040SharedAccess(t, pool)
+	mustExec(t, pool, `INSERT INTO task_trees(id,title) VALUES(9,'Steered')`)
+	mustExec(t, pool, `INSERT INTO tree_steerers(id,tree_id,task_id,request_id,request_digest) VALUES(1,9,6,'r1','d')`)
+}
+
+func checkV0055SteeringFinish(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	wantRows(t, pool, `SELECT id,finish_event_id,final_state_revision,completion FROM tree_steerers`, "1|NULL|NULL|NULL")
+	if _, err := pool.Exec(`UPDATE tree_steerers SET completion='maybe' WHERE id=1`); err == nil {
+		t.Fatal("accepted an unknown completion")
+	}
+	mustExec(t, pool, `UPDATE tree_steerers SET finish_event_id=3,final_state_revision=4,completion='completed' WHERE id=1`)
 }
 
 func checkV0051StateRevision(t *testing.T, pool *sqlite.DB) {

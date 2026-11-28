@@ -198,8 +198,15 @@ and per task; `(tree_id, request_id)` makes the set request replayable
 (`request_digest` compares content). An ended binding keeps its row with
 `end_reason` (`replaced`, `stopped`, `tree_finished`, `task_removed`); a
 deleted steerer task nulls `task_id` and its active binding ends first
-(`task_removed`). `delivered_through`, `last_delivered_at` and `last_error`
-belong to the later delivery dispatcher and stay at their defaults today.
+(`task_removed`), and so does archiving it. The delivery dispatcher
+(`internal/steering`) writes `delivered_through` (the last event id a
+digest covered; a bind sets it to its own `steering_started` event, which
+the launch brief covers), `last_delivered_at` and `last_error`.
+`finish_event_id` is the binding's one `tree_finished` event;
+`final_state_revision` is the steerer task's state revision before the
+final digest went out (recorded with the binding's `tree_finished` end, in
+the same write as the delivery); `completion` is the one auto-complete
+decision after it (`completed` or `skipped`).
 
 `steering_events` is the durable outbox. A member change enqueues its event
 in the same `Write` as the change, only while a binding is active, so it
@@ -209,6 +216,11 @@ per-tree transaction advisory lock and rechecks the active binding before
 it allocates the id, so ids commit in order per tree and a cursor
 (`after`) never skips a lower id committed later; a binding ended
 meanwhile gets no event. SQLite's single writer gives both by construction.
+`tree_finished` is enqueued once per binding, with no cause, when the last
+member gets acceptance (or leaves, with every remaining member accepted)
+or the tree is marked done or archived, in the same write. A committed
+`Write` that inserted an event calls the Store's `OnSteeringEvent` hook
+(the dispatcher's kick).
 
 `steering_launch_context(task_id, attempt, brief)` freezes the steering
 brief an active steerer's launch attempt appended, like
@@ -252,7 +264,7 @@ migration 0026 (#399).
 | Acceptance (`insertAcceptance`) | `task_acceptances.source_session_id` = the task's session |
 | Handoff (`recordHandoff`) | source session: the evidence's session, else none (a bare legacy thread id names no connection, #420) |
 | Steering binding (`bindSteerer`, `endSteerer`) | `steering_started` (or `steering_replaced`, naming the old steerer) on the tree; `steering_ended` with its reason, except a replacement; a `steering_started` or `steering_ended` steering event |
-| Steering events (`enqueueSteering`, from `addTaskEventType`, `insertNote`, `setMembership`, `changeTreeStatus`, `recordAcceptance`) | one `steering_events` row per member transition, answer, readiness, membership change, acceptance, blocker or decision note and tree status change, while the tree has an active steerer ([Tree steering](#tree-steering)) |
+| Steering events (`enqueueSteering`, from `addTaskEventType`, `insertNote`, `setMembership`, `changeTreeStatus`, `recordAcceptance`) | one `steering_events` row per member transition, answer, readiness, membership change, acceptance, blocker or decision note and tree status change, while the tree has an active steerer, plus one `tree_finished` per binding (`steerTreeFinished`) ([Tree steering](#tree-steering)) |
 
 - **Attribution:** new work records the admitted actor and known cause with
   each event in the same transaction. Existing creator IDs retain their
@@ -643,6 +655,10 @@ and paging. (Thread search was removed with API v3.)
   `task_trees.steering_hold_seconds` (integer, default 300, checked 0 to
   3600) and nullable `notifications.note` ([Tree steering](#tree-steering)).
   Existing trees take the default; no backfill; copies carry them.
+  Paired migration 0055 `steering_finish` adds nullable
+  `tree_steerers.finish_event_id`, `final_state_revision` and `completion`
+  (`completed` or `skipped`) for tree finish ([Tree steering](#tree-steering)).
+  Existing bindings start null (unfinished, undecided); copies carry them.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
