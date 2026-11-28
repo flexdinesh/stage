@@ -37,6 +37,9 @@
   (workspace source and project action `trust`), under Claude's state lock.
   Launches stay `claude --bg`. See
   [execution](../execution.md#claude-code-adapter).
+- **Amended** 2026-11-28 by #541 ([ADR 0013](0013-tree-steering.md)):
+  decision 18's "only the user sends" no longer holds for sends Stage
+  makes to a tree's steerer.
 - **Sources:** probes of the local `claude` CLI on Linux x86_64 with a
   claude.ai (Max) login, 2026-11-25, in scratch directories with haiku
   prompts. The CLI auto-updated from 2.1.331 to 2.1.332 two minutes in;
