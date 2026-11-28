@@ -41,6 +41,18 @@ func Conflict(format string, args ...any) error {
 	return &ConflictError{Msg: fmt.Sprintf(format, args...)}
 }
 
+// AlreadyAnsweredError: a guarded answer (expectedStateRevision) lost:
+// the task left needs_input, moved to another revision, or that revision
+// was answered already (409 already_answered, ADR 0013).
+type AlreadyAnsweredError struct {
+	State         TaskState
+	StateRevision int64
+}
+
+func (e *AlreadyAnsweredError) Error() string {
+	return fmt.Sprintf("Already answered: the task is %s at state revision %d.", e.State, e.StateRevision)
+}
+
 // InvalidError: invalid input (400).
 type InvalidError struct{ Msg string }
 

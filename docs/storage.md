@@ -581,6 +581,14 @@ and paging. (Thread search was removed with API v3.)
   will not start a session in a listed workspace, from the latest complete
   inventory. Each complete refresh rewrites it, so existing rows need no
   backfill and copies carry it unchanged.
+  Paired migration 0051 `task_state_revision` adds
+  `tasks.state_revision` (integer, default 0) and nullable
+  `tasks.answered_revision` for first answer wins
+  ([ADR 0013](adr/0013-tree-steering.md#first-answer-wins)). Every real
+  state transition bumps `state_revision` in its journal write
+  (`addTaskEventType`, from != to); a guarded send or respond sets
+  `answered_revision` in the same write as its event. Existing rows start
+  at 0 and unanswered; copies carry both unchanged.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.
@@ -1015,6 +1023,7 @@ MCP or CLI. Test-only callers are noted where they are the only ones.
 | `tasks.launch_reuse` | Always 0 outside tests (`ReuseAttempt` is test-only, `ReusesLaunch` has no caller); 0009 moved reuse into `execution_attempts` | Dropped (0028) | Remove the reads and `ReuseAttempt` |
 | `tasks` and `schedules`: `provider_instance_id`, `model`, `model_options`, `runtime_mode`, `interaction_mode` | Primary storage for the legacy T3 model inputs: stored raw on create and update, copied by duplicate and schedule spawn, translated only on read (`LegacyModel`/`LegacyConfig` in `api/shapes.go`, `sync/service.go`) | Legacy storage: Dropped (0027, 0028) | Translate legacy inputs to `execution_config` on write; backfill `execution_config` where NULL. API inputs may stay, translated |
 | `tasks.launch_request_id`, `handoff` | Launch intents, task API | Keep | None |
+| `tasks.state_revision`, `answered_revision` | First answer wins: transition journal writes, guarded send and respond (0051) | Keep | None |
 | `tasks.settled_at` | Historical finish timestamp | Dropped (0035) | Backfill missing `finished_at` when converting state `settled` to `done` |
 | `schedules.origin_thread_id` | Insert column, never set by a caller; `COALESCE` puts it first, into a `json:"-"` field | Dropped (0028) | `origin_session_id` already backfilled (0008) |
 | `threads.t3_thread_id`, `t3_project_id`, `status`, `parent_thread_id` | The T3 mirror's key and live fields, written by `PutObservation` and read by the session API, push and binding lookup | Keep | None |

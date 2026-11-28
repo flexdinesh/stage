@@ -1,10 +1,12 @@
 // Following up a task's session from Stage: one composer panel on task detail. It leads under the needs-input alert
 // when the turn ended asking you (Reply), else sits under Last word (Follow up). The page owns the draft and the send
 // mutation, so both survive the panel moving and the session working. Logic: lib/followup.ts; hooks: api/queries.ts
-// useConnectionOperation, useSendMessage.
+// useConnectionOperation, useSendMessage. A Reply is guarded by the task's state revision (first answer wins): one that lost reads
+// "Already answered, by the steerer or in the harness." and keeps the draft.
 import { useId, type FormEvent, type KeyboardEvent } from "react";
 import { busyHint, isSendKey, MAX_MESSAGE_BYTES, sendable, tooLong, type FollowUpView } from "../lib/followup.ts";
-import { Button, ErrorText, InlineError, Kbd, Panel, RelTime, Textarea } from "./ui.tsx";
+import { AnswerError } from "./Requests.tsx";
+import { Button, InlineError, Kbd, Panel, RelTime, Textarea } from "./ui.tsx";
 
 export function FollowUpPanel({
   view,
@@ -81,7 +83,7 @@ export function FollowUpPanel({
             Send
           </Button>
         </div>
-        <ErrorText error={error} />
+        <AnswerError error={error} />
       </form>
     </Panel>
   );

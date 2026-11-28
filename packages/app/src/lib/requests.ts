@@ -107,6 +107,13 @@ export const requestsPath = (taskId: number) => `/tasks/${taskId}#${REQUESTS_ANC
 /** A failed answer: `expired` when the request is no longer pending (answered in the harness, timed out), else an error to show. */
 export const respondFailure = (error: unknown): "expired" | "error" => (error instanceof ApiError && error.status === 404 ? "expired" : "error");
 
+/**
+ * A guarded answer lost (409 `already_answered`): the task moved on, or the steerer or the harness answered it first. Shown as a status,
+ * not an error; the draft stays and the task refetches.
+ */
+export const alreadyAnswered = (error: unknown): boolean => error instanceof ApiError && error.status === 409 && error.code === "already_answered";
+export const ALREADY_ANSWERED = "Already answered, by the steerer or in the harness.";
+
 /** Copy for answered or expired requests; `harness` is its display name. */
 export const answeredText = (harness: string) => `Answered · waiting for ${harness}`;
 export const expiredText = (harness: string) => `Already answered in ${harness} or expired`;

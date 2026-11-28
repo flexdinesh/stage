@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/flexdinesh/stage/server/internal/harness"
@@ -271,9 +270,7 @@ func (s *server) addedResult(ctx context.Context, conn db.HarnessConnection, d h
 func (s *server) recordWorkspaceAdded(ctx context.Context, r *http.Request, result workspaceAddResult, source execution.WorkspaceSource, requestID string) {
 	var caller *db.SessionRef
 	if actionCaller(r) == execution.CallerAgent {
-		if ref, err := agentctx.ParseSession(r.Header.Get(agentctx.CallerHeader)); err == nil {
-			caller = &ref
-		}
+		caller = db.CallerRef(r.Context())
 	}
 	ws := result.Workspace
 	text := fmt.Sprintf("Added workspace %s on %s (%s).", ws.Title, ws.ConnectionLabel, source.Label)

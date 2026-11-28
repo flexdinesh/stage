@@ -108,6 +108,8 @@ type RespondRequestArgs struct {
 	Option    string              `json:"option,omitempty" jsonschema:"chosen option id"`
 	Text      string              `json:"text,omitempty" jsonschema:"text answer, or a reason with the request's textOption"`
 	Answers   map[string][]string `json:"answers,omitempty" jsonschema:"question id to chosen option labels, for question requests"`
+	// ExpectedStateRevision guards the answer (first answer wins).
+	ExpectedStateRevision *int64 `json:"expectedStateRevision,omitempty" jsonschema:"the task's stateRevision you are answering; Stage refuses with already_answered when the task moved on or was answered first"`
 }
 
 func (o *Ops) RespondRequest(ctx context.Context, a RespondRequestArgs) (client.Task, error) {
@@ -115,7 +117,7 @@ func (o *Ops) RespondRequest(ctx context.Context, a RespondRequestArgs) (client.
 	if err != nil {
 		return client.Task{}, err
 	}
-	return o.Client.Respond(ctx, a.TaskID, a.RequestID, execution.Response{Option: a.Option, Text: a.Text, Answers: a.Answers}, c.Session)
+	return o.Client.Respond(ctx, a.TaskID, a.RequestID, execution.Response{Option: a.Option, Text: a.Text, Answers: a.Answers}, a.ExpectedStateRevision, c.Session)
 }
 
 // SendMessageArgs is send_message (execution.Message).
@@ -123,6 +125,8 @@ type SendMessageArgs struct {
 	CallerArgs
 	TaskID int64  `json:"taskId" jsonschema:"task whose session receives it (not your own)"`
 	Text   string `json:"text" jsonschema:"message text (up to 32 KiB)"`
+	// ExpectedStateRevision guards the message (first answer wins).
+	ExpectedStateRevision *int64 `json:"expectedStateRevision,omitempty" jsonschema:"the task's stateRevision you are answering (it needs input); Stage refuses with already_answered when the task moved on or was answered first"`
 }
 
 func (o *Ops) SendMessage(ctx context.Context, a SendMessageArgs) (client.Task, error) {
@@ -130,5 +134,5 @@ func (o *Ops) SendMessage(ctx context.Context, a SendMessageArgs) (client.Task, 
 	if err != nil {
 		return client.Task{}, err
 	}
-	return o.Client.SendMessage(ctx, a.TaskID, execution.Message{Text: a.Text}, c.Session)
+	return o.Client.SendMessage(ctx, a.TaskID, execution.Message{Text: a.Text}, a.ExpectedStateRevision, c.Session)
 }

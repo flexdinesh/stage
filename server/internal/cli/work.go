@@ -119,9 +119,11 @@ func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 		c.fs.StringVar(&a.Option, "option", "", "chosen option id")
 		c.fs.StringVar(&a.Text, "text", "", "text answer")
 		c.fs.StringVar(&answers, "answers", "", `JSON object of question id to option labels, e.g. {"q1":["Yes"]}`)
+		expect := expectRevision(c)
 		if err := c.parse(rest); err != nil {
 			return err
 		}
+		a.ExpectedStateRevision = expect()
 		if len(c.pos) != 2 {
 			return usagef("task respond: want a task id and a request id")
 		}
@@ -146,6 +148,7 @@ func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 	case "send":
 		var text string
 		c.fs.StringVar(&text, "text", "", "message text")
+		expect := expectRevision(c)
 		if err := c.parse(rest); err != nil {
 			return err
 		}
@@ -157,7 +160,7 @@ func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 		if err != nil {
 			return err
 		}
-		res, err := c.ops().SendMessage(ctx, agenttools.SendMessageArgs{CallerArgs: ca, TaskID: id, Text: text})
+		res, err := c.ops().SendMessage(ctx, agenttools.SendMessageArgs{CallerArgs: ca, TaskID: id, Text: text, ExpectedStateRevision: expect()})
 		if err != nil {
 			return err
 		}
@@ -185,4 +188,17 @@ func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 		})
 	}
 	return usagef("task %s: unknown", v)
+}
+
+// expectRevision registers --expect-revision (a guarded answer: first
+// answer wins) and returns its value after parsing (nil: not given).
+func expectRevision(c *cmd) func() *int64 {
+	var revision int64
+	c.fs.Int64Var(&revision, "expect-revision", 0, "the task's state revision you are answering (task show); refused with already_answered when it moved on or was answered first")
+	return func() *int64 {
+		if !c.set("expect-revision") {
+			return nil
+		}
+		return &revision
+	}
 }

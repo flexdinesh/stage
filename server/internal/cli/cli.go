@@ -222,8 +222,9 @@ Usage:
   stage task complete ID --revision N --evidence-version V [--note TEXT] [--request-id KEY]
   stage task reopen ID --revision N [--request-id KEY]
   stage task requests ID              what the task's session waits on
-  stage task respond ID RID [--option O] [--text T] [--answers JSON]
-  stage task send ID --text TEXT      message the task's session
+  stage task respond ID RID [--option O] [--text T] [--answers JSON] [--expect-revision N]
+  stage task send ID --text TEXT [--expect-revision N]   message the task's session
+                                      --expect-revision: first answer wins (409 already_answered)
   stage task opening-prompt ID [--full]
                                       complete, reopen, respond and send: never your own task or session
   stage tree ls [--status active|done|archived|all] [--all] [--project P]

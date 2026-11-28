@@ -52,3 +52,42 @@ func TestTaskCompleteFromPreview(t *testing.T) {
 		t.Fatalf("send own session: %d %s", code, stderr)
 	}
 }
+
+// task send --expect-revision is a guarded answer: the stale revision is
+// refused with already_answered, the current one goes once; task show
+// prints the revision.
+func TestTaskSendExpectRevision(t *testing.T) {
+	h := newHarness(t)
+	p := h.project("/w/cli-expect")
+	c := client.New(h.url)
+	a, err := c.CreateTask(t.Context(), client.CreateTask{ProjectID: p.ID, ConnectionID: dbtest.T3Connection, WorkspaceID: h.workspaceID(p), Title: "asks", Prompt: "x", Start: true})
+	if err != nil || a.ExternalSessionID == nil {
+		t.Fatalf("task %+v %v", a, err)
+	}
+	if _, err := h.store.TransitionTask(t.Context(), db.Transition{TaskID: a.ID, To: db.StateNeedsInput}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.store.GetTask(t.Context(), a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, rev := fmt.Sprint(a.ID), got.StateRevision
+	if code, stdout, stderr := h.run("", "task", "show", id); code != 0 || !strings.Contains(stdout, fmt.Sprintf("state revision %d", rev)) {
+		t.Fatalf("show: %d %s %s", code, stdout, stderr)
+	}
+	if code, _, stderr := h.run("", "task", "send", id, "--text", "go", "--expect-revision", fmt.Sprint(rev-1)); code != 1 || !strings.Contains(stderr, "Already answered") {
+		t.Fatalf("stale revision: %d %s", code, stderr)
+	}
+	if len(h.fake.Sent) != 0 {
+		t.Fatalf("refused message sent: %+v", h.fake.Sent)
+	}
+	if code, stdout, stderr := h.run("", "task", "send", id, "--text", "go", "--expect-revision", fmt.Sprint(rev)); code != 0 {
+		t.Fatalf("send: %d %s %s", code, stdout, stderr)
+	}
+	if code, _, stderr := h.run("", "task", "send", id, "--text", "again", "--expect-revision", fmt.Sprint(rev)); code != 1 || !strings.Contains(stderr, "Already answered") {
+		t.Fatalf("answered twice: %d %s", code, stderr)
+	}
+	if len(h.fake.Sent) != 1 {
+		t.Fatalf("sent: %+v", h.fake.Sent)
+	}
+}

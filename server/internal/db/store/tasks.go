@@ -76,6 +76,10 @@ type Task struct {
 	Title                   string      `json:"title"`
 	Prompt                  string      `json:"prompt"`
 	State                   TaskState   `json:"state"`
+	// StateRevision counts real state transitions; AnsweredRevision is
+	// the revision last answered through Stage (nil: never). ADR 0013.
+	StateRevision    int64  `json:"stateRevision"`
+	AnsweredRevision *int64 `json:"-"`
 	// ExternalSessionID is the session's external id (nil without a session).
 	ExternalSessionID *string `json:"externalSessionId"`
 	TreeID            *int64  `json:"treeId"` // the task's tree (docs/api.md "Trees")
@@ -384,6 +388,10 @@ type Tasks interface {
 	SetArchived(ctx context.Context, id int64, archived bool) error
 	// Unarchive reports whether the task was archived.
 	Unarchive(ctx context.Context, id int64) (bool, error)
+	// BumpStateRevision counts one real state transition.
+	BumpStateRevision(ctx context.Context, id int64) error
+	// SetAnswered records revision as answered.
+	SetAnswered(ctx context.Context, id int64, revision int64) error
 	// Touch bumps updated_at (false: no such task).
 	Touch(ctx context.Context, id int64) (bool, error)
 	LaunchState(ctx context.Context, id int64) (TaskLaunchState, error)

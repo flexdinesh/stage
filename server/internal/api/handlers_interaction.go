@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -44,22 +45,50 @@ func (s *server) selfAction(w http.ResponseWriter, r *http.Request, id int64, ms
 // callerOwns reports whether the request's caller session belongs to task
 // id, returning the named caller session (nil when none is named).
 func (s *server) callerOwns(r *http.Request, id int64) (*db.SessionRef, bool, error) {
-	v := r.Header.Get(agentctx.CallerHeader)
-	if v == "" {
-		return nil, false, nil
-	}
-	ref, err := agentctx.ParseSession(v)
-	if err != nil {
-		return nil, false, db.Invalid("%s: %v", agentctx.CallerHeader, err)
-	}
-	owner, err := s.Store.TaskBySession(r.Context(), ref)
-	if errors.Is(err, db.ErrNotFound) {
-		return &ref, false, nil
-	}
-	if err != nil {
+	c, named, err := callerSession(r.Context())
+	if err != nil || !named {
 		return nil, false, err
 	}
-	return &ref, owner.ID == id, nil
+	ref := c.Ref
+	return &ref, c.TaskID != 0 && c.TaskID == id, nil
+}
+
+type callerErrKey struct{}
+
+// withCaller resolves the request's caller session (agentctx.CallerHeader)
+// once, into db.WithCallerSession. Agent routes run it; a request naming
+// none is unchanged. A malformed header or failed lookup is kept for
+// callerSession, so only the routes that need the caller (the self-action
+// guard) refuse it, as before.
+func (s *server) withCaller(r *http.Request) *http.Request {
+	v := r.Header.Get(agentctx.CallerHeader)
+	if v == "" {
+		return r
+	}
+	ctx := r.Context()
+	ref, err := agentctx.ParseSession(v)
+	if err != nil {
+		return r.WithContext(context.WithValue(ctx, callerErrKey{}, db.Invalid("%s: %v", agentctx.CallerHeader, err)))
+	}
+	c := db.CallerSession{Ref: ref}
+	owner, err := s.Store.TaskBySession(ctx, ref)
+	switch {
+	case err == nil:
+		c.TaskID = owner.ID
+	case !errors.Is(err, db.ErrNotFound):
+		return r.WithContext(context.WithValue(ctx, callerErrKey{}, err))
+	}
+	return r.WithContext(db.WithCallerSession(ctx, c))
+}
+
+// callerSession is the caller session withCaller resolved (false: none
+// named), or why it could not be resolved.
+func callerSession(ctx context.Context) (db.CallerSession, bool, error) {
+	if err, ok := ctx.Value(callerErrKey{}).(error); ok {
+		return db.CallerSession{}, false, err
+	}
+	c, ok := db.CallerSessionFrom(ctx)
+	return c, ok, nil
 }
 
 // selfForbidden is 403 self_action_forbidden (selfAction) as an error.
@@ -91,11 +120,14 @@ func (s *server) respondRequest(w http.ResponseWriter, r *http.Request) error {
 	if _, refused, err := s.selfAction(w, r, id, "An agent cannot answer its own session's request. The user answers it in Stage or in the harness."); err != nil || refused {
 		return err
 	}
-	var in execution.Response
+	var in struct {
+		execution.Response
+		ExpectedStateRevision *int64 `json:"expectedStateRevision"`
+	}
 	if err := decodeStrict(r, &in); err != nil {
 		return err
 	}
-	t, err := s.Engine.Coordinator.Respond(r.Context(), id, r.PathValue("rid"), in)
+	t, err := s.Engine.Coordinator.Respond(r.Context(), id, r.PathValue("rid"), in.Response, in.ExpectedStateRevision)
 	if err != nil {
 		return err
 	}
@@ -115,12 +147,13 @@ func (s *server) sendMessage(w http.ResponseWriter, r *http.Request) error {
 	}
 	// The body is text only: the coordinator gives each call its request ID.
 	var in struct {
-		Text string `json:"text"`
+		Text                  string `json:"text"`
+		ExpectedStateRevision *int64 `json:"expectedStateRevision"`
 	}
 	if err := decodeStrict(r, &in); err != nil {
 		return err
 	}
-	t, err := s.Engine.Coordinator.Send(r.Context(), id, execution.Message{Text: in.Text})
+	t, err := s.Engine.Coordinator.Send(r.Context(), id, execution.Message{Text: in.Text}, in.ExpectedStateRevision)
 	if err != nil {
 		return err
 	}
