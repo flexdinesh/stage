@@ -194,7 +194,7 @@ export function SessionView({ task, attempt }: { task: TaskDetail; attempt?: num
               </div>
             ) : null}
             <LastWordPanel reply={current ? task.finalReply : snapshot?.reply} harness={harness} href={destination} />
-            {activityOffered ? <ActivitySection activity={activity.data} loading={activity.isPending} offline={offline} error={activityError} harness={harness} href={destination} /> : null}
+            {activityOffered ? <ActivitySection activity={activity.data} loading={activity.isPending} offline={offline} error={activityError} harness={harness} href={destination} showModel={!slots?.activityModelInHeader} /> : null}
             {Sections && slotProps ? <Sections {...slotProps} /> : null}
           </div>
           <div className="flex min-w-0 flex-col gap-3.5">

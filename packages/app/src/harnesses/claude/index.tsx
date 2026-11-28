@@ -6,8 +6,10 @@ import { GENERIC_STATUS, statusSlots } from "../status.ts";
 import type { ConnectionRowProps, HarnessSlots } from "../types.ts";
 import { CLAUDE, CLAUDE_DISCONNECT_PROMPT, claudeRowDetail, claudeStatusView } from "./claude.ts";
 import { ClaudeSetup } from "./Setup.tsx";
+import { ClaudeSessionHeader } from "./SessionHeader.tsx";
 
 export const CLAUDE_SLOTS: HarnessSlots = {
+  session: { HeaderExtra: ClaudeSessionHeader, activityModelInHeader: true },
   Setup: ClaudeSetup,
   Row: ClaudeRow,
   // The generic status (same query and cache as its Settings row), read as Claude Code's.

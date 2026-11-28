@@ -38,6 +38,12 @@ export interface ClaudeEvents {
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
+export function claudeSessionDetails(details: unknown) {
+  return isRecord(details)
+    ? { permissionMode: str(details.permissionMode), effort: str(details.effort) }
+    : { permissionMode: "", effort: "" };
+}
+
 function eventsOf(v: unknown): ClaudeEvents | null {
   if (!isRecord(v) || (v.mode !== "push" && v.mode !== "polling")) return null;
   const at = str(v.lastEventAt);

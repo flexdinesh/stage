@@ -172,13 +172,13 @@ func assistantText(content json.RawMessage) string {
 // blobs with the system prompt) are skipped unread.
 const maxLine = 4 << 20
 
-// eachRecord calls fn for each parsable line of r until fn returns false.
-func eachRecord(r io.Reader, fn func(record) bool) error {
+// eachRecord decodes each parsable line of r into the caller's record shape.
+func eachRecord[T any](r io.Reader, fn func(T) bool) error {
 	br := bufio.NewReaderSize(r, 64<<10)
 	for {
 		line, err := readLine(br)
 		if len(line) > 0 {
-			var rec record
+			var rec T
 			if json.Unmarshal(line, &rec) == nil && !fn(rec) {
 				return nil
 			}

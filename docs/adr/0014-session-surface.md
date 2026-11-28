@@ -79,8 +79,9 @@ shared session view and can add its own sections.
 - The harness owns message storage and scheduling. Stage relays messages
   through documented mechanisms.
 - Claude Code uses documented hooks. The adapter's in-memory pending list
-  is delivered on the next `PostToolUse` (`additionalContext`) or `Stop`
-  (decision block). Codex steer uses stable `turn/steer`.
+  is delivered on the next `PostToolUse` or `PostToolBatch`
+  (`additionalContext`) or eligible `Stop` (decision block). Codex steer
+  uses stable `turn/steer`.
 - The target excludes Codex experimental APIs (`thread/queue/*`,
   `requestUserInput`) and Claude Agent SDK, channels, stream-json and the
   control socket.
@@ -136,10 +137,11 @@ shared session view and can add its own sections.
 | OpenCode (shipped in 04) | Permissions (once/always/reject) and forms | Idle prompt | Prompt with `steer` | Prompt with `queue` | `/message`, `/diff`, `Session.Info` | `/inbox` (task 09) |
 | T3 (shipped in 05) | Questions via `t3_pending_request`. Permission approvals use **Open in T3**. | `t3_thread_send` with `queue` after the turn ends | `t3_thread_send` with `steer` | `t3_thread_send` with `queue` while a turn runs | `t3_thread_read` activity | `t3_queue` (task 09) |
 | Codex | Command, file-change and permissions approvals on tracked active threads through `thread/resume` and a held subscription (task 06, Codex 0.172+) | `turn/start` | `turn/steer` | Unavailable (experimental) | `thread/items/list` | Unavailable |
-| Claude Code | Existing `PermissionRequest` hooks | Existing send between turns | `PostToolUse` `additionalContext` | `Stop` block | Transcript | Unavailable |
+| Claude Code | `PermissionRequest` hooks | Send between turns | `PostToolUse` / `PostToolBatch` context, with `Stop` fallback | `Stop` block | Owning-machine transcript | Unavailable |
 
 Claude Code steer and queue apply only to sessions launched with the new
-hooks. The target matrix lands by adapter task. Task #530's journal and
+hooks. Pending delivery is memory-only in the hook receiver, lost on Stage
+restart. The target matrix lands by adapter task. Task #530's journal and
 the task prompts hold the API evidence. The plan checked the Codex
 0.172.0 schema, OpenCode v2.3.2 OpenAPI and T3 tool schemas.
 

@@ -27,6 +27,13 @@ func pushes(t *testing.T, a *claudecode.Adapter) (<-chan execution.Observation, 
 		})
 	}()
 	t.Cleanup(cancel)
+	deadline := time.Now().Add(5 * time.Second)
+	for !a.HasHookSubscriber() {
+		if time.Now().After(deadline) {
+			t.Fatal("Events never subscribed")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	return out, errc, cancel
 }
 
@@ -86,28 +93,12 @@ func TestEventsPushWhatHooksAnnounce(t *testing.T) {
 	ch, _, _ := pushes(t, a)
 	f.Reply(id, "All done.", true)
 	f.SetState(id, "done", "idle", "")
-	// Events subscribes asynchronously: retry the first hook until it lands.
-	var o execution.Observation
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if code := f.Hook(id, "Stop", map[string]any{"last_assistant_message": "ignored"}); code != http.StatusNoContent {
-			t.Fatal(code)
-		}
-		select {
-		case o = <-ch:
-		case <-time.After(100 * time.Millisecond):
-			if time.Now().After(deadline) {
-				t.Fatal("no push after Stop")
-			}
-			continue
-		}
-		break
+	if code := f.Hook(id, "Stop", map[string]any{"last_assistant_message": "ignored"}); code != http.StatusNoContent {
+		t.Fatal(code)
 	}
+	o := next(t, ch)
 	if o.State != "done" || o.Reply == nil || o.Reply.Text != "All done." || o.Session != (execution.SessionRef{ConnectionID: conn, ExternalSessionID: id}) {
 		t.Fatalf("after Stop %+v", o)
-	}
-	for len(ch) > 0 { // repeated Stops while subscribing
-		<-ch
 	}
 	// The prompt's hook stays open for an answer in Stage; it nudges first.
 	call := f.Ask(id, "Bash", map[string]any{"command": "ls"}, nil)
@@ -124,24 +115,12 @@ func TestEventsPushWhatHooksAnnounce(t *testing.T) {
 	}
 }
 
-// subscribed launches a hooked session, runs Events and returns once a
-// first hook was pushed (Events subscribes asynchronously).
+// subscribed launches a hooked session and waits for Events to subscribe.
 func subscribed(t *testing.T, f *claudetest.Fake, a *claudecode.Adapter) (string, <-chan execution.Observation, <-chan error, context.CancelFunc) {
 	t.Helper()
 	id := launched(t, f, a)
 	ch, errc, cancel := pushes(t, a)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		f.Hook(id, "Notification", map[string]any{"notification_type": "auth_success"})
-		select {
-		case <-ch:
-			return id, ch, errc, cancel
-		case <-time.After(50 * time.Millisecond):
-			if time.Now().After(deadline) {
-				t.Fatal("Events never subscribed")
-			}
-		}
-	}
+	return id, ch, errc, cancel
 }
 
 // Claude may post Stop a moment before its list shows the turn over:
