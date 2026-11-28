@@ -1562,37 +1562,35 @@ server's `harness_settings` row for that machine
   archive and turn completion for every thread. Stage reads each thread and
   passes the observation to the local runner. `Attention` lists loaded
   threads waiting on input.
-- **Interaction** (`execution.Interactive`, `interaction.go`; live gates
-  g8, g9, g10 against codex-cli 0.172.0). Each call opens its own
-  app-server connection, runs `thread/resume {threadId, excludeTurns}`,
-  acts, then `thread/unsubscribe`s and disconnects; the daemon keeps
-  running the turn. Resume replays the thread's pending server requests to
-  the resuming client right after its reply, with the same request ids
-  (per-thread counters) every client sees; `serverRequest/resolved` clears
-  one. Stage waits for the first replayed request, then 250 ms of quiet,
-  at most 3 s, and only resumes a thread whose status waits
-  (`waitingOnApproval`, `waitingOnUserInput`).
-  - **Requests.** `item/commandExecution/requestApproval` and
-    `item/fileChange/requestApproval` are approvals keyed by `approvalId`
-    (else `itemId`), with the plain decisions of `availableDecisions` in
-    Codex's order (all four for a file change, which names none):
-    `accept`, `acceptForSession`, `decline` (the turn continues without
-    it) and `cancel` (the turn stops). Decisions carrying an exec policy or
-    network amendment stay in Codex. A command shows its command and
-    reason; a file change shows its reason and, since Codex shares the
-    edits only with the session that made them, says to read the diff with
-    the resume command. `item/tool/requestUserInput` is a question request
-    keyed by `itemId` ("Codex asks"); `isOther` or no options allows custom
-    text. Permission requests (`item/permissions/requestApproval`), MCP
-    elicitations and questions with a secret answer are not listed: the
-    descriptor's `unlistedRequests` says to answer them with the resume
-    command.
-  - **Respond.** An approval takes one of its options and no text
-    (`{decision}`); a question request takes an answer for every question,
-    option labels or one custom text, several only when multi-select
-    (`{answers: {id: {answers}}}`). An answer that does not fit is
-    `*Invalid` before anything is sent; a request no longer pending (or an
-    unlisted kind) is `ErrNotFound`.
+- **Interaction** (`execution.Interactive`). The runner passes tracked
+  sessions to `TrackedEventSource` on the adapter's machine. On Codex
+  0.172 or later it subscribes to a tracked thread with an active turn
+  (running or waiting) using `thread/resume {threadId, excludeTurns: true}`.
+  This attaches to the existing turn and replays its pending requests
+  with their daemon-wide JSON-RPC IDs. Stage passes no configuration
+  overrides and starts no turn. It unsubscribes when the thread is idle
+  and reattaches to active threads after a connection drop.
+  - **Requests.** Command, file-change and permission approvals are
+    held in memory on the subscription by thread and JSON-RPC ID.
+    `serverRequest/resolved` removes a request, including when a Codex
+    client answered first. Turn completion and connection loss clear
+    their pending approvals. The command preview shows the exact
+    command, working directory and reason when present. Stage offers
+    Codex's `availableDecisions` in order. The plain decisions are
+    `accept`, `acceptForSession`, `decline` and `cancel`. The
+    `acceptWithExecpolicyAmendment` and `applyNetworkPolicyAmendment`
+    decisions carry Codex's proposed rules. File changes show paths and counts when
+    matching file item metadata arrives, or direct the user to the
+    resume command to review the diff. Permission requests show the
+    requested profile with turn, session and denial choices.
+  - **Respond.** Stage sends the result on the subscribed connection.
+    Command and file approvals take `{decision}`. Permission approvals
+    take `{permissions, scope}`, with an empty permission profile for
+    denial. An invalid option is `*Invalid`. An absent request is
+    `ErrNotFound`. Stage leaves experimental questions, MCP elicitations
+    and other server requests for the Codex client. The legacy
+    `applyPatchApproval` and `execCommandApproval` methods are outside
+    the v2 event path Stage uses.
   - **Send.** `thread/read`: a thread with a turn running is `*Busy`
     ("Codex is working…", or waiting on an approval or question); Stage
     never steers a turn (`turn/steer` is unused). Otherwise resume (which
@@ -1620,10 +1618,12 @@ socket; `internal/engine/contract_codex_test.go` runs the execution
 contract on it in both placements, and `codex/testdata` holds sanitized
 fixtures from the live gates. The fake also resumes threads (replaying
 their pending server requests), takes client replies to server requests
-and broadcasts `serverRequest/resolved` to subscribers. The send and
-respond gates rerun with `STAGE_CODEX_GATES=1 go test -tags codexlive
--run TestLiveGate ./internal/codex/` (real model turns on the signed-in
-account in temp directories; threads are deleted afterwards).
+and broadcasts `serverRequest/resolved` to subscribers. `mise run codex:live`
+launches a read-only scratch thread, answers a replayed approval in Stage,
+and verifies that the approved command ran. The raw protocol gates run
+with `STAGE_CODEX_GATES=1 go test -tags codexlive -run TestLiveGate
+./internal/codex/`. These gates use the signed-in account and delete their
+scratch threads afterwards.
 
 ## Steering live check
 

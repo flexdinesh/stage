@@ -269,18 +269,22 @@ func (g *gate) start(threadParams map[string]any, prompt, clientID string) strin
 	if err := json.Unmarshal(a.must("thread/start", threadParams), &th); err != nil {
 		g.t.Fatal(err)
 	}
-	g.t.Cleanup(func() {
-		c := gateDial(g.t, g.sock, "cleanup", &gateRecorder{})
-		defer c.close()
-		if _, err := c.call("thread/delete", map[string]any{"threadId": th.Thread.ID}); err != nil {
-			g.t.Logf("delete %s: %v", th.Thread.ID, err)
-		}
-	})
+	g.deleteOnCleanup(th.Thread.ID)
 	a.must("turn/start", map[string]any{"threadId": th.Thread.ID, "effort": "low", "clientUserMessageId": clientID,
 		"input": []map[string]any{{"type": "text", "text": prompt, "text_elements": []any{}}}})
 	a.must("thread/unsubscribe", map[string]any{"threadId": th.Thread.ID})
 	g.t.Logf("thread %s", th.Thread.ID)
 	return th.Thread.ID
+}
+
+func (g *gate) deleteOnCleanup(id string) {
+	g.t.Cleanup(func() {
+		c := gateDial(g.t, g.sock, "cleanup", &gateRecorder{})
+		defer c.close()
+		if _, err := c.call("thread/delete", map[string]any{"threadId": id}); err != nil {
+			g.t.Logf("delete %s: %v", id, err)
+		}
+	})
 }
 
 // g8: a message to an idle thread no client holds: turn/start alone, then
@@ -490,15 +494,32 @@ func TestLiveGateCleanup(t *testing.T) {
 }
 
 // TestLiveAdapterRoundTrip drives the adapter's interaction against the
-// daemon: a thread (started as Stage's launch does) that waits on a command
-// approval, Requests and Respond, then Send on the idle thread.
+// daemon: launch a scratch thread, attach the watch after it waits for
+// approval, answer the replay, then Send on the idle thread.
 func TestLiveAdapterRoundTrip(t *testing.T) {
 	g := newGate(t)
-	a := New(NewClient(CLI{}, "verify"), 1, "")
+	client := NewClient(CLI{}, "verify")
+	defer client.Close()
+	a := New(client, 1, "")
 	ctx := t.Context()
-	id := g.start(map[string]any{"approvalPolicy": "on-request", "sandbox": "read-only"},
-		"Run exactly `touch x` in the shell (request escalation if needed), then reply OK.", "verify-launch")
-	ref := execution.SessionRef{ConnectionID: 1, ExternalSessionID: id}
+	launch, err := a.Launch(ctx, execution.Intent{
+		ConnectionID: 1, RequestID: "verify-approval", Directory: g.work, Title: "Stage scratch approval",
+		Prompt: "Run exactly `touch x` in the shell. Request escalation before running it. Then reply OK.",
+		Config: execution.Config{Permission: "read-only"},
+	}, execution.Checkpoint{}, func(_ context.Context, cp execution.Checkpoint) error {
+		var r launchRecord
+		if err := json.Unmarshal(cp.Data, &r); err != nil {
+			return err
+		}
+		if r.Thread != "" {
+			g.deleteOnCleanup(r.Thread)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := launch.Session
 	poll := func(want string) execution.Observation {
 		for range 120 {
 			o, err := a.Observe(ctx, ref)
@@ -510,12 +531,33 @@ func TestLiveAdapterRoundTrip(t *testing.T) {
 		t.Fatalf("never %s", want)
 		return execution.Observation{}
 	}
-	poll("needs_input")
-	rs, err := a.Requests(ctx, ref)
+	waiting := poll("needs_input")
+	watch, cancel := context.WithCancel(ctx)
+	defer cancel()
+	watchDone := make(chan error, 1)
+	go func() {
+		watchDone <- a.TrackedEvents(watch, []execution.SessionRef{ref}, func(context.Context, execution.Observation) error { return nil })
+	}()
+	var rs []execution.Request
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		rs, err = a.Requests(ctx, ref)
+		if err != nil || len(rs) != 0 {
+			break
+		}
+		select {
+		case err := <-watchDone:
+			t.Fatal("approval watch stopped", err)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 	if err != nil || len(rs) != 1 || rs[0].Kind != execution.RequestApproval {
 		t.Fatalf("requests %+v %v", rs, err)
 	}
 	t.Logf("request %+v", rs[0])
+	current, err := a.Observe(ctx, ref)
+	if err != nil || current.ExecutionID != waiting.ExecutionID || current.Config.Model != waiting.Config.Model {
+		t.Fatalf("resume changed the turn or model: %+v %v", current, err)
+	}
 	if err := a.Send(ctx, ref, execution.Message{Text: "hi"}); err == nil {
 		t.Fatal("send while waiting")
 	} else {

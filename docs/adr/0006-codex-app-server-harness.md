@@ -79,6 +79,11 @@ daemon, so a thread Stage starts is the user's thread too.
    Codex (`unlistedRequests`), with the resume command. Send starts a turn
    (`turn/start` with `clientUserMessageId`) only on an idle thread, after
    `thread/resume` (gate g8); a running turn is Busy and never steered.*
+
+   *Amended 2026-11-29 by [ADR 0014](0014-session-surface.md) task 06.
+   Stage holds a subscription while a tracked thread has an active turn.
+   The subscription receives command, file-change and permission
+   approvals. Questions and MCP elicitations are answered in Codex.*
 8. **Inventory.** Workspaces are the projects `config/read` reports
    trusted (`projects{path:{trust_level}}`); a Git checkout is importable.
    Stage never writes Codex's config: trust a project in Codex.

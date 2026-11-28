@@ -199,7 +199,7 @@ func (r *Runner) start(entry WatchConnection) {
 	}
 	r.workers[entry.ID] = worker
 	go r.poll(ctx, worker)
-	go r.stream(ctx, entry.ID)
+	go r.stream(ctx, entry)
 }
 
 func (a *attentionWatch) retain(id string, active bool) {
@@ -357,7 +357,8 @@ func (r *Runner) read(ctx context.Context, a execution.Adapter, ref execution.Se
 	return record.Observation, r.send(ctx, record)
 }
 
-func (r *Runner) stream(ctx context.Context, id int64) {
+func (r *Runner) stream(ctx context.Context, entry WatchConnection) {
+	id := entry.ID
 	var mu sync.Mutex
 	var last *string
 	report := func(ctx context.Context, message string) {
@@ -375,7 +376,7 @@ func (r *Runner) stream(ctx context.Context, id int64) {
 		if err == nil {
 			if src, ok := execution.As[execution.EventSource](a); ok {
 				call, cancel := context.WithCancel(ctx)
-				err = src.Events(call, func(callback context.Context, o execution.Observation) error {
+				sink := func(callback context.Context, o execution.Observation) error {
 					if err := call.Err(); err != nil {
 						return err
 					}
@@ -390,7 +391,18 @@ func (r *Runner) stream(ctx context.Context, id int64) {
 						report(call, "")
 					}
 					return err
-				})
+				}
+				if tracked, ok := execution.As[execution.TrackedEventSource](a); ok {
+					var refs []execution.SessionRef
+					for _, session := range entry.Sessions {
+						if !session.Attention {
+							refs = append(refs, execution.SessionRef{ConnectionID: id, ExternalSessionID: session.ID})
+						}
+					}
+					err = tracked.TrackedEvents(call, refs, sink)
+				} else {
+					err = src.Events(call, sink)
+				}
 				cancel()
 			}
 			if ctx.Err() == nil && err != nil {

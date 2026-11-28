@@ -114,6 +114,12 @@ its ready snapshot. The trait says whether the interface is callable.
 Check the corresponding operation, policy or action availability for the
 requested scope. Polling reconciles missed `EventSource` events.
 
+An adapter can also implement `TrackedEventSource` when a native event
+subscription needs the set of sessions Stage owns. The runner passes
+tracked session references and cancels the stream when its watch changes.
+Discovery sessions are excluded. The runner uses this interface on the
+adapter's machine, including on a worker.
+
 ### Session interaction and activity
 
 Follow [ADR 0014](adr/0014-session-surface.md) and the

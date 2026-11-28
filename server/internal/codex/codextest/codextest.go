@@ -1,6 +1,6 @@
 // Package codextest is an in-process fake of the Codex app-server daemon:
 // a WebSocket JSON-RPC server on a unix socket speaking the subset of the
-// protocol the codex adapter uses (codex-cli 0.171.0 shapes, recorded in
+// protocol the codex adapter uses (codex-cli 0.172.0 shapes, recorded in
 // internal/codex/testdata), with knobs for lost replies, restarts,
 // sign-out and missing methods.
 package codextest
@@ -48,7 +48,6 @@ type Thread struct {
 	persisted bool
 	// requests are the thread's pending server requests (Request).
 	requests []*serverRequest
-	reqSeq   int
 }
 
 type serverRequest struct {
@@ -75,6 +74,7 @@ type Server struct {
 	clients map[*wsClient]bool
 	threads map[string]*Thread
 	seq     int
+	reqSeq  int
 	now     int64
 	models  []map[string]any
 	// projects is the user config's projects table; configVersion its
@@ -204,10 +204,25 @@ func (s *Server) Restart(t testing.TB) {
 			}
 		}
 		th.Status, th.Flags = "notLoaded", nil
+		th.requests = nil
 	}
 	s.mu.Unlock()
 	if err := s.listen(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// DropClients simulates a transport loss without restarting the daemon or
+// ending its turns. A new subscriber can recover the pending requests.
+func (s *Server) DropClients() {
+	s.mu.Lock()
+	clients := make([]*wsClient, 0, len(s.clients))
+	for c := range s.clients {
+		clients = append(clients, c)
+	}
+	s.mu.Unlock()
+	for _, c := range clients {
+		_ = c.ws.CloseNow()
 	}
 }
 
@@ -340,9 +355,22 @@ func (s *Server) Finish(id, status, final string) {
 	tu := th.Turns[len(th.Turns)-1]
 	tu.Status, tu.Final, tu.Completed = status, final, s.now
 	th.Status, th.Flags, th.Updated = "idle", nil, s.now
+	th.requests = nil
+	turnID := tu.ID
 	s.mu.Unlock()
 	s.broadcastStatus(id)
-	s.broadcast("turn/completed", map[string]any{"threadId": id})
+	s.broadcast("turn/completed", map[string]any{"threadId": id, "turn": map[string]any{"id": turnID}})
+}
+
+// StartFileChange sends the file metadata to current thread subscribers.
+func (s *Server) StartFileChange(thread, item string, changes []map[string]any) {
+	th := s.Thread(thread)
+	turn := th.Turns[len(th.Turns)-1].ID
+	for _, c := range s.subscribers(thread) {
+		c.write(map[string]any{"method": "item/started", "params": map[string]any{
+			"threadId": thread, "turnId": turn, "item": map[string]any{"id": item, "type": "fileChange", "changes": changes},
+		}})
+	}
 }
 
 // Archive archives the thread as `codex archive` does.
@@ -556,6 +584,11 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		th.Name = str("name")
 		return map[string]any{}, nil
 	case "thread/resume":
+		for k := range p {
+			if k != "threadId" && k != "excludeTurns" {
+				return nil, invalid("unexpected thread/resume override %q", k)
+			}
+		}
 		th, e := thread()
 		if e != nil {
 			return nil, e
@@ -773,16 +806,19 @@ func (s *Server) subscribers(id string) []*wsClient {
 // (method and params; threadId is set): its subscribers receive it now, a
 // client resuming the thread later gets it replayed. The thread waits on
 // approval, or on user input for item/tool/requestUserInput. Returns the
-// request id (per thread, from 0).
+// daemon-wide request id.
 func (s *Server) Request(id, method string, params map[string]any) int {
 	s.mu.Lock()
 	th := s.threads[id]
 	p := map[string]any{"threadId": id}
+	if len(th.Turns) > 0 {
+		p["turnId"] = th.Turns[len(th.Turns)-1].ID
+	}
 	for k, v := range params {
 		p[k] = v
 	}
-	r := &serverRequest{ID: th.reqSeq, Method: method, Params: p}
-	th.reqSeq++
+	r := &serverRequest{ID: s.reqSeq, Method: method, Params: p}
+	s.reqSeq++
 	th.requests = append(th.requests, r)
 	flag := "waitingOnApproval"
 	if method == "item/tool/requestUserInput" {
@@ -847,6 +883,70 @@ func (s *Server) Answers() []Answer {
 	return slices.Clone(s.answers)
 }
 
+// AnswerFromAnotherClient simulates Codex's own client resuming a thread
+// and answering a replayed request before Stage does.
+func (s *Server) AnswerFromAnotherClient(ctx context.Context, thread string, id int, result any) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	hc := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, "unix", s.Path)
+	}}}
+	ws, _, err := websocket.Dial(ctx, "ws://localhost/", &websocket.DialOptions{HTTPClient: hc})
+	if err != nil {
+		return err
+	}
+	defer ws.CloseNow()
+	write := func(m map[string]any) error {
+		b, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		return ws.Write(ctx, websocket.MessageText, b)
+	}
+	readUntil := func(match func(method string, id *int) bool) error {
+		for {
+			_, b, err := ws.Read(ctx)
+			if err != nil {
+				return err
+			}
+			var m struct {
+				Method string
+				ID     *int
+				Error  *rpcError
+			}
+			if err := json.Unmarshal(b, &m); err != nil {
+				return err
+			}
+			if match(m.Method, m.ID) {
+				if m.Error != nil {
+					return fmt.Errorf("%s", m.Error.Message)
+				}
+				return nil
+			}
+		}
+	}
+	call := func(id int, method string, params map[string]any) error {
+		if err := write(map[string]any{"id": id, "method": method, "params": params}); err != nil {
+			return err
+		}
+		return readUntil(func(method string, reply *int) bool { return method == "" && reply != nil && *reply == id })
+	}
+	if err := call(-1, "initialize", map[string]any{}); err != nil {
+		return err
+	}
+	if err := call(-2, "thread/resume", map[string]any{"threadId": thread, "excludeTurns": true}); err != nil {
+		return err
+	}
+	if err := readUntil(func(method string, request *int) bool { return method != "" && request != nil && *request == id }); err != nil {
+		return err
+	}
+	if err := write(map[string]any{"id": id, "result": result}); err != nil {
+		return err
+	}
+	return readUntil(func(method string, _ *int) bool { return method == "serverRequest/resolved" })
+}
+
 // Subscribed reports how many clients hold the thread's subscription.
 func (s *Server) Subscribed(id string) int { return len(s.subscribers(id)) }
 
@@ -904,6 +1004,8 @@ func wireTurn(tu *Turn, view string) map[string]any {
 type Daemon struct {
 	Srv *Server
 	T   testing.TB
+	// VersionTag overrides the default version returned by the daemon.
+	VersionTag string
 
 	mu sync.Mutex
 	// Missing: the CLI is not installed.
@@ -917,7 +1019,11 @@ var _ codex.Daemon = (*Daemon)(nil)
 func (d *Daemon) Starts() int { d.mu.Lock(); defer d.mu.Unlock(); return d.starts }
 
 func (d *Daemon) info(status string) codex.DaemonInfo {
-	return codex.DaemonInfo{Status: status, SocketPath: d.Srv.Path, CLIVersion: "0.171.0", AppServerVersion: "0.171.0"}
+	version := d.VersionTag
+	if version == "" {
+		version = "0.172.0"
+	}
+	return codex.DaemonInfo{Status: status, SocketPath: d.Srv.Path, CLIVersion: version, AppServerVersion: version}
 }
 
 func (d *Daemon) Version(context.Context) (codex.DaemonInfo, error) {

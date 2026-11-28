@@ -753,7 +753,7 @@ Codex's setup (hosted; [ADR 0006](adr/0006-codex-app-server-harness.md)): field 
 - `PUT /api/harnesses/codex/settings`: `{binary}`. A connected Codex reconnects through the new CLI on next use.
 - `DELETE /api/harnesses/codex/connection`: deactivates the adapter; the daemon keeps running and its threads stay in Codex.
 
-Codex tasks: respond and send are available ([session interaction](#session-interaction-api-v6)); requests Stage doesn't list are answered in Codex, and every Codex session's links carry `command`, the `cd <dir> && codex resume <id>` line to copy. Adoption accepts a thread id or that command; a thread T3 started (originator `T3 Code`, which T3 wraps) is refused with "This Codex session was started by T3. Track it through T3."
+Codex tasks with a connected daemon at 0.172 or later can answer command, file-change and permission approvals through the declared `respond` operation ([session interaction](#session-interaction-api-v6)). `send` starts a turn on an idle thread. Questions and MCP elicitations are answered in Codex. Every Codex session's links carry `command`, the `cd <dir> && codex resume <id>` line to copy. Adoption accepts a thread id or that command. A thread T3 started (originator `T3 Code`, which T3 wraps) is refused with "This Codex session was started by T3. Track it through T3."
 
 Request `/api/connections/:connectionId/capabilities?workspaceId=ID` for options for an exact workspace. The scoped session context route supports explicit adoption previews. Task detail includes a bounded finalReply, the session's `usage` when its harness reports one, and `links.web`, `links.native` or `links.command` when available. `links.command` is a shell command that resumes the session in the harness's own client; hosts offer to copy it (Copy resume command) when there is no destination to open. Capabilities may list harness-wide `options` (any model) beside each model's `options`; an `executionConfig` may set the union, and option ids never collide (capabilities that reuse an id are rejected).
 
@@ -1116,7 +1116,12 @@ OpenCode offers `respond` (its permissions and the forms Stage can show,
 when its OpenAPI has the reply operations; other forms are answered in
 OpenCode, its descriptor's `unlistedRequests`) and `send` (queued: a
 running session takes it when its turn ends, never mid-turn; both when its
-OpenAPI has the operations: [execution.md](execution.md#opencode-interaction)); Codex offers `respond` (command and file-change approvals and its `requestUserInput` questions; permission requests, MCP elicitations and secret questions are answered in Codex, its descriptor's `unlistedRequests`) and `send` (a new turn on an idle thread; busy while a turn runs: [execution.md](execution.md#codex-adapter)). The app answers and sends on task detail
+OpenAPI has the operations: [execution.md](execution.md#opencode-interaction)).
+Codex offers `respond` for command, file-change and permission approvals
+on tracked active threads with a supported daemon. Its descriptor's
+`unlistedRequests` points questions and MCP elicitations to Codex.
+Codex `send` starts a new turn on an idle thread and reports busy while a
+turn runs ([execution.md](execution.md#codex-adapter)). The app answers and sends on task detail
 (answers also on needs-input rows); agents use `list_requests`,
 `respond_request` and `send_message` (CLI `task requests|respond|send`).
 An answer or message whose `Stage-Caller-Session` belongs to the task gets 403
@@ -1457,6 +1462,7 @@ The server and workers roll forward together at API v9. Layer 07 raises the inde
 - Notification subjects (additive, no version bump): events `completed`, `tree_completed`, `schedule_started` and `schedule_skipped`; `Notification.treeId` and `scheduleId`; groups `tree:<id>` and `schedule:<id>` with tags `tree-<id>` and `schedule-<id>`. A task's finished run no longer notifies (`done` is for untracked sessions); acceptance by inference or an agent notifies `completed` (see "Notification rules"). Migration 0056 adds `completed`, `tree_completed` and `schedule_skipped` to saved filters.
 - Session rename (additive, no version bump): the `sessionRename` operation, and a task title change renames the session Stage launched where available (`PATCH /api/tasks/:id`).
 - Session surface contracts (additive, no version bump, [ADR 0014](adr/0014-session-surface.md)). Connections declare `steer`, `queue` and `activity`. Session messages accept `delivery` and the activity route returns a bounded session view. Worker kinds `adapter.deliver` and `adapter.activity` gate the new calls. MCP and CLI expose the same contracts.
+- Codex approvals use the existing request and response schemas and worker kinds. Tracked active threads list command, file-change and permission approvals. Permission approvals use the option IDs `turn`, `session` and `decline`. Use the options each request returns. Experimental Codex questions are answered through the resume command.
 - Task session history (additive, no version bump). Migration 0057 preserves session links by attempt. Task detail and MCP `get_task` expose `sessions`, and `GET /api/tasks/:id/sessions/:attempt` reads the cached snapshot. Activity accepts an attempt over HTTP, MCP and CLI. Historical session references return the owning task and attempt.
 - Needs-input task notifications store and push `/tasks/<id>/session`. Task group keys and push tags keep the same IDs. Historical notification records keep their stored URLs.
 - Agent operation parity (additive, no version bump; [ADR 0011](adr/0011-agent-operation-parity.md)): agent callers may complete, reopen, list and answer requests, send messages, read opening prompts, create, rename and archive projects, read project events, edit group membership, manage snippets and delete attachments. 403 `agent_forbidden` on respond and send is now `self_action_forbidden`, only for the caller's own task. `PATCH /api/projects/:id` keeps omitted fields.

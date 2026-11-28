@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -83,122 +84,38 @@ func TestConnRoutesServerRequestsAndResponds(t *testing.T) {
 	}
 }
 
-// The registry keeps one thread's requests in arrival order until
-// serverRequest/resolved names them; other threads are ignored.
-func TestPendingRegistryLifecycle(t *testing.T) {
-	p := newPending("t1")
-	req := func(id int, thread string) serverRequest {
-		params, _ := json.Marshal(map[string]any{"threadId": thread, "itemId": "i"})
-		raw, _ := json.Marshal(id)
-		return serverRequest{ID: raw, Method: methodCommandApproval, Params: params}
-	}
-	resolved := func(id int, thread string) notification {
-		params, _ := json.Marshal(map[string]any{"threadId": thread, "requestId": id})
-		return notification{Method: notifyResolved, Params: params}
-	}
-	p.add(req(1, "t1"))
-	p.add(req(0, "t1"))
-	p.add(req(5, "t2"))
-	p.add(req(1, "t1")) // a replay of a request already held
-	if got := p.list(); len(got) != 2 || idKey(got[0].ID) != "1" || idKey(got[1].ID) != "0" {
-		t.Fatalf("list %+v", got)
-	}
-	p.notify(resolved(0, "t2"))
-	p.notify(notification{Method: "thread/status/changed", Params: json.RawMessage(`{"threadId":"t1","requestId":1}`)})
-	if p.size() != 2 {
-		t.Fatalf("cleared by another thread or method: %d", p.size())
-	}
-	p.notify(resolved(1, "t1"))
-	if got := p.list(); len(got) != 1 || idKey(got[0].ID) != "0" {
-		t.Fatalf("after resolve %+v", got)
-	}
-}
-
-// settle returns after the quiet spell once a request arrived, and at the
-// cap when none does.
-func TestPendingSettleWaitsForReplay(t *testing.T) {
-	quiet, wait := replayQuiet, replayWait
-	replayQuiet, replayWait = 20*time.Millisecond, 200*time.Millisecond
-	t.Cleanup(func() { replayQuiet, replayWait = quiet, wait })
-
-	p := newPending("t1")
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		p.add(serverRequest{ID: json.RawMessage(`0`), Params: json.RawMessage(`{"threadId":"t1"}`)})
-	}()
-	start := time.Now()
-	if err := p.settle(t.Context()); err != nil || p.size() != 1 {
-		t.Fatalf("settle %v size %d", err, p.size())
-	}
-	if d := time.Since(start); d >= replayWait {
-		t.Fatalf("waited the cap (%s) despite a request", d)
-	}
-	start = time.Now()
-	if err := newPending("t1").settle(t.Context()); err != nil || time.Since(start) < replayWait {
-		t.Fatalf("empty settle %v after %s", err, time.Since(start))
-	}
-}
-
-// The requests the live gates recorded (codex-cli 0.172.0) map to Stage's
-// requests, and the answers the gates sent are the ones answer builds.
-func TestRecordedServerRequestsMap(t *testing.T) {
-	type entry struct {
-		Client string
-		Dir    string
-		Msg    gateLike
-	}
-	load := func(name string) []entry {
-		var es []entry
-		fixture(t, name, &es)
-		return es
-	}
-	var got []execution.Request
-	sent := map[string]string{}
-	for _, name := range []string{"g9-transcript.json", "g10-transcript.json"} {
-		var reqs []serverRequest
-		for _, e := range load(name) {
-			switch {
-			case e.Dir == "in" && e.Msg.Method != "" && len(e.Msg.ID) > 0 && (e.Client == "stage-respond" || e.Client == "stage-respond-2"):
-				reqs = append(reqs, serverRequest{ID: e.Msg.ID, Method: e.Msg.Method, Params: e.Msg.Params})
-			case e.Dir == "out" && e.Msg.Method == "" && len(e.Msg.ID) > 0 && len(e.Msg.Result) > 0 && (e.Client == "stage-respond" || e.Client == "stage-respond-2"):
-				sent[name+"/"+idKey(e.Msg.ID)] = string(e.Msg.Result)
-			}
+// These sanitized schema fixtures exercise every wire decision, including
+// two amendments of the same kind and the empty profile used to deny.
+func TestApprovalDecisionPayloads(t *testing.T) {
+	var frames []envelope
+	fixture(t, "approval-decisions.json", &frames)
+	approvals := make([]*approval, 0, len(frames))
+	for _, f := range frames {
+		_, a := decodeApproval(serverRequest{ID: f.ID, Method: f.Method, Params: f.Params})
+		if a == nil {
+			t.Fatalf("request %s was not listed", f.Method)
 		}
-		for _, r := range reqs {
-			req, ok := listed(r)
-			if !ok {
-				t.Fatalf("%s: %s not listed", name, r.Method)
-			}
-			got = append(got, req)
-			var resp execution.Response
-			switch {
-			case r.Method == methodCommandApproval:
-				resp.Option = "accept"
-			case r.Method == methodFileApproval:
-				resp.Option = "decline"
-			default:
-				resp.Answers = map[string][]string{"color": {"Blue"}}
-			}
-			result, err := answer(r, req, resp)
-			if err != nil {
-				t.Fatal(err)
-			}
-			b, _ := json.Marshal(result)
-			var want any
-			_ = json.Unmarshal([]byte(sent[name+"/"+idKey(r.ID)]), &want)
-			if wb, _ := json.Marshal(want); string(wb) != string(b) {
-				t.Fatalf("%s %s: answer %s, gate sent %s", name, r.Method, b, wb)
-			}
+		approvals = append(approvals, a)
+	}
+	cmd, permissions := approvals[0], approvals[1]
+	var choices []string
+	for _, c := range cmd.request.Options {
+		choices = append(choices, c.ID)
+	}
+	if !slices.Equal(choices, []string{"accept", "acceptForSession", "acceptWithExecpolicyAmendment",
+		"applyNetworkPolicyAmendment:allow:example.test", "applyNetworkPolicyAmendment:deny:example.test", "decline", "cancel"}) {
+		t.Fatal(choices)
+	}
+	assertResult := func(a *approval, option, want string) {
+		t.Helper()
+		result, err := a.answer(execution.Response{Option: option})
+		got, marshalErr := json.Marshal(result)
+		if err != nil || marshalErr != nil || string(got) != want {
+			t.Fatalf("%s = %s, want %s (%v, %v)", option, got, want, err, marshalErr)
 		}
 	}
-	if len(got) != 3 || got[0].Title != "Run a command" || len(got[0].Options) != 2 || got[1].Title != "Edit files" || got[2].Kind != execution.RequestQuestion || got[2].Questions[0].Options[1].Label != "Blue" {
-		t.Fatalf("mapped %+v", got)
-	}
-}
-
-type gateLike struct {
-	ID     json.RawMessage `json:"id"`
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
-	Result json.RawMessage `json:"result"`
+	assertResult(cmd, "acceptWithExecpolicyAmendment", `{"decision":{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["touch","x"]}}}`)
+	assertResult(cmd, "applyNetworkPolicyAmendment:deny:example.test", `{"decision":{"applyNetworkPolicyAmendment":{"network_policy_amendment":{"host":"example.test","action":"deny"}}}}`)
+	assertResult(permissions, "turn", `{"permissions":{"fileSystem":{"read":["/home/u/work"],"write":["/home/u/work"]}},"scope":"turn"}`)
+	assertResult(permissions, "decline", `{"permissions":{},"scope":"turn"}`)
 }

@@ -137,7 +137,7 @@ shared session view and can add its own sections.
 | --- | --- | --- | --- | --- | --- | --- |
 | OpenCode | Permissions (once/always/reject) and forms | Prompt delivery | Prompt delivery | Prompt delivery | `/message`, `/diff`, `Session.Info` | `/inbox` |
 | T3 | Questions only (`t3_pending_request`) | `t3_thread_send` for a new turn | `t3_thread_send` with `steer` | `t3_thread_send` with `queue` | `t3_thread_read` activity | `t3_queue` |
-| Codex | Command, file-change and permissions approvals through `thread/resume` and a held subscription | `turn/start` | `turn/steer` | Unavailable (experimental) | `thread/items/list` | Unavailable |
+| Codex | Command, file-change and permissions approvals on tracked active threads through `thread/resume` and a held subscription (task 06, Codex 0.172+) | `turn/start` | `turn/steer` | Unavailable (experimental) | `thread/items/list` | Unavailable |
 | Claude Code | Existing `PermissionRequest` hooks | Existing send between turns | `PostToolUse` `additionalContext` | `Stop` block | Transcript | Unavailable |
 
 Claude Code steer and queue apply only to sessions launched with the new
