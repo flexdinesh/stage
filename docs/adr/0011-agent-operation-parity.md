@@ -100,5 +100,5 @@ may run can still require the confirmation a person gives: MCP
 - [ADR 0009](0009-shared-access.md#principals-and-endpoint-policy) requires
   one policy across transports, so the shared agent credential gains the
   same powers over REST as over MCP.
-- MCP now lists 64 tools. Each registered MCP server loads every schema
+- MCP now lists 67 tools. Each registered MCP server loads every schema
   into context; the CLI stays the default for agents with a shell.

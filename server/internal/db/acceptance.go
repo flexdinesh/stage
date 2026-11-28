@@ -170,6 +170,10 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 		if p.Revision != in.Revision {
 			return Conflict("Acceptance changed. Refresh and review it again.")
 		}
+		by, err := acceptanceActor(ctx, tx, by, p.Evidence.TreeID)
+		if err != nil {
+			return err
+		}
 		current, err := ac.Current(ctx, id)
 		if err != nil {
 			return err
@@ -211,6 +215,26 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 	return result, err
 }
 
+// acceptanceActor names who accepts or reopens: "steerer #N" when the
+// caller session's task is the tree's active steerer (ADR 0013), else by.
+func acceptanceActor(ctx context.Context, tx store.Tx, by string, tree *int64) (string, error) {
+	c, ok := CallerSessionFrom(ctx)
+	if !ok || c.TaskID == 0 || tree == nil {
+		return by, nil
+	}
+	s, err := tx.Steering().Active(ctx, *tree)
+	if errors.Is(err, ErrNotFound) {
+		return by, nil
+	}
+	if err != nil {
+		return by, err
+	}
+	if s.TaskID == c.TaskID {
+		return fmt.Sprintf("steerer #%d", c.TaskID), nil
+	}
+	return by, nil
+}
+
 // recordAcceptance sets (or, with a nil acceptance, clears) the task's current
 // acceptance at revision, journals it and refreshes dependents' readiness.
 func recordAcceptance(ctx context.Context, tx store.Tx, id, revision int64, acceptanceID *int64, event, detail string) error {
@@ -222,7 +246,10 @@ func recordAcceptance(ctx context.Context, tx store.Tx, id, revision int64, acce
 	if err := ac.JournalEvent(ctx, id, event, detail, ActingUser(ctx), ActingMachine(ctx), attribution); err != nil {
 		return err
 	}
-	return ac.ResetDependentsReady(ctx, id)
+	if err := ac.ResetDependentsReady(ctx, id); err != nil {
+		return err
+	}
+	return steerAcceptance(ctx, tx, id, revision, acceptanceID)
 }
 
 // InferCompletion completes a done task whose session was closed in its

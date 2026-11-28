@@ -75,6 +75,9 @@ or `projects split`.
 | `stage tree start ID` | start every ready member |
 | `stage tree done\|archive ID [--undo]` | mark done or archive (`--undo` reopens) |
 | `stage tree rm-tree ID` | delete a tree and its tasks (none started) |
+| `stage tree steer ID --prompt TEXT --connection ID --workspace-id ID [--title T] [--replace]` | give the tree a steerer task and launch it (`--replace` ends the current one) |
+| `stage tree unsteer ID` | stop steering (ends the binding, stops the steerer's session) |
+| `stage tree steering-events ID [--after N] [--limit N]` | the tree's steering event feed |
 | `stage tree notes ID ...` | the tree's journal ([Journals](#journals)) |
 
 ## Journals
@@ -280,6 +283,8 @@ stage task wait 42 --until done --timeout 30m                          # exit 3 
 stage tree new --title "Auth" 41 43:41 42:43                                   # 43 needs 41, 42 needs 43
 stage task add --title "Docs" --prompt "..." --connection 2 --workspace-id "$WORKSPACE_ID" --needs 42 --start-mode manual    # ready (not launched) once 42 is completed
 stage tree start 7                                                             # start every ready member
+stage tree steer 7 --prompt "Answer members, accept good work" --connection 2 --workspace-id "$WORKSPACE_ID"  # a steerer for tree 7
+stage tree steering-events 7 --after 40                                        # what changed since event 40
 stage task notes 42 add --text "Chose cookie sessions" --category decision
 stage task ls --origin-connection 1 --origin-session "$T3CODE_THREAD_ID"        # tasks a T3 session created (connection 1)
 stage show "http://127.0.0.1:7380/tasks/12"                                     # what a pasted link names

@@ -221,7 +221,9 @@ type ContextOut struct {
 	WorkspaceID  string  `json:"workspaceId,omitempty"`
 	TreeID       *int64  `json:"treeId"`
 	TreeTitle    *string `json:"treeTitle"`
-	APIURL       string  `json:"apiUrl"`
+	// SteeringTreeID: the tree the caller's task actively steers.
+	SteeringTreeID *int64 `json:"steeringTreeId"`
+	APIURL         string `json:"apiUrl"`
 	// SessionSource: where session came from (request, argument,
 	// STAGE_CALLER_SESSION or a harness variable such as T3CODE_THREAD_ID).
 	SessionSource string `json:"sessionSource,omitempty"`
@@ -268,6 +270,9 @@ func (o *Ops) Context(ctx context.Context, a CallerArgs) (ContextOut, error) {
 		}
 		out.TreeID = d.Task.TreeID
 		out.TreeTitle = d.Task.TreeTitle
+		if st := d.Task.Steering; st != nil && st.Active {
+			out.SteeringTreeID = &st.TreeID
+		}
 	}
 	return out, nil
 }

@@ -282,6 +282,13 @@ func (s *Store) GetTree(ctx context.Context, id int64) (TreeDetail, error) {
 		if err != nil {
 			return TreeDetail{}, fmt.Errorf("tree: %w", err)
 		}
+		steerers, err := tx.Steering().ActiveForTrees(ctx, []int64{id})
+		if err != nil {
+			return TreeDetail{}, err
+		}
+		if st, ok := steerers[id]; ok {
+			tree.Steerer = &st
+		}
 		tasks, err := tr.Members(ctx, []int64{id})
 		if err != nil {
 			return TreeDetail{}, err
@@ -332,11 +339,18 @@ func (s *Store) ListTrees(ctx context.Context, f TreeFilter) ([]TreeSummary, err
 		if err != nil {
 			return nil, err
 		}
+		steerers, err := tx.Steering().ActiveForTrees(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
 		byTree := map[int64][]Task{}
 		for _, m := range members {
 			byTree[*m.TreeID] = append(byTree[*m.TreeID], m)
 		}
 		for i, t := range trees {
+			if st, ok := steerers[t.ID]; ok {
+				t.Steerer = &st
+			}
 			out[i] = summarize(t, byTree[t.ID], edges)
 		}
 		return out, nil
@@ -498,6 +512,11 @@ func (s *Store) DeleteTree(ctx context.Context, id int64) error {
 		if started != nil {
 			return Conflict("#%d has started: archive the tree instead", *started)
 		}
+		if _, err := tx.Steering().Active(ctx, id); err == nil {
+			return Conflict("tree %d has an active steerer: stop steering first", id)
+		} else if !errors.Is(err, ErrNotFound) {
+			return err
+		}
 		if err := tr.DeleteMembers(ctx, id); err != nil {
 			return err
 		}
@@ -625,7 +644,7 @@ func (s *Store) MarkReady(ctx context.Context) ([]int64, error) {
 			if err != nil {
 				return err
 			}
-			if err := addTaskEvent(eventCtx, tx, id, &from, StateBacklog, "ready: needs completed"); err != nil {
+			if err := addTaskEvent(eventCtx, tx, id, &from, StateBacklog, ReadyDetail); err != nil {
 				return err
 			}
 		}
@@ -641,7 +660,18 @@ func releaseAttribution(ctx context.Context, tx store.Tx, id int64) (context.Con
 		return ctx, err
 	}
 	cause.TaskID, cause.AcceptanceID = a.TaskID, a.ID
-	return AutomatedWork(ctx, "system", cause, a.Attribution), nil
+	ctx = AutomatedWork(ctx, "system", cause, a.Attribution)
+	// The readiness steering event inherits the acceptance's caller.
+	if c := a.Attribution.Cause; c != nil && c.Session != nil {
+		caller := CallerSession{Ref: *c.Session}
+		owner, err := tx.Tasks().BySession(ctx, *c.Session)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return ctx, err
+		}
+		caller.TaskID = owner.ID
+		ctx = withSteeringCause(ctx, caller)
+	}
+	return ctx, nil
 }
 
 func treeExists(ctx context.Context, tx store.Tx, id int64) error {

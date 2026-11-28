@@ -834,6 +834,7 @@ attempt is consumed.
   "finishedAt": null,
   "acceptanceId": null, "acceptanceRevision": 0, "completedAt": null, "completionProvenance": null,
   "stateRevision": 2,
+  "steering": null,               // { treeId, active, endedAt?, endReason? } once it steered a tree
   "runStartedAt": null,
   "runEndedAt": null,
   "lastWordPreview": null,
@@ -862,6 +863,7 @@ attempt is consumed.
 - `links`: where the session opens, from the harness adapter: `web`, `native` (an app scheme), `command` (a copyable resume command); each omitted when the harness has none. T3: `web` = `publicUrl/<environmentId>/<externalSessionId>` (the Browser URL), `native` = `t3code://threads/<environmentId>/<externalSessionId>`.
 - `finishedAt`: first entry into `done|failed|interrupted|cancelled` (per launch attempt).
 - `stateRevision`: counts the task's real state transitions (a same-state event does not count; 0 for a new task). A guarded answer names the revision it answers (`expectedStateRevision`, see "Session interaction").
+- `steering`: the task's latest steerer binding (see "Tree steering"), null when it never steered: `{ "treeId", "active", "endedAt"?, "endReason"? }`, `endReason` one of `replaced | stopped | tree_finished | task_removed`.
 - `runStartedAt` / `runEndedAt`: the task session's elapsed run span, from its observation; null without a session or before one is observed.
 - `lastWordPreview` / `lastWordAt`: the task session's latest reply as one plain line (markdown stripped, at most 240 characters) and its time, from the observation; null without a session or before a reply is read.
 
@@ -1170,8 +1172,9 @@ A tree is a DAG of tasks: each member's `needs` are members that must be complet
 
 `Tree`:
 ```json
-{ "id": 3, "title": "Ship auth", "startMode": "auto", "status": "open", "closedAt": null, "createdAt": "2026-11-08T09:59:00Z", "createdBy": 1, "sourceMachineId": null, "updatedAt": "2026-11-08T10:00:00Z", "deletable": false }
+{ "id": 3, "title": "Ship auth", "startMode": "auto", "status": "open", "closedAt": null, "createdAt": "2026-11-08T09:59:00Z", "createdBy": 1, "sourceMachineId": null, "updatedAt": "2026-11-08T10:00:00Z", "deletable": false, "steerer": null }
 ```
+`steerer`: the tree's active steerer (see "Tree steering"), else null: `{ "taskId", "title", "state" (the steerer task's), "since" (bound at), "deliveredThrough" (last delivered event id, 0 before any), "lastDeliveredAt", "pending" (the binding's events after `deliveredThrough` not caused by the steerer), "lastError" }`.
 `status`: `open | done | archived` (see "Done, archive and delete"); `closedAt`: when it was marked done or archived (null while open); `deletable`: the tree and every member have no recorded work and no member started (`DELETE` removes the tree and its tasks).
 `TreeDetail` = `Tree` + `TreeTimes` + `{ "tasks": Task[] (by id), "edges": [{ "taskId": 9, "needId": 5 }], "levels": [[5, 7], [9]], "events": TaskEvent[] }`. `levels`: member ids per level, roots first; a task's level is the longest need path to a root; each level by id. `events`: the members' 50 newest task events, newest first (`{ id, taskId, fromState, toState, detail, at }`), retained temporarily for compatibility. New tree Activity reads the journal.
 
@@ -1192,7 +1195,7 @@ Body `{ "title": string, "startMode"?: StartMode, "tasks": [{ "taskId": number, 
 Body: any of `title`, `startMode` (`auto|manual`), `status` (`open|done|archived`; applied first). 200 `TreeDetail`. 400. 404. Switching to `manual` makes released members ready (each notifies once); switching to `auto` launches them on the next reconcile. `status` `done` or `archived` 409 while a member is `launching|running|needs_input` (`#N is running: stop it first`); `startMode` 409 on a done or archived tree; `open` reopens or unarchives.
 
 ### `DELETE /api/trees/:id`
-Deletes the tree and every member task only when `deletable`: no recorded work in the tree or its members and no member ever started. 204. 404. 409 otherwise; archive instead. Protection survives a task leaving the tree.
+Deletes the tree and every member task only when `deletable`: no recorded work in the tree or its members and no member ever started. 204. 404. 409 otherwise (archive instead), and while the tree has an active steerer (stop steering first). Protection survives a task leaving the tree.
 
 ### `POST /api/trees/:id/dissolve`
 Detaches the tasks, clears their needs, and archives the tree. Its identity and journal remain readable. 204. 404.
@@ -1205,6 +1208,36 @@ Splices the task out: its dependents take over its needs; the task stays, standa
 
 ### `POST /api/trees/:id/start`
 "Start ready": starts every `ready` member (same as `POST /api/tasks/:id/start` each). 200 `{ "started": Task[], "errors": [{ "taskId": number, "error": string }] }`. 404. 409 on a done or archived tree.
+
+## Tree steering
+
+A tree can have one steerer ([ADR 0013](adr/0013-tree-steering.md)): an ordinary standalone task bound to it that hears about the tree's members and acts on them (answering, accepting) with the operations any agent has. It is never a member: a task cannot join the tree it steers (400 `{error, code: "steerer_not_member"}` on create, add, needs and a pull-in through needs), and a task steers at most one tree. While a binding is active, each member change enqueues a steering event in the same transaction as the change; nothing is enqueued without one. Delivering events to the steerer, its launch brief and notification holds come later; today the steerer reads the feed.
+
+### `POST /api/trees/:id/steerer`
+Body `{ "prompt": string, "title"?: string, "connectionId": number, "workspaceId": string, "executionConfig"?: ExecutionConfig, "replace"?: boolean, "requestId": string }`. Creates a standalone task (title default `Steer: <tree title>`, the prompt as given), binds it and launches it. 201 `{ "tree": TreeDetail, "task": Task, "warnings": string[] }`. `requestId` is required and scoped to the tree: retrying identical content returns the existing steerer (200, nothing launched again); other content with the same key is 409. 400 missing fields or destination. 404 tree. 409: the tree is done or archived; `steerer_exists` while one is active and `replace` is not set; `operation_unavailable` with the harness's reason when the connection's `send` operation is unavailable (a steerer needs send). `replace` ends the current binding (`replaced`), stops the old steerer's session when it is active and the harness offers stop, then launches the new task; a failed stop still ends the binding and returns a warning. A launch failure leaves the bound task failed with `lastError` and a warning.
+
+### `DELETE /api/trees/:id/steerer`
+Ends the binding (`stopped`) and stops the steerer's session as above. 200 `{ "tree": TreeDetail, "warnings": string[] }`. 404 tree. 409 `no_steerer` when none is active.
+
+### `GET /api/trees/:id/steering/events`
+Query `after` (event id, default 0) and `limit` (1 to 200, default 50). 200 `{ "events": SteeringEvent[], "hasMore": boolean }`, ascending by id, every event of the tree's bindings (past ones too). 400 bad query. 404 tree. Ids are monotonic per tree: a cursor never skips an event committed later.
+
+`SteeringEvent`:
+```json
+{ "id": 41, "treeId": 3, "steererId": 2, "kind": "member_needs_input", "taskId": 9, "payload": { "title": "Build API", "stateRevision": 4 },
+  "causedBy": { "session": { "connectionId": 1, "externalSessionId": "t-abc" }, "taskId": 12 }, "self": true, "createdAt": "2026-11-28T10:00:00Z" }
+```
+- `kind` and `payload` (every member event carries the member's `title`):
+  - `member_needs_input` (`stateRevision`, the revision a guarded answer names), `member_done` (`reply`, at most 600 characters, and `replyTruncated`), `member_failed` and `member_interrupted` (`error` when set), `member_cancelled`: the member entered that state.
+  - `member_ready`: a manual member's needs were all completed (its `ready: needs completed` episode).
+  - `member_added`, `member_removed`: membership changed.
+  - `member_accepted` (`acceptanceId`, `revision`), `member_reopened` (`revision`).
+  - `member_answered` (`via`: `respond` with `requestId`, or `send`): an answer through Stage.
+  - `note` (`noteId`, `category`, `text` at most 600 characters, `truncated`): a `blocker` or `decision` note on a member or on the tree.
+  - `tree_status` (`from`, `to`), `steering_started`, `steering_ended` (`reason`); `taskId` is the steerer for these two.
+- `causedBy`: the caller session that made the change (`Stage-Caller-Session`) and the task that owns it; null for harness observations, the user's own actions and the server's. A dependent made ready inherits the cause of the acceptance that released it. `self`: caused by the binding's steerer task.
+
+The tree journal records `steering_started`, `steering_replaced` and `steering_ended` events. An acceptance whose caller is the tree's active steerer reads `Completed by steerer #N` (`Reopened by steerer #N`).
 
 ## Schedules
 
@@ -1706,7 +1739,8 @@ Reply budget per need: `min(4000, max(1000, 8000 / sources))` Unicode characters
 - `list_actions` and `run_action` take exactly one of `connectionId`, `taskId` or `projectId`. A project also requires `onConnectionId` and `workspaceId`. `run_action` takes `actionId`, optional `input` and optional `confirmed` (sends `Stage-Action-Confirmed: 1`; set it only after the user agreed to the action's `confirm` text, which an action such as Claude Code's `trust` requires). Both tools use agent policy with or without caller provenance.
 - CLI `stage action ls|run` takes `--connection ID`, `--task ID` or `--project ID --on-connection ID --workspace-id ID`. For example, `stage action run --task 42 label --input - --json` reads the input JSON from stdin. Use `--confirm` for a user-only destructive action.
 - `read_ref {session}` and `stage show --target-connection ID --target-session ID` accept an opaque scoped ID. A scoped reference path is `/connections/:connectionId/sessions/:id`. `list_tasks {originSession}` uses REST query fields `originConnectionId` and `originSessionId`. A bare session id names no connection: pass the connection with it.
-- Journals: `read_journal {taskId?|treeId?, kind?, category?, q?, filterTaskId?, cursor?, limit?}` requires exactly one owner; `filterTaskId` is tree-only. `get_journal_entry {id}` retrieves full text. `append_note {taskId?|treeId?, text, requestId, category?, sourceTaskId?, callerSession?}` records caller session provenance. `get_context` includes `callerTaskId`, current `treeId` and `treeTitle`; refresh it or `get_task` before reading or contributing to a tree.
+- Journals: `read_journal {taskId?|treeId?, kind?, category?, q?, filterTaskId?, cursor?, limit?}` requires exactly one owner; `filterTaskId` is tree-only. `get_journal_entry {id}` retrieves full text. `append_note {taskId?|treeId?, text, requestId, category?, sourceTaskId?, callerSession?}` records caller session provenance. `get_context` includes `callerTaskId`, current `treeId` and `treeTitle`, and `steeringTreeId` (the tree the caller's task actively steers, else null); refresh it or `get_task` before reading or contributing to a tree.
+- Tree steering: `set_tree_steerer {treeId, prompt, connectionId, workspaceId, title?, executionConfig?, replace?, requestId?, callerSession?}`, `end_tree_steering {treeId, callerSession?}` (both `{tree, task?, warnings}`) and `get_steering_events {treeId, after?, limit?}` (`{events, hasMore}`). CLI `tree steer ID --prompt TEXT --connection ID --workspace-id ID [--title T] [--replace] [--request-id KEY]`, `tree unsteer ID` and `tree steering-events ID [--after N] [--limit N]`. The MCP tool and CLI generate a request ID when omitted.
 - CLI: `stage task notes ID [list] [--kind notes|events|all --category C --q Q --limit N --cursor C]`; `stage tree notes ID` adds `--task ID` filtering. Append with `stage task notes ID add --text TEXT [--category C --request-id KEY]`, or `stage tree notes ID add --text TEXT --source-task ID`; `--text -` reads stdin. CLI generates a request key when omitted; supply `--request-id` to retry across invocations. `stage task notes ID get ENTRY_ID` and `stage tree notes ID get ENTRY_ID` retrieve full entries. Task creation/adoption use `--initial-note` / `initialNote`; task edit has no notes field. Schedule `--notes` remains a template.
 - A project ID or title supplies planning context. A caller's session and cwd supply context and provenance.
 - CLI `stage projects ls --json` lists destination selectors. Task and schedule commands use `--connection ID --workspace-id ID`. The `--binding` flag and MCP binding selectors were removed.

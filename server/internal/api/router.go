@@ -253,6 +253,9 @@ func NewRouter(deps Deps) http.Handler {
 	agent("POST /api/trees/{id}/tasks", s.addToTree)
 	agent("DELETE /api/trees/{id}/tasks/{taskId}", s.removeFromTree)
 	agent("POST /api/trees/{id}/start", s.startTree)
+	agent("POST /api/trees/{id}/steerer", s.setSteerer)
+	agent("DELETE /api/trees/{id}/steerer", s.endSteering)
+	agent("GET /api/trees/{id}/steering/events", s.steeringEvents)
 	agent("GET /api/trees/{id}/journal", s.treeJournal)
 	agent("POST /api/trees/{id}/journal", s.treeJournal)
 	agent("GET /api/journal/{id}", s.getJournalEntry)
@@ -453,6 +456,8 @@ func (s *server) writeErr(w http.ResponseWriter, r *http.Request, err error) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": unavailable.Message, "code": unavailable.Code})
 	case errors.Is(err, execution.ErrUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "Harness unavailable")
+	case errors.As(err, &invalid) && invalid.Code != "":
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": invalid.Msg, "code": invalid.Code})
 	case errors.As(err, &invalid):
 		writeError(w, http.StatusBadRequest, invalid.Msg)
 	case errors.Is(err, db.ErrNotFound):

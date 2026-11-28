@@ -88,6 +88,11 @@ var seedSQL = []string{
 	`INSERT INTO tasks (id, project_id, title, prompt, tree_id, workspace_pin, launch_attempt) VALUES (2, 1, 'needle %_\ "quoted"', 'prompt with
 newline and 日本語', 1, '{"externalId":"next","root":"/next"}', 1)`,
 	`INSERT INTO task_needs (task_id, need_id) VALUES (2, 1)`,
+	`INSERT INTO tasks (id, project_id, title, prompt, connection_id) VALUES (3, 1, 'Steer: Tree', 'steer it', 1)`,
+	`INSERT INTO tree_steerers (id, tree_id, task_id, request_id, request_digest, created_at, ended_at, end_reason, delivered_through, last_delivered_at, last_error, attribution) VALUES
+	  (1, 1, 3, 'steer-1', 'abc', '2026-11-09T00:00:00.000000Z', '2026-11-09T02:00:00.000000Z', 'stopped', 2, '2026-11-09T01:00:00.000000Z', 'busy', '{ "actor": { "kind": "agent" } }')`,
+	`INSERT INTO steering_events (id, tree_id, steerer_id, kind, task_id, payload, caused_by_connection_id, caused_by_external_session_id, caused_by_task_id, created_at) VALUES
+	  (1, 1, 1, 'member_done', 1, '{"reply":"done ✓","n":1.50}', 1, 'sess-1', 3, '2026-11-09T01:00:00.000000Z')`,
 	`INSERT INTO task_events (task_id, from_state, to_state, detail, at) VALUES (1, NULL, 'backlog', 'created', '2026-11-09T00:00:00.000000Z'), (1, 'backlog', 'done', '', '2026-11-09T01:00:00.000000Z')`,
 	`INSERT INTO task_acceptances (id, task_id, provenance, evidence, note, source_session_id) VALUES (1, 1, 'user', '` + legacyEvidence + `', 'n', 1)`,
 	`INSERT INTO acceptance_requests (task_id, request_id, input, result) VALUES (1, 'r1', '{"b":2, "a":1}', '{"ok": true, "n": 10}')`,
@@ -397,7 +402,7 @@ func TestRoundTrip(t *testing.T) {
 	if evidence != legacyEvidence {
 		t.Fatalf("evidence bytes changed: %q", evidence)
 	}
-	for table, want := range map[string]int64{"snippets": 4, "project_events": 10, "users": 3, "machines": 3, "harness_connections": 4, "tasks": 3, "push_subscriptions": 2} {
+	for table, want := range map[string]int64{"snippets": 4, "project_events": 10, "users": 3, "machines": 3, "harness_connections": 4, "tasks": 4, "push_subscriptions": 2} {
 		var id int64
 		q := `INSERT INTO ` + table + ` DEFAULT VALUES RETURNING id`
 		switch table {

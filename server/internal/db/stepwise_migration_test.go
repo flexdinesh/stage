@@ -99,10 +99,31 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	49: {{"project events keep history and accept workspace_added", seedV0049ProjectEvents, checkV0049ProjectEvents}},
 	50: {{"existing workspace is not blocked until refreshed", seedV0046HistoricalWorkspaceProject, checkV0050BlockedReason}},
 	51: {{"existing task starts at revision 0, unanswered", seedV0040SharedAccess, checkV0051StateRevision}},
+	52: {{"one active steerer per tree and per task", seedV0040SharedAccess, checkV0052TreeSteering}},
 }
 
 func checkV0051StateRevision(t *testing.T, pool *sqlite.DB) {
 	wantRows(t, pool, `SELECT id,state_revision,answered_revision FROM tasks WHERE id=6`, "6|0|NULL")
+}
+
+func checkV0052TreeSteering(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	mustExec(t, pool, `INSERT INTO task_trees(id,title) VALUES(9,'Steered'),(10,'Other')`)
+	mustExec(t, pool, `INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest) VALUES(9,6,'r1','d')`)
+	for _, q := range []string{
+		`INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest) VALUES(9,NULL,'r2','d')`,
+		`INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest) VALUES(10,6,'r3','d')`,
+		`INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest,ended_at,end_reason) VALUES(10,6,'r4','d',stage_now(),'unknown')`,
+	} {
+		if _, err := pool.Exec(q); err == nil {
+			t.Fatalf("accepted %s", q)
+		}
+	}
+	mustExec(t, pool, `UPDATE tree_steerers SET ended_at=stage_now(), end_reason='replaced' WHERE request_id='r1'`)
+	mustExec(t, pool, `INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest) VALUES(9,6,'r2','d')`)
+	mustExec(t, pool, `INSERT INTO steering_events(tree_id,steerer_id,kind,task_id) VALUES(9,1,'steering_started',6)`)
+	wantRows(t, pool, `SELECT id,steerer_id,kind,payload,caused_by_task_id FROM steering_events`, "1|1|steering_started|{}|NULL")
+	wantRows(t, pool, `SELECT id,delivered_through FROM tree_steerers ORDER BY id`, "1|0", "2|0")
 }
 
 func seedV0049ProjectEvents(t *testing.T, pool *sqlite.DB) {

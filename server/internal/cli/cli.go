@@ -237,6 +237,10 @@ Usage:
   stage tree done|archive ID [--undo] mark done / archive (--undo reopens)
   stage tree rm-tree ID               delete a tree and its tasks (none started)
   stage tree dissolve ID              detach every task (needs go) and archive the tree
+  stage tree steer ID --prompt TEXT --connection ID --workspace-id ID [--title T] [--replace]
+                                      create, bind and launch the tree's steerer (one per tree)
+  stage tree unsteer ID               end the tree's steerer binding and stop its session
+  stage tree steering-events ID [--after N] [--limit N]   the tree's steering feed, oldest first
   stage schedule ls [--project P]
   stage schedule show ID
   stage schedule add --title T --prompt TEXT --cron CRON --tz ZONE [config] [--paused]

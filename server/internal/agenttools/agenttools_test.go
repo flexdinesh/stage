@@ -210,6 +210,7 @@ func TestToolList(t *testing.T) {
 		"list_snippets", "get_snippet", "create_snippet", "update_snippet", "delete_snippet", "delete_attachment",
 		"get_completion_preview", "complete_task", "reopen_task", "get_opening_prompt", "list_requests", "respond_request", "send_message",
 		"list_workspace_sources", "add_workspace",
+		"set_tree_steerer", "end_tree_steering", "get_steering_events",
 	}
 	// Every expected tool is registered once; other tools may join.
 	slices.Sort(names)

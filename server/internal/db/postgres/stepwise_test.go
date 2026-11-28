@@ -65,10 +65,36 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	49: {{name: "project events keep history and accept workspace_added", seed: seedV0049ProjectEvents, check: checkV0049ProjectEvents}},
 	50: {{name: "existing workspace is not blocked until refreshed", seed: seedV0046HistoricalWorkspaceProject, check: checkV0050BlockedReason}},
 	51: {{name: "existing task starts at revision 0, unanswered", seed: seedV0040SharedAccess, check: checkV0051StateRevision}},
+	52: {{name: "one active steerer per tree and per task", seed: seedV0040SharedAccess, check: checkV0052TreeSteering}},
 }
 
 func checkV0051StateRevision(t *testing.T, pool *sql.DB) {
 	wantPGRows(t, pool, `SELECT id::text || '|' || state_revision::text || '|' || COALESCE(answered_revision::text,'NULL') FROM tasks WHERE id=6`, "6|0|NULL")
+}
+
+func checkV0052TreeSteering(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	exec := func(q string) {
+		t.Helper()
+		if _, err := pool.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	exec(`INSERT INTO task_trees(id,title) VALUES(9,'Steered'),(10,'Other')`)
+	exec(`INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest) VALUES(9,6,'r1','d')`)
+	for _, q := range []string{
+		`INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest) VALUES(9,NULL,'r2','d')`,
+		`INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest) VALUES(10,6,'r3','d')`,
+		`INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest,ended_at,end_reason) VALUES(10,6,'r4','d',now(),'unknown')`,
+	} {
+		if _, err := pool.Exec(q); err == nil {
+			t.Fatalf("accepted %s", q)
+		}
+	}
+	exec(`UPDATE tree_steerers SET ended_at=now(), end_reason='replaced' WHERE request_id='r1'`)
+	exec(`INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest) VALUES(9,6,'r2','d')`)
+	exec(`INSERT INTO steering_events(tree_id,steerer_id,kind,task_id) VALUES(9,(SELECT id FROM tree_steerers WHERE request_id='r1'),'steering_started',6)`)
+	wantPGRows(t, pool, `SELECT kind || '|' || payload::text || '|' || COALESCE(caused_by_task_id::text,'NULL') FROM steering_events`, "steering_started|{}|NULL")
 }
 
 func seedV0049ProjectEvents(t *testing.T, pool *sql.DB) {

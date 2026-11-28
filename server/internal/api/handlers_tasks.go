@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -467,26 +466,7 @@ func (s *server) stopTask(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	adapter, err := s.Engine.Connections.Adapter(task.ConnectionID)
-	if err != nil {
-		return err
-	}
-	// A catalog outage does not prevent the owning adapter from stopping a
-	// running session. A negative declaration still prevents dispatch.
-	caps, catalogErr := adapter.Features(r.Context())
-	if op, declared := caps.Operations[execution.OpStop]; !op.Available && (catalogErr == nil || declared) {
-		reason := strings.TrimSpace(op.Reason)
-		if reason == "" {
-			reason = "This connection does not support stopping tasks."
-		}
-		return &db.ConflictError{Code: "operation_unavailable", Msg: reason}
-	}
-	if err := adapter.Stop(r.Context(), *task.Session); err != nil {
-		return &db.HarnessError{Err: err}
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
-	defer cancel()
-	if err := s.Store.RecordTaskOperation(ctx, task.ID, *task.Session, "task_stopped", "Stop requested from Stage"); err != nil {
+	if err := s.Engine.Coordinator.Stop(r.Context(), task); err != nil {
 		return err
 	}
 	return s.pollAndWrite(w, r, task.ID)

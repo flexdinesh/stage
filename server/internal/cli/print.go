@@ -284,6 +284,9 @@ func printAnyTree(w io.Writer, v any) {
 // title, needs and readiness.
 func printTree(w io.Writer, t client.TreeDetail) {
 	fmt.Fprintf(w, "tree %d  %s  (%s)  %d tasks, %d levels\n", t.ID, t.Title, t.StartMode, len(t.Tasks), len(t.Levels))
+	if st := t.Steerer; st != nil {
+		fmt.Fprintf(w, "steered by #%d %s [%s], %d pending\n", st.TaskID, st.Title, st.State, st.Pending)
+	}
 	byID := make(map[int64]client.Task, len(t.Tasks))
 	for _, m := range t.Tasks {
 		byID[m.ID] = m
@@ -306,6 +309,44 @@ func printTree(w io.Writer, t client.TreeDetail) {
 			}
 		}
 	})
+}
+
+// printSteerer prints a set or stop steering result.
+func printSteerer(w io.Writer, res client.SteererResult) {
+	if res.Task != nil {
+		success(w, "Steering tree %d with #%d %s %s", res.Tree.ID, res.Task.ID, dim("["+string(res.Task.State)+"]"), res.Task.Title)
+	} else {
+		success(w, "Stopped steering tree %d", res.Tree.ID)
+	}
+	for _, msg := range res.Warnings {
+		warn(w, "%s", msg)
+	}
+}
+
+// printSteeringEvents prints a steering feed page, one event per line.
+func printSteeringEvents(w io.Writer, res client.SteeringEvents) {
+	if len(res.Events) == 0 {
+		warn(w, "No steering events")
+	}
+	table(w, "ID\tKIND\tTASK\tBY\tPAYLOAD", func(tw io.Writer) {
+		for _, e := range res.Events {
+			task, by := "-", "-"
+			if e.TaskID != nil {
+				task = fmt.Sprintf("#%d", *e.TaskID)
+			}
+			if e.Self {
+				by = "steerer"
+			} else if e.CausedBy != nil && e.CausedBy.TaskID != nil {
+				by = fmt.Sprintf("#%d", *e.CausedBy.TaskID)
+			} else if e.CausedBy != nil {
+				by = "agent"
+			}
+			fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", e.ID, e.Kind, task, by, e.Payload)
+		}
+	})
+	if res.HasMore && len(res.Events) > 0 {
+		fmt.Fprintf(w, "more: --after %d\n", res.Events[len(res.Events)-1].ID)
+	}
 }
 
 func printTreeStart(w io.Writer, res client.TreeStart) {
