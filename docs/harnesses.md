@@ -134,7 +134,8 @@ reason for each unavailable operation.
 
 Return `Invalid` if a caller supplies an unsupported delivery. Keep the
 session data in the harness and expose harness-specific activity details
-through its own UI slot.
+through its own UI slot. OpenCode probes the native operations in OpenAPI
+and gives an update reason for each unavailable operation.
 
 ### Workspace and session selection
 

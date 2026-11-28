@@ -192,8 +192,13 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	if contract.respond {
 		ops[execution.OpRespond] = available
 	}
-	if contract.send {
-		ops[execution.OpSend] = available
+	for _, op := range []execution.Op{execution.OpSend, execution.OpSteer, execution.OpQueue} {
+		if contract.canDeliver(op) {
+			ops[op] = available
+		}
+	}
+	if contract.activity {
+		ops[execution.OpActivity] = available
 	}
 	if contract.fsList {
 		ops[execution.OpDirectoryBrowse] = available
@@ -218,9 +223,9 @@ func operations() map[execution.Op]execution.Availability {
 	return map[execution.Op]execution.Availability{
 		execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
 		execution.OpSend:            {Reason: sendUnavailable},
-		execution.OpSteer:           {Reason: "Steer in OpenCode."},
-		execution.OpQueue:           {Reason: "Queue in OpenCode."},
-		execution.OpActivity:        {Reason: "Recent activity is in OpenCode."},
+		execution.OpSteer:           {Reason: steerUnavailable},
+		execution.OpQueue:           {Reason: queueUnavailable},
+		execution.OpActivity:        {Reason: activityUnavailable},
 		execution.OpSessionSearch:   {Reason: sessionSearchUnavailable},
 		execution.OpImages:          {Reason: "Image attachment delivery has not been verified for this adapter."},
 		execution.OpRespond:         {Reason: respondUnavailable},

@@ -356,13 +356,14 @@ func replyUntil(t *testing.T, a *Adapter, ref execution.SessionRef, text string)
 	t.Fatalf("want reply %q, got %+v", text, o)
 }
 
-// The interaction live gate (ADR 0013): a permission answered from Stage, a
+// The interaction live gate: a permission answered from Stage, a
 // question form answered from Stage, and a message sent while a turn runs
 // that OpenCode delivers only once the turn ends.
 func TestLiveOpenCodeInteractive(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
 	release := make(chan struct{})
+	releaseSteer := make(chan struct{})
 	var mu sync.Mutex
 	var calls []string // the last user text of each scripted model call, "tool" after a tool result
 	var queuedBody string
@@ -389,6 +390,8 @@ func TestLiveOpenCodeInteractive(t *testing.T) {
 		}
 		mu.Unlock()
 		switch {
+		case strings.Contains(user, "fixture-steered"):
+			streamText(w, "steered reply")
 		case last.Role == "tool":
 			streamText(w, "tool done")
 		case strings.Contains(user, "fixture-permission"):
@@ -403,8 +406,19 @@ func TestLiveOpenCodeInteractive(t *testing.T) {
 				return true
 			}
 			streamText(w, "slow reply")
+		case strings.Contains(user, "fixture-steer-slow"):
+			select {
+			case <-releaseSteer:
+			case <-r.Context().Done():
+				return true
+			}
+			streamToolCall(w, "read", map[string]string{"path": path.Join(f.dir, "scratch-read.txt")})
 		case strings.Contains(user, "fixture-queued"):
 			streamText(w, "queued reply")
+		case strings.Contains(user, "activity follow-up"):
+			streamText(w, "activity response")
+		case strings.Contains(user, "fixture-diff"):
+			streamToolCall(w, "write", map[string]string{"path": path.Join(f.dir, "scratch.go"), "content": "package scratch\n"})
 		default:
 			return false
 		}
@@ -467,7 +481,11 @@ func TestLiveOpenCodeInteractive(t *testing.T) {
 	t.Run("queue while busy", func(t *testing.T) {
 		ref := launch(t, "fixture-slow")
 		observeUntil(t, f.a, ref, "running")
-		msg := execution.Message{Text: "fixture-queued", RequestID: "steering-live-1"}
+		var busy *execution.Busy
+		if err := f.a.Send(ctx, ref, execution.Message{Text: "too early"}); !errors.As(err, &busy) || busy.Reason != busyRunning {
+			t.Fatalf("send while running: %v", err)
+		}
+		msg := execution.Message{Text: "fixture-queued", RequestID: "steering-live-1", Delivery: execution.DeliveryQueue}
 		for range 2 { // a retry with the same RequestID is admitted once
 			if err := f.a.Send(ctx, ref, msg); err != nil {
 				t.Fatal(err)
@@ -486,6 +504,54 @@ func TestLiveOpenCodeInteractive(t *testing.T) {
 		defer mu.Unlock()
 		if !strings.Contains(queuedBody, "slow reply") || strings.Count(queuedBody, "fixture-queued") != 1 {
 			t.Fatalf("queued turn did not follow the slow turn once: %s", queuedBody)
+		}
+	})
+
+	t.Run("idle send and recent activity", func(t *testing.T) {
+		ref := launch(t, "activity opening")
+		observeUntil(t, f.a, ref, "done")
+		if err := f.a.Send(ctx, ref, execution.Message{Text: "activity follow-up"}); err != nil {
+			t.Fatal(err)
+		}
+		replyUntil(t, f.a, ref, "activity response")
+		activity, err := f.a.Activity(ctx, ref, execution.ActivityQuery{})
+		if err != nil || activity.Model != "fixture/test" || !slices.ContainsFunc(activity.Items, func(item execution.ActivityItem) bool {
+			return item.Kind == "message_user" && item.Text == "activity follow-up"
+		}) {
+			t.Fatalf("recent activity %+v: %v", activity, err)
+		}
+	})
+
+	t.Run("steer the current turn", func(t *testing.T) {
+		resume := sync.OnceFunc(func() { close(releaseSteer) })
+		defer resume()
+		if err := os.WriteFile(path.Join(f.dir, "scratch-read.txt"), []byte("Steer fixture\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		ref := launch(t, "fixture-steer-slow")
+		before := observeUntil(t, f.a, ref, "running")
+		msg := execution.Message{Text: "fixture-steered", RequestID: "steer-live", Delivery: execution.DeliverySteer}
+		if err := f.a.Send(ctx, ref, msg); err != nil {
+			t.Fatal(err)
+		}
+		resume()
+		replyUntil(t, f.a, ref, "steered reply")
+		// A retry after the turn ended uses the delivered message as its receipt.
+		if err := f.a.Send(ctx, ref, msg); err != nil {
+			t.Fatal(err)
+		}
+		after := observeUntil(t, f.a, ref, "done")
+		if after.ExecutionID != before.ExecutionID {
+			t.Fatalf("steer started a different turn: before %s after %s", before.ExecutionID, after.ExecutionID)
+		}
+	})
+
+	t.Run("native turn diff", func(t *testing.T) {
+		ref := launch(t, "fixture-diff")
+		replyUntil(t, f.a, ref, "tool done")
+		activity, err := f.a.Activity(ctx, ref, execution.ActivityQuery{})
+		if err != nil || !slices.Equal(activity.Files, []execution.FileChange{{Path: "scratch.go", Additions: 1, Status: "added"}}) {
+			t.Fatalf("activity files %+v: %v", activity, err)
 		}
 	})
 }

@@ -1,6 +1,5 @@
 // Package opencodetest is a fake OpenCode V2 service for tests: health and
-// contract (permission and form replies and prompt delivery included unless
-// WithoutInteraction), HTTP Basic auth, pairing codes and session tokens, session
+// contract and interaction, HTTP Basic auth, pairing codes and session tokens, session
 // update (title and archive, session.update), and project listing and
 // rename (project.update).
 package opencodetest
@@ -38,6 +37,9 @@ type Server struct {
 	// noInteraction drops the permission and form replies and the prompt's
 	// delivery from the contract (an older service).
 	noInteraction bool
+	noDiff        bool
+	sessions      map[string]Session
+	interactions  []Interaction
 	// archived: known session IDs and whether each is archived.
 	archived map[string]bool
 	// projects: GET /api/project, in insertion order (AddProject).
@@ -66,7 +68,7 @@ type Project struct {
 // New starts a fake service; password "" requires no auth.
 func New(t testing.TB, password string) *Server {
 	s := &Server{password: password, codes: map[string]bool{}, tokens: map[string]bool{}, version: "2.3.0",
-		mcp: []map[string]any{MCP("stage", "connected", "")}, archived: map[string]bool{}}
+		mcp: []map[string]any{MCP("stage", "connected", "")}, archived: map[string]bool{}, sessions: map[string]Session{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.Close)
 	return s
@@ -122,6 +124,13 @@ func (s *Server) WithoutInteraction() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.noInteraction = true
+}
+
+// WithoutDiff removes the optional activity route from the advertised contract.
+func (s *Server) WithoutDiff() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noDiff = true
 }
 
 // AddProject lists a git project; archived marks it archived in OpenCode.
@@ -262,11 +271,13 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": version, "hostname": "fake", "pid": 42})
 	case r.URL.Path == "/openapi.json":
 		s.mu.Lock()
-		update, projectUpdate, interaction := !s.noUpdate, !s.noProjectUpdate, !s.noInteraction
+		contract := spec(!s.noUpdate, !s.noProjectUpdate, !s.noInteraction, !s.noDiff)
 		s.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(spec(update, projectUpdate, interaction))
-	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/session/"):
+		_ = json.NewEncoder(w).Encode(contract)
+	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/session/") && strings.Count(r.URL.Path, "/") == 3:
 		s.patchSession(w, r, strings.TrimPrefix(r.URL.Path, "/api/session/"))
+	case strings.HasPrefix(r.URL.Path, "/api/session/"):
+		s.serveSession(w, r)
 	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/project/"):
 		s.patchProject(w, r, strings.TrimPrefix(r.URL.Path, "/api/project/"))
 	case r.URL.Path == "/api/project":
@@ -378,7 +389,7 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request, id string)
 // session.update unless update is false, project.update unless
 // projectUpdate is false, and the permission and form replies and the
 // prompt's delivery unless interaction is false.
-func spec(update, projectUpdate, interaction bool) map[string]any {
+func spec(update, projectUpdate, interaction, diff bool) map[string]any {
 	bodies := map[string][]string{
 		"/api/worktree":                   {"projectID", "from", "name"},
 		"/api/session":                    {"id", "location", "metadata"},
@@ -414,9 +425,17 @@ func spec(update, projectUpdate, interaction bool) map[string]any {
 			for _, f := range fields {
 				props[f] = map[string]any{}
 			}
+			if _, ok := props["delivery"]; ok {
+				props["delivery"] = map[string]any{"anyOf": []any{
+					map[string]any{"$ref": "#/components/schemas/Session.Inbox.Delivery"}, map[string]any{"type": "null"},
+				}}
+			}
 			operation["requestBody"] = map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"properties": props}}}}
 		}
 		paths[op.path][op.method] = operation
+	}
+	if diff {
+		paths["/api/session/{sessionID}/diff"] = map[string]any{"get": map[string]any{"operationId": "session.diff"}}
 	}
 	if interaction {
 		for path, op := range map[string]struct {
@@ -450,5 +469,7 @@ func spec(update, projectUpdate, interaction bool) map[string]any {
 			}}}}},
 		}}
 	}
-	return map[string]any{"paths": paths}
+	return map[string]any{"paths": paths, "components": map[string]any{"schemas": map[string]any{
+		"Session.Inbox.Delivery": map[string]any{"type": "string", "enum": []string{"steer", "queue"}},
+	}}}
 }

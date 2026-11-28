@@ -42,6 +42,7 @@ type interactionFake struct {
 	// admitID overrides the admitted message ID (else the prompt's id).
 	admitID string
 	gone    bool
+	running bool
 }
 
 type recorded struct{ path, body string }
@@ -50,6 +51,14 @@ func (f *interactionFake) handle(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	prefix := "/api/session/" + liveSession
+	if r.URL.Path == "/api/session/active" {
+		active := map[string]any{}
+		if f.running {
+			active[liveSession] = map[string]string{"type": "running"}
+		}
+		writeJSON(w, map[string]any{"data": active})
+		return
+	}
 	if f.gone || !strings.HasPrefix(r.URL.Path, prefix+"/") {
 		http.Error(w, `{"_tag":"SessionNotFoundError","sessionID":"x","message":"Session not found"}`, http.StatusNotFound)
 		return
@@ -61,6 +70,8 @@ func (f *interactionFake) handle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"data": append([]map[string]any{}, f.permissions...)})
 	case r.Method == http.MethodGet && rest == "/form":
 		writeJSON(w, map[string]any{"data": append([]map[string]any{}, f.forms...)})
+	case r.Method == http.MethodGet && rest == "/inbox":
+		writeJSON(w, map[string]any{"data": []any{}})
 	case r.Method == http.MethodPost && strings.HasSuffix(rest, "/reply"):
 		f.replies = append(f.replies, recorded{r.URL.Path, string(body)})
 		if f.replyStatus != 0 {
@@ -100,7 +111,9 @@ func interactionFixture(t *testing.T, replies bool) (*Adapter, *interactionFake)
 	base.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
 	var spec struct {
 		Paths      map[string]map[string]json.RawMessage `json:"paths"`
-		Components json.RawMessage                       `json:"components,omitempty"`
+		Components struct {
+			Schemas map[string]json.RawMessage `json:"schemas"`
+		} `json:"components"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &spec); err != nil {
 		t.Fatal(err)
@@ -108,7 +121,9 @@ func interactionFixture(t *testing.T, replies bool) (*Adapter, *interactionFake)
 	if replies {
 		spec.Paths["/api/session/{sessionID}/permission/{requestID}/reply"] = map[string]json.RawMessage{"post": json.RawMessage(permissionReply)}
 		spec.Paths["/api/session/{sessionID}/form/{formID}/reply"] = map[string]json.RawMessage{"post": json.RawMessage(formReply)}
-		spec.Components = json.RawMessage(replyComponents)
+		if err := json.Unmarshal([]byte(replyComponents), &spec.Components); err != nil {
+			t.Fatal(err)
+		}
 	}
 	session := &interactionFake{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -172,13 +187,14 @@ func TestFeaturesGatesRespondOnReplyOperations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		send := c.Operations[execution.OpSend]
-		if send.Available != replies || (!replies && send.Reason != sendUnavailable) {
-			t.Fatalf("replies=%v send %+v", replies, send)
+		for _, op := range []execution.Op{execution.OpSend, execution.OpSteer, execution.OpQueue, execution.OpRespond} {
+			got := c.Operations[op]
+			if got.Available != replies || (!replies && got.Reason != operations()[op].Reason) {
+				t.Fatalf("replies=%v %s %+v", replies, op, got)
+			}
 		}
-		got := c.Operations[execution.OpRespond]
-		if got.Available != replies || (!replies && got.Reason != respondUnavailable) {
-			t.Fatalf("replies=%v respond %+v", replies, got)
+		if !c.Operations[execution.OpActivity].Available || !c.Operations[execution.OpLaunch].Available {
+			t.Fatalf("independent operations disabled %+v", c.Operations)
 		}
 	}
 }
@@ -207,14 +223,13 @@ func TestRequestsMapPermissionsAndShowableForms(t *testing.T) {
 		t.Fatalf("listed %v", ids)
 	}
 	p := rs[0]
-	wantOptions := []execution.Choice{choice("once", "Allow once"), choice("always", "Allow always"), choice("reject", "Deny")}
+	wantOptions := []execution.Choice{choice("once", "Allow once"), choice("always", "Always allow npm *"), choice("reject", "Deny")}
 	if p.Kind != execution.RequestApproval || p.Title != "Run shell commands" || p.Detail != "Runs the suite" ||
-		p.Preview != "command: npm test\ndescription: Run tests\nnpm test" || p.TextOption != "reject" || !reflect.DeepEqual(p.Options, wantOptions) {
+		p.Preview != "npm test" || p.TextOption != "reject" || !reflect.DeepEqual(p.Options, wantOptions) {
 		t.Fatalf("permission %+v", p)
 	}
-	// No save patterns: OpenCode would save nothing, so Allow always is not offered.
 	if rs[1].Title != "Permission required: mcp_thing" || rs[1].Preview != "" ||
-		!reflect.DeepEqual(rs[1].Options, []execution.Choice{choice("once", "Allow once"), choice("reject", "Deny")}) {
+		!reflect.DeepEqual(rs[1].Options, []execution.Choice{choice("once", "Allow once"), choice("always", "Always allow"), choice("reject", "Deny")}) {
 		t.Fatalf("unknown action %+v", rs[1])
 	}
 	q := rs[2]
@@ -301,13 +316,14 @@ func TestRespondPermission(t *testing.T) {
 	unsaved := bashPermission("per_2")
 	delete(unsaved, "save")
 	fake.permissions = append(fake.permissions, unsaved)
-	var invalid *execution.Invalid
-	if err := a.Respond(ctx, liveRef, "per_2", execution.Response{Option: "always"}); !errors.As(err, &invalid) || len(fake.replies) != 2 {
+	if err := a.Respond(ctx, liveRef, "per_2", execution.Response{Option: "always"}); err != nil || len(fake.replies) != 3 {
 		t.Fatalf("always without save: %v %+v", err, fake.replies)
 	}
-	fake.replyStatus, fake.replyBody = http.StatusNotFound, `{"_tag":"PermissionNotFoundError","requestID":"per_1","message":"gone"}`
-	if err := a.Respond(ctx, liveRef, "per_1", execution.Response{Option: "once"}); !errors.Is(err, execution.ErrNotFound) {
-		t.Fatalf("answered elsewhere: %v", err)
+	for _, status := range []int{http.StatusNotFound, http.StatusGone} {
+		fake.replyStatus, fake.replyBody = status, `{"_tag":"PermissionNotFoundError","requestID":"per_1","message":"gone"}`
+		if err := a.Respond(ctx, liveRef, "per_1", execution.Response{Option: "once"}); !errors.Is(err, execution.ErrNotFound) {
+			t.Fatalf("answered elsewhere: %v", err)
+		}
 	}
 }
 
@@ -414,7 +430,7 @@ func decodePrompt(t *testing.T, raw string) promptBody {
 	return p
 }
 
-func TestSendQueuesWithAStageMessageID(t *testing.T) {
+func TestSendDeliveryUsesNativeModesAndStageMessageID(t *testing.T) {
 	a, fake := interactionFixture(t, true)
 	ctx := t.Context()
 	if err := a.Send(ctx, liveRef, execution.Message{Text: "also run lint"}); err != nil {
@@ -424,7 +440,7 @@ func TestSendQueuesWithAStageMessageID(t *testing.T) {
 		t.Fatal(err)
 	}
 	first, second := decodePrompt(t, fake.prompts[0]), decodePrompt(t, fake.prompts[1])
-	if first.Text != "also run lint" || first.Delivery != "queue" || !strings.HasPrefix(first.ID, "msg_") || len(first.ID) != 36 ||
+	if first.Text != "also run lint" || strings.Contains(fake.prompts[0], `"delivery"`) || !strings.HasPrefix(first.ID, "msg_") || len(first.ID) != 36 ||
 		!reflect.DeepEqual(first.Metadata, map[string]string{"stageMessage": first.ID}) {
 		t.Fatalf("prompt %+v", first)
 	}
@@ -432,10 +448,18 @@ func TestSendQueuesWithAStageMessageID(t *testing.T) {
 		t.Fatalf("fresh sends share message ID %s", first.ID)
 	}
 
+	var busy *execution.Busy
+	if err := a.Send(ctx, liveRef, execution.Message{Text: "hi", Delivery: execution.DeliverySteer}); !errors.As(err, &busy) || busy.Reason != busyIdle {
+		t.Fatalf("steer on idle: %v", err)
+	}
+	fake.running = true
+	if err := a.Send(ctx, liveRef, execution.Message{Text: "hi"}); !errors.As(err, &busy) || busy.Reason != busyRunning {
+		t.Fatalf("send on running: %v", err)
+	}
 	// A RequestID derives the ID, so a retry is the same message to OpenCode.
-	steer := execution.Message{Text: "digest", RequestID: "steering-3-41"}
+	queued := execution.Message{Text: "digest", RequestID: "steering-3-41", Delivery: execution.DeliveryQueue}
 	for range 2 {
-		if err := a.Send(ctx, liveRef, steer); err != nil {
+		if err := a.Send(ctx, liveRef, queued); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -448,8 +472,12 @@ func TestSendQueuesWithAStageMessageID(t *testing.T) {
 		t.Fatal("request IDs collide across sessions")
 	}
 
+	if err := a.Send(ctx, liveRef, execution.Message{Text: "hi", Delivery: execution.DeliverySteer}); err != nil ||
+		decodePrompt(t, fake.prompts[4]).Delivery != "steer" {
+		t.Fatalf("steer delivery: %v, %q", err, fake.prompts)
+	}
 	fake.admitID = "msg_someone_else"
-	if err := a.Send(ctx, liveRef, execution.Message{Text: "hi"}); err == nil {
+	if err := a.Send(ctx, liveRef, execution.Message{Text: "hi", Delivery: execution.DeliverySteer}); err == nil {
 		t.Fatal("mismatched admission accepted")
 	}
 }

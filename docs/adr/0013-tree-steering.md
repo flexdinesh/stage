@@ -64,7 +64,7 @@ session's current turn ends (queued), or refused with `execution.Busy`
 | --- | --- | --- |
 | Claude Code | Done: idle-only resume (ADR 0005 decision 18). | Done: hooks. |
 | T3 | Send mode `queue` with `clientRequestId` (today `auto`, which steers a running turn). | Questions through `t3_pending_request`. Approvals stay unavailable: T3's MCP cannot list or answer them. |
-| OpenCode | Prompt delivery `queue` (today `steer`). | Permission reply (once, always, reject) and form reply. Forms with external or conditional fields stay in OpenCode. |
+| OpenCode | Send waits for idle. [ADR 0014](0014-session-surface.md#d4-operations) | Permission reply (once, always, reject) and form reply. Forms with external or conditional fields stay in OpenCode. |
 | Codex | When idle: `thread/resume` then `turn/start`. Busy while a turn is active; no `turn/steer`. | `thread/resume` replays pending server requests: `commandExecution` and `fileChange` approvals, `requestUserInput`. |
 
 Anything not verified live stays unavailable with a reason. Codex
@@ -211,9 +211,8 @@ onto the jobs queue is a possible later migration.
   Busy.
 - At-least-once delivery means a steerer can see a digest twice. The
   `through=N` tag lets it skip what it has seen.
-- Queue semantics change T3 and OpenCode follow-ups from steering a
-  running turn to waiting for it to end, for every caller, not only
-  steerers.
+- Follow-ups wait for the current turn to end. OpenCode also offers
+  explicit Steer and Queue under [ADR 0014](0014-session-surface.md#d4-operations).
 - A Stage-completed steerer has a system actor. Reopen undoes it, and it
   never fires for failed or interrupted runs.
 - Four more tables and four more MCP tools. The outbox only grows while a

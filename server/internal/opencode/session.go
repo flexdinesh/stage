@@ -2,6 +2,7 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -19,9 +20,33 @@ type location struct {
 type session struct {
 	ID, ProjectID, ParentID, Title, Agent, Outcome string
 	Model                                          *wireModel
+	Cost                                           *float64
+	Tokens                                         *sessionTokens
 	Location                                       location
 	Time                                           wireTime
 	Metadata                                       map[string]interface{}
+}
+
+type sessionTokens struct {
+	Input     int64 `json:"input"`
+	Output    int64 `json:"output"`
+	Reasoning int64 `json:"reasoning"`
+	Cache     struct {
+		Read  int64 `json:"read"`
+		Write int64 `json:"write"`
+	} `json:"cache"`
+}
+
+func (s session) usage() *execution.Usage {
+	if s.Cost == nil && s.Tokens == nil {
+		return nil
+	}
+	u := &execution.Usage{CostUSD: s.Cost}
+	if v := s.Tokens; v != nil {
+		u.InputTokens, u.OutputTokens = v.Input, v.Output
+		u.CacheReadTokens, u.CacheWriteTokens = v.Cache.Read, v.Cache.Write
+	}
+	return u
 }
 
 func (a *Adapter) readSession(ctx context.Context, ref execution.SessionRef) (session, error) {
@@ -30,11 +55,8 @@ func (a *Adapter) readSession(ctx context.Context, ref execution.SessionRef) (se
 		return s.Data, errors.New("session belongs to another OpenCode connection or has an invalid ID")
 	}
 	e := a.get(ctx, "/api/session/"+url.PathEscape(ref.ExternalSessionID), &s)
-	if missing(e) {
-		return s.Data, execution.ErrNotFound
-	}
 	if e != nil {
-		return s.Data, e
+		return s.Data, sessionReadErr(e)
 	}
 	v := s.Data
 	if v.ID != ref.ExternalSessionID || v.ProjectID == "" || v.Location.Directory == "" || v.Time.Created <= 0 || v.Time.Updated <= 0 {
@@ -97,8 +119,17 @@ func (a *Adapter) Attention(ctx context.Context) ([]execution.SessionRef, error)
 type message struct {
 	ID, Type, Text, Finish string
 	Time                   wireTime
-	Content                []struct{ Type, Text string }
+	Content                []messagePart
 	Metadata               map[string]interface{}
+}
+
+type messagePart struct {
+	Type, Text, Name string
+	Time             wireTime
+	State            struct {
+		Status string
+		Input  json.RawMessage // streaming stores incomplete JSON as a string
+	}
 }
 
 func (a *Adapter) reply(ctx context.Context, s session, kind, order string, limit int) (*execution.Reply, error) {
@@ -218,7 +249,7 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 		Directory: s.Location.Directory, Links: execution.Links{Web: a.sessionWebURL(s.ID)},
 		Archived: s.Time.Archived > 0, Child: s.ParentID != "", Config: execution.Config{Mode: s.Agent},
 		CreatedAt: *millis(s.Time.Created), UpdatedAt: *millis(s.Time.Updated),
-		StartedAt: millis(s.Time.Busy), ExecutionID: runID(s),
+		StartedAt: millis(s.Time.Busy), ExecutionID: runID(s), Usage: s.usage(),
 	}
 	if o.Child {
 		o.Parent = &execution.SessionRef{ConnectionID: a.connection, ExternalSessionID: s.ParentID}
