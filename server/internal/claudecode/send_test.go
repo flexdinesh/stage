@@ -32,6 +32,22 @@ func transcriptHas(t *testing.T, f *claudetest.Fake, id, text string) bool {
 	return strings.Contains(string(b), text)
 }
 
+func TestSendRejectsUnsupportedDelivery(t *testing.T) {
+	f := claudetest.New(t)
+	a := f.Adapter(conn)
+	ref := execution.SessionRef{ConnectionID: conn, ExternalSessionID: "unused"}
+	for _, mode := range []execution.Delivery{execution.DeliverySteer, execution.DeliveryQueue} {
+		var invalid *execution.Invalid
+		err := a.Send(t.Context(), ref, execution.Message{Text: "do not send", Delivery: mode})
+		if !errors.As(err, &invalid) {
+			t.Fatalf("%s delivery: %v", mode, err)
+		}
+	}
+	if calls := f.Read().Calls; len(calls) != 0 {
+		t.Fatalf("invalid delivery reached Claude Code: %+v", calls)
+	}
+}
+
 // A finished session whose process lives is stopped, then woken under its
 // own id with the message after "--" and no flags (a flag, or a live
 // process, would start a copy): it runs again.
@@ -105,9 +121,7 @@ func TestSendWithoutProcessAndToAQuestion(t *testing.T) {
 	}
 	ref, id := o.Session, o.Session.ExternalSessionID
 	f.Reply(id, "Which color?", true)
-	f.Update(func(s *fakestate.State) {
-		s.Sessions[0].State, s.Sessions[0].Status, s.Sessions[0].PID = "blocked", "", 0
-	})
+	f.Update(func(s *fakestate.State) { s.Sessions[0].State, s.Sessions[0].Status, s.Sessions[0].PID = "blocked", "", 0 })
 	if err := a.Send(t.Context(), ref, execution.Message{Text: "teal"}); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +162,9 @@ func TestSendBusy(t *testing.T) {
 	f.SetState(id, "blocked", "idle", "input needed")
 	busy("question", "permission prompt or question")
 	f.Reply(id, "", false)
-	f.Update(func(s *fakestate.State) { s.Sessions[0].State, s.Sessions[0].Status, s.Sessions[0].PID = "blocked", "", 0 })
+	f.Update(func(s *fakestate.State) {
+		s.Sessions[0].State, s.Sessions[0].Status, s.Sessions[0].PID = "blocked", "", 0
+	})
 	busy("reaped mid-turn", "permission prompt or question")
 	f.SetState(id, "stopped", "", "")
 	busy("stopped", "claude attach")

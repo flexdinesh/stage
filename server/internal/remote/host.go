@@ -247,12 +247,23 @@ func (h *Host) Handlers() map[string]workerchan.WorkerHandler {
 			}
 			return Empty{}, in.Respond(ctx, r.Session, r.RequestID, r.Response)
 		}),
-		KindSend: h.interactive(func(ctx context.Context, in execution.Interactive, env workerchan.Envelope) (any, error) {
-			var r SendRequest
+		KindSend:    h.interactive(deliver),
+		KindDeliver: h.interactive(deliver),
+		KindActivity: h.with(func(ctx context.Context, a execution.Adapter, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
+			var r ActivityRequest
 			if err := decode(env, &r); err != nil {
 				return nil, err
 			}
-			return Empty{}, in.Send(ctx, r.Session, r.Message)
+			reader, ok := execution.As[execution.ActivityReader](a)
+			if !ok {
+				return nil, unsupported("session activity")
+			}
+			q := r.Query.Bounded()
+			out, err := reader.Activity(ctx, r.Session, q)
+			if err != nil {
+				return nil, err
+			}
+			return out.Bounded(q)
 		}),
 		KindAct:             h.with(act),
 		KindWorkspaceAdd:    h.with(addWorkspace),
@@ -363,6 +374,22 @@ func (h *Host) interactive(fn func(ctx context.Context, in execution.Interactive
 		}
 		return fn(ctx, in, env)
 	})
+}
+
+// deliver keeps the legacy send channel safe when peers differ in version.
+func deliver(ctx context.Context, in execution.Interactive, env workerchan.Envelope) (any, error) {
+	var r SendRequest
+	if err := decode(env, &r); err != nil {
+		return nil, err
+	}
+	op, err := r.Message.Delivery.Operation()
+	if err != nil {
+		return nil, err
+	}
+	if env.Kind != operationKinds[op][0] {
+		return nil, &execution.Invalid{Reason: "message delivery does not match the worker channel operation"}
+	}
+	return Empty{}, in.Send(ctx, r.Session, r.Message)
 }
 
 // launch fetches the intent's images, then runs the adapter's launch with

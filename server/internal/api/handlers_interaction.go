@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/db"
@@ -24,6 +25,26 @@ func (s *server) taskRequests(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"requests": rs})
+	return nil
+}
+
+func (s *server) taskActivity(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	var q execution.ActivityQuery
+	if params := r.URL.Query(); params.Has("limit") {
+		q.Limit, err = strconv.Atoi(params.Get("limit"))
+		if err != nil || q.Limit < 0 {
+			return db.Invalid("limit must be a nonnegative integer")
+		}
+	}
+	out, err := s.Engine.Coordinator.Activity(r.Context(), id, q)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"activity": out})
 	return nil
 }
 
@@ -145,15 +166,16 @@ func (s *server) sendMessage(w http.ResponseWriter, r *http.Request) error {
 	if _, refused, err := s.selfAction(w, r, id, "An agent cannot message its own session."); err != nil || refused {
 		return err
 	}
-	// The body is text only: the coordinator gives each call its request ID.
+	// The coordinator gives each call its request ID.
 	var in struct {
-		Text                  string `json:"text"`
-		ExpectedStateRevision *int64 `json:"expectedStateRevision"`
+		Text                  string             `json:"text"`
+		Delivery              execution.Delivery `json:"delivery"`
+		ExpectedStateRevision *int64             `json:"expectedStateRevision"`
 	}
 	if err := decodeStrict(r, &in); err != nil {
 		return err
 	}
-	t, err := s.Engine.Coordinator.Send(r.Context(), id, execution.Message{Text: in.Text}, in.ExpectedStateRevision)
+	t, err := s.Engine.Coordinator.Send(r.Context(), id, execution.Message{Text: in.Text, Delivery: in.Delivery}, in.ExpectedStateRevision)
 	if err != nil {
 		return err
 	}

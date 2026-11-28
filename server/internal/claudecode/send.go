@@ -92,6 +92,9 @@ func (a *Adapter) sendable(s session) error {
 // for the session to run. A copy (the session got busy meanwhile) is
 // removed and reported Busy.
 func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m execution.Message) error {
+	if err := m.Delivery.RequireSend(); err != nil {
+		return err
+	}
 	if ref.ConnectionID != a.conn {
 		return execution.ErrNotFound
 	}

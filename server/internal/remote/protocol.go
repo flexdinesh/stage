@@ -39,6 +39,8 @@ const (
 	KindRequests             = "adapter.requests"
 	KindRespond              = "adapter.respond"
 	KindSend                 = "adapter.send"
+	KindDeliver              = "adapter.deliver"
+	KindActivity             = "adapter.activity"
 	KindAct                  = "adapter.act"
 	KindWorkspaceAdd         = "adapter.workspaceAdd"
 	KindDirectoryBrowse      = "adapter.directoryBrowse"
@@ -141,10 +143,16 @@ type RespondRequest struct {
 	Response  execution.Response   `json:"response"`
 }
 
-// SendRequest is adapter.send.
+// SendRequest is adapter.send or adapter.deliver.
 type SendRequest struct {
 	Session execution.SessionRef `json:"session"`
 	Message execution.Message    `json:"message"`
+}
+
+// ActivityRequest is adapter.activity.
+type ActivityRequest struct {
+	Session execution.SessionRef    `json:"session"`
+	Query   execution.ActivityQuery `json:"query"`
 }
 
 // SessionRenameRequest is adapter.sessionRename.

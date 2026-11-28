@@ -509,6 +509,9 @@ func replyErr(err error) error {
 // OpenCode's own composer does. The message ID derives from m.RequestID
 // when set, so a retry is admitted once.
 func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m execution.Message) error {
+	if err := m.Delivery.RequireSend(); err != nil {
+		return err
+	}
 	if !a.valid(ref) {
 		return execution.ErrNotFound
 	}

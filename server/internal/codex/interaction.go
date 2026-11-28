@@ -490,6 +490,9 @@ func busyFor(t thread) error {
 // already carries was delivered: nothing is sent again. An archived thread
 // is *execution.Refused.
 func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m execution.Message) error {
+	if err := m.Delivery.RequireSend(); err != nil {
+		return err
+	}
 	if !a.valid(ref) {
 		return execution.ErrNotFound
 	}

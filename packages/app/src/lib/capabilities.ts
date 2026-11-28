@@ -22,12 +22,15 @@ export const OPERATION_LABELS: Record<OperationId, string> = {
   images: "Prompt images",
   respond: "Answer approvals and questions in Stage",
   send: "Send follow-ups",
+  steer: "Steer running sessions",
+  queue: "Queue messages",
+  activity: "Recent activity",
   sessionRename: "Rename sessions with the task title",
   workspaceAdd: "Add workspaces from Stage",
   directoryBrowse: "Browse folders for paths",
 };
 
-const OPERATIONS: readonly OperationId[] = ["launch", "stop", "adopt", "images", "respond", "send", "sessionRename"];
+const OPERATIONS: readonly OperationId[] = ["launch", "stop", "adopt", "images", "respond", "send", "steer", "queue", "activity", "sessionRename"];
 
 /** One line of a connection's capability list. */
 export interface CapabilityLine {

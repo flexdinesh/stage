@@ -209,7 +209,7 @@ func TestToolList(t *testing.T) {
 		"list_machines", "get_machine", "list_harnesses", "get_harness_status", "get_preferences",
 		"create_project", "update_project", "get_project_events", "preview_membership", "set_membership",
 		"list_snippets", "get_snippet", "create_snippet", "update_snippet", "delete_snippet", "delete_attachment",
-		"get_completion_preview", "complete_task", "reopen_task", "get_opening_prompt", "list_requests", "respond_request", "send_message",
+		"get_completion_preview", "complete_task", "reopen_task", "get_opening_prompt", "list_requests", "respond_request", "send_message", "get_session_activity",
 		"list_workspace_sources", "add_workspace",
 		"set_tree_steerer", "end_tree_steering", "get_steering_events", "escalate_to_user",
 	}

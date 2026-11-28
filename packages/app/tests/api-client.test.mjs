@@ -144,6 +144,22 @@ test("session actions list on the task and dispatch an encoded action with expli
   ]);
 });
 
+test("session delivery and activity use the task routes and preserve guarded follow-ups", async () => {
+  const seen = [];
+  const { api } = fakeApi(async (path, init) => {
+    seen.push({ path, method: init.method, body: init.body === undefined ? undefined : JSON.parse(init.body) });
+    return Response.json({});
+  });
+  await api.sendMessage(17, "Go ahead", undefined, 3);
+  await api.sendMessage(17, "Next", "queue");
+  await api.getActivity(17, { limit: 15 });
+  assert.deepEqual(seen, [
+    { path: "/tasks/17/messages", method: "POST", body: { text: "Go ahead", expectedStateRevision: 3 } },
+    { path: "/tasks/17/messages", method: "POST", body: { text: "Next", delivery: "queue" } },
+    { path: "/tasks/17/activity?limit=15", method: "GET", body: undefined },
+  ]);
+});
+
 test("setAutoComplete PUTs the flag to the connection and returns it", async () => {
   let seen;
   const connection = { id: 2, configured: true, harness: "opencode", autoComplete: true };

@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agenttools"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
-// runTaskWork runs task preview|complete|reopen|requests|respond|send|
-// opening-prompt: accepting another task and driving its session. Stage
+// runTaskWork handles acceptance and session interaction commands. Stage
 // refuses each write on the caller's own task or session.
 func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 	caller := c.sessionFlags("caller")
@@ -147,7 +148,10 @@ func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 		return printTask(res)
 	case "send":
 		var text string
+		var steer, queue bool
 		c.fs.StringVar(&text, "text", "", "message text")
+		c.fs.BoolVar(&steer, "steer", false, "inject into the running turn")
+		c.fs.BoolVar(&queue, "queue", false, "queue for the next turn")
 		expect := expectRevision(c)
 		if err := c.parse(rest); err != nil {
 			return err
@@ -156,15 +160,39 @@ func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 		if err != nil {
 			return err
 		}
+		var delivery execution.Delivery
+		switch {
+		case steer && queue:
+			return usagef("task send: --steer and --queue are mutually exclusive")
+		case steer:
+			delivery = execution.DeliverySteer
+		case queue:
+			delivery = execution.DeliveryQueue
+		}
 		ca, err := callerArgs()
 		if err != nil {
 			return err
 		}
-		res, err := c.ops().SendMessage(ctx, agenttools.SendMessageArgs{CallerArgs: ca, TaskID: id, Text: text, ExpectedStateRevision: expect()})
+		res, err := c.ops().SendMessage(ctx, agenttools.SendMessageArgs{CallerArgs: ca, TaskID: id, Text: text, Delivery: delivery, ExpectedStateRevision: expect()})
 		if err != nil {
 			return err
 		}
 		return printTask(res)
+	case "activity":
+		var limit int
+		c.fs.IntVar(&limit, "limit", 0, "recent item count (default 30, capped at 100)")
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		id, err := c.oneID()
+		if err != nil {
+			return err
+		}
+		res, err := c.ops().GetSessionActivity(ctx, agenttools.SessionActivityArgs{TaskID: id, Limit: limit})
+		if err != nil {
+			return err
+		}
+		return c.out(res, func(w io.Writer) { printActivity(w, res.Activity) })
 	case "escalate":
 		var reason string
 		c.fs.StringVar(&reason, "reason", "", "why the user must answer (at most 500 characters)")
@@ -207,6 +235,31 @@ func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 		})
 	}
 	return usagef("task %s: unknown", v)
+}
+
+func printActivity(w io.Writer, a execution.Activity) {
+	if len(a.Items) == 0 {
+		fmt.Fprintln(w, "No recent activity")
+	}
+	for _, item := range a.Items {
+		fmt.Fprintf(w, "%s  %s  %s", item.At.Format(time.RFC3339), item.Kind, item.Title)
+		if item.Preview != "" {
+			fmt.Fprintf(w, "  %s", item.Preview)
+		}
+		fmt.Fprintln(w)
+	}
+	if len(a.Plan) > 0 {
+		fmt.Fprintln(w, "Plan")
+		for _, step := range a.Plan {
+			fmt.Fprintf(w, "  %s  %s\n", step.Status, step.Text)
+		}
+	}
+	if len(a.Files) > 0 {
+		fmt.Fprintln(w, "Files")
+		for _, file := range a.Files {
+			fmt.Fprintf(w, "  %s  +%d -%d %s\n", file.Path, file.Additions, file.Deletions, file.Status)
+		}
+	}
 }
 
 // expectRevision registers --expect-revision (a guarded answer: first

@@ -38,7 +38,25 @@ func (f *documentHarness) Health(context.Context) execution.Health {
 	return execution.Health{Availability: execution.Availability{Available: !f.offline, Reason: "Reconnect documents"}, Identity: "documents-local"}
 }
 func (f *documentHarness) Features(context.Context) (execution.Capabilities, error) {
-	return execution.Capabilities{Operations: map[execution.Op]execution.Availability{execution.OpLaunch: {Available: !f.disallow, Reason: "Read-only document service"}, execution.OpOpening: {Reason: "Documents have no opening prompt"}}, Models: []execution.Model{{Choice: execution.Choice{ID: "brain-7", Label: "Brain seven", Availability: execution.Availability{Available: true}}, Permissions: []execution.Choice{{ID: "reviewed"}}}}}, nil
+	return execution.Capabilities{
+		Operations: contractOperations("Documents", map[execution.Op]execution.Availability{
+			execution.OpLaunch:   {Available: !f.disallow, Reason: "Read-only document service"},
+			execution.OpOpening:  {Reason: "Documents have no opening prompt"},
+			execution.OpSteer:    {Reason: "Documents have no running turn."},
+			execution.OpQueue:    {Reason: "Documents do not queue messages."},
+			execution.OpActivity: {Reason: "Recent activity is in Documents."},
+		}),
+		Models: []execution.Model{{Choice: execution.Choice{ID: "brain-7", Label: "Brain seven", Availability: execution.Availability{Available: true}}, Permissions: []execution.Choice{{ID: "reviewed"}}}},
+	}, nil
+}
+
+func contractOperations(name string, declared map[execution.Op]execution.Availability) map[execution.Op]execution.Availability {
+	for _, op := range execution.Ops {
+		if _, ok := declared[op]; !ok {
+			declared[op] = execution.Availability{Reason: name + " does not offer " + string(op) + " from Stage."}
+		}
+	}
+	return declared
 }
 func (f *documentHarness) Workspaces(context.Context) ([]execution.WorkspaceInfo, error) {
 	if f.offline {

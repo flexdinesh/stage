@@ -52,7 +52,15 @@ type assignedHarness struct {
 }
 
 func (f *assignedHarness) Features(context.Context) (execution.Capabilities, error) {
-	return execution.Capabilities{Operations: map[execution.Op]execution.Availability{execution.OpLaunch: {Available: true}}, Models: []execution.Model{{Choice: execution.Choice{ID: "m", Availability: execution.Availability{Available: true}}}}}, nil
+	return execution.Capabilities{
+		Operations: contractOperations("Assigned", map[execution.Op]execution.Availability{
+			execution.OpLaunch:   {Available: true},
+			execution.OpSteer:    {Reason: "Steer in Assigned."},
+			execution.OpQueue:    {Reason: "Queue in Assigned."},
+			execution.OpActivity: {Reason: "Recent activity is in Assigned."},
+		}),
+		Models: []execution.Model{{Choice: execution.Choice{ID: "m", Availability: execution.Availability{Available: true}}}},
+	}, nil
 }
 func (f *assignedHarness) observation(conn int64, id string) execution.Observation {
 	now := time.Now().UTC()
@@ -99,24 +107,33 @@ func (f *assignedHarness) Correlate(_ context.Context, in execution.Intent) (exe
 
 type hostedHarness struct {
 	fakeBase
-	mu         gosync.Mutex
-	state      string
-	reason     string
-	observed   int
-	pushes     []execution.Observation
-	requests   []execution.Request
-	responses  map[string]execution.Response
-	messages   []string
-	respondOff string // reason respond is unavailable
+	mu          gosync.Mutex
+	state       string
+	reason      string
+	observed    int
+	pushes      []execution.Observation
+	requests    []execution.Request
+	responses   map[string]execution.Response
+	messages    []execution.Message
+	respondOff  string // reason respond is unavailable
+	surface     bool   // enable steer, queue and activity for the session surface tests
+	activity    execution.Activity
+	activityQ   execution.ActivityQuery
+	activityRef execution.SessionRef
 }
 
 func (f *hostedHarness) Features(context.Context) (execution.Capabilities, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return execution.Capabilities{
-		Operations: map[execution.Op]execution.Availability{
-			execution.OpLaunch:  {Available: true},
-			execution.OpRespond: {Available: f.respondOff == "", Reason: f.respondOff},
-			execution.OpSend:    {Available: true},
-		},
+		Operations: contractOperations("Hosted", map[execution.Op]execution.Availability{
+			execution.OpLaunch:   {Available: true},
+			execution.OpRespond:  {Available: f.respondOff == "", Reason: f.respondOff},
+			execution.OpSend:     {Available: true},
+			execution.OpSteer:    {Available: f.surface, Reason: "Steer in Hosted."},
+			execution.OpQueue:    {Available: f.surface, Reason: "Queue in Hosted."},
+			execution.OpActivity: {Available: f.surface, Reason: "Recent activity is in Hosted."},
+		}),
 		Models: []execution.Model{{Choice: execution.Choice{ID: "m", Availability: execution.Availability{Available: true}}}},
 	}, nil
 }
@@ -178,8 +195,30 @@ func (f *hostedHarness) Respond(_ context.Context, _ execution.SessionRef, id st
 func (f *hostedHarness) Send(_ context.Context, _ execution.SessionRef, m execution.Message) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.messages = append(f.messages, m.Text)
+	op, err := m.Delivery.Operation()
+	if err != nil {
+		return err
+	}
+	if op != execution.OpSend {
+		if !f.surface {
+			return m.Delivery.RequireSend()
+		}
+		if f.state == "done" {
+			return &execution.Busy{Reason: "The turn ended; send instead."}
+		}
+	}
+	if f.surface && op == execution.OpSend && f.state != "done" {
+		return &execution.Busy{Reason: "The turn is running. Steer or queue instead."}
+	}
+	f.messages = append(f.messages, m)
 	return nil
+}
+
+func (f *hostedHarness) Activity(_ context.Context, ref execution.SessionRef, q execution.ActivityQuery) (execution.Activity, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.activityRef, f.activityQ = ref, q
+	return f.activity, nil
 }
 
 // v2Setup registers connection 3 of kind with a, one bound project and one
@@ -408,7 +447,9 @@ func TestContractInteraction(t *testing.T) {
 		if _, err := svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: "also update docs"}, nil); err != nil || len(f.messages) != 1 {
 			t.Fatal(err, f.messages)
 		}
+		f.mu.Lock()
 		f.respondOff = "read-only session"
+		f.mu.Unlock()
 		var ce *db.ConflictError
 		if _, err := svc.Coordinator.Requests(ctx, task.ID); !errors.As(err, &ce) || ce.Code != "operation_unavailable" || !strings.Contains(ce.Msg, "read-only session") {
 			t.Fatal("unavailable operation", err)

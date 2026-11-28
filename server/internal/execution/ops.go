@@ -22,7 +22,10 @@ const (
 	OpSessionSearch Op = "sessionSearch" // browse a harness's listed session metadata
 	OpImages        Op = "images"        // launch with image attachments
 	OpRespond       Op = "respond"       // list and answer pending requests (Interactive)
-	OpSend          Op = "send"          // send a message to the session (Interactive)
+	OpSend          Op = "send"          // start a new turn with a message (Interactive)
+	OpSteer         Op = "steer"         // inject a message into the current turn (Interactive)
+	OpQueue         Op = "queue"         // queue a message for the next turn (Interactive)
+	OpActivity      Op = "activity"      // read recent session activity (ActivityReader)
 	OpSessionRename Op = "sessionRename" // rename a Stage-launched session after its task's title (SessionNamer)
 	OpWorkspaceAdd  Op = "workspaceAdd"  // add a workspace through a declared source (WorkspaceAdder)
 	// OpDirectoryBrowse lists folders on the harness's host for a path
@@ -31,7 +34,7 @@ const (
 )
 
 // Ops are every operation, in a fixed order.
-var Ops = []Op{OpLaunch, OpStop, OpAdopt, OpReply, OpOpening, OpAttention, OpSessionSearch, OpImages, OpRespond, OpSend, OpSessionRename, OpWorkspaceAdd, OpDirectoryBrowse}
+var Ops = []Op{OpLaunch, OpStop, OpAdopt, OpReply, OpOpening, OpAttention, OpSessionSearch, OpImages, OpRespond, OpSend, OpSteer, OpQueue, OpActivity, OpSessionRename, OpWorkspaceAdd, OpDirectoryBrowse}
 
 // DeclaresOperations reports an operation c leaves out, or one unavailable
 // without a reason. Every adapter declares them all (its contract tests).

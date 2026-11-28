@@ -53,6 +53,7 @@ var (
 	_ execution.Correlator        = (*Adapter)(nil)
 	_ execution.EventSource       = (*Adapter)(nil)
 	_ execution.Interactive       = (*Adapter)(nil)
+	_ execution.ActivityReader    = (*Adapter)(nil)
 	_ execution.Actor             = (*Adapter)(nil)
 	_ execution.SessionSearcher   = (*Adapter)(nil)
 	_ execution.SessionNamer      = (*Adapter)(nil)
@@ -132,6 +133,7 @@ var operationKinds = map[execution.Op][]string{
 	execution.OpStop: {KindStop}, execution.OpAdopt: {KindObserve, KindWorkspaces}, execution.OpReply: {KindObserve},
 	execution.OpOpening: {KindOpening}, execution.OpAttention: {KindAttention},
 	execution.OpRespond: {KindRequests, KindRespond}, execution.OpSend: {KindSend},
+	execution.OpSteer: {KindDeliver}, execution.OpQueue: {KindDeliver}, execution.OpActivity: {KindActivity},
 	execution.OpSessionRename:   {KindSessionRename},
 	execution.OpWorkspaceAdd:    {KindWorkspaceAdd, KindWorkspaces},
 	execution.OpDirectoryBrowse: {KindDirectoryBrowse},
@@ -151,6 +153,15 @@ func (a *Adapter) limitOperations(c *execution.Capabilities) {
 				c.Operations[op] = execution.Availability{Reason: "Update Stage on the worker machine to use " + string(op) + "."}
 				break
 			}
+		}
+	}
+	// Older workers omit the session surface operations entirely.
+	for _, op := range []execution.Op{execution.OpSteer, execution.OpQueue, execution.OpActivity} {
+		if _, declared := c.Operations[op]; !declared && !slices.Contains(snapshot.ChannelKinds, operationKinds[op][0]) {
+			if c.Operations == nil {
+				c.Operations = make(map[execution.Op]execution.Availability)
+			}
+			c.Operations[op] = execution.Availability{Reason: "Update Stage on the worker machine to use " + string(op) + "."}
 		}
 	}
 	// A worker predating session search cannot declare its availability.
@@ -322,5 +333,15 @@ func (a *Adapter) Respond(ctx context.Context, ref execution.SessionRef, request
 }
 
 func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m execution.Message) error {
-	return callTrait[execution.Interactive](ctx, a, KindSend, SendRequest{Session: ref, Message: m}, nil)
+	op, err := m.Delivery.Operation()
+	if err != nil {
+		return err
+	}
+	return callTrait[execution.Interactive](ctx, a, operationKinds[op][0], SendRequest{Session: ref, Message: m}, nil)
+}
+
+func (a *Adapter) Activity(ctx context.Context, ref execution.SessionRef, q execution.ActivityQuery) (execution.Activity, error) {
+	var out execution.Activity
+	err := callTrait[execution.ActivityReader](ctx, a, KindActivity, ActivityRequest{Session: ref, Query: q}, &out)
+	return out, err
 }
