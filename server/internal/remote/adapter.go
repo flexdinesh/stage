@@ -57,6 +57,7 @@ var (
 	_ execution.SessionSearcher   = (*Adapter)(nil)
 	_ execution.SessionNamer      = (*Adapter)(nil)
 	_ execution.WorkspaceAdder    = (*Adapter)(nil)
+	_ execution.DirectoryBrowser  = (*Adapter)(nil)
 )
 
 // Implements reads the current peer's declaration, never the Go proxy's methods.
@@ -131,8 +132,9 @@ var operationKinds = map[execution.Op][]string{
 	execution.OpStop: {KindStop}, execution.OpAdopt: {KindObserve, KindWorkspaces}, execution.OpReply: {KindObserve},
 	execution.OpOpening: {KindOpening}, execution.OpAttention: {KindAttention},
 	execution.OpRespond: {KindRequests, KindRespond}, execution.OpSend: {KindSend},
-	execution.OpSessionRename: {KindSessionRename},
-	execution.OpWorkspaceAdd:  {KindWorkspaceAdd, KindWorkspaces},
+	execution.OpSessionRename:   {KindSessionRename},
+	execution.OpWorkspaceAdd:    {KindWorkspaceAdd, KindWorkspaces},
+	execution.OpDirectoryBrowse: {KindDirectoryBrowse},
 }
 
 func (a *Adapter) limitOperations(c *execution.Capabilities) {
@@ -175,6 +177,9 @@ func (a *Adapter) limitOperations(c *execution.Capabilities) {
 	}
 	if c.Operations[execution.OpWorkspaceAdd].Available && !a.Implements(execution.TraitOf[execution.WorkspaceAdder]()) {
 		c.Operations[execution.OpWorkspaceAdd] = execution.Availability{Reason: "This worker connection does not offer adding workspaces."}
+	}
+	if c.Operations[execution.OpDirectoryBrowse].Available && !a.Implements(execution.TraitOf[execution.DirectoryBrowser]()) {
+		c.Operations[execution.OpDirectoryBrowse] = execution.Availability{Reason: "This worker connection does not offer folder browsing. Type the path."}
 	}
 }
 

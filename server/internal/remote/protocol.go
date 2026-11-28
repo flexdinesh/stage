@@ -41,6 +41,7 @@ const (
 	KindSend                 = "adapter.send"
 	KindAct                  = "adapter.act"
 	KindWorkspaceAdd         = "adapter.workspaceAdd"
+	KindDirectoryBrowse      = "adapter.directoryBrowse"
 	KindInventory            = "ops.inventory"
 )
 
@@ -169,6 +170,7 @@ func encodeError(err error) error {
 	var busy *execution.Busy
 	var re *workerchan.RemoteError
 	var searchUnsupported *execution.SessionSearchUnsupported
+	var browseUnavailable *execution.BrowseUnavailable
 	switch {
 	case errors.As(err, &re):
 		return err
@@ -190,6 +192,8 @@ func encodeError(err error) error {
 		return &workerchan.RemoteError{Code: CodeSessionSearchCursor, Message: err.Error()}
 	case errors.As(err, &searchUnsupported):
 		return &workerchan.RemoteError{Code: CodeUnsupported, Message: searchUnsupported.Reason}
+	case errors.As(err, &browseUnavailable):
+		return &workerchan.RemoteError{Code: CodeUnsupported, Message: browseUnavailable.Reason}
 	}
 	return err
 }

@@ -204,7 +204,8 @@ export function AddWorkspaceFields({ add, fixed, nested = false, onRetry }: {
           )) : null}
         </div>
       ) : null}
-      <SetupInputs fields={sourceFields(source)} values={add.values} disabled={pending} nativeRequired={!nested} onChange={add.setValue} />
+      <SetupInputs fields={sourceFields(source)} values={add.values} disabled={pending} nativeRequired={!nested}
+        connectionId={add.current?.connection.id} onChange={add.setValue} />
       {source?.confirm ? (
         <ChoiceRow control={<Checkbox disabled={pending} checked={add.confirmed}
           onChange={(e) => add.setConfirmed(e.target.checked)} />}>

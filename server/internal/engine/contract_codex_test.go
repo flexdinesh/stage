@@ -246,3 +246,42 @@ func TestContractCodexWorkspaceAddTrustsAFolder(t *testing.T) {
 		}
 	})
 }
+
+// Folder browsing reads the same listing and refusal in process and behind
+// a worker.
+func TestContractCodexBrowsesFolders(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		_, srv, svc, _ := codexSetup(t, p, t.TempDir())
+		ctx := t.Context()
+		a, err := svc.Connections.Adapter(3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f, err := a.Features(ctx); err != nil || !f.Operations[execution.OpDirectoryBrowse].Available {
+			t.Fatalf("declaration %+v %v", f.Operations[execution.OpDirectoryBrowse], err)
+		}
+		browser, ok := execution.As[execution.DirectoryBrowser](a)
+		if !ok {
+			t.Fatal("DirectoryBrowser hidden")
+		}
+		dir := t.TempDir()
+		for _, sub := range []string{"src", ".git"} {
+			if err := os.Mkdir(dir+"/"+sub, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := browser.Browse(ctx, execution.BrowseRequest{Path: dir})
+		if err != nil || got.Path != dir || len(got.Entries) != 1 || got.Entries[0] != (execution.DirEntry{Name: "src", Path: dir + "/src"}) {
+			t.Fatalf("listing %+v %v", got, err)
+		}
+		_, err = browser.Browse(ctx, execution.BrowseRequest{Path: dir + "/missing"})
+		var invalid *execution.Invalid
+		if !errors.As(err, &invalid) || !strings.Contains(invalid.Reason, "Codex cannot read") {
+			t.Fatalf("refusal %T %v", err, err)
+		}
+		srv.Unsupported("fs/readDirectory")
+		if _, err := browser.Browse(ctx, execution.BrowseRequest{Path: dir}); err == nil || !strings.Contains(err.Error(), "cannot list folders") {
+			t.Fatalf("older Codex %v", err)
+		}
+	})
+}

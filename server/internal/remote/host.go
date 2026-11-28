@@ -254,8 +254,9 @@ func (h *Host) Handlers() map[string]workerchan.WorkerHandler {
 			}
 			return Empty{}, in.Send(ctx, r.Session, r.Message)
 		}),
-		KindAct:          h.with(act),
-		KindWorkspaceAdd: h.with(addWorkspace),
+		KindAct:             h.with(act),
+		KindWorkspaceAdd:    h.with(addWorkspace),
+		KindDirectoryBrowse: h.with(browseDirectory),
 		KindInventory: func(ctx context.Context, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
 			var r InventoryRequest
 			if err := decode(env, &r); err != nil {

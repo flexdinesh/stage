@@ -185,8 +185,9 @@ against the scoped session.
 
 Use `execution.As[T](role)` to reach a trait and check the corresponding
 operation or descriptor policy before dispatch. `execution/optional.go`
-registers `LinkResolver`, `WorkspaceFeatures`, `Correlator`,
-`EventSource`, `Interactive` and `Actor`. A local adapter implements
+registers `LinkResolver`, `SessionSearcher`, `SessionNamer`,
+`WorkspaceFeatures`, `Correlator`, `EventSource`, `Interactive`, `Actor`,
+`WorkspaceAdder` and `DirectoryBrowser`. A local adapter implements
 the Go interface. A partial adapter, such as a worker proxy, must also
 declare that trait in the connection's current ready snapshot. Unknown traits
 are ignored. Channel negotiation also scopes each request and harness kind.
@@ -514,6 +515,41 @@ new projects. OpenCode adds existing folders ([Adding folders](#adding-folders))
 Codex trusts folders ([Codex adapter](#codex-adapter)). Claude Code declares
 the source `trust` ([Trust in Claude Code](#claude-code-adapter)).
 [Workspace add API](api.md#add-a-workspace)
+
+### Folder browsing
+
+`execution.DirectoryBrowser` is the optional role behind the
+`directoryBrowse` operation. It lets a person pick a declared `path` field's
+value from the harness host's folders instead of typing it. `Browse` takes
+`BrowseRequest{Path, ShowHidden}`, where an empty `Path` means the adapter's
+default start. It returns `BrowseResult{Path, Parent, Entries, Truncated}`:
+the cleaned folder, its parent (`""` at `/`), and child folders only, each
+with its name and absolute path. Files are never listed.
+`execution.Listing` gives every adapter the same result: dot-named folders
+only with `ShowHidden`, sorted by name ignoring case, at most 500
+(`MaxDirectoryEntries`, then `Truncated`). Browsing reads only. It never
+persists a project, writes a harness file, or runs on behalf of an agent.
+
+`*execution.Invalid` (a missing folder, a file, an unreadable folder) is a
+400 with the harness's words. `*execution.BrowseUnavailable` is a 409
+`operation_unavailable` with the adapter's reason. Any other failure is a
+502 `directory_browse_failed`. On workers the operation needs the
+`directoryBrowser` trait and the `adapter.directoryBrowse` request kind;
+`BrowseUnavailable` crosses the channel as `unsupported` and keeps its
+reason. An older worker without the kind declares the operation
+unavailable ("Update Stage on the worker machine…").
+
+| Harness | `directoryBrowse` |
+| --- | --- |
+| OpenCode | `fs.list`, anchored to a listed project ([OpenCode folder browsing](#opencode-folder-browsing)) |
+| Codex | `fs/readDirectory`; the default start is the host user's home ([Codex adapter](#codex-adapter)) |
+| T3 | Unavailable: "T3 does not expose folder browsing to Stage; type the path." |
+| Claude Code | Unavailable: "Type the path." |
+
+The route is `GET /api/connections/{id}/directories` and only people may
+use it ([API](api.md#browse-folders)). In the UI, a `path` input offers
+Browse… when its connection declares the operation
+([harnesses](harnesses.md)).
 
 ### Interaction
 
@@ -893,6 +929,31 @@ unarchived before the call.
 A lost or unreadable location answer, or a failed listing after the
 location answered, is an uncertain outcome (504): OpenCode may have saved
 the project, and retrying with the same `requestId` is safe.
+
+### OpenCode folder browsing
+
+`directoryBrowse` is available when `/openapi.json` has `fs.list` (`GET
+/api/fs/list`). Otherwise it says "This OpenCode version cannot list folders
+(fs.list is missing). Type the path."
+
+OpenCode 2.3.2 (checked on a throwaway `opencode serve` with temporary
+`HOME` and XDG directories) lists the direct children of an absolute
+`path`: files and folders, hidden ones included.
+Entry paths are relative to the request's location. Folders end in `/`.
+A request without `location[directory]` resolves the default location (the
+service's working directory) and saves it as a project the first time, even
+when it lists another path. A request naming an existing project's folder
+saves nothing new. A listed path is never saved.
+
+So every listing names a location: the most recently active listed project
+that is not archived and not `global` (archived projects are skipped
+because a location request restores them). The default start is that
+project's parent folder. If its folder is gone (404
+`LocationNotFoundError`), the next listed project anchors, up to five. With
+no usable project, Browse is unavailable: "OpenCode lists no projects yet.
+Type the path." A missing path or a file is 404 `FileNotFoundError`, and
+Stage answers 400 "Folder not found on the OpenCode host: <path>." The
+fake in `server/internal/opencode/directory_browse_test.go` pins this.
 
 ### Launch and recovery
 
@@ -1353,6 +1414,15 @@ server's `harness_settings` row for that machine
   Stage re-reads `config/read`: a folder a higher layer keeps untrusted is
   invalid input naming the override. Codex's experimental `project/*` API
   (create, import, list) is a future option; Stage does not use it.
+- **Folder browsing.** `directoryBrowse` lists a folder with
+  `fs/readDirectory {path}` (read only; checked on a throwaway 0.172.0 app
+  server). The default start is the host user's home: the daemon serves a
+  local socket and runs as the adapter's user. Codex returns entry names
+  with their resolved kind (a symlink to a folder is a folder; a broken one
+  is left out). A missing folder, a file or an unreadable folder is invalid
+  input with Codex's OS error. A daemon without the method declares Browse
+  unavailable: "This Codex version cannot list folders (fs/readDirectory is
+  missing). Type the path."
 - **Launch (`reserved`).** Validation rejects before any effect (an
   unknown option such as `worktree`, missing directory, non-image attachment, invalid option or
   permission). `thread/start`, checkpoint the thread id, best-effort

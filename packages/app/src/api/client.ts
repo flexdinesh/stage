@@ -1,6 +1,6 @@
 import type {
   AccessStatus, Account, AccountRole, AgentCredential, GrantInfo, GrantKind, Invitation, IssuedLink,
-  AddedWorkspace, AddWorkspaceRequest, HarnessAction,
+  AddedWorkspace, AddWorkspaceRequest, DirectoryListing, HarnessAction,
   Machine, MachinePairing, PairingStatus,
   ActionResult, Harness, HarnessFact, HarnessConnection, HarnessesReply, HarnessStatus, Capabilities, ExecutionConfig, ExecutionLinks, TaskState,
   CompletionPreview,
@@ -251,6 +251,9 @@ export function createApi(transport: Transport) {
     /** Asks the connection's harness to add a workspace (ADR 0012): 201, or 409/400/502 `workspace_not_listed`/504 `outcome_uncertain`. */
     addWorkspace: (connectionId: number, body: AddWorkspaceRequest) =>
       apiFetch<AddedWorkspace>(`/connections/${connectionId}/workspaces`, post(body)),
+    /** Lists a folder's child folders on the connection's host (`directoryBrowse`); "" is the harness's default start. People only. */
+    browseDirectories: (connectionId: number, path: string, hidden: boolean, signal?: AbortSignal) =>
+      apiFetch<DirectoryListing>(`/connections/${connectionId}/directories${toQuery({ path, hidden: hidden ? "true" : undefined })}`, { signal }),
     projectEvents: (id: number) => apiFetch<{ events: ProjectEvent[] }>(`/projects/${id}/events`),
     projectActions: (id: number, scope: { connectionId: number; workspaceId: string }, signal?: AbortSignal) =>
       apiFetch<HarnessAction[]>(`/projects/${id}/actions${toQuery(scope)}`, { signal }),

@@ -128,6 +128,7 @@ var optionalTraits = []optionalTrait{
 	registerTrait[Interactive]("interactive"),
 	registerTrait[Actor]("actor"),
 	registerTrait[WorkspaceAdder]("workspaceAdder"),
+	registerTrait[DirectoryBrowser]("directoryBrowser"),
 }
 
 func (t optionalTrait) offered(a Adapter) bool {

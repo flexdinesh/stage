@@ -655,6 +655,31 @@ OpenCode adds existing folders ([source `folder`](execution.md#adding-folders)).
 Codex trusts folders ([source `trust`](execution.md#codex-adapter)). Claude
 Code trusts folders ([source `trust`](execution.md#claude-code-adapter)).
 
+### Browse folders
+
+`GET /api/connections/:connectionId/directories?path=&hidden=` lists the
+child folders of `path` on the connection's host, through the declared
+`directoryBrowse` operation. Use it to pick a `path` field's value. An
+empty `path` opens the harness's default start. `path` must be absolute
+and at most 4096 bytes. `hidden=true` includes dot-named folders (default
+false). The response is `{path, parent, entries: [{name, path}],
+truncated}`: folders only, sorted by name ignoring case, at most 500
+(`truncated` when more exist), with `parent` `""` at the root. Browsing
+reads only and is `Cache-Control: private, no-store`.
+
+Only people may browse, like session search: the personal operator and
+active shared members and admins. Agent credentials, MCP tool calls,
+private agent sockets and worker agent gateways receive 403
+`principal_forbidden` ("Browse folders from the Stage app. Agents type
+paths."). There is no MCP or CLI equivalent.
+
+400 means invalid input or the harness refused the folder (missing, a
+file, unreadable), in the harness's words. 409 `operation_unavailable`
+gives the harness's reason it cannot browse, or that the worker needs an
+update. 502 `directory_browse_failed` means the listing failed. An offline
+worker answers like any worker route.
+[Folder browsing by harness](execution.md#folder-browsing)
+
 ### Retired workspace routes
 
 The following routes return 410 with `{error, code: "removed"}`.
@@ -675,8 +700,8 @@ The `error` field names the replacement.
 In personal mode, the implicit operator uses the human product routes.
 During `setup_pending`, product routes are closed to humans and agents.
 In claimed mode, active human members and admins can create or edit projects,
-change group membership, read or refresh inventory, and browse the
-connection's session roster. The retired routes keep human admission, so
+change group membership, read or refresh inventory, browse the
+connection's session roster and browse its host's folders. The retired routes keep human admission, so
 410 guidance is returned only after admission.
 
 Scoped agents can read project and group summaries, project events and the
@@ -684,8 +709,8 @@ exact destination projection, create, rename and archive projects, preview
 and apply group membership edits, add workspaces, fetch scoped capabilities, and use the
 allowed task and schedule operations
 ([ADR 0011](adr/0011-agent-operation-parity.md)). Their project and
-membership responses omit raw paths. Raw inventory, `POST /api/sync` and
-roster search require human admission. Named session reference lookup,
+membership responses omit raw paths. Raw inventory, `POST /api/sync`,
+roster search and folder browsing require human admission. Named session reference lookup,
 context and adoption retain agent access under the existing transport
 scope and adoption checks. Declared actions also enforce their caller
 policy.

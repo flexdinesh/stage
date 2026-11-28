@@ -91,7 +91,7 @@ func TestWorkspaceAdderTrait(t *testing.T) {
 	if _, ok := execution.As[execution.WorkspaceAdder](plain{}); ok {
 		t.Fatal("plain adapter adds workspaces")
 	}
-	if !slices.Contains(execution.Ops, execution.OpWorkspaceAdd) || execution.Ops[len(execution.Ops)-1] != execution.OpWorkspaceAdd {
+	if !slices.Contains(execution.Ops, execution.OpWorkspaceAdd) {
 		t.Fatalf("ops %v", execution.Ops)
 	}
 	var uncertain *execution.OutcomeUncertain

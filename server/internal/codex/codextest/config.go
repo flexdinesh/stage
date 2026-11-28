@@ -246,3 +246,34 @@ func fsMetadata(path string) (any, *rpcError) {
 	}
 	return map[string]any{"isDirectory": info.IsDir(), "isFile": info.Mode().IsRegular(), "isSymlink": false, "createdAtMs": 0, "modifiedAtMs": info.ModTime().UnixMilli()}, nil
 }
+
+// fsReadDirectory answers fs/readDirectory from the real filesystem as Codex
+// 0.172.0 does (verified on a throwaway app-server): direct children by
+// name, hidden ones included, a symlink by its target's kind and a broken
+// one left out; a missing folder, a file or an unreadable folder is -32603
+// with the OS error.
+func fsReadDirectory(path string) (any, *rpcError) {
+	if !filepath.IsAbs(path) {
+		return nil, invalid("Invalid request: AbsolutePathBuf deserialized without a base path")
+	}
+	info, err := os.Stat(path)
+	switch {
+	case err != nil:
+		return nil, &rpcError{Code: -32603, Message: "No such file or directory (os error 2)"}
+	case !info.IsDir():
+		return nil, &rpcError{Code: -32603, Message: "Not a directory (os error 20)"}
+	}
+	names, err := os.ReadDir(path)
+	if err != nil {
+		return nil, &rpcError{Code: -32603, Message: "Permission denied (os error 13)"}
+	}
+	entries := []map[string]any{}
+	for _, e := range names {
+		target, err := os.Stat(filepath.Join(path, e.Name()))
+		if err != nil {
+			continue
+		}
+		entries = append(entries, map[string]any{"fileName": e.Name(), "isDirectory": target.IsDir(), "isFile": target.Mode().IsRegular()})
+	}
+	return map[string]any{"entries": entries}, nil
+}
