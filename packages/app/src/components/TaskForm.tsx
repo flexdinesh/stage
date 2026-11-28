@@ -461,6 +461,10 @@ function TaskFormDrawer({
             destination.chooseWorkspace(id);
             resetConfig();
           }}
+          onAdded={(result) => {
+            destination.selectAdded(result);
+            resetConfig();
+          }}
         />
         {showPlanningProject ? (
           <Field label="Project">

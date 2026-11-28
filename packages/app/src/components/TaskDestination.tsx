@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { keys, useHarnesses, useMachines } from "../api/queries.ts";
-import type { HarnessConnection, Workspace } from "../api/types.ts";
+import type { AddedWorkspace, HarnessConnection, Workspace } from "../api/types.ts";
 import { POLL } from "../lib/polling.ts";
 import { availableTaskWorkspaces, blockedTaskWorkspaces, suggestedTaskWorkspace, workspaceLine } from "../lib/taskForm.ts";
+import { addedChoice } from "../lib/workspaceAdd.ts";
 import { useApi } from "../platform/context.tsx";
-import { IconClose, IconRefresh } from "./icons.tsx";
+import { AddWorkspacePanel } from "./AddWorkspace.tsx";
+import { IconClose, IconPlus, IconRefresh } from "./icons.tsx";
 import { Combobox, ErrorText, Field, IconButton, TextLink, type ComboboxOption } from "./ui.tsx";
 
 interface WorkspaceChoice {
@@ -107,7 +109,7 @@ export function useTaskDestination({ initialConnection, initialWorkspace, allowP
   }
 
   return {
-    harnesses, picked, connection, connectionOptions, workspaceOptions, selected, status, loading,
+    harnesses, picked, connection, connectionOptions, workspaceOptions, selected, status, loading, projectId,
     /** Blocked rows stay browsable so their reasons can be read. */
     canBrowse: rows.length > 0 || blocked.length > 0,
     workspaceId: saved?.id ?? prefill?.workspaceId ?? null,
@@ -124,6 +126,10 @@ export function useTaskDestination({ initialConnection, initialWorkspace, allowP
       const row = rows.find((w) => w.workspaceId === id);
       setDraft({ connection, workspace: row === undefined ? null : workspaceChoice(row) });
     },
+    /** Selects a workspace the harness just added (the inventory already lists it: the add refreshed it). */
+    selectAdded(result: AddedWorkspace) {
+      setDraft({ connection, workspace: addedChoice(result) });
+    },
     refresh() {
       refresh.mutate(connection, { onSuccess: (data) => {
         client.setQueryData(queryKey, data);
@@ -134,7 +140,7 @@ export function useTaskDestination({ initialConnection, initialWorkspace, allowP
   };
 }
 
-export function TaskDestinationFields({ destination: d, readOnly, canClear, checkingLaunch, backlogNeedsWorkspace, onConnection, onWorkspace }: {
+export function TaskDestinationFields({ destination: d, readOnly, canClear, checkingLaunch, backlogNeedsWorkspace, onConnection, onWorkspace, onAdded }: {
   destination: ReturnType<typeof useTaskDestination>;
   readOnly: boolean;
   canClear: boolean;
@@ -144,7 +150,21 @@ export function TaskDestinationFields({ destination: d, readOnly, canClear, chec
   backlogNeedsWorkspace: boolean;
   onConnection: (id: number) => void;
   onWorkspace: (id: string) => void;
+  /** The inline Add workspace panel added one on this connection. */
+  onAdded: (result: AddedWorkspace) => void;
 }) {
+  const [adding, setAdding] = useState(false);
+  const addTrigger = useRef<HTMLButtonElement>(null);
+  const closeAdd = () => {
+    setAdding(false);
+    addTrigger.current?.focus();
+  };
+  // A new connection closes the panel: its connection is fixed to the form's.
+  const [panelConnection, setPanelConnection] = useState(d.connection);
+  if (panelConnection !== d.connection) {
+    setPanelConnection(d.connection);
+    setAdding(false);
+  }
   const pathText = d.selected === undefined ? null : d.selected.workspace || d.selected.externalId;
   // Read-only shows the path alone. Editable always keeps one line under the workspace (see workspaceLine) and fixed
   // refresh/clear buttons, so picking a connection or workspace never moves the form.
@@ -172,6 +192,10 @@ export function TaskDestinationFields({ destination: d, readOnly, canClear, chec
                 <IconButton variant="secondary" icon={IconRefresh} label="Refresh workspaces" busy={d.refreshing}
                   disabled={!d.canRefresh} onClick={d.refresh} />
               )}
+              {readOnly ? null : (
+                <IconButton ref={addTrigger} variant="secondary" icon={IconPlus} label="Add workspace"
+                  aria-expanded={adding} disabled={!d.canRefresh} onClick={() => setAdding(!adding)} />
+              )}
               {readOnly || !canClear ? null : (
                 <IconButton variant="secondary" icon={IconClose} label="Clear workspace"
                   disabled={d.workspaceId === null} onClick={() => onWorkspace("")} />
@@ -180,6 +204,10 @@ export function TaskDestinationFields({ destination: d, readOnly, canClear, chec
           )}
         </Field>
       </div>
+      {adding && !readOnly && d.connection > 0 ? (
+        <AddWorkspacePanel connectionId={d.connection} projectId={d.projectId} onClose={closeAdd}
+          onAdded={(result) => { onAdded(result); closeAdd(); }} />
+      ) : null}
       <ErrorText error={d.harnesses.error} />
     </div>
   );

@@ -185,6 +185,13 @@ allows, and only in its adapter ([trust.go](../server/internal/claudecode/trust.
 Until a harness supports it, declare
 `execution.WorkspaceAddNotSupported(name)`. Workers relay the call as
 `adapter.workspaceAdd` behind the `workspaceAdder` trait.
+
+The Add workspace UI (Projects, a project's Workspaces panel, and the task
+and schedule form) renders only from these declarations: your source labels
+and help, your fields (`path` in monospace), and your confirmation as a
+checkbox the person must tick. One source shows no Source choice; two to
+four show joined buttons (a dropdown on phones); more show a dropdown.
+Write labels short enough to read in joined buttons.
 [Workspace add API](api.md#add-a-workspace) ·
 [Execution contract](execution.md#workspace-add)
 

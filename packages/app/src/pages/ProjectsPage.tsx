@@ -1,10 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import type { PreferenceStorage } from "../platform/index.ts";
 import { useInvalidateProjects, useProjectGroups, useTasks } from "../api/queries.ts";
-import type { ProjectGroup, Task } from "../api/types.ts";
+import type { AddedWorkspace, ProjectGroup, Task } from "../api/types.ts";
+import { AddWorkspaceDrawer } from "../components/AddWorkspace.tsx";
+import { GroupMembershipDrawer, type MembershipAction } from "../components/GroupMembershipDrawer.tsx";
+import { HarnessFacts } from "../components/HarnessPresentation.tsx";
 import { IconPlus } from "../components/icons.tsx";
 import { GroupSummary } from "../components/GroupWorkspaceDisplay.tsx";
 import { useWorkspaceConnections } from "../components/WorkspaceDisplay.tsx";
@@ -14,6 +17,7 @@ import {
   Drawer,
   ErrorText,
   Field,
+  Hint,
   Input,
   Meta,
   Muted,
@@ -75,6 +79,27 @@ function CreateProjectDrawer({ onClose }: { onClose: () => void }) {
         <ErrorText error={create.error} />
       </form>
     </Drawer>
+  );
+}
+
+/** The add drawer's success view: what the harness added and where Stage grouped it, then Move to project or Done. */
+function AddedWorkspaceView({ result, connectionName }: { result: AddedWorkspace; connectionName: string }) {
+  const line = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { line.current?.focus(); }, []);
+  const { workspace, group } = result;
+  const name = <strong className="font-medium">{workspace.title || workspace.path || workspace.workspaceId}</strong>;
+  const where = <TextLink to={`/projects/${group.id}`} variant="rest">{group.title}</TextLink>;
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <p ref={line} tabIndex={-1} role="status" className="text-body wrap-anywhere">
+        {result.existing
+          ? <>{name} was already listed on {connectionName}. It is in {where}.</>
+          : <>Added {name} on {connectionName} in {where}.</>}
+      </p>
+      {workspace.path ? <code className="wrap-anywhere text-meta">{workspace.path}</code> : null}
+      {result.message ? <Hint className="wrap-anywhere">{result.message}</Hint> : null}
+      <HarnessFacts facts={result.facts} />
+    </div>
   );
 }
 
@@ -151,6 +176,17 @@ export function ProjectsPage() {
   const { storage } = usePlatform();
   const [sort, setSort] = useState<Sort>(() => readSort(storage));
   const [creating, setCreating] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [moving, setMoving] = useState<{ action: MembershipAction; group: ProjectGroup } | null>(null);
+  const [moved, setMoved] = useState<Pick<ProjectGroup, "id" | "title"> | null>(null);
+  const movedLine = useRef<HTMLParagraphElement>(null);
+  useEffect(() => { if (moved !== null) movedLine.current?.focus(); }, [moved]);
+  const closeMove = useCallback(() => setMoving(null), []);
+  const [added, setAdded] = useState<{ result: AddedWorkspace; connectionName: string } | null>(null);
+  const closeAdd = () => {
+    setAdding(false);
+    setAdded(null);
+  };
   const projects = useProjectGroups();
   const tasks = useTasks();
   const groups = projects.data?.groups ?? [];
@@ -167,6 +203,12 @@ export function ProjectsPage() {
   };
   const counts = tasks.data === undefined ? null : countByProject(tasks.data.tasks);
   const connections = useWorkspaceConnections();
+  // The added row in the refreshed groups, for Move to project.
+  const addedGroup = added === null ? undefined : groups.find((g) => g.id === added.result.group.id);
+  const addedWorkspace = added === null ? undefined : addedGroup?.members.find((m) =>
+    m.connectionId === added.result.workspace.connectionId && m.workspaceId === added.result.workspace.workspaceId);
+  const addedMember = addedGroup === undefined || addedWorkspace === undefined
+    ? null : { action: { workspace: addedWorkspace, separate: false }, group: addedGroup };
 
   return (
     <>
@@ -177,12 +219,20 @@ export function ProjectsPage() {
             <Segmented label="Projects filter" options={FILTER_OPTIONS} value={filter} onChange={setFilter} />
             <Segmented label="Sort projects" options={SORT_OPTIONS} value={sort} onChange={changeSort} />
             <TrackSessionButton />
+            <Button onClick={() => { setMoved(null); setAdding(true); }}>
+              <IconPlus /> Add workspace
+            </Button>
             <Button variant="primary" onClick={() => setCreating(true)}>
               <IconPlus /> New project
             </Button>
           </>
         }
       />
+      {moved === null ? null : (
+        <p ref={movedLine} tabIndex={-1} role="status" className="mb-3 text-small wrap-anywhere">
+          Workspace moved to <TextLink to={`/projects/${moved.id}`}>{moved.title}</TextLink>.
+        </p>
+      )}
       <QueryState
         isPending={projects.isPending}
         error={projects.error}
@@ -224,6 +274,20 @@ export function ProjectsPage() {
         </Panel>
       </QueryState>
       {creating ? <CreateProjectDrawer onClose={() => setCreating(false)} /> : null}
+      {adding ? <AddWorkspaceDrawer onClose={closeAdd} onAdded={(result, connectionName) => setAdded({ result, connectionName })}
+        done={added === null ? null : {
+          body: <AddedWorkspaceView {...added} />,
+          footer: <>
+            <Button variant="primary" onClick={closeAdd}>Done</Button>
+            <Button disabled={addedMember === null} onClick={() => {
+              if (addedMember === null) return;
+              closeAdd();
+              setMoving(addedMember);
+            }}>Move to project</Button>
+          </>,
+        }} /> : null}
+      {moving === null ? null : <GroupMembershipDrawer action={moving.action} group={moving.group} connections={connections}
+        onClose={closeMove} onApplied={(target) => { setMoved(target); closeMove(); }} />}
     </>
   );
 }
