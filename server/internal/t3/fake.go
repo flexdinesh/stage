@@ -27,9 +27,9 @@ type Fake struct {
 	missingRefs map[string]bool   // worktree base refs that do not resolve (MissRef)
 	Catalog     Catalog
 	Sent        []FakeSend
-	sends       map[string]bool // clientRequestIds already sent
-	queued      map[string]int  // thread id -> runs waiting for the current one
-	Interrupted []string        // interrupted thread ids
+	sends       map[string]bool        // clientRequestIds already sent
+	queued      map[string][]QueuedRun // thread id -> runs in send order
+	Interrupted []string               // interrupted thread ids
 	// Renamed: every accepted RenameThread; RenameErr fails it (tests).
 	Renamed   []FakeRename
 	RenameErr error
@@ -136,9 +136,9 @@ func NewFake() *Fake {
 		items:    map[string][]TimelineItem{},
 		launches: map[string]string{},
 		sends:    map[string]bool{},
-		queued:   map[string]int{},
+		queued:   map[string][]QueuedRun{},
 		requests: map[string][]*fakeRequest{},
-		Catalog: Catalog{Tools: []string{"t3_pending_request", "t3_thread_read", "t3_thread_send"}, Providers: []Provider{{
+		Catalog: Catalog{Tools: []string{"t3_pending_request", "t3_thread_read", "t3_thread_send", queueTool}, Providers: []Provider{{
 			ProviderInstanceID: "claude",
 			DriverKind:         "claude",
 			DisplayName:        "Claude",
@@ -626,17 +626,17 @@ func (f *Fake) SendMessage(_ context.Context, threadID, message string, mode Sen
 		return nil
 	}
 	if t.ActiveRunID != "" {
-		f.queued[threadID]++
+		f.queued[threadID] = append(f.queued[threadID], QueuedRun{ID: f.nextID("run"), Text: message})
 		return nil
 	}
-	f.startRun(t)
+	f.startRun(t, f.nextID("run"))
 	return nil
 }
 
 // startRun starts a new running run on t. Caller holds mu.
-func (f *Fake) startRun(t *ThreadDetail) {
+func (f *Fake) startRun(t *ThreadDetail, runID string) {
 	now := f.now()
-	run := Run{RunID: f.nextID("run"), Ordinal: t.RunCount + 1, Status: StatusRunning, ProviderInstanceID: t.ProviderInstanceID, Model: t.Model, RequestedAt: now, StartedAt: &now}
+	run := Run{RunID: runID, Ordinal: t.RunCount + 1, Status: StatusRunning, ProviderInstanceID: t.ProviderInstanceID, Model: t.Model, RequestedAt: now, StartedAt: &now}
 	t.RecentRuns = append([]Run{run}, t.RecentRuns...)
 	t.RunCount++
 	t.ActiveRunID = run.RunID
@@ -877,9 +877,9 @@ func (f *Fake) setStatus(t *ThreadDetail, status ThreadStatus) {
 		}
 	}
 	// A queued message runs once the current run completes.
-	if status == StatusCompleted && f.queued[t.ThreadID] > 0 {
-		f.queued[t.ThreadID]--
-		f.startRun(t)
+	if queued := f.queued[t.ThreadID]; status == StatusCompleted && len(queued) > 0 {
+		f.startRun(t, queued[0].ID)
+		f.queued[t.ThreadID] = slices.Delete(queued, 0, 1)
 	}
 }
 

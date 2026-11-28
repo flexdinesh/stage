@@ -28,6 +28,40 @@ func (s *server) taskRequests(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+func (s *server) taskQueue(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathID(r)
+	if err != nil {
+		return err
+	}
+	messages, err := s.Engine.Coordinator.Queued(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": messages})
+	return nil
+}
+
+func (s *server) changeTaskQueue(steer bool) func(http.ResponseWriter, *http.Request) error {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		id, err := pathID(r)
+		if err != nil {
+			return err
+		}
+		if _, refused, err := s.selfAction(w, r, id, "An agent cannot change its own session's queue."); err != nil || refused {
+			return err
+		}
+		change := s.Engine.Coordinator.CancelQueued
+		if steer {
+			change = s.Engine.Coordinator.PromoteQueued
+		}
+		if err := change(r.Context(), id, r.PathValue("qid")); err != nil {
+			return err
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	}
+}
+
 func (s *server) taskActivity(w http.ResponseWriter, r *http.Request) error {
 	id, err := pathID(r)
 	if err != nil {

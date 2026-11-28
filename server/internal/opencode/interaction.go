@@ -592,12 +592,12 @@ func (a *Adapter) deliveryBlock(ctx context.Context, id string, op execution.Op)
 // original admission in the inbox and in the delivered messages.
 func (a *Adapter) hasPrompt(ctx context.Context, session, id, marker string) (bool, error) {
 	prefix := "/api/session/" + url.PathEscape(session)
-	var inbox envelope[[]admitted]
-	if err := a.get(ctx, prefix+"/inbox", &inbox); err != nil {
+	inbox, err := a.userInbox(ctx, session)
+	if err != nil {
 		return false, sessionReadErr(err)
 	}
-	for _, v := range inbox.Data {
-		if v.Type == "user" && v.ID == id && v.SessionID == session && v.Payload.Metadata["stageMessage"] == marker {
+	for _, v := range inbox {
+		if v.ID == id && v.Payload.Metadata["stageMessage"] == marker {
 			return true, nil
 		}
 	}

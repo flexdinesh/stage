@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agenttools"
@@ -198,6 +199,48 @@ func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 			return err
 		}
 		return c.out(res, func(w io.Writer) { printActivity(w, res.Activity) })
+	case "queue":
+		var cancelID, steerID string
+		c.fs.StringVar(&cancelID, "cancel", "", "cancel the queued message with this id")
+		c.fs.StringVar(&steerID, "steer", "", "promote the queued message with this id to a steer")
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		id, err := c.oneID()
+		if err != nil {
+			return err
+		}
+		in := agenttools.QueuedMessagesArgs{TaskID: id, Action: "list"}
+		switch {
+		case c.set("cancel") && c.set("steer"):
+			return usagef("task queue: --cancel and --steer are mutually exclusive")
+		case c.set("cancel"):
+			in.Action, in.ID = "cancel", cancelID
+		case c.set("steer"):
+			in.Action, in.ID = "steer", steerID
+		}
+		if in.Action != "list" {
+			if strings.TrimSpace(in.ID) == "" {
+				return usagef("task queue: --%s requires a queued message id", in.Action)
+			}
+			if in.CallerArgs, err = callerArgs(); err != nil {
+				return err
+			}
+		}
+		res, err := c.ops().QueuedMessages(ctx, in)
+		if err != nil {
+			return err
+		}
+		return c.out(res, func(w io.Writer) {
+			switch in.Action {
+			case "cancel":
+				success(w, "Cancelled queued message %s", in.ID)
+			case "steer":
+				success(w, "Steered queued message %s", in.ID)
+			default:
+				printQueue(w, res.Messages)
+			}
+		})
 	case "escalate":
 		var reason string
 		c.fs.StringVar(&reason, "reason", "", "why the user must answer (at most 500 characters)")
@@ -240,6 +283,22 @@ func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 		})
 	}
 	return usagef("task %s: unknown", v)
+}
+
+func printQueue(w io.Writer, messages []execution.QueuedMessage) {
+	if len(messages) == 0 {
+		fmt.Fprintln(w, "No queued messages")
+	}
+	for _, message := range messages {
+		fmt.Fprintf(w, "%s  %s", message.ID, message.Delivery)
+		if !message.CreatedAt.IsZero() {
+			fmt.Fprintf(w, "  %s", message.CreatedAt.Format(time.RFC3339))
+		}
+		if message.Source != "" {
+			fmt.Fprintf(w, "  %s", message.Source)
+		}
+		fmt.Fprintf(w, "\n  %s\n", message.Text)
+	}
 }
 
 func printActivity(w io.Writer, a execution.Activity) {

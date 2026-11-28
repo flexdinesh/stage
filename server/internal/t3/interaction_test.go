@@ -329,7 +329,7 @@ func TestFeaturesGateSessionSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, op := range []execution.Op{execution.OpRespond, execution.OpSend, execution.OpSteer, execution.OpQueue, execution.OpActivity} {
+	for _, op := range []execution.Op{execution.OpRespond, execution.OpSend, execution.OpSteer, execution.OpQueue, execution.OpQueueManage, execution.OpActivity} {
 		if !c.Operations[op].Available {
 			t.Errorf("%s: %+v", op, c.Operations[op])
 		}
@@ -341,7 +341,7 @@ func TestFeaturesGateSessionSurface(t *testing.T) {
 	}
 	for op, verb := range map[execution.Op]string{
 		execution.OpRespond: "answer questions", execution.OpSend: "send",
-		execution.OpSteer: "steer", execution.OpQueue: "queue",
+		execution.OpSteer: "steer", execution.OpQueue: "queue", execution.OpQueueManage: "manage queued messages",
 	} {
 		if got := c.Operations[op]; got.Available || got.Reason != "Update T3 to "+verb+" in Stage." {
 			t.Errorf("%s: %+v", op, got)

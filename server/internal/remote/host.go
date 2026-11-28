@@ -265,6 +265,7 @@ func (h *Host) Handlers() map[string]workerchan.WorkerHandler {
 			}
 			return out.Bounded(q)
 		}),
+		KindQueue:           h.with(manageQueue),
 		KindAct:             h.with(act),
 		KindWorkspaceAdd:    h.with(addWorkspace),
 		KindDirectoryBrowse: h.with(browseDirectory),
@@ -390,6 +391,31 @@ func deliver(ctx context.Context, in execution.Interactive, env workerchan.Envel
 		return nil, &execution.Invalid{Reason: "message delivery does not match the worker channel operation"}
 	}
 	return Empty{}, in.Send(ctx, r.Session, r.Message)
+}
+
+func manageQueue(ctx context.Context, a execution.Adapter, env workerchan.Envelope, _ workerchan.Upcall) (any, error) {
+	var r QueueRequest
+	if err := decode(env, &r); err != nil {
+		return nil, err
+	}
+	manager, ok := execution.As[execution.QueueManager](a)
+	if !ok {
+		return nil, unsupported("queue management")
+	}
+	switch r.Action {
+	case "list":
+		messages, err := manager.Queued(ctx, r.Session)
+		if err != nil {
+			return nil, err
+		}
+		return execution.BoundQueuedMessages(messages), nil
+	case "cancel":
+		return Empty{}, manager.CancelQueued(ctx, r.Session, r.ID)
+	case "steer":
+		return Empty{}, manager.PromoteQueued(ctx, r.Session, r.ID)
+	default:
+		return nil, &execution.Invalid{Reason: "unknown queue action"}
+	}
 }
 
 // launch fetches the intent's images, then runs the adapter's launch with

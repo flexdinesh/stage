@@ -452,7 +452,7 @@ func runTask(ctx context.Context, env Env, args []string) error {
 			return errTimeout
 		}
 		return nil
-	case "preview", "complete", "reopen", "requests", "respond", "send", "activity", "escalate", "opening-prompt":
+	case "preview", "complete", "reopen", "requests", "respond", "send", "activity", "queue", "escalate", "opening-prompt":
 		return runTaskWork(ctx, c, v, rest)
 	}
 	return usagef("task %s: unknown", v)

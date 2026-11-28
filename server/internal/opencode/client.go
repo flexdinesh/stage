@@ -38,6 +38,7 @@ type Adapter struct {
 var _ execution.Adapter = (*Adapter)(nil)
 var _ execution.WorkspaceFeatures = (*Adapter)(nil)
 var _ execution.LinkResolver = (*Adapter)(nil)
+var _ execution.QueueManager = (*Adapter)(nil)
 
 // invisible reports a character a pasted address can carry unseen: control,
 // format (zero-width, BOM, direction marks) or any space but a plain one.
@@ -260,6 +261,8 @@ type serverContract struct {
 	respond bool
 	// Prompt delivery modes explicitly advertised by session.prompt.
 	delivery map[string]bool
+	// queueManage: native inbox entries can be promoted to steer and cancelled.
+	queueManage bool
 	// activity: session.diff augments the required message and session reads.
 	activity bool
 	// events: the event types Stage subscribes to on GET /api/event
@@ -307,7 +310,7 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 		{"post", "/api/session/{sessionID}/interrupt", "session.interrupt"},
 		{"get", "/api/session/{sessionID}/message", "session.message.list"},
 		{"get", "/api/session/{sessionID}/message/{messageID}", "session.message.get"},
-		{"get", "/api/session/{sessionID}/inbox", "session.inbox.list"},
+		{"get", inboxContractPath, "session.inbox.list"},
 		{"get", "/api/session/{sessionID}/permission", "session.permission.list"},
 		{"get", "/api/session/{sessionID}/form", "session.form.list"},
 	} {
@@ -339,6 +342,7 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 	contract.fsList = spec.Paths["/api/fs/list"]["get"].OperationID == "fs.list"
 	contract.respond = inspectReplies(spec.Paths, spec.Components.Schemas)
 	contract.delivery = inspectDelivery(spec.Paths["/api/session/{sessionID}/prompt"]["post"], spec.Components.Schemas)
+	contract.queueManage = inspectQueueManage(spec.Paths[inboxContractPath+"/{inboxID}"], spec.Components.Schemas)
 	contract.activity = spec.Paths["/api/session/{sessionID}/diff"]["get"].OperationID == "session.diff"
 	contract.events = inspectEvents(spec.Paths["/api/event"]["get"])
 	a.verified = contract
@@ -346,7 +350,7 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 }
 
 func inspectDelivery(op operation, schemas map[string]json.RawMessage) map[string]bool {
-	shape, _ := requestShape(op, schemas) // the required prompt shape was already verified
+	shape, _ := requestShape(op, schemas)
 	modes := map[string]bool{}
 	seen := map[string]bool{}
 	var inspect func(json.RawMessage)

@@ -41,6 +41,7 @@ const (
 	KindSend                 = "adapter.send"
 	KindDeliver              = "adapter.deliver"
 	KindActivity             = "adapter.activity"
+	KindQueue                = "adapter.queue"
 	KindAct                  = "adapter.act"
 	KindWorkspaceAdd         = "adapter.workspaceAdd"
 	KindDirectoryBrowse      = "adapter.directoryBrowse"
@@ -153,6 +154,14 @@ type SendRequest struct {
 type ActivityRequest struct {
 	Session execution.SessionRef    `json:"session"`
 	Query   execution.ActivityQuery `json:"query"`
+}
+
+// QueueRequest is adapter.queue. List takes only a session, while cancel
+// and steer also take a queued message ID.
+type QueueRequest struct {
+	Session execution.SessionRef `json:"session"`
+	Action  string               `json:"action"`
+	ID      string               `json:"id,omitempty"`
 }
 
 // SessionRenameRequest is adapter.sessionRename.

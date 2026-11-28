@@ -103,8 +103,8 @@ func (a Activity) Bounded(q ActivityQuery) (Activity, error) {
 	}
 	a.Items = slices.Clone(a.Items)
 	for i := range a.Items {
-		a.Items[i].Text = activityPrefix(a.Items[i].Text, 2000)
-		a.Items[i].Title = activityPrefix(a.Items[i].Title, 200)
+		a.Items[i].Text = runePrefix(a.Items[i].Text, 2000)
+		a.Items[i].Title = runePrefix(a.Items[i].Title, 200)
 	}
 	switch {
 	case len(a.Details) > maxActivityDetails:
@@ -124,7 +124,7 @@ func (a Activity) Bounded(q ActivityQuery) (Activity, error) {
 	return a, nil
 }
 
-func activityPrefix(s string, limit int) string {
+func runePrefix(s string, limit int) string {
 	for i := range s {
 		if limit == 0 {
 			return s[:i]

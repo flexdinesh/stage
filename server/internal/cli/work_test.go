@@ -167,3 +167,48 @@ func TestTaskSessionSurfaceCommands(t *testing.T) {
 		t.Fatalf("activity JSON: %d %s %s", code, stdout, stderr)
 	}
 }
+
+func TestTaskQueueCommand(t *testing.T) {
+	h := newHarness(t)
+	c := client.New(h.url)
+	p := h.project("/w/cli-queue")
+	task, err := c.CreateTask(t.Context(), client.CreateTask{ProjectID: p.ID, ConnectionID: dbtest.T3Connection, WorkspaceID: h.workspaceID(p), Title: "Queue", Prompt: "x", Start: true})
+	if err != nil || task.Session == nil {
+		t.Fatal(task, err)
+	}
+	id := fmt.Sprint(task.ID)
+	for _, message := range []string{"Keep going", "Check the output"} {
+		if code, stdout, stderr := h.run("", "task", "send", id, "--queue", "--text", message); code != 0 {
+			t.Fatalf("queue send: %d %s %s", code, stdout, stderr)
+		}
+	}
+	if code, stdout, stderr := h.run("", "task", "queue", id); code != 0 || !strings.Contains(stdout, "Keep going") {
+		t.Fatalf("list: %d %s %s", code, stdout, stderr)
+	}
+	code, stdout, stderr := h.run("", "task", "queue", id, "--json")
+	if code != 0 {
+		t.Fatalf("list JSON: %d %s %s", code, stdout, stderr)
+	}
+	out := decode[client.SessionQueue](t, stdout)
+	if len(out.Messages) != 2 || out.Messages[0].Delivery != execution.DeliveryQueue || out.Messages[1].Text != "Check the output" {
+		t.Fatalf("queue: %+v", out.Messages)
+	}
+	first, second := out.Messages[0].ID, out.Messages[1].ID
+	if code, _, stderr := h.run("", "task", "queue", id, "--cancel", first, "--steer", second); code != 2 || !strings.Contains(stderr, "mutually exclusive") {
+		t.Fatalf("conflicting flags: %d %s", code, stderr)
+	}
+	h.caller = agentctx.Caller{Session: task.Session}
+	if code, _, stderr := h.run("", "task", "queue", id, "--cancel", first); code != 1 || !strings.Contains(stderr, "change its own session's queue") {
+		t.Fatalf("cancel own: %d %s", code, stderr)
+	}
+	h.caller = agentctx.Caller{}
+	if code, stdout, stderr := h.run("", "task", "queue", id, "--cancel", first); code != 0 || !strings.Contains(stdout, "Cancelled queued message") {
+		t.Fatalf("cancel: %d %s %s", code, stdout, stderr)
+	}
+	if code, stdout, stderr := h.run("", "task", "queue", id, "--steer", second); code != 0 || !strings.Contains(stdout, "Steered queued message") {
+		t.Fatalf("steer: %d %s %s", code, stdout, stderr)
+	}
+	if code, stdout, stderr := h.run("", "task", "queue", id); code != 0 || !strings.Contains(stdout, "No queued messages") {
+		t.Fatalf("empty: %d %s %s", code, stdout, stderr)
+	}
+}

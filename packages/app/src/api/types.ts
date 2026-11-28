@@ -542,6 +542,7 @@ export type OperationId =
   | "send"
   | "steer"
   | "queue"
+  | "queueManage"
   | "activity"
   | "sessionRename"
   | "workspaceAdd"
@@ -1109,6 +1110,15 @@ export interface RequestResponse {
 }
 
 export type Delivery = "send" | "steer" | "queue";
+
+/** A preview from the current session's native queue. */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  delivery: "queue" | "steer";
+  createdAt: string;
+  source: "stage" | "harness" | "";
+}
 
 /** A message into a task's session (POST /tasks/:id/messages); nonblank, at most 32 KiB. */
 export interface SendMessageRequest {

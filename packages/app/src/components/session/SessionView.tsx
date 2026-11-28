@@ -12,6 +12,7 @@ import { isRetired, retiredHint } from "../../lib/harnesses.ts";
 import { useSessionAction } from "../../lib/hostState.ts";
 import { liveActivity } from "../../lib/sessionActivity.ts";
 import { composerDelivery, sessionMessage } from "../../lib/sessionComposer.ts";
+import { taskQueueKey } from "../../lib/sessionQueue.ts";
 import { SETTINGS_PATH } from "../../lib/settings.ts";
 import { parseAttempt, REQUESTS_ANCHOR, requestsPath } from "../../lib/taskSession.ts";
 import { canStop } from "../../lib/tasks.ts";
@@ -35,6 +36,7 @@ import { usePhoneActionBar } from "./PhoneActionBar.tsx";
 import { SessionComposer } from "./SessionComposer.tsx";
 import { useSessionDraft } from "./SessionDraft.tsx";
 import { SESSION_ACTIONS_ANCHOR, SessionHeader } from "./SessionHeader.tsx";
+import { SessionQueue } from "./SessionQueue.tsx";
 
 export function SessionRoute() {
   const task = useOutletContext<TaskDetail>();
@@ -66,6 +68,7 @@ export function SessionView({ task, attempt }: { task: TaskDetail; attempt?: num
   const harness = harnesses.kindName(kind);
   const connectionActive = current ? !isRetired(task) : !harnesses.retired(connectionId);
   const recorded = current ? task.session !== null : snapshot !== undefined;
+  const queueSession = { launchAttempt: task.launchAttempt, externalSessionId: task.externalSessionId };
   const state = current ? summary?.state || task.state : snapshot?.state || summary?.state;
   const links = current ? task.links ?? seen?.links : snapshot?.links ?? summary?.links;
   const action = resolveAction({ ...(links === undefined ? {} : { links }), connectionActive });
@@ -182,7 +185,7 @@ export function SessionView({ task, attempt }: { task: TaskDetail; attempt?: num
                   reasons={requests.error === null ? reasons : ["Pending requests could not be checked."]}
                   draft={draft.text}
                   onDraft={draft.setText}
-                  onSend={(mode) => draft.send(task.launchAttempt, sessionMessage(draft.text, mode, task.state, task.stateRevision))}
+                  onSend={(mode) => draft.send(queueSession, sessionMessage(draft.text, mode, task.state, task.stateRevision))}
                   pending={draft.pending}
                   result={result}
                   destination={action === null ? null : (
@@ -191,6 +194,9 @@ export function SessionView({ task, attempt }: { task: TaskDetail; attempt?: num
                     </a>
                   )}
                 />
+                {connectionActive && operations?.queueManage?.available === true ? (
+                  <SessionQueue key={JSON.stringify(taskQueueKey(task.id, queueSession))} taskId={task.id} session={queueSession} live={active} />
+                ) : null}
               </div>
             ) : null}
             <LastWordPanel reply={current ? task.finalReply : snapshot?.reply} harness={harness} href={destination} />

@@ -28,6 +28,7 @@ func addWorkTools(s *mcp.Server, o *Ops, ro *mcp.ToolAnnotations) {
 	add(s, o, "respond_request", "Answer a pending request of a task's session with option, text or answers (by question id)."+selfRule, nil, o.RespondRequest)
 	add(s, o, "send_message", "Deliver a message to a task's session. Use send (default) to start a new turn after the previous one ends, steer to inject into the running turn, or queue to let the harness deliver it as the next turn. Availability is declared per connection operation."+selfRule, nil, o.SendMessage)
 	add(s, o, "get_session_activity", "Read bounded recent activity, plan and changed files for a task's current session or recorded attempt, including your own task. Requires the session connection's activity operation.", ro, o.GetSessionActivity)
+	add(s, o, "queued_messages", "List, cancel or steer messages in the current session's native queue. Requires queueManage. Listing your own queue is allowed. Changes to your own queue are refused.", nil, o.QueuedMessages)
 }
 
 func (o *Ops) GetCompletionPreview(ctx context.Context, a TaskIDArgs) (db.CompletionPreview, error) {
@@ -148,4 +149,45 @@ type SessionActivityArgs struct {
 
 func (o *Ops) GetSessionActivity(ctx context.Context, a SessionActivityArgs) (client.SessionActivity, error) {
 	return o.Client.Activity(ctx, a.TaskID, a.Attempt, execution.ActivityQuery{Limit: a.Limit})
+}
+
+type QueuedMessagesArgs struct {
+	CallerArgs
+	TaskID int64       `json:"taskId" jsonschema:"task whose native session queue to read or change"`
+	Action QueueAction `json:"action" jsonschema:"list, cancel or steer"`
+	ID     string      `json:"id,omitempty" jsonschema:"queued message id from list, required for cancel or steer"`
+}
+
+type QueueAction string
+
+type QueuedMessagesOut struct {
+	Messages []execution.QueuedMessage `json:"messages,omitzero"`
+	OK       bool                      `json:"ok,omitempty"`
+}
+
+func (o *Ops) QueuedMessages(ctx context.Context, a QueuedMessagesArgs) (QueuedMessagesOut, error) {
+	switch a.Action {
+	case "list":
+		if a.ID != "" {
+			return QueuedMessagesOut{}, fmt.Errorf("id can only be used with cancel or steer")
+		}
+		out, err := o.Client.QueuedMessages(ctx, a.TaskID)
+		return QueuedMessagesOut{Messages: out.Messages}, err
+	case "cancel", "steer":
+		if strings.TrimSpace(a.ID) == "" {
+			return QueuedMessagesOut{}, fmt.Errorf("id is required for %s", a.Action)
+		}
+		c, err := o.caller(ctx, a.CallerArgs)
+		if err != nil {
+			return QueuedMessagesOut{}, err
+		}
+		change := o.Client.CancelQueued
+		if a.Action == "steer" {
+			change = o.Client.PromoteQueued
+		}
+		err = change(ctx, a.TaskID, a.ID, c.Session)
+		return QueuedMessagesOut{OK: err == nil}, err
+	default:
+		return QueuedMessagesOut{}, fmt.Errorf("action must be list, cancel or steer")
+	}
 }

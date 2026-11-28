@@ -30,26 +30,17 @@ func (a *Adapter) matched(s session, r launchRecord, in execution.Intent) bool {
 	return s.ID == r.Session && s.Metadata["stageAttempt"] == r.Marker && s.ProjectID == in.Project && s.Location.Directory == r.Directory && s.ParentID == "" && s.Time.Archived == 0
 }
 
-type admitted struct {
-	ID, Type, SessionID string
-	Time                wireTime
-	Payload             struct {
-		Text     string
-		Metadata map[string]interface{}
-	}
-}
-
 func (r launchRecord) matchesPrompt(v admitted, text string) bool {
 	return v.Type == "user" && v.ID == r.Message && v.SessionID == r.Session && v.Payload.Text == text && v.Payload.Metadata["stageAttempt"] == r.Marker
 }
 
 func (a *Adapter) verifyPrompt(ctx context.Context, r *launchRecord, text string) error {
 	prefix := "/api/session/" + r.Session
-	var inbox envelope[[]admitted]
-	if e := a.get(ctx, prefix+"/inbox", &inbox); e != nil {
-		return e
+	inbox, err := a.userInbox(ctx, r.Session)
+	if err != nil {
+		return err
 	}
-	for _, v := range inbox.Data {
+	for _, v := range inbox {
 		if r.matchesPrompt(v, text) {
 			r.PromptAt = v.Time.Created
 			return nil

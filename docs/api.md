@@ -988,7 +988,7 @@ attaches to the unresolved attempt; 409 if it changed. No launch or acceptance.
 Stage-owned operation availability/reasons, models/options, permissions,
 interaction modes and launch options. `operations` maps every operation
 (`launch`, `stop`, `adopt`, `reply`, `opening`, `attention`, `sessionSearch`, `images`,
-`respond`, `send`, `steer`, `queue`, `activity`, `sessionRename`, `workspaceAdd`,
+`respond`, `send`, `steer`, `queue`, `queueManage`, `activity`, `sessionRename`, `workspaceAdd`,
 `directoryBrowse`) to `{available, reason?}`. An unavailable operation says why.
 `workspaceSources`, when present, lists the sources for
 [adding a workspace](#add-a-workspace).
@@ -1099,8 +1099,8 @@ alter acceptance only through inferred completion.
 
 ### Session interaction (API v6)
 
-A harness may answer what its session waits on, take messages or provide a
-bounded activity view. See [ADR 0014](adr/0014-session-surface.md).
+A harness may answer what its session waits on, take messages, expose its
+native queue or provide a bounded activity view. See [ADR 0014](adr/0014-session-surface.md).
 Each route needs a task
 with an execution session (409 otherwise); a harness without the operation,
 or reporting it unavailable, answers 409 `{"code": "operation_unavailable"}`
@@ -1120,6 +1120,8 @@ OpenCode offers `respond` for permissions and supported forms, `send` for
 an idle session, `steer` and `queue` during a running turn, and `activity`
 where its OpenAPI advertises the required operations. Answer other forms
 in OpenCode. [OpenCode interaction](execution.md#opencode-interaction)
+
+OpenCode and T3 also offer `queueManage` when their native queue APIs are available.
 
 Codex offers `respond` for command, file-change and permission approvals
 on tracked active threads with a supported daemon. Its descriptor's
@@ -1172,6 +1174,9 @@ prevented; Stage sees it only as the task's next state.
   T3 activity `details` includes `providerInstance`, `model`,
   `runtimeMode`, `interactionMode`, `branch` and `worktree`.
   Claude Code details can contain `permissionMode`, `effort` and `worktree` (path) when reported.
+
+- `GET /api/tasks/:id/queue` (operation `queueManage`, the caller's own task included). Returns 200 `{"messages": [{id, text, delivery, createdAt, source}]}` for the current session in native queue order. `text` is a preview capped at 2000 runes, `delivery` is `queue|steer`, and `source` is `stage|harness` or empty when unknown. An unknown `createdAt` is the zero timestamp. An empty queue returns `{"messages":[]}`.
+- `DELETE /api/tasks/:id/queue/:qid` cancels a queued message. `POST /api/tasks/:id/queue/:qid/steer` promotes it to a steer. Both require `queueManage` and return 204 on success, 404 if the item is gone or 403 `self_action_forbidden` on the caller's own task. A steer that cannot run now may return 409 `session_busy`. Success records the action on the task timeline without the message text.
 
 ### `POST /api/tasks/:id/duplicate`
 New `backlog` task with the same project, title, prompt, images (copied), execution config (launch options included); no copied notes, no tree, no needs, no start time, no schedule.
@@ -1483,6 +1488,7 @@ The server and workers roll forward together at API v9. Layer 07 raises the inde
 - Codex declares `steer` and `activity` when the daemon supports their methods. The existing delivery and activity transports include worker support. Codex activity `details` can include `model`, `reasoningEffort`, `approvalPolicy` and `sandbox`. The Codex queue remains unavailable.
 - Task session history (additive, no version bump). Migration 0057 preserves session links by attempt. Task detail and MCP `get_task` expose `sessions`, and `GET /api/tasks/:id/sessions/:attempt` reads the cached snapshot. Activity accepts an attempt over HTTP, MCP and CLI. Historical session references return the owning task and attempt.
 - T3 declares question responses, idle Send, active Steer and Queue, and recent activity from its advertised MCP tools. A T3 Send during a turn returns `session_busy`. Activity file entries can carry `countsUnknown`.
+- Native queue management (additive, no version bump). OpenCode and T3 declare `queueManage` for current-session list, cancel and steer. HTTP, MCP and CLI expose the same actions. Workers relay them through `adapter.queue`.
 - Needs-input task notifications store and push `/tasks/<id>/session`. Task group keys and push tags keep the same IDs. Historical notification records keep their stored URLs.
 - Agent operation parity (additive, no version bump; [ADR 0011](adr/0011-agent-operation-parity.md)): agent callers may complete, reopen, list and answer requests, send messages, read opening prompts, create, rename and archive projects, read project events, edit group membership, manage snippets and delete attachments. 403 `agent_forbidden` on respond and send is now `self_action_forbidden`, only for the caller's own task. `PATCH /api/projects/:id` keeps omitted fields.
 
@@ -1832,6 +1838,7 @@ Reply budget per need: `min(4000, max(1000, 8000 / sources))` Unicode characters
 - Read-only lookups by id (no names; run any with `stage call TOOL`): `get_project {id}` (`{id, title, archivedAt, aliases}`, the agent summary of `GET /api/projects/:id`), `list_project_groups {archived?}` (`false` default, `true`, `all`; `{groups: [{id, title, archivedAt, aliases}]}`), `get_project_group {id}` (one group summary), `list_connections` (`{connections}` as `GET /api/connections`), `list_machines` (`{machines: [Machine]}`), `get_machine {id}` (`Machine`), `list_harnesses {machineId?}` (`GET /api/harnesses`, or `/api/machines/:id/harnesses`), `get_harness_status {kind, machineId?}` (`HarnessStatus`, likewise per machine), `get_preferences` (`{defaultConnectionId, notifyEvents}`).
 - Acceptance: `get_completion_preview {taskId}` (`revision`, `evidenceVersion`, `evidence`, `blockedReason`, `dependents`), `complete_task {taskId, revision, evidenceVersion, requestId, note?, callerSession?}` and `reopen_task {taskId, revision, requestId, callerSession?}` (`{revision, acceptanceId}`; a 409 tells the agent to preview again). CLI `task preview ID`, `task complete ID --revision N --evidence-version V [--note TEXT] [--request-id KEY]` and `task reopen ID --revision N [--request-id KEY]`; the CLI derives the request ID from the task and revision when omitted.
 - Session interaction. `list_requests {taskId}` returns `{requests}`. `respond_request {taskId, requestId, option?, text?, answers?, expectedStateRevision?, callerSession?}` and `send_message {taskId, text, delivery?, expectedStateRevision?, callerSession?}` return `Task`. `delivery` is `send|steer|queue` and `expectedStateRevision` guards the first answer (409 `already_answered`). CLI `task requests ID`, `task respond ID RID [--option O] [--text T] [--answers JSON] [--expect-revision N]` and `task send ID --text TEXT [--steer | --queue] [--expect-revision N]`. `get_session_activity {taskId, attempt?, limit?}` returns `{activity}` (CLI `task activity ID [--attempt N] [--limit N] [--json]`). `get_opening_prompt {taskId, full?}` reads the opening prompt (CLI `task opening-prompt ID [--full]`).
+- Native queue. `queued_messages {taskId, action: list|cancel|steer, id?, callerSession?}` takes an item ID for cancel and steer. List returns `{messages}` and writes return `{ok: true}`. CLI `stage task queue ID [--cancel QID | --steer QID]`. Writes refuse the caller's own task.
 - Complete, reopen, respond, send and session actions (`run_action` with `taskId`) refuse the caller's own task or session (403 `self_action_forbidden`). Each sends the caller session; a call naming none passes.
 - Projects: `create_project {title}` and `update_project {id, title?, archived?}` (omitted keeps its value; at least one) return the project summary; `get_project_events {id}` returns `{events}`. CLI `projects add --title T` and `projects edit ID [--title T] [--archived true|false]`. `preview_membership {connectionId, workspaceId, targetProjectId?}` (omitted: a new group titled after the workspace) returns the preview with `previewToken`, changing nothing; `set_membership` takes the same inputs plus `previewToken` and fails on a changed preview: preview again. Responses omit raw paths.
 - Workspaces ([ADR 0012](adr/0012-harness-workspace-add.md)): `list_workspace_sources {connectionId}` returns `{availability, sources}`. `add_workspace {connectionId, sourceId, input?, requestId, projectId?, confirmed?}` returns the [add result](#add-a-workspace) without paths. CLI `stage workspaces sources --connection ID` and `stage workspaces add --connection ID --source S [--input JSON|-] [--project P] [--request-id KEY] [--confirm]`; without `--request-id` the CLI derives a stable key from the connection, source, input and project, so rerunning the same command retries safely. A 504 `outcome_uncertain` means retry with the same key.

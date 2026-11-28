@@ -93,6 +93,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	declare(execution.OpSend, "send", "t3_thread_send", "t3_thread_read")
 	declare(execution.OpSteer, "steer", "t3_thread_send", "t3_thread_read")
 	declare(execution.OpQueue, "queue", "t3_thread_send", "t3_thread_read")
+	declare(execution.OpQueueManage, "manage queued messages", queueTool, "t3_thread_read")
 	declare(execution.OpActivity, "see recent activity", "t3_thread_read")
 	out.Operations[execution.OpDirectoryBrowse] = execution.Availability{Reason: "T3 does not expose folder browsing to Stage; type the path."}
 	out.WorkspaceSources = workspaceSources()

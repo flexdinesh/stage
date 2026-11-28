@@ -27,6 +27,7 @@ test("capability lines: declared operations in Stage's order and words, with the
     sessionRename: { available: false, reason: "Claude Code has no rename interface." },
     activity: { available: false, reason: "Recent activity is in the harness." },
     queue: { available: true },
+    queueManage: { available: true },
     steer: { available: false, reason: "Steer in the harness." },
   });
   assert.deepEqual(lines, [
@@ -36,6 +37,7 @@ test("capability lines: declared operations in Stage's order and words, with the
     { op: "send", label: OPERATION_LABELS.send, available: false, reason: "Sessions take follow-ups in their own client." },
     { op: "steer", label: "Steer running sessions", available: false, reason: "Steer in the harness." },
     { op: "queue", label: "Queue messages", available: true, reason: null },
+    { op: "queueManage", label: "Manage queued messages", available: true, reason: null },
     { op: "activity", label: "Recent activity", available: false, reason: "Recent activity is in the harness." },
     { op: "sessionRename", label: "Rename sessions with the task title", available: false, reason: "Claude Code has no rename interface." },
   ]);

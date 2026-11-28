@@ -56,6 +56,7 @@ import type {
   RequestResponse,
   Activity,
   Delivery,
+  QueuedMessage,
   SessionRequest,
   Task,
   TaskDetail,
@@ -297,6 +298,12 @@ export function createApi(transport: Transport) {
     taskRequests: (id: number) => apiFetch<{requests: SessionRequest[]}>(`/tasks/${id}/requests`),
     getActivity: (id: number, q: {attempt?: number; limit?: number} = {}) =>
       apiFetch<{activity: Activity}>(`/tasks/${id}/activity${toQuery(q)}`),
+    taskQueue: (id: number, signal?: AbortSignal) =>
+      apiFetch<{messages: QueuedMessage[]}>(`/tasks/${id}/queue`, { signal }),
+    cancelQueuedMessage: (id: number, messageId: string) =>
+      apiSend(`/tasks/${id}/queue/${encodeURIComponent(messageId)}`, del),
+    steerQueuedMessage: (id: number, messageId: string) =>
+      apiSend(`/tasks/${id}/queue/${encodeURIComponent(messageId)}/steer`, post()),
     /**
      * Answers one request (400 the answer doesn't fit, 404 no longer pending, 403 `self_action_forbidden` from the task's own session). With
      * `expectedStateRevision` (the task's `stateRevision`) the first answer wins: 409 `already_answered` when it moved on or was answered first.

@@ -29,6 +29,7 @@ const guide = `Stage owns projects, tasks, trees, accepted results and journals.
 - A dependent launch receives Stage's stored accepted reply and references unless handoff is disabled. Stage does not start a dependent from its predecessor's branch: the handoff carries the branch the harness reported. A worktree, its base ref or branch are launch options in executionConfig where the harness declares them (list_models).
 - Append findings and outcomes with append_note. Provide taskId for a task note, or treeId and the current sourceTaskId for a tree conclusion. Reuse requestId only for identical retries. Report your outcome; never complete your own task (Stage refuses it). Leave acceptance to the user unless asked: to complete another task, call get_completion_preview, then complete_task with its revision and evidenceVersion.
 - Read pending requests with list_requests and bounded recent activity with get_session_activity, including on your own task. Use respond_request and send_message on other tasks' sessions. Message delivery (send, steer or queue) and activity depend on the connection's declared operations.
+- Use queued_messages to list the current session's native queue where queueManage is available. Cancel and steer actions apply to other tasks' sessions.
 - For a shared server, use the agent address in the launch instructions or the configured Stage MCP integration. Keep passwords and credentials out of prompts, notes and callerSession.
 - Use list_tasks with originSession to find work you created. Use read_ref with a Stage task, tree, schedule, project or journal entry link, a harness session link or a scoped session; get_project and get_project_group read a project or group by id. get_task returns stored results and available links. Use the native harness for the conversation.
 - create_schedule queues recurring work. Use get_task, get_tree, list_tasks or wait_task for progress. The CLI exposes the same workflows through {cli} task, tree, schedule, sessions adopt and show. Run {cli} help for flags.`
@@ -192,6 +193,7 @@ func add[In, Out any](s *mcp.Server, o *Ops, name, desc string, ann *mcp.ToolAnn
 		reflect.TypeFor[execution.Delivery](): {Type: "string", Enum: []any{
 			string(execution.DeliverySend), string(execution.DeliverySteer), string(execution.DeliveryQueue),
 		}},
+		reflect.TypeFor[QueueAction](): {Type: "string", Enum: []any{"list", "cancel", "steer"}},
 	}})
 	if err != nil {
 		panic(fmt.Sprintf("MCP tool %s input schema: %v", name, err))
