@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
-import { useProjects, useTasks } from "../api/queries.ts";
+import { useProjects, useTasks, useTrees } from "../api/queries.ts";
+import { dashboardGroups, dashboardLoad } from "../lib/dashboard.ts";
 import { capCount } from "../lib/format.ts";
 import { EMPTY_LOAD, LIVE_STATES, projectLoads, sidebarProjects, totalLoad, type ProjectLoad } from "../lib/scope.ts";
 import { IconMore, IconPin } from "./icons.tsx";
@@ -16,11 +17,17 @@ export function useProjectLoads(): Map<number, ProjectLoad> {
   return projectLoads(tasks.data?.tasks ?? []);
 }
 
-/** The scope's open work: All projects' total, or the scoped project's load. */
-export function useScopeLoad(): ProjectLoad {
-  const loads = useProjectLoads();
-  const { projectId } = useScope();
-  return projectId === null ? totalLoad(loads.values()) : (loads.get(projectId) ?? EMPTY_LOAD);
+const NO_LINGER: ReadonlySet<number> = new Set();
+
+/** The scope's Dashboard rows as a load (a tree counts once, no backlog), from the queries the Dashboard reads. */
+export function useDashboardLoad(): ProjectLoad {
+  const { query } = useScope();
+  const tasks = useTasks({ state: [...LIVE_STATES], ...query });
+  const trees = useTrees(query);
+  // Completed is not counted; any window works for the group test.
+  const [since] = useState(() => new Date().toISOString());
+  if (tasks.data === undefined || trees.data === undefined) return EMPTY_LOAD;
+  return dashboardLoad(dashboardGroups(tasks.data.tasks, trees.data.trees, since, NO_LINGER));
 }
 
 /** Sidebar nav row style: the active row box when current (`fill` false: the row's parent paints it). */

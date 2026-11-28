@@ -1,13 +1,15 @@
-import type { HarnessConnection, Task } from "../api/types.ts";
+import type { HarnessConnection, Task, TreeSummary } from "../api/types.ts";
+import type { ProjectLoad } from "./scope.ts";
 import type { StatusItem } from "./status.ts";
+import { treeGroup } from "./trees.ts";
 
-/** Task groups, in Tasks view order; the Dashboard lists the first four (`ATTENTION_GROUPS`). */
+/** Task groups, in Tasks view order; the Dashboard lists five of them (`DASHBOARD_GROUPS`). */
 export type GroupKey = "needs" | "done" | "ready" | "failed" | "running" | "backlog" | "scheduled" | "completed";
 
 export const GROUP_KEYS: readonly GroupKey[] = ["needs", "done", "ready", "failed", "running", "backlog", "scheduled", "completed"];
 
-/** What asks for the user: the Dashboard. */
-export const ATTENTION_GROUPS: readonly GroupKey[] = ["needs", "done", "ready", "failed"];
+/** The Dashboard's groups, in its order: what asks for the user, then work in motion, then ready starts. */
+export const DASHBOARD_GROUPS: readonly GroupKey[] = ["needs", "done", "failed", "running", "ready"];
 
 export const parseGroupKey = (v: string | null): GroupKey | null => GROUP_KEYS.find((k) => k === v) ?? null;
 
@@ -40,6 +42,55 @@ export function inGroup(key: GroupKey, t: Grouped, since: string, lingering: Rea
     case "scheduled":
       return t.state === "backlog" && t.startAt !== null;
   }
+}
+
+type DashboardTask = Grouped & Pick<Task, "treeId">;
+type DashboardTree = Pick<TreeSummary, "status" | "counts" | "completedAt">;
+
+/** One Dashboard group: its open trees, then its tasks outside any tree. */
+export interface DashboardGroup<T extends DashboardTask, R extends DashboardTree> {
+  key: GroupKey;
+  trees: R[];
+  tasks: T[];
+}
+
+/**
+ * The Dashboard's non-empty groups in `DASHBOARD_GROUPS` order. A tree member never lists on its own: its open tree
+ * lists once, under its most pressing step as on the Trees view (`treeGroup`); waiting and completed trees, and closed
+ * trees with their members, stay off. Input order is kept within each list.
+ */
+export function dashboardGroups<T extends DashboardTask, R extends DashboardTree>(
+  tasks: readonly T[],
+  trees: readonly R[],
+  since: string,
+  lingering: ReadonlySet<number>,
+): DashboardGroup<T, R>[] {
+  const loose = tasks.filter((t) => t.treeId === null);
+  const open = trees.filter((t) => t.status === "open");
+  return DASHBOARD_GROUPS.map((key) => ({
+    key,
+    trees: open.filter((t) => treeGroup(t) === key),
+    tasks: loose.filter((t) => inGroup(key, t, since, lingering)),
+  })).filter((g) => g.trees.length + g.tasks.length > 0);
+}
+
+const rows = (g: Pick<DashboardGroup<DashboardTask, DashboardTree>, "trees" | "tasks">) => g.trees.length + g.tasks.length;
+
+/** Rows that ask for the user: every group but Running, a tree counting once. */
+export const needsYouCount = (groups: readonly DashboardGroup<DashboardTask, DashboardTree>[]) =>
+  groups.reduce((n, g) => n + (g.key === "running" ? 0 : rows(g)), 0);
+
+/** The Dashboard's rows as a sidebar load (a tree counts once; no backlog). */
+export function dashboardLoad(groups: readonly DashboardGroup<DashboardTask, DashboardTree>[]): ProjectLoad {
+  const load = { need: 0, waiting: 0, run: 0, open: 0 };
+  for (const g of groups) {
+    const n = rows(g);
+    load.open += n;
+    if (g.key === "needs") load.need += n;
+    else if (g.key === "running") load.run += n;
+    else load.waiting += n;
+  }
+  return load;
 }
 
 /**

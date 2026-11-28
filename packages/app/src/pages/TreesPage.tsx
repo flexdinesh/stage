@@ -1,13 +1,13 @@
-import { useId, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
-import { useTree, useTrees } from "../api/queries.ts";
+import { useState } from "react";
+import { Link, useSearchParams } from "react-router";
+import { useTrees } from "../api/queries.ts";
 import type { TreeSummary } from "../api/types.ts";
 import { useScope } from "../components/Scope.tsx";
 import { GroupPanel, StatStrip, useGroupFold, type GroupMeta } from "../components/TaskGroups.tsx";
 import { TrackSessionButton } from "../components/trees/AdoptSessionDrawer.tsx";
-import { TreeRow, TreeRowsSkeleton } from "../components/trees/TreeRow.tsx";
-import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
-import { EmptyState, ErrorText, PageHeader, Panel, QueryState, Row, RowList, Segmented, buttonClass } from "../components/ui.tsx";
+import { TreeItem } from "../components/trees/TreeItem.tsx";
+import { TreeRowsSkeleton } from "../components/trees/TreeRow.tsx";
+import { EmptyState, PageHeader, Panel, QueryState, RowList, Segmented, buttonClass } from "../components/ui.tsx";
 import { scopedPageName } from "../lib/history.ts";
 import { groupWorkspaceSummary } from "../lib/projectGroups.ts";
 import { completedWindowStart } from "../lib/completed.ts";
@@ -182,37 +182,5 @@ function TreeList({ trees, emptyText }: { trees: readonly TreeSummary[]; emptyTe
         <TreeItem key={t.id} tree={t} />
       ))}
     </RowList>
-  );
-}
-
-/** A tree row whose task count expands its members in level order. */
-function TreeItem({ tree }: { tree: TreeSummary }) {
-  const [open, setOpen] = useState(false);
-  const membersId = useId();
-  return (
-    <Row bare>
-      <TreeRow tree={tree} tasks={{ open, onToggle: () => setOpen((o) => !o), controls: membersId }} />
-      <div id={membersId} hidden={!open}>
-        {open ? <TreeMembers id={tree.id} /> : null}
-      </div>
-    </Row>
-  );
-}
-
-function TreeMembers({ id }: { id: number }) {
-  const tree = useTree(id);
-  const navigate = useNavigate();
-  return (
-    <div className="border-t border-line bg-bg">
-      {tree.isPending ? (
-        <TreeViewSkeleton />
-      ) : tree.error !== null || tree.data === undefined ? (
-        <div className="p-3">
-          <ErrorText error={tree.error} />
-        </div>
-      ) : (
-        <TreeView tree={tree.data} selected={null} onSelect={(task) => void navigate(`/tasks/${task}`)} />
-      )}
-    </div>
   );
 }
