@@ -2,6 +2,7 @@ package schedule_test
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -76,8 +77,15 @@ func TestReconcileLaunchesDueStarts(t *testing.T) {
 	l := &fakeLauncher{store: store}
 	r := schedule.NewRunner(store, l, nil)
 	r.Now = func() time.Time { return now }
+	var runs []string // OnRun reports each recorded fire (notifications)
+	r.OnRun = func(_ context.Context, id int64, outcome string) {
+		runs = append(runs, fmt.Sprintf("%d:%s", id, outcome))
+	}
 	if err := r.Reconcile(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if want := []string{fmt.Sprintf("%d:%s", sc.ID, db.RunStarted)}; !slices.Equal(runs, want) {
+		t.Fatalf("runs = %v, want %v", runs, want)
 	}
 	got, err := store.GetSchedule(ctx, sc.ID)
 	if err != nil {
@@ -111,6 +119,9 @@ func TestReconcileLaunchesDueStarts(t *testing.T) {
 	if len(l.got) != n {
 		t.Fatalf("second pass launched %+v", l.got[n:])
 	}
+	if len(runs) != 1 {
+		t.Fatalf("second pass reported runs %v", runs)
+	}
 }
 
 func TestUnresolvedScheduleSkipsUntilReselected(t *testing.T) {
@@ -128,8 +139,13 @@ func TestUnresolvedScheduleSkipsUntilReselected(t *testing.T) {
 	launcher := &fakeLauncher{store: store}
 	runner := schedule.NewRunner(store, launcher, nil)
 	runner.Now = func() time.Time { return now }
+	var outcomes []string
+	runner.OnRun = func(_ context.Context, _ int64, outcome string) { outcomes = append(outcomes, outcome) }
 	if err = runner.Reconcile(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if !slices.Equal(outcomes, []string{db.RunSkipped}) {
+		t.Fatalf("outcomes = %v, want skipped", outcomes)
 	}
 	got, err := store.GetSchedule(ctx, sc.ID)
 	if err != nil || got.LastTaskID != nil || got.NextRunAt == nil {

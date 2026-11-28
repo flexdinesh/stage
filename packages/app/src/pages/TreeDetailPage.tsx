@@ -1,10 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { ApiError } from "../api/client.ts";
 import { useInvalidateWork, useTree } from "../api/queries.ts";
 import type { StartMode, TreeDetail, TreeStatus } from "../api/types.ts";
-import { useApi } from "../platform/context.tsx";
+import { useApi, usePlatform } from "../platform/context.tsx";
+import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { IconBack, IconPlus } from "../components/icons.tsx";
 import { useNewTask } from "../components/NewTask.tsx";
 import { AddExistingTaskDrawer } from "../components/trees/AddExistingTaskDrawer.tsx";
@@ -49,6 +50,13 @@ export function TreeDetailPage() {
 
 function TreeDetailView({ id }: { id: number }) {
   const tree = useTree(id);
+  // Viewing the tree clears its system notification here and marks its group read.
+  const { notifications } = usePlatform();
+  const markViewed = useMarkNotificationGroupsRead();
+  useEffect(() => {
+    void notifications?.closeShown(`tree-${id}`);
+    markViewed([`tree:${id}`]);
+  }, [notifications, id, markViewed]);
   if (tree.isPending) return <TreeLoading />;
   if (tree.error instanceof ApiError && tree.error.status === 404) return <TreeNotFound id={id} />;
   if (tree.data === undefined) return <ErrorText error={tree.error} />;

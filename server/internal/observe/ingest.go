@@ -22,7 +22,7 @@ type recordResult struct {
 	rejection   error
 	task        *workevent.TaskChange
 	session     *workevent.SessionChange
-	inferred    bool
+	inferred    int64 // the task whose completion was inferred (0: none)
 	afterCommit func()
 }
 
@@ -141,7 +141,11 @@ func (s *Service) applyRecord(ctx context.Context, tx *db.Store, machine int64, 
 		result.ingested = Unowned
 	default:
 		result.ingested = Applied
-		result.task, result.inferred, err = s.coord.ApplyObservation(ctx, tx, task, o, r.ObservedAt, r.captureTime())
+		var inferred bool
+		result.task, inferred, err = s.coord.ApplyObservation(ctx, tx, task, o, r.ObservedAt, r.captureTime())
+		if inferred {
+			result.inferred = task.ID
+		}
 	}
 	if err == nil && s.RecordNotification != nil && (result.task != nil || result.session != nil) {
 		result.afterCommit, err = s.RecordNotification(ctx, tx, workevent.ObservationChange{
@@ -170,7 +174,7 @@ func (s *Service) applyAttention(ctx context.Context, tx *db.Store, kind string,
 	if err := tx.PutObservation(ctx, o); err != nil {
 		return nil, err
 	}
-	if quiet || descriptor.Attention == harness.AttentionSilent || previous.State == o.State || !workevent.Notifiable(db.TaskState(o.State)) ||
+	if quiet || descriptor.Attention == harness.AttentionSilent || previous.State == o.State || !workevent.SessionNotifiable(db.TaskState(o.State)) ||
 		previous.State == "" && !o.CreatedAt.After(s.started) {
 		return nil, nil
 	}

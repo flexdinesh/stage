@@ -41,6 +41,9 @@ type Runner struct {
 	// Since is the shared installation's first claim. Earlier recurring
 	// fires are missed, even if they are within the startup grace period.
 	Since time.Time
+	// OnRun is called with each recorded cron fire's outcome (db.RunStarted,
+	// RunSkipped or RunMissed); nil = none.
+	OnRun func(ctx context.Context, scheduleID int64, outcome string)
 
 	mu sync.Mutex
 }
@@ -90,6 +93,9 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 		}
 		if res.Outcome != "" {
 			r.log.Info("schedule fired", "schedule", id, "outcome", res.Outcome)
+			if r.OnRun != nil {
+				r.OnRun(ctx, id, res.Outcome)
+			}
 		}
 	}
 	tasks, err := r.store.DueForConnection(ctx, now, r.ConnectionID)

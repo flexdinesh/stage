@@ -81,7 +81,7 @@ func TestSilentWaitingSessionsDoNotCreateNotifications(t *testing.T) {
 		t.Fatalf("resolved session still waiting %+v", inbox)
 	}
 	observeState(t, e, id, db.StateNeedsInput)
-	if _, err := e.store.InsertNotification(t.Context(), db.NewNotification{Event: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}, Title: "Waiting", URL: "/?inbox"}); err != nil {
+	if _, err := e.store.InsertNotification(t.Context(), db.NewNotification{Event: db.EventNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: id}, Title: "Waiting", URL: "/?inbox"}); err != nil {
 		t.Fatal(err)
 	}
 	read()

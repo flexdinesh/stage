@@ -184,6 +184,7 @@ type env struct {
 	engine *engine.Engine
 	runner *release.Runner
 	store  *db.Store
+	push   *notify.Notifier
 }
 
 const publicURL = "http://localhost:3773"
@@ -223,7 +224,7 @@ func newEnvWrapped(t *testing.T, wrap func(*t3.Adapter) execution.Adapter, opts 
 		withT3Setup(&deps, t3setup.Options{Client: client, Fake: true})
 	}
 	h := api.NewRouter(deps)
-	return &env{t: t, h: h, fake: fake, t3: client, engine: svc, runner: runner, store: store}
+	return &env{t: t, h: h, fake: fake, t3: client, engine: svc, runner: runner, store: store, push: push}
 }
 
 // withT3Setup installs a T3 connector backed by the local machine, keeping
@@ -1192,12 +1193,12 @@ func TestPreferences(t *testing.T) {
 		t.Fatalf("unpinned %+v", c.Connection.NewTaskConfig)
 	}
 
-	// Notification filter: default all; set; validate.
-	if strings.Join(p.NotifyEvents, ",") != "needs_input,failed,ready,done" {
+	// Notification filter: every event but schedule_started by default; set; validate.
+	if strings.Join(p.NotifyEvents, ",") != "needs_input,failed,ready,completed,tree_completed,schedule_skipped,done" {
 		t.Fatalf("default notifyEvents %v", p.NotifyEvents)
 	}
-	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{"ready", "done", "needs_input"}}, 200, &p)
-	if strings.Join(p.NotifyEvents, ",") != "needs_input,ready,done" {
+	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{"ready", "done", "schedule_started", "needs_input"}}, 200, &p)
+	if strings.Join(p.NotifyEvents, ",") != "needs_input,ready,schedule_started,done" {
 		t.Fatalf("notifyEvents %+v", p)
 	}
 	e.must("PUT", "/api/preferences/notifications", map[string]any{"events": []string{}}, 200, &p)
@@ -1457,7 +1458,7 @@ func TestNotificationsInbox(t *testing.T) {
 	var ids []int64
 	for i := range 3 {
 		id, err := e.store.InsertNotification(ctx, db.NewNotification{
-			Event: db.StateDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: fmt.Sprintf("n%d", i), URL: "/history?q=x",
+			Event: db.EventDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: fmt.Sprintf("n%d", i), URL: "/history?q=x",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -1504,7 +1505,7 @@ func TestNotificationGroupRead(t *testing.T) {
 	ctx := context.Background()
 	for _, thread := range []string{"ext-1", "ext-2"} {
 		if _, err := e.store.InsertNotification(ctx, db.NewNotification{
-			Event: db.StateDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: thread, URL: "/sessions/" + thread,
+			Event: db.EventDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: thread, URL: "/sessions/" + thread,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -1557,7 +1558,7 @@ func TestNotificationGroups(t *testing.T) {
 	var latest int64
 	for _, thread := range []string{threads[0], threads[1], threads[0]} {
 		id, err := e.store.InsertNotification(ctx, db.NewNotification{
-			Event: db.StateDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Same title", URL: "/history?q=Same",
+			Event: db.EventDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Same title", URL: "/history?q=Same",
 		})
 		if err != nil {
 			t.Fatal(err)

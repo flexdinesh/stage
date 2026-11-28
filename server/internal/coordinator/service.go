@@ -32,6 +32,7 @@ type Service struct {
 	OnTransition         func(context.Context, workevent.TaskChange)
 	OnObservedTransition func(context.Context, workevent.TaskChange) // observation inbox writes have already committed
 	OnAccepted           func()                                      // a completion was inferred (tree release may follow)
+	OnInferred           func(context.Context, int64)                // the task's completion was inferred (notifies completed)
 }
 
 type Workspaces interface {

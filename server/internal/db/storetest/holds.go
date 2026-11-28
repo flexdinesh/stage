@@ -67,7 +67,7 @@ func taskHold(t *testing.T, s *db.Store, ctx context.Context, task int64) *db.Ta
 
 // recordAll inserts a plain needs_input notification for the task.
 func recordAll(_ context.Context, _ *db.Store, task db.Task) (*db.NewNotification, error) {
-	return &db.NewNotification{Event: db.StateNeedsInput, TaskID: &task.ID, Title: task.Title, URL: fmt.Sprintf("/tasks/%d", task.ID)}, nil
+	return &db.NewNotification{Event: db.EventNeedsInput, TaskID: &task.ID, Title: task.Title, URL: fmt.Sprintf("/tasks/%d", task.ID)}, nil
 }
 
 func recordNone(context.Context, *db.Store, db.Task) (*db.NewNotification, error) { return nil, nil }

@@ -233,12 +233,12 @@ func TestMigrationTrees(t *testing.T) {
 		t.Fatalf("two sources %+v", hs)
 	}
 
-	// Notifications and preferences retain the ready event.
+	// Notifications and preferences retain the ready event; 0056 appends completed, tree_completed and schedule_skipped.
 	if _, err := s.InsertNotification(ctx, NewNotification{Event: EventReady, TaskID: ptrTo(int64(3)), Title: "Ship", URL: "/tasks/3"}); err != nil {
 		t.Fatalf("ready notification: %v", err)
 	}
 	prefs, err := s.GetPreferences(ctx)
-	if err != nil || !slices.Contains(prefs.NotifyEvents, EventReady) || len(prefs.NotifyEvents) != 4 {
+	if err != nil || !slices.Contains(prefs.NotifyEvents, EventReady) || !slices.Contains(prefs.NotifyEvents, EventCompleted) || len(prefs.NotifyEvents) != 7 {
 		t.Fatalf("prefs %+v %v", prefs.NotifyEvents, err)
 	}
 }

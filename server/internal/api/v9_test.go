@@ -24,7 +24,7 @@ func TestRemovedV9InputsNameTheReplacement(t *testing.T) {
 		{"task state", "GET", "/api/tasks?state=done,settled", nil,
 			"state settled was removed in API v9; use state done (completedAt marks acceptance)"},
 		{"notification preference", "PUT", "/api/preferences/notifications", map[string]any{"events": []string{"done", "settled"}},
-			"event settled was removed in API v9; completion sends no notification (want needs_input, failed, ready or done)"},
+			"event settled was removed in API v9; use completed (want needs_input, failed, ready, completed, tree_completed, schedule_started, schedule_skipped, done)"},
 		{"notification history", "GET", "/api/notifications?group=thread%3A1%3Aext-1", nil, group},
 		{"notification bulk read", "POST", "/api/notifications/read", map[string]any{"groups": []string{"thread:1:ext-1"}}, group},
 	} {

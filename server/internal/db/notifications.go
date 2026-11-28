@@ -15,7 +15,25 @@ type (
 	NotificationGroup  = store.NotificationGroup
 	NotificationCursor = store.NotificationCursor
 	WaitingSession     = store.WaitingSession
+	NotificationEvent  = store.NotificationEvent
 )
+
+const (
+	EventNeedsInput      = store.EventNeedsInput
+	EventFailed          = store.EventFailed
+	EventReady           = store.EventReady
+	EventCompleted       = store.EventCompleted
+	EventTreeCompleted   = store.EventTreeCompleted
+	EventScheduleStarted = store.EventScheduleStarted
+	EventScheduleSkipped = store.EventScheduleSkipped
+	EventDone            = store.EventDone
+)
+
+// NotificationEvents: the events that can notify, in display order.
+var NotificationEvents = store.NotificationEvents
+
+// DefaultNotifyEvents: the filter of an account that never saved one.
+var DefaultNotifyEvents = store.DefaultNotifyEvents
 
 // NotificationKey is a loaded row's group key (the adapter computes the
 // same key in SQL). n.ExternalSessionID is the task's current session only when
@@ -24,32 +42,41 @@ func NotificationKey(n Notification) string {
 	switch {
 	case n.TaskID != nil:
 		return "task:" + strconv.FormatInt(*n.TaskID, 10)
-	case isTaskURL(n.URL):
-		return "task:" + strings.TrimPrefix(n.URL, "/tasks/")
-	case n.ExternalSessionID != nil:
+	case n.TreeID != nil:
+		return "tree:" + strconv.FormatInt(*n.TreeID, 10)
+	case n.ScheduleID != nil:
+		return "schedule:" + strconv.FormatInt(*n.ScheduleID, 10)
+	}
+	for _, kind := range []string{"task", "tree", "schedule"} {
+		if id, ok := subjectURL(n.URL, kind); ok {
+			return kind + ":" + id
+		}
+	}
+	if n.ExternalSessionID != nil {
 		return "session:" + strconv.FormatInt(n.ConnectionID, 10) + ":" + *n.ExternalSessionID
 	}
 	return "notification:" + strconv.FormatInt(n.ID, 10)
 }
 
-// isTaskURL: `/tasks/` followed by one or more ASCII digits only.
-func isTaskURL(u string) bool {
-	id, ok := strings.CutPrefix(u, "/tasks/")
+// subjectURL: `/<kind>s/` followed by one or more ASCII digits only (the
+// stored URL keeps a deleted subject's group).
+func subjectURL(u, kind string) (string, bool) {
+	id, ok := strings.CutPrefix(u, "/"+kind+"s/")
 	if !ok || id == "" {
-		return false
+		return "", false
 	}
 	for _, c := range []byte(id) {
 		if c < '0' || c > '9' {
-			return false
+			return "", false
 		}
 	}
-	return true
+	return id, true
 }
 
-// TagForKey is a group key's push tag (`task:<id>` → `task-<id>`,
-// `session:<id>` → `session-<id>`); identity-less keys have none ("").
+// TagForKey is a group key's push tag (`task:<id>` → `task-<id>`, likewise
+// tree, schedule and session); identity-less keys have none ("").
 func TagForKey(key string) string {
-	if kind, id, ok := strings.Cut(key, ":"); ok && (kind == "task" || kind == "session") {
+	if kind, id, ok := strings.Cut(key, ":"); ok && (kind == "task" || kind == "tree" || kind == "schedule" || kind == "session") {
 		return kind + "-" + id
 	}
 	return ""

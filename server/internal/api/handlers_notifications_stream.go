@@ -29,14 +29,14 @@ const notificationReplayMax = 100
 
 // streamNotification is one inbox row on GET /api/notifications/stream.
 type streamNotification struct {
-	ID        int64        `json:"id"`
-	Event     db.TaskState `json:"event"`
-	CreatedAt time.Time    `json:"createdAt"`
-	Read      bool         `json:"read"`
-	Tag       string       `json:"tag"`
-	Title     string       `json:"title"`
-	Body      string       `json:"body"`
-	URL       string       `json:"url"`
+	ID        int64                `json:"id"`
+	Event     db.NotificationEvent `json:"event"`
+	CreatedAt time.Time            `json:"createdAt"`
+	Read      bool                 `json:"read"`
+	Tag       string               `json:"tag"`
+	Title     string               `json:"title"`
+	Body      string               `json:"body"`
+	URL       string               `json:"url"`
 }
 
 type streamHello struct {

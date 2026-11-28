@@ -179,7 +179,7 @@ async function closeViewed(generation: number): Promise<void> {
     const unread = new Set(raw.tags.filter((t: unknown): t is string => typeof t === "string"));
     for (const n of shown) {
       const tag = tagOf(n);
-      if (tag !== null && (tag.startsWith("task-") || tag.startsWith("session-")) && !unread.has(tag)) n.close();
+      if (tag !== null && /^(task|tree|schedule|session)-/.test(tag) && !unread.has(tag)) n.close();
     }
   } catch {
     // Offline or unsupported; the next sync retries.

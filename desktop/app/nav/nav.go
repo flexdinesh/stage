@@ -268,16 +268,18 @@ func T3WebURL(publicURL, raw string) (string, error) {
 }
 
 // AlertPath validates the app path a native notification click opens:
-// /tasks/<n>, /settings and /?inbox, exactly (no query or fragment;
-// historical /sessions and #answer paths are rejected). It returns p
-// unchanged when allowed.
+// /tasks/<n>, /trees/<n>, /schedules/<n>, /settings and /?inbox, exactly
+// (no query or fragment; historical /sessions and #answer paths are
+// rejected). It returns p unchanged when allowed.
 func AlertPath(p string) (string, bool) {
 	switch p {
 	case "/settings", "/?inbox":
 		return p, true
 	}
-	if n, ok := strings.CutPrefix(p, "/tasks/"); ok && taskNum.MatchString(n) {
-		return p, true
+	for _, prefix := range []string{"/tasks/", "/trees/", "/schedules/"} {
+		if n, ok := strings.CutPrefix(p, prefix); ok && taskNum.MatchString(n) {
+			return p, true
+		}
 	}
 	return "", false
 }

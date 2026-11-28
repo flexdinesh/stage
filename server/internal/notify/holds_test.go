@@ -178,11 +178,11 @@ func TestHoldObservationPath(t *testing.T) {
 	if got := f.notes(t); got != "" || !f.held(t, f.a) {
 		t.Fatalf("observation not held: %q", got)
 	}
-	// done is never held.
-	f.move(t, f.b, db.StateDone)
+	// failed is never held.
+	f.move(t, f.b, db.StateFailed)
 	err = f.store.WriteObservation(t.Context(), func(tx *db.Store) error {
 		_, err := f.n.RecordObservation(t.Context(), tx, workevent.ObservationChange{
-			Task: &workevent.TaskChange{TaskID: f.b, To: db.StateDone}, At: f.now,
+			Task: &workevent.TaskChange{TaskID: f.b, To: db.StateFailed}, At: f.now,
 		})
 		return err
 	})
@@ -190,7 +190,7 @@ func TestHoldObservationPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := f.notes(t); got != fmt.Sprintf("%d:-", f.b) {
-		t.Fatalf("done notification %q", got)
+		t.Fatalf("failed notification %q", got)
 	}
 	select {
 	case <-f.holds.kick:
@@ -281,7 +281,7 @@ func TestHoldUnanswerableConnectionReleases(t *testing.T) {
 // hold without a row.
 func TestHoldFilterAppliesAtRelease(t *testing.T) {
 	f := newHeldFixture(t)
-	if _, err := f.store.SetNotifyEvents(t.Context(), []db.TaskState{db.StateDone}); err != nil {
+	if _, err := f.store.SetNotifyEvents(t.Context(), []db.NotificationEvent{db.EventFailed}); err != nil {
 		t.Fatal(err)
 	}
 	f.waits(t, f.a)

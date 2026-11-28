@@ -618,7 +618,7 @@ func TestNotificationsServerRestart(t *testing.T) {
 	}
 	a.do("GET", fmt.Sprintf("/api/tasks/%d/completion-preview", source.ID), nil, 200, &preview)
 	a.do("POST", fmt.Sprintf("/api/tasks/%d/complete", source.ID), map[string]any{"requestId": "restart-ready", "revision": preview.Revision, "evidenceVersion": preview.EvidenceVersion}, 200, nil)
-	want := alerts.Note{ID: noteID(taskTag(dependent.ID)), Title: "Ready", Body: "Ready after restart · " + projectTitle}
+	want := alerts.Note{ID: noteID(taskTag(dependent.ID)), Title: "Ready to start", Body: "Ready after restart · " + projectTitle}
 	waitUntil(t, "ready after restart", notifWait, func() bool { return slices.Contains(h.sink.notes(), want) })
 	time.Sleep(500 * time.Millisecond)
 	if got := a.task(tk.ID).State; got != "needs_input" {

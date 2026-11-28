@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/api"
@@ -82,5 +83,56 @@ func TestAgentCompletesOtherTaskNotOwn(t *testing.T) {
 	}
 	if got := e.getTask(b.ID); got.LaunchAttempt != 1 {
 		t.Fatalf("agent acceptance did not release the auto dependent: %+v", got)
+	}
+}
+
+// Completed notifies for an agent's completion, never for a person's own.
+func TestCompletionNotifiesForAgentsOnly(t *testing.T) {
+	e := gatewayEnv(t)
+	ctx := t.Context()
+	go e.push.Run(ctx)
+	j := e.join("laptop")
+	p := e.project("/w/agent-notify")
+	mine := e.task(p.ID, "mine", nil)
+	theirs := e.task(p.ID, "theirs", nil)
+	worker := e.task(p.ID, "worker", map[string]any{"start": true})
+	st, err := e.store.GetTask(ctx, worker.ID)
+	if err != nil || st.Session == nil {
+		t.Fatalf("worker session: %v", err)
+	}
+	agent := workerHeaders(j.Token)
+	agent[agentctx.CallerHeader] = fmt.Sprintf("%d:%s", st.Session.ConnectionID, st.Session.ExternalSessionID)
+	complete := func(prefix string, headers map[string]string, id int64, requestID string) {
+		t.Helper()
+		var preview db.CompletionPreview
+		if rec := raw(t, e.h, "GET", fmt.Sprintf("%s/api/tasks/%d/completion-preview", prefix, id), headers, nil, &preview); rec.Code != 200 {
+			t.Fatalf("preview %d: %d %s", id, rec.Code, rec.Body)
+		}
+		request := db.AcceptanceRequest{RequestID: requestID, Revision: preview.Revision, EvidenceVersion: preview.EvidenceVersion}
+		for range 2 { // an exact replay notifies nothing more
+			if rec := raw(t, e.h, "POST", fmt.Sprintf("%s/api/tasks/%d/complete", prefix, id), headers, request, nil); rec.Code != 200 {
+				t.Fatalf("complete %d: %d %s", id, rec.Code, rec.Body)
+			}
+		}
+	}
+	complete("", nil, mine.ID, "person")
+	complete(api.GatewayPrefix, agent, theirs.ID, "agent")
+
+	// Events are handled in order: once the agent's completion is recorded,
+	// a person's earlier completion would have been too.
+	var rows []db.Notification
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		rows, err = e.store.ListNotifications(ctx, 10, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(rows) != 1 || rows[0].Event != db.EventCompleted || rows[0].TaskID == nil || *rows[0].TaskID != theirs.ID {
+		t.Fatalf("completion notifications %+v", rows)
 	}
 }

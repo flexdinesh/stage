@@ -104,14 +104,18 @@ Each connection keeps its own new-task defaults in its Manage drawer (Settings >
 
 ## Notifications
 
-| Event | When |
-|---|---|
-| needs input | a task or session asks a question or an approval |
-| failed | a run failed |
-| ready | a manual tree task can start; the notification offers Start |
-| done | a run finished |
+| Subject | Event | When | Default |
+|---|---|---|---|
+| Tasks | Needs input | a task or session asks a question or an approval | on |
+| Tasks | Failed | a run failed | on |
+| Tasks | Ready to start | a manual tree task can start; the notification offers Start | on |
+| Tasks | Completed | the harness or an agent completed a task | on |
+| Trees | Tree completed | the harness or an agent completed a tree's last task | on |
+| Schedules | Run started | a cron fire started a task (Run now never notifies) | off |
+| Schedules | Run skipped | a fire was skipped or missed | on |
+| Untracked sessions | Session finished | a session started outside Stage finished its run | on |
 
-Each event is toggleable in Settings > Notifications. On a shared server your filter and read state follow your account across devices. Notifications cover tasks and supported external sessions (subagents excluded). Completing a task in Stage sends no notification.
+Each event is toggleable in Settings > Notifications, grouped by subject. On a shared server your filter and read state follow your account across devices. Notifications cover tasks, trees, schedules and supported external sessions (subagents excluded). Completing a task yourself never notifies, and a task's finished run does not either: you hear once it is completed. Tree and schedule notifications open their page; opening it clears them.
 
 - **Inbox and toasts**: every notification lands in an in-app inbox and a toast. A needs-input toast clears once the question is resolved.
 - **Silent rows**: pre-existing external sessions waiting for input appear as silent current-state rows in the inbox when they have no recorded notification group. They add no unread event, push, toast or synthetic history. A recorded group replaces the silent row. Local Claude Code sessions waiting for input always appear this way and never notify; a row offers Open, Copy resume command or "Answer in Claude Code", and Track fills in Track session for you to confirm.

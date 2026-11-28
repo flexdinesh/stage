@@ -178,8 +178,9 @@ Inbox history and stream replay include retained events for every account.
 Each account sees its own receipt timestamp. An event without a receipt reads
 as of its creation time. Read actions update that account's unread receipts.
 Delivery requires an unread receipt. Joining or changing a filter affects
-future receipts. `notification_preferences` stores each user's filter, with
-all notification events enabled by default. The default connection remains
+future receipts. `notification_preferences` stores each user's filter. A user with no row
+gets every event except `schedule_started` (`DefaultNotifyEvents`; the
+shared recipient insert applies the same default in SQL). The default connection remains
 an installation-wide setting in `preferences`.
 
 In shared access, browser push subscriptions reference an active browser
@@ -659,6 +660,17 @@ and paging. (Thread search was removed with API v3.)
   `tree_steerers.finish_event_id`, `final_state_revision` and `completion`
   (`completed` or `skipped`) for tree finish ([Tree steering](#tree-steering)).
   Existing bindings start null (unfinished, undecided); copies carry them.
+  Paired migration 0056 `notification_subjects` widens the
+  `notifications.event` check to `needs_input`, `failed`, `ready`,
+  `completed`, `tree_completed`, `schedule_started`, `schedule_skipped` and
+  `done`, and adds nullable `notifications.tree_id` (`task_trees`) and
+  `schedule_id` (`schedules`), both `ON DELETE SET NULL`. SQLite rebuilds
+  the table (rows, 0054's `note`, id sequence and indexes kept); Postgres swaps the
+  constraint. Each saved `notification_preferences.notify_events` gains
+  `completed`, `tree_completed` and `schedule_skipped` where missing
+  (appended in SQL, order kept). Keys and tags add `tree:<id>`/`tree-<id>`
+  and `schedule:<id>`/`schedule-<id>`, with `/trees/<id>` and
+  `/schedules/<id>` URL fallbacks once the subject is deleted.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.

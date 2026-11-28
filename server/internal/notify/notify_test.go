@@ -191,18 +191,24 @@ func TestEventSelection(t *testing.T) {
 	if len(n.events) != 0 {
 		t.Fatalf("queued %d events for non-notifying states", len(n.events))
 	}
+	// A task's finished run no longer notifies (acceptance does); an
+	// untracked session's still does ("Session finished").
+	n.OnTransition(context.Background(), workevent.TaskChange{TaskID: 1, To: db.StateDone})
+	if len(n.events) != 0 {
+		t.Fatalf("queued %d events for a task's finished run", len(n.events))
+	}
 	for _, to := range []db.TaskState{db.StateNeedsInput, db.StateDone, db.StateFailed} {
 		n.OnTransition(context.Background(), workevent.TaskChange{TaskID: 1, To: to})
 		n.OnSessionChange(context.Background(), workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "external"}, To: to})
 	}
-	if len(n.events) != 6 {
-		t.Fatalf("queued %d events, want 6", len(n.events))
+	if len(n.events) != 5 {
+		t.Fatalf("queued %d events, want 5", len(n.events))
 	}
 	// A full queue drops instead of blocking.
 	done := make(chan struct{})
 	go func() {
 		for range queueSize + 10 {
-			n.OnTransition(context.Background(), workevent.TaskChange{TaskID: 1, To: db.StateDone})
+			n.OnTransition(context.Background(), workevent.TaskChange{TaskID: 1, To: db.StateFailed})
 		}
 		close(done)
 	}()
@@ -233,18 +239,23 @@ func TestPayload(t *testing.T) {
 	}{
 		{"task needs input", event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateNeedsInput}},
 			Payload{Title: "Needs input", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
-		{"task done", event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}},
-			Payload{Title: "Done", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
+		{"task failed", event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateFailed}},
+			Payload{Title: "Failed", Body: "Say OK · stage", URL: fmt.Sprintf("/tasks/%d", task.ID), Tag: fmt.Sprintf("task-%d", task.ID), Badge: 2}},
 		{"session with Stage project", event{session: &workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "Fix bug & test", To: db.StateNeedsInput}},
 			Payload{Title: "Needs input", Body: "Fix bug & test · stage", URL: "/?inbox", Tag: "session-1:ext-1", Badge: 2}},
 		{"session without Stage project", event{session: &workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-2"}, ProjectID: "proj-unknown", Title: "Other", To: db.StateFailed}},
 			Payload{Title: "Failed", Body: "Other · proj-unknown", URL: "/?inbox", Tag: "session-1:ext-2", Badge: 2}},
 	}
 	for _, tc := range tests {
-		got, _, err := n.payload(ctx, tc.e)
-		if err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
+		recs, err := notificationRecords(ctx, n.store, tc.e)
+		if err != nil || len(recs) != 1 {
+			t.Fatalf("%s: %v, %v", tc.name, recs, err)
 		}
+		badge, err := n.store.NeedsInputCount(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := PayloadFor(notificationFrom(recs[0]), badge)
 		if got != tc.want {
 			t.Fatalf("%s: got %+v, want %+v", tc.name, got, tc.want)
 		}
@@ -254,23 +265,34 @@ func TestPayload(t *testing.T) {
 // PayloadFor builds the push from a stored row; the stream shares it.
 func TestPayloadFor(t *testing.T) {
 	task, sessionID, project := int64(7), "provider:session/with%id", "stage"
+	tree, schedule := int64(3), int64(4)
 	created := time.Now()
 	tests := []struct {
 		name string
 		n    db.Notification
 		want Payload
 	}{
-		{"task needs input with session", db.Notification{ID: 1, Event: db.StateNeedsInput, TaskID: &task, ExternalSessionID: &sessionID,
+		{"task needs input with session", db.Notification{ID: 1, Event: db.EventNeedsInput, TaskID: &task, ExternalSessionID: &sessionID,
 			Title: "Say OK", ProjectTitle: &project, URL: "/tasks/7", CreatedAt: created},
 			Payload{Title: "Needs input", Body: "Say OK · stage", URL: "/tasks/7", Tag: "task-7", Badge: 3}},
-		{"task without session", db.Notification{ID: 2, Event: db.StateDone, TaskID: &task, Title: "Say OK", ProjectTitle: &project, URL: "/tasks/7"},
-			Payload{Title: "Done", Body: "Say OK · stage", URL: "/tasks/7", Tag: "task-7", Badge: 3}},
-		{"deleted task keeps its URL group", db.Notification{ID: 3, Event: db.StateFailed, ExternalSessionID: &sessionID, Title: "Gone", URL: "/tasks/9"},
+		{"older task run finished, no session", db.Notification{ID: 2, Event: db.EventDone, TaskID: &task, Title: "Say OK", ProjectTitle: &project, URL: "/tasks/7"},
+			Payload{Title: "Run finished", Body: "Say OK · stage", URL: "/tasks/7", Tag: "task-7", Badge: 3}},
+		{"task completed", db.Notification{ID: 6, Event: db.EventCompleted, TaskID: &task, ExternalSessionID: &sessionID, Title: "Say OK", ProjectTitle: &project, URL: "/tasks/7"},
+			Payload{Title: "Task completed", Body: "Say OK · stage", URL: "/tasks/7", Tag: "task-7", Badge: 3}},
+		{"tree completed", db.Notification{ID: 7, Event: db.EventTreeCompleted, TreeID: &tree, Title: "Ship auth", URL: "/trees/3"},
+			Payload{Title: "Tree completed", Body: "Ship auth", URL: "/trees/3", Tag: "tree-3", Badge: 3}},
+		{"deleted tree keeps its URL group", db.Notification{ID: 8, Event: db.EventTreeCompleted, Title: "Ship auth", URL: "/trees/3"},
+			Payload{Title: "Tree completed", Body: "Ship auth", URL: "/trees/3", Tag: "tree-3", Badge: 3}},
+		{"schedule started", db.Notification{ID: 9, Event: db.EventScheduleStarted, ScheduleID: &schedule, Title: "Nightly", ProjectTitle: &project, URL: "/schedules/4"},
+			Payload{Title: "Schedule started", Body: "Nightly · stage", URL: "/schedules/4", Tag: "schedule-4", Badge: 3}},
+		{"schedule skipped", db.Notification{ID: 10, Event: db.EventScheduleSkipped, ScheduleID: &schedule, Title: "Nightly", ProjectTitle: &project, URL: "/schedules/4"},
+			Payload{Title: "Schedule skipped", Body: "Nightly · stage", URL: "/schedules/4", Tag: "schedule-4", Badge: 3}},
+		{"deleted task keeps its URL group", db.Notification{ID: 3, Event: db.EventFailed, ExternalSessionID: &sessionID, Title: "Gone", URL: "/tasks/9"},
 			Payload{Title: "Failed", Body: "Gone", URL: "/tasks/9", Tag: "task-9", Badge: 3}},
-		{"external session", db.Notification{ID: 4, Event: db.StateDone, ConnectionID: 1, ExternalSessionID: &sessionID, Title: "Ext", ProjectTitle: &project,
+		{"external session", db.Notification{ID: 4, Event: db.EventDone, ConnectionID: 1, ExternalSessionID: &sessionID, Title: "Ext", ProjectTitle: &project,
 			URL: "/sessions/provider:session%2Fwith%25id"},
-			Payload{Title: "Done", Body: "Ext · stage", URL: "/?inbox", Tag: "session-1:" + sessionID, Badge: 3}},
-		{"identity-less", db.Notification{ID: 5, Event: db.StateNeedsInput, Title: "Old", URL: "/"},
+			Payload{Title: "Session finished", Body: "Ext · stage", URL: "/?inbox", Tag: "session-1:" + sessionID, Badge: 3}},
+		{"identity-less", db.Notification{ID: 5, Event: db.EventNeedsInput, Title: "Old", URL: "/"},
 			Payload{Title: "Needs input", Body: "Old", URL: "/?inbox", Tag: "", Badge: 3}},
 	}
 	for _, tc := range tests {
@@ -296,10 +318,10 @@ func TestHandleSignalsInbox(t *testing.T) {
 			return false
 		}
 	}
-	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.StateNeedsInput}); err != nil {
+	if _, err := store.SetNotifyEvents(ctx, []db.NotificationEvent{db.EventNeedsInput}); err != nil {
 		t.Fatal(err)
 	}
-	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}})
+	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateFailed}})
 	if got, err := store.ListNotifications(ctx, 10, nil); err != nil || len(got) != 0 || signalled() {
 		t.Fatalf("filtered event: rows %d err %v, want no row and no signal", len(got), err)
 	}
@@ -352,9 +374,9 @@ func TestSendPath(t *testing.T) {
 		t.Fatalf("after 201: %+v", sub)
 	}
 
-	// Done → normal urgency; 500 records last_error and keeps the subscription.
+	// Ready → normal urgency; 500 records last_error and keeps the subscription.
 	srv.setStatus(http.StatusInternalServerError)
-	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}})
+	n.handle(ctx, event{ready: &task.ID})
 	reqs = srv.requests()
 	if len(reqs) != 2 || reqs[1].header.Get("Urgency") != "normal" {
 		t.Fatalf("second push %d %v", len(reqs), reqs[len(reqs)-1].header)
@@ -395,14 +417,14 @@ func TestInboxRecordedWithoutSubscriptions(t *testing.T) {
 		t.Fatalf("notifications %d, want 2", len(got))
 	}
 	session, tk := got[0], got[1] // newest first
-	if tk.Event != db.StateNeedsInput || tk.TaskID == nil || *tk.TaskID != task.ID || tk.Title != "Say OK" ||
+	if tk.Event != db.EventNeedsInput || tk.TaskID == nil || *tk.TaskID != task.ID || tk.Title != "Say OK" ||
 		tk.ProjectTitle == nil || *tk.ProjectTitle != "stage" || tk.URL != fmt.Sprintf("/tasks/%d", task.ID) ||
 		tk.CurrentState == nil || *tk.CurrentState != db.StateNeedsInput || tk.ReadAt != nil {
 		t.Fatalf("task notification %+v", tk)
 	}
 	// A session no task owns: its observed title, and the title of the one
 	// Stage project its harness project is bound to.
-	if session.Event != db.StateDone || session.TaskID != nil || session.ExternalSessionID == nil || *session.ExternalSessionID != "ext-1" ||
+	if session.Event != db.EventDone || session.TaskID != nil || session.ExternalSessionID == nil || *session.ExternalSessionID != "ext-1" ||
 		session.Title != "External" || session.ProjectTitle == nil || *session.ProjectTitle != "stage" ||
 		session.URL != "/?inbox" || session.CurrentState == nil || *session.CurrentState != db.StateDone {
 		t.Fatalf("session notification %+v", session)
@@ -428,12 +450,12 @@ func TestNotifyEventsFilter(t *testing.T) {
 		return len(got)
 	}
 
-	// Done off: done events (task and session) leave no inbox row and no push.
-	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.StateNeedsInput, db.StateFailed}); err != nil {
+	session := event{session: &workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "External", To: db.StateDone}}
+	// Session finished off: the session's done leaves no inbox row and no push.
+	if _, err := store.SetNotifyEvents(ctx, []db.NotificationEvent{db.EventNeedsInput, db.EventFailed}); err != nil {
 		t.Fatal(err)
 	}
-	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}})
-	n.handle(ctx, event{session: &workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "External", To: db.StateDone}})
+	n.handle(ctx, session)
 	if c, r := count(), len(srv.requests()); c != 0 || r != 0 {
 		t.Fatalf("done disabled: %d notifications, %d pushes", c, r)
 	}
@@ -442,20 +464,18 @@ func TestNotifyEventsFilter(t *testing.T) {
 		t.Fatalf("needs input enabled: %d notifications, %d pushes", c, r)
 	}
 
-	// Done on records both task and session events.
-	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.StateDone}); err != nil {
+	// Session finished on records the session's done.
+	if _, err := store.SetNotifyEvents(ctx, []db.NotificationEvent{db.EventDone}); err != nil {
 		t.Fatal(err)
 	}
-	n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}})
-	n.handle(ctx, event{session: &workevent.SessionChange{Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: "ext-1"}, ProjectID: "proj-1", Title: "External", To: db.StateDone}})
-	if c, r := count(), len(srv.requests()); c != 3 || r != 3 {
+	n.handle(ctx, session)
+	if c, r := count(), len(srv.requests()); c != 2 || r != 2 {
 		t.Fatalf("done enabled: %d notifications, %d pushes", c, r)
 	}
-	if got, err := store.ListNotifications(ctx, 2, nil); err != nil || len(got) != 2 ||
-		got[0].Event != db.StateDone || got[1].Event != db.StateDone {
-		t.Fatalf("done notifications %+v %v", got, err)
+	if got, err := store.ListNotifications(ctx, 1, nil); err != nil || len(got) != 1 || got[0].Event != db.EventDone {
+		t.Fatalf("done notification %+v %v", got, err)
 	}
-	if p, _, err := n.payload(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}}); err != nil || p.Title != "Done" {
+	if p, _, err := n.payload(ctx, session); err != nil || p.Title != "Session finished" {
 		t.Fatalf("done payload %+v %v", p, err)
 	}
 
@@ -463,10 +483,12 @@ func TestNotifyEventsFilter(t *testing.T) {
 	if _, err := store.SetNotifyEvents(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, to := range db.NotificationEvents {
+	for _, to := range []db.TaskState{db.StateNeedsInput, db.StateFailed} {
 		n.handle(ctx, event{task: &workevent.TaskChange{TaskID: task.ID, To: to}})
 	}
-	if c, r := count(), len(srv.requests()); c != 3 || r != 3 {
+	n.handle(ctx, event{ready: &task.ID})
+	n.handle(ctx, session)
+	if c, r := count(), len(srv.requests()); c != 2 || r != 2 {
 		t.Fatalf("all disabled: %d notifications, %d pushes", c, r)
 	}
 }
@@ -481,17 +503,17 @@ func TestReadyNotification(t *testing.T) {
 	task := seedTask(t, store, db.StateBacklog)
 
 	n.OnReady(ctx, task.ID)
-	if len(n.events) != 1 || (<-n.events).to() != db.EventReady {
+	if len(n.events) != 1 || (<-n.events).ready == nil {
 		t.Fatal("OnReady must queue one ready event")
 	}
-	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.StateDone}); err != nil {
+	if _, err := store.SetNotifyEvents(ctx, []db.NotificationEvent{db.EventDone}); err != nil {
 		t.Fatal(err)
 	}
 	n.handle(ctx, event{ready: &task.ID})
 	if got, err := store.ListNotifications(ctx, 10, nil); err != nil || len(got) != 0 || len(srv.requests()) != 0 {
 		t.Fatalf("ready disabled: %+v %v", got, err)
 	}
-	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.EventReady}); err != nil {
+	if _, err := store.SetNotifyEvents(ctx, []db.NotificationEvent{db.EventReady}); err != nil {
 		t.Fatal(err)
 	}
 	n.handle(ctx, event{ready: &task.ID})
@@ -503,7 +525,7 @@ func TestReadyNotification(t *testing.T) {
 		t.Fatalf("ready notification %+v", r)
 	}
 	p, _, err := n.payload(ctx, event{ready: &task.ID})
-	if err != nil || p.Title != "Ready" || p.URL != fmt.Sprintf("/tasks/%d", task.ID) || p.Tag != fmt.Sprintf("task-%d", task.ID) || p.Body != "Say OK · stage" {
+	if err != nil || p.Title != "Ready to start" || p.URL != fmt.Sprintf("/tasks/%d", task.ID) || p.Tag != fmt.Sprintf("task-%d", task.ID) || p.Body != "Say OK · stage" {
 		t.Fatalf("ready payload %+v %v", p, err)
 	}
 }
@@ -547,7 +569,7 @@ func TestTaskNotificationGroupSurvivesSessionChange(t *testing.T) {
 		if _, err := store.TransitionTask(ctx, db.Transition{TaskID: task.ID, To: db.StateDone, Session: &db.SessionRef{ConnectionID: store.ActiveID(db.LocalMachine, "t3"), ExternalSessionID: sessionID}}); err != nil {
 			t.Fatal(err)
 		}
-		e := event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateDone}}
+		e := event{task: &workevent.TaskChange{TaskID: task.ID, To: db.StateFailed}}
 		payload, _, err := n.payload(ctx, e)
 		if err != nil || payload.URL != fmt.Sprintf("/tasks/%d", task.ID) {
 			t.Fatalf("session navigation: %+v %v", payload, err)
@@ -595,6 +617,22 @@ func TestSendTest(t *testing.T) {
 	if _, err := store.GetPushSubscription(ctx, 0, endpoint); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("404 kept subscription: %v", err)
 	}
+}
+
+// payload builds e's push and its single inbox record as handle does.
+func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotification, error) {
+	recs, err := notificationRecords(ctx, n.store, e)
+	if err != nil {
+		return Payload{}, db.NewNotification{}, err
+	}
+	if len(recs) != 1 {
+		return Payload{}, db.NewNotification{}, fmt.Errorf("%d records, want 1", len(recs))
+	}
+	badge, err := n.store.NeedsInputCount(ctx)
+	if err != nil {
+		return Payload{}, db.NewNotification{}, err
+	}
+	return PayloadFor(notificationFrom(recs[0]), badge), recs[0], nil
 }
 
 // jwtSub decodes the sub claim of the VAPID JWT in an Authorization header.
@@ -648,5 +686,188 @@ func TestVAPIDSubject(t *testing.T) {
 		if got := New(nil, in, log).subject; got != want {
 			t.Errorf("STAGE_PUBLIC_URL %q: subject %q, want %q", in, got, want)
 		}
+	}
+}
+
+func acceptTask(t *testing.T, store *db.Store, id int64) int64 {
+	t.Helper()
+	ctx := context.Background()
+	p, err := store.CompletionPreview(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := store.ChangeAcceptance(ctx, id, db.AcceptanceRequest{RequestID: fmt.Sprintf("accept-%d-%d", id, p.Revision), Revision: p.Revision, EvidenceVersion: p.EvidenceVersion}, false)
+	if err != nil || r.AcceptanceID == nil {
+		t.Fatalf("accept %d: %+v, %v", id, r, err)
+	}
+	return *r.AcceptanceID
+}
+
+// recorded lists the inbox rows newer than after, oldest first.
+func recorded(t *testing.T, store *db.Store, after int64) []db.Notification {
+	t.Helper()
+	rows, err := store.ListNotifications(context.Background(), 50, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []db.Notification
+	for i := len(rows) - 1; i >= 0; i-- {
+		if rows[i].ID > after {
+			out = append(out, rows[i])
+		}
+	}
+	return out
+}
+
+func lastID(rows []db.Notification) int64 {
+	if len(rows) == 0 {
+		return 0
+	}
+	return rows[len(rows)-1].ID
+}
+
+// Completion (inference or an agent): completed while the acceptance is
+// current; tree_completed once, for the newest acceptance of an open tree.
+func TestCompletionNotifications(t *testing.T) {
+	n, store := newNotifier(t)
+	ctx := context.Background()
+	srv := newPushServer(t)
+	subscribe(t, store, srv.URL+"/push/1")
+	first := seedTask(t, store, db.StateDone)
+	second, err := store.CreateTask(ctx, db.NewTask{ConnectionID: dbtest.T3Connection, ProjectID: first.ProjectID, Title: "Ship it", Prompt: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := store.CreateTree(ctx, db.NewTree{Title: "Ship auth", Tasks: []db.TreeMember{{TaskID: first.ID}, {TaskID: second.ID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	n.OnCompleted(ctx, first.ID, 0)
+	if len(n.events) != 1 || (<-n.events).completed == nil {
+		t.Fatal("OnCompleted must queue one completion")
+	}
+
+	// Not accepted (or reopened since): nothing.
+	n.handle(ctx, event{completed: &completion{TaskID: first.ID}})
+	if rows := recorded(t, store, 0); len(rows) != 0 {
+		t.Fatalf("unaccepted task notified: %+v", rows)
+	}
+
+	// One member accepted: completed only, on the task's group.
+	firstAcceptance := acceptTask(t, store, first.ID)
+	n.handle(ctx, event{completed: &completion{TaskID: first.ID}})
+	rows := recorded(t, store, 0)
+	if len(rows) != 1 || rows[0].Event != db.EventCompleted || rows[0].TaskID == nil || *rows[0].TaskID != first.ID ||
+		rows[0].URL != fmt.Sprintf("/tasks/%d", first.ID) || db.NotificationKey(rows[0]) != fmt.Sprintf("task:%d", first.ID) {
+		t.Fatalf("completed row %+v", rows)
+	}
+	if p := PayloadFor(rows[0], 0); p.Title != "Task completed" || p.Body != "Say OK · stage" {
+		t.Fatalf("completed payload %+v", p)
+	}
+	// A stale acceptance id (replaced since) records nothing.
+	n.handle(ctx, event{completed: &completion{TaskID: first.ID, AcceptanceID: firstAcceptance + 100}})
+	if got := recorded(t, store, lastID(rows)); len(got) != 0 {
+		t.Fatalf("stale acceptance notified: %+v", got)
+	}
+
+	// The last member: completed, then tree_completed on the tree's group.
+	secondAcceptance := acceptTask(t, store, second.ID)
+	n.handle(ctx, event{completed: &completion{TaskID: second.ID, AcceptanceID: secondAcceptance}})
+	got := recorded(t, store, lastID(rows))
+	if len(got) != 2 || got[0].Event != db.EventCompleted || got[1].Event != db.EventTreeCompleted ||
+		got[1].TreeID == nil || *got[1].TreeID != tree.ID || got[1].TaskID != nil || got[1].Title != "Ship auth" ||
+		got[1].URL != fmt.Sprintf("/trees/%d", tree.ID) || db.NotificationKey(got[1]) != fmt.Sprintf("tree:%d", tree.ID) {
+		t.Fatalf("last member rows %+v", got)
+	}
+	if p := PayloadFor(got[1], 0); p.Title != "Tree completed" || p.URL != fmt.Sprintf("/trees/%d", tree.ID) || p.Tag != fmt.Sprintf("tree-%d", tree.ID) {
+		t.Fatalf("tree payload %+v", p)
+	}
+	if len(srv.requests()) != 3 {
+		t.Fatalf("pushes %d, want 3", len(srv.requests()))
+	}
+	rows = append(rows, got...)
+
+	// An older member's late completion does not complete the tree again.
+	n.handle(ctx, event{completed: &completion{TaskID: first.ID, AcceptanceID: firstAcceptance}})
+	got = recorded(t, store, lastID(rows))
+	if len(got) != 1 || got[0].Event != db.EventCompleted {
+		t.Fatalf("older member rows %+v", got)
+	}
+	rows = append(rows, got...)
+
+	// A closed tree releases nothing, and completes nothing.
+	if _, err := store.SetTreeStatus(ctx, tree.ID, db.TreeDone); err != nil {
+		t.Fatal(err)
+	}
+	n.handle(ctx, event{completed: &completion{TaskID: second.ID, AcceptanceID: secondAcceptance}})
+	got = recorded(t, store, lastID(rows))
+	if len(got) != 1 || got[0].Event != db.EventCompleted {
+		t.Fatalf("closed tree rows %+v", got)
+	}
+	rows = append(rows, got...)
+
+	// The filter applies per event.
+	if _, err := store.SetTreeStatus(ctx, tree.ID, db.TreeOpen); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetNotifyEvents(ctx, []db.NotificationEvent{db.EventTreeCompleted}); err != nil {
+		t.Fatal(err)
+	}
+	n.handle(ctx, event{completed: &completion{TaskID: second.ID, AcceptanceID: secondAcceptance}})
+	got = recorded(t, store, lastID(rows))
+	if len(got) != 1 || got[0].Event != db.EventTreeCompleted {
+		t.Fatalf("filtered rows %+v", got)
+	}
+}
+
+// Cron fires: started notifies schedule_started, skipped and missed
+// schedule_skipped, on the schedule's group; manual runs never notify.
+func TestScheduleRunNotifications(t *testing.T) {
+	n, store := newNotifier(t)
+	ctx := context.Background()
+	task := seedTask(t, store, db.StateBacklog)
+	sc, err := store.CreateSchedule(ctx, db.NewSchedule{ConnectionID: dbtest.T3Connection, ProjectID: task.ProjectID, Title: "Nightly", Prompt: "p", Cron: "0 3 * * *", Tz: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, outcome := range []string{db.RunManual, "", "unknown"} {
+		n.OnScheduleRun(ctx, sc.ID, outcome)
+	}
+	if len(n.events) != 0 {
+		t.Fatalf("queued %d events for outcomes that do not notify", len(n.events))
+	}
+	if _, err := store.SetNotifyEvents(ctx, db.NotificationEvents); err != nil {
+		t.Fatal(err)
+	}
+	for _, outcome := range []string{db.RunStarted, db.RunSkipped, db.RunMissed} {
+		n.OnScheduleRun(ctx, sc.ID, outcome)
+		n.handle(ctx, <-n.events)
+	}
+	rows := recorded(t, store, 0)
+	want := []db.NotificationEvent{db.EventScheduleStarted, db.EventScheduleSkipped, db.EventScheduleSkipped}
+	if len(rows) != len(want) {
+		t.Fatalf("schedule rows %+v", rows)
+	}
+	for i, r := range rows {
+		if r.Event != want[i] || r.ScheduleID == nil || *r.ScheduleID != sc.ID || r.TaskID != nil || r.Title != "Nightly" ||
+			r.ProjectTitle == nil || *r.ProjectTitle != "stage" || db.NotificationKey(r) != fmt.Sprintf("schedule:%d", sc.ID) {
+			t.Fatalf("schedule row %d: %+v", i, r)
+		}
+	}
+	if p := PayloadFor(rows[0], 0); p.Title != "Schedule started" || p.URL != fmt.Sprintf("/schedules/%d", sc.ID) || p.Tag != fmt.Sprintf("schedule-%d", sc.ID) {
+		t.Fatalf("started payload %+v", p)
+	}
+	if p := PayloadFor(rows[1], 0); p.Title != "Schedule skipped" || p.Body != "Nightly · stage" {
+		t.Fatalf("skipped payload %+v", p)
+	}
+
+	// Run started is opt-in: the default filter leaves it out.
+	if _, err := store.SetNotifyEvents(ctx, db.DefaultNotifyEvents); err != nil {
+		t.Fatal(err)
+	}
+	n.handle(ctx, event{schedule: &scheduleRun{ScheduleID: sc.ID, Outcome: db.RunStarted}})
+	if got := recorded(t, store, lastID(rows)); len(got) != 0 {
+		t.Fatalf("schedule_started recorded while off: %+v", got)
 	}
 }

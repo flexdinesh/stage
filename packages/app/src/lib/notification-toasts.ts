@@ -7,6 +7,9 @@ export function newToastEvents(items: Notification[], after: number, includeRead
 
 const entityKey = (n: Notification) => {
   if (n.taskId !== null) return `task:${n.taskId}`;
+  // Older payloads may omit tree and schedule ids.
+  if (n.treeId != null) return `tree:${n.treeId}`;
+  if (n.scheduleId != null) return `schedule:${n.scheduleId}`;
   // Older payloads may omit the connection: they key by session alone (never assume a fixed connection id).
   if (n.externalSessionId !== null) return `session:${n.connectionId ?? ""}:${n.externalSessionId}`;
   return `notification:${n.id}`;

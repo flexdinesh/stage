@@ -56,7 +56,11 @@ func (s *Service) Apply(ctx context.Context, task db.Task, o execution.Observati
 		return err
 	})
 	if err == nil {
-		s.PublishObservation(ctx, change, inferred, false)
+		var inferredTask int64
+		if inferred {
+			inferredTask = task.ID
+		}
+		s.PublishObservation(ctx, change, inferredTask, false)
 	}
 	return err
 }
@@ -116,7 +120,9 @@ func (s *Service) ApplyObservation(ctx context.Context, tx *db.Store, task db.Ta
 	return transition, inferred, err
 }
 
-func (s *Service) PublishObservation(ctx context.Context, change *workevent.TaskChange, inferred, inboxRecorded bool) {
+// PublishObservation runs the after-commit hooks of an applied observation:
+// inferredTask is the task whose completion it inferred (0: none).
+func (s *Service) PublishObservation(ctx context.Context, change *workevent.TaskChange, inferredTask int64, inboxRecorded bool) {
 	if change != nil {
 		hook := s.OnTransition
 		if inboxRecorded && s.OnObservedTransition != nil {
@@ -126,8 +132,14 @@ func (s *Service) PublishObservation(ctx context.Context, change *workevent.Task
 			hook(ctx, *change)
 		}
 	}
-	if inferred && s.OnAccepted != nil {
+	if inferredTask == 0 {
+		return
+	}
+	if s.OnAccepted != nil {
 		s.OnAccepted()
+	}
+	if s.OnInferred != nil {
+		s.OnInferred(ctx, inferredTask)
 	}
 }
 

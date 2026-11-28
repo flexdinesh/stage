@@ -40,7 +40,7 @@ Base path `/api`. JSON in and out (`Content-Type: application/json`). Field name
 | SendMode | `auto` `queue` `steer` `restart` (default `auto`) |
 | StartMode | `auto` (a tree member launches once its needs are completed in Stage) `manual` (it reads `ready` and notifies; the user starts it). New tree default `auto`; a task's own `startMode` null inherits the tree's |
 | Readiness | `blocked` (a need lacks user acceptance) `ready` (every need has user acceptance, no start time, and manual or no needs); backlog tree members only, else null |
-| NotificationEvent | `needs_input` `failed` `ready` `done` |
+| NotificationEvent | `needs_input` `failed` `ready` `completed` `tree_completed` `schedule_started` `schedule_skipped` `done` (display order; `done` is an untracked session's finished run) |
 | ProjectSource | `app` (created via stage) `t3` (imported from T3) |
 | T3State | `unreachable` `unpaired` `expired` `rejected` `connected` (see [T3 details](#t3-details)) |
 
@@ -1340,7 +1340,7 @@ Body `{ "cron": "0 2 * * 1-5", "tz": "America/New_York" }`. 200 `{ "next": [ISO,
   - A missing or unavailable workspace pin records a `skipped` run with the repair reason and advances `nextRunAt`.
   - Else spawn a task (config + images copied, `scheduleId`, `startAt = fireAt`, `startTz = tz`), record `started`, advance. The one-shot pass then launches it (a crash in between still launches it on restart).
 - Fires are computed in the schedule's `tz`; a fire is never run twice (`nextRunAt` advances in the same transaction).
-- Scheduled starts and skips do not notify; a failed launch notifies as usual (`failed`).
+- A cron fire that spawns a task notifies `schedule_started` ("Schedule started"); a fire recorded `skipped` or `missed` notifies `schedule_skipped` ("Schedule skipped"). Run now never notifies. Both use group `schedule:<id>`, tag `schedule-<id>` and `url` `/schedules/<id>`. A failed launch notifies as usual (`failed`).
 
 ## Images
 
@@ -1420,6 +1420,7 @@ The server and workers roll forward together at API v9. Layer 07 raises the inde
 - `POST /api/sync` returns `sessions`. The T3 setup status keeps its own `details.sync.threads` counter.
 - External notification groups use `session:<connectionId>:<externalSessionId>`. Push and unread tags use `session-<connectionId>:<externalSessionId>`. Previously shown notifications with a `thread-` tag stay until dismissed. Acceptance sends no notification. Migration 0035 maps old task states and notification events to `done` while preserving acceptance history.
 - MCP `get_task` describes session identity, `stop_task` interrupts a running session, and `list_tasks.states` accepts the current TaskState values. MCP and CLI handoff help names the final reply, branch and session link. `stage task show` drops its artifact lines, `stage show` uses web and native links, and the CLI journal source line uses `connection N session X` for a scoped source session.
+- Notification subjects (additive, no version bump): events `completed`, `tree_completed`, `schedule_started` and `schedule_skipped`; `Notification.treeId` and `scheduleId`; groups `tree:<id>` and `schedule:<id>` with tags `tree-<id>` and `schedule-<id>`. A task's finished run no longer notifies (`done` is for untracked sessions); acceptance by inference or an agent notifies `completed` (see "Notification rules"). Migration 0056 adds `completed`, `tree_completed` and `schedule_skipped` to saved filters.
 - Session rename (additive, no version bump): the `sessionRename` operation, and a task title change renames the session Stage launched where available (`PATCH /api/tasks/:id`).
 - Agent operation parity (additive, no version bump; [ADR 0011](adr/0011-agent-operation-parity.md)): agent callers may complete, reopen, list and answer requests, send messages, read opening prompts, create, rename and archive projects, read project events, edit group membership, manage snippets and delete attachments. 403 `agent_forbidden` on respond and send is now `self_action_forbidden`, only for the caller's own task. `PATCH /api/projects/:id` keeps omitted fields.
 
@@ -1433,7 +1434,7 @@ Removed inputs return 400. MCP and CLI surface the same validation text where ap
 |---|---|
 | `settledFrom` on `GET /api/tasks` or `GET /api/trees` | `settledFrom was removed in API v9; use completedFrom` |
 | `state=settled` or `settled` in MCP `list_tasks.states` | `state settled was removed in API v9; use state done (completedAt marks acceptance)` |
-| `settled` in `events` on `PUT /api/preferences/notifications` | `event settled was removed in API v9; completion sends no notification (want needs_input, failed, ready or done)` |
+| `settled` in `events` on `PUT /api/preferences/notifications` | `event settled was removed in API v9; use completed (want needs_input, failed, ready, completed, tree_completed, schedule_started, schedule_skipped, done)` |
 | `settled` in MCP `wait_task.until` or CLI `--until` | `until: settled was removed in API v9; wait for done` |
 | Group key starting with `thread:` on `GET /api/notifications?group=` or `POST /api/notifications/read` | `group key thread:... was renamed in API v9; use session:<connectionId>:<externalSessionId>` |
 | Pushed observation `artifacts` | `observations[i].artifacts was removed in API v9` |
@@ -1548,14 +1549,14 @@ claimed attempt.
 The shared default connection can prefill a visible selection in the new-task form, which submits the selected exact pair. In shared access, the notification filter belongs to the authenticated account. New-task defaults live with each connection: its model pin is `newTaskConfig` on [`GET /api/connections`](#harness-connections-api-v6) (`PUT /api/connections/:connectionId/new-task-config`). Model and options prefill from the selected connection, else the harness default. Permission and mode start at the harness default.
 
 ### `GET /api/preferences`
-200 `{ "defaultConnectionId": number | null, "notifyEvents": NotificationEvent[], "sharedNotifications"?: true }`. `defaultConnectionId` is null when unset or when its connection is no longer active (its machine removed). Pairing another instance of its harness moves it to the replacement. `notifyEvents` lists the person's enabled events in display order (`needs_input`, `failed`, `ready`, `done`). Human sessions in shared access receive `sharedNotifications: true`. Shared agent credentials can read the connection default and receive an empty `notifyEvents`.
+200 `{ "defaultConnectionId": number | null, "notifyEvents": NotificationEvent[], "sharedNotifications"?: true }`. `defaultConnectionId` is null when unset or when its connection is no longer active (its machine removed). Pairing another instance of its harness moves it to the replacement. `notifyEvents` lists the person's enabled events in display order (`needs_input`, `failed`, `ready`, `completed`, `tree_completed`, `schedule_started`, `schedule_skipped`, `done`). An account that never saved a filter gets every event except `schedule_started`. Human sessions in shared access receive `sharedNotifications: true`. Shared agent credentials can read the connection default and receive an empty `notifyEvents`.
 
 ### `PUT /api/preferences/default-connection`
 Body: `{ "connectionId": number | null }` (null clears it).
 200 `Preferences`. 400 unknown or replaced connection.
 
 ### `PUT /api/preferences/notifications`
-Body `{ "events": NotificationEvent[] }` with `needs_input|failed|ready|done`. Duplicates are dropped. An empty array mutes every event. Applies to new events on every device for the signed-in account. Shared history keeps muted events as read. In personal mode, muted events are dropped.
+Body `{ "events": NotificationEvent[] }` with `needs_input|failed|ready|completed|tree_completed|schedule_started|schedule_skipped|done`. Duplicates are dropped. An empty array mutes every event. Applies to new events on every device for the signed-in account. Shared history keeps muted events as read. In personal mode, muted events are dropped.
 200 `Preferences`. 400 unknown event or missing `events`.
 
 ## Notifications (Web Push)
@@ -1591,9 +1592,9 @@ The display payload is built from the stored inbox row, using the same fields as
 { "title": "Needs input", "body": "Say OK · stage", "url": "/tasks/7", "tag": "task-7", "badge": 2 }
 ```
 Needs-input payloads open their task or the inbox. Open in T3 continues the conversation.
-`tag` replaces an older notification for the same task (`task-<id>`) or external session (`session-<connectionId>:<externalSessionId>`). The service worker sets `renotify` to alert again and closes shown notifications with the same tag on iOS. TTL is 24 hours. Urgency is `high` for needs input and `normal` otherwise. The push service retains the latest pending message for a topic, derived from the tag and, in shared access, the binding.
+`tag` replaces an older notification for the same task (`task-<id>`), tree (`tree-<id>`), schedule (`schedule-<id>`) or external session (`session-<connectionId>:<externalSessionId>`). The service worker sets `renotify` to alert again and closes shown notifications with the same tag on iOS. TTL is 24 hours. Urgency is `high` for needs input and `normal` otherwise. The push service retains the latest pending message for a topic, derived from the tag and, in shared access, the binding.
 
-Clear on view: opening a task page closes its `task-<id>` system notification and marks group `task:<id>` read; opening session detail closes its `session-<connectionId>:<externalSessionId>` notification and the related task notification when present, and marks those groups read (`POST /api/notifications/read` with `groups`). Clicking a notification opens one of these pages. Opening the notifications inbox closes all of them and marks everything read.
+Clear on view: opening a task, tree or schedule page closes its `task-<id>`, `tree-<id>` or `schedule-<id>` system notification and marks group `task:<id>`, `tree:<id>` or `schedule:<id>` read; opening session detail closes its `session-<connectionId>:<externalSessionId>` notification and the related task notification when present, and marks those groups read (`POST /api/notifications/read` with `groups`). Clicking a notification opens one of these pages. Opening the notifications inbox closes all of them and marks everything read.
 
 Cross-device clear: each device closes shown `task-*` and `session-*` notifications after those groups have been read on the same account. The service worker reconciles after a push, the app reconciles on load and when it becomes visible, and desktop reconciles on each SSE `unread` event. OS dismissal is best effort. WebKit can defer closing recent alerts until a later sync. The account lifecycle also clears device alerts and badges when the host detects logout or session replacement.
 
@@ -1609,6 +1610,8 @@ Shared access records each workspace notification event once, including when no 
   "id": 12,
   "event": "needs_input",
   "taskId": 7,
+  "treeId": null,
+  "scheduleId": null,
   "externalSessionId": "thread-abc",
   "title": "Say OK",
   "projectTitle": "stage",
@@ -1621,9 +1624,9 @@ Shared access records each workspace notification event once, including when no 
   "links": { "native": "t3code://threads/env-1/thread-abc" }
 }
 ```
-`event`: `needs_input|ready|done|failed`. `taskId` is null for external sessions or once the task is deleted. `title` and `projectTitle` are snapshots at send time. `currentState` is live and reflects the task state or the observed state of an external session. It is null when unknown. `note`: why a held notification came late (`Steerer did not answer`, or `Steerer: <reason>` from `escalate_to_user`), else null; push bodies end with it.
+`event`: a NotificationEvent. `taskId` is null for external sessions, tree and schedule events, or once the task is deleted. `treeId` is set on `tree_completed`, `scheduleId` on `schedule_started|schedule_skipped`; each is null once its tree or schedule is deleted. Tree and schedule rows have no `currentState`. `title` and `projectTitle` are snapshots at send time. `currentState` is live and reflects the task state or the observed state of an external session. It is null when unknown. `note`: why a held notification came late (`Steerer did not answer`, or `Steerer: <reason>` from `escalate_to_user`), else null; push bodies end with it.
 
-Task notifications retain `/tasks/<id>` for group identity and navigation. External notifications open `/?inbox`, with the harness destination in the inbox when available. Historical stored URLs are preserved; emitted destinations derive from task/session identity.
+Task notifications retain `/tasks/<id>` for group identity and navigation; tree and schedule notifications retain `/trees/<id>` and `/schedules/<id>`. External notifications open `/?inbox`, with the harness destination in the inbox when available. Historical stored URLs are preserved; emitted destinations derive from task/session identity.
 
 ### `GET /api/notifications`
 Query: `limit` (default 50, max 200), `before` (id; only older entries), `group` (optional group key from the grouped inbox; restricts history to that task or session). 200 `{ "notifications": Notification[], "unread": number, "nextBefore": number | null }` newest first; `nextBefore` = the `before` for the next (older) page, null when none. `readAt` and `unread` apply to the authenticated recipient. 400 bad `limit` / `before`.
@@ -1635,13 +1638,13 @@ Query: `limit` (default 50, max 200), `cursor` (opaque `nextCursor` from the pre
 
 Groups whose current state is `needs_input` come first, then other groups; each section is newest-event-ID first. Aggregation precedes pagination, so repeated events cannot consume a page or cause older copies of a group to reappear. `latestId` is the global newest event ID captured before listing, independent of priority order; use it for read-on-open, then the newest observed `latestId` for arrivals while the drawer is open. Events inserted after that boundary remain unread. Unread markers captured on open stay visible until close. The bell still counts unread events.
 
-Expandable history uses `GET /api/notifications?group=...`; it contains only recorded `needs_input`, `ready`, `done` and `failed` notifications. Unknown current state displays as unavailable rather than falling back to an old event.
+Expandable history uses `GET /api/notifications?group=...`; it contains only that group's recorded notifications. Unknown current state displays as unavailable rather than falling back to an old event.
 
 ### `POST /api/notifications/read`
 Body `{ "upTo": number }` marks the recipient's entries through `id <= upTo` read. Alternatively, `{ "groups": string[] }` marks their entries in 1 to 20 groups, such as `task:12` or `session:<connectionId>:<externalSessionId>`. 204 on success. 400 when neither or both are sent, `upTo` < 1, or `groups` is empty, too long or has an empty key.
 
 ### `GET /api/notifications/unread-tags`
-200 `{ "tags": string[] }`: push tags of groups with unread entries (`task:<id>` → `task-<id>`, `session:<connectionId>:<externalSessionId>` → `session-<connectionId>:<externalSessionId>`; identity-less groups have none). Devices close shown notifications whose tag is missing (see "Clear on view").
+200 `{ "tags": string[] }`: push tags of groups with unread entries (`task:<id>` → `task-<id>`, `tree:<id>` → `tree-<id>`, `schedule:<id>` → `schedule-<id>`, `session:<connectionId>:<externalSessionId>` → `session-<connectionId>:<externalSessionId>`; identity-less groups have none). Devices close shown notifications whose tag is missing (see "Clear on view").
 
 ### `GET /api/notifications/stream`
 Server-sent events return inbox rows after a cursor, then live rows and the recipient's unread snapshots. Headers include `Content-Type: text/event-stream` and `X-Accel-Buffering: no`. Shared streams are private and use `Cache-Control: private, no-store, no-transform`. Personal streams use `no-cache, no-transform`. The first line is `retry: 3000`. 400 when the cursor is not an integer >= 0.
@@ -1661,15 +1664,18 @@ Each new inbox row, read, prune, or task transition wakes the stream. It sends r
 
 - A shared account's filter determines whether each new event arrives unread and can alert that account's devices. All workspace events remain available in shared history. In personal mode, the owner's filter determines which events are recorded and pushed.
 
-- Tasks: a transition into `needs_input` ("Needs input"), `done` ("Done") or `failed` ("Failed") notifies. Stored `url` = `/tasks/<id>` for stable group identity; push destination = the task URL. Other states (incl. `interrupted`) do not.
-- Hold (tree steering, [ADR 0013](adr/0013-tree-steering.md)): a tree member's `needs_input` is held, not recorded, when its tree's `steeringHoldSeconds` is above 0, the tree has an active steerer whose task is `running`, `done` or `needs_input`, and the member's connection offers `respond` or `send`. Both paths hold: the coordinator's transition hook and the observation transaction. A hold is a `notification_holds` row (Task JSON `hold`); the notification row is inserted only at release, because the inbox stream's cursor is id-ordered. `done`, `failed` and `ready` are never held.
+- Tasks: a transition into `needs_input` ("Needs input") or `failed` ("Failed") notifies. Stored `url` = `/tasks/<id>` for stable group identity; push destination = the task URL. Other states (incl. `done` and `interrupted`) do not; older `done` task rows read "Run finished".
+- Hold (tree steering, [ADR 0013](adr/0013-tree-steering.md)): a tree member's `needs_input` is held, not recorded, when its tree's `steeringHoldSeconds` is above 0, the tree has an active steerer whose task is `running`, `done` or `needs_input`, and the member's connection offers `respond` or `send`. Both paths hold: the coordinator's transition hook and the observation transaction. A hold is a `notification_holds` row (Task JSON `hold`); the notification row is inserted only at release, because the inbox stream's cursor is id-ordered. No other event is held.
   - The member leaves `needs_input`, or is answered through Stage at the held revision: the hold is cancelled in the same write; nothing notifies.
   - Expiry (`hold.until`) while still unanswered at the same revision: the notification is recorded with note `Steerer did not answer`, pushed and signalled, and `hold_escalated` is enqueued.
   - `POST /api/tasks/:id/escalate`: released at once with note `Steerer: <reason>`.
   - The steerer's binding ends (stopped, replaced, tree finished, task removed), its task stops being `running|done|needs_input`, the member leaves the tree, or the member's connection no longer offers `respond` or `send`: released at once without a note. A connection whose capability check fails keeps its holds until the next check.
   - A release loop ticks every 5 s and on transitions and tree or steering changes; holds are durable, so a restart releases what came due while down. The filter above applies at release: a muted `needs_input` ends the hold without a row.
-- Ready: a manual tree member with at least one need whose needs all have user acceptance (see "Tree rules") notifies once per readiness episode ("Ready", `url` = `/tasks/<id>`, tag `task-<id>`). Roots and auto members never send it.
-- External sessions: adapters expose an attention feed. Stage also rereads stored active/done sessions to observe their outcomes. Changes into `needs_input|done|failed` notify; the inbox destination is retained. The first pass after startup is silent. Later newly discovered sessions notify only if created after startup. Missing sessions and failed reads preserve the last observation; closing an unowned session does not affect acceptance or dependencies. A task's own session follows "Inferred completion".
+- Completed: acceptance by inferred completion or by an agent's complete action notifies `completed` ("Task completed", `url` = `/tasks/<id>`, tag `task-<id>`). A person's complete action never notifies, in either access mode; a replayed `requestId` and a reopen never notify.
+- Tree completed: when an open tree's last member is accepted by a path that notifies `completed`, `tree_completed` ("Tree completed", title = the tree's title, `url` = `/trees/<id>`, tag `tree-<id>`) notifies once per episode (only for the member with the newest acceptance). A person's acceptance of the last member never notifies.
+- Ready: a manual tree member with at least one need whose needs all have user acceptance (see "Tree rules") notifies once per readiness episode ("Ready to start", `url` = `/tasks/<id>`, tag `task-<id>`). Roots and auto members never send it.
+- Schedules: see "Schedule rules".
+- External sessions: adapters expose an attention feed. Stage also rereads stored active/done sessions to observe their outcomes. Changes into `needs_input`, `done` ("Session finished") or `failed` notify; the inbox destination is retained. The first pass after startup is silent. Later newly discovered sessions notify only if created after startup. Missing sessions and failed reads preserve the last observation; closing an unowned session does not affect acceptance or dependencies. A task's own session follows "Inferred completion".
 - Needs-input counts combine tasks with unowned, non-child normalized session observations. Historical notification entries and links remain available.
 
 ## State mapping

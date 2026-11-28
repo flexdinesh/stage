@@ -10,12 +10,55 @@ import (
 // SessionRef names a harness session: its connection and external id.
 type SessionRef = execution.SessionRef
 
+// NotificationEvent is what an inbox entry reports (docs/api.md
+// "Notification rules"). Ids are stable on the wire and in storage.
+type NotificationEvent string
+
+const (
+	// EventNeedsInput: a task or untracked session waits on the user.
+	EventNeedsInput NotificationEvent = "needs_input"
+	// EventFailed: a task's or untracked session's run failed.
+	EventFailed NotificationEvent = "failed"
+	// EventReady: a manual tree member whose needs are all completed.
+	EventReady NotificationEvent = "ready"
+	// EventCompleted: a task was accepted by inference or by an agent
+	// (never a user's own completion).
+	EventCompleted NotificationEvent = "completed"
+	// EventTreeCompleted: the last member of an open tree was accepted by
+	// inference or by an agent.
+	EventTreeCompleted NotificationEvent = "tree_completed"
+	// EventScheduleStarted: a cron fire spawned a task.
+	EventScheduleStarted NotificationEvent = "schedule_started"
+	// EventScheduleSkipped: a cron fire was skipped or missed.
+	EventScheduleSkipped NotificationEvent = "schedule_skipped"
+	// EventDone: an untracked session's run finished ("Session finished").
+	// Older task rows also carry it ("Run finished").
+	EventDone NotificationEvent = "done"
+)
+
+// NotificationEvents: every event, in display order.
+var NotificationEvents = []NotificationEvent{
+	EventNeedsInput, EventFailed, EventReady, EventCompleted,
+	EventTreeCompleted, EventScheduleStarted, EventScheduleSkipped, EventDone,
+}
+
+// DefaultNotifyEvents: the filter of an account that never saved one
+// (every event but schedule_started).
+var DefaultNotifyEvents = []NotificationEvent{
+	EventNeedsInput, EventFailed, EventReady, EventCompleted,
+	EventTreeCompleted, EventScheduleSkipped, EventDone,
+}
+
 // Notification is an inbox entry (docs/api.md "Notifications inbox").
 type Notification struct {
-	ConnectionID      int64      `json:"connectionId"`
-	ID                int64      `json:"id"`
-	Event             TaskState  `json:"event"` // needs_input | ready | done | failed
-	TaskID            *int64     `json:"taskId"`
+	ConnectionID int64             `json:"connectionId"`
+	ID           int64             `json:"id"`
+	Event        NotificationEvent `json:"event"`
+	TaskID       *int64            `json:"taskId"`
+	// TreeID and ScheduleID name a tree_completed or schedule_* entry's
+	// subject (nil otherwise, or once it is deleted).
+	TreeID            *int64     `json:"treeId"`
+	ScheduleID        *int64     `json:"scheduleId"`
 	ExternalSessionID *string    `json:"externalSessionId"` // the session's external id: the task's, else the notification's
 	Title             string     `json:"title"`
 	ProjectTitle      *string    `json:"projectTitle"`
@@ -31,8 +74,10 @@ type Notification struct {
 // NewNotification is what the notifier records.
 type NewNotification struct {
 	Session      *SessionRef
-	Event        TaskState
+	Event        NotificationEvent
 	TaskID       *int64
+	TreeID       *int64
+	ScheduleID   *int64
 	Title        string
 	ProjectTitle *string
 	URL          string
@@ -66,8 +111,9 @@ type WaitingSession struct {
 	Directory *string `json:"directory"`
 }
 
-// Notifications is the inbox repository. A group key is
-// task:<id> | session:<connection>:<external id> | notification:<id>.
+// Notifications is the inbox repository. A group key is task:<id> |
+// tree:<id> | schedule:<id> | session:<connection>:<external id> |
+// notification:<id>.
 type Notifications interface {
 	// Insert stores n with its resolved session identity and returns its id.
 	Insert(ctx context.Context, n NewNotification, sessionID *int64) (int64, error)

@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -266,6 +267,8 @@ func TestHarnessSettleInfersCompletionOncePerExecution(t *testing.T) {
 	ctx := context.Background()
 	released := 0
 	e.engine.Coordinator.OnAccepted = func() { released++ }
+	var inferred []int64 // completed notifications follow each inference
+	e.engine.Coordinator.OnInferred = func(_ context.Context, id int64) { inferred = append(inferred, id) }
 	e.autoComplete(1, true)
 	p := e.project("/w/infer")
 	a := e.task(p.ID, "source", map[string]any{"start": true})
@@ -285,8 +288,8 @@ func TestHarnessSettleInfersCompletionOncePerExecution(t *testing.T) {
 	_ = e.fake.Settle(thread)
 	e.poll()
 	got := e.acceptances(a.ID)
-	if len(got) != 1 || got[0].Provenance != "harness_settled" || got[0].Note != "" || released != 1 {
-		t.Fatalf("inferred %+v, released %d", got, released)
+	if len(got) != 1 || got[0].Provenance != "harness_settled" || got[0].Note != "" || released != 1 || !slices.Equal(inferred, []int64{a.ID}) {
+		t.Fatalf("inferred %+v, released %d, notified %v", got, released, inferred)
 	}
 	completed := false
 	for _, entry := range e.journal(taskPath(a.ID, "/journal?kind=events")).Entries {
@@ -315,8 +318,8 @@ func TestHarnessSettleInfersCompletionOncePerExecution(t *testing.T) {
 	_ = e.fake.SetStatus(thread, t3.StatusCompleted)
 	_ = e.fake.Settle(thread)
 	e.poll()
-	if got := e.acceptances(a.ID); len(got) != 2 || got[0].Provenance != "harness_settled" || released != 2 {
-		t.Fatalf("new execution: %+v, released %d", got, released)
+	if got := e.acceptances(a.ID); len(got) != 2 || got[0].Provenance != "harness_settled" || released != 2 || !slices.Equal(inferred, []int64{a.ID, a.ID}) {
+		t.Fatalf("new execution: %+v, released %d, notified %v", got, released, inferred)
 	}
 }
 

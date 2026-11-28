@@ -1,7 +1,8 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { useApi } from "../platform/context.tsx";
+import { useApi, usePlatform } from "../platform/context.tsx";
+import { useMarkNotificationGroupsRead } from "../components/Notifications.tsx";
 import { isNotFound, useHarnesses, useInvalidateWork, useSchedule, useSchedulePreview } from "../api/queries.ts";
 import type { ScheduleDetail, ScheduleRun } from "../api/types.ts";
 import { CopyLinkPair, RefText } from "../components/StageLinks.tsx";
@@ -46,6 +47,13 @@ export function ScheduleDetailPage() {
 
 function ScheduleDetailView({ id }: { id: number }) {
   const schedule = useSchedule(id);
+  // Viewing the schedule clears its system notification here and marks its group read.
+  const { notifications } = usePlatform();
+  const markViewed = useMarkNotificationGroupsRead();
+  useEffect(() => {
+    void notifications?.closeShown(`schedule-${id}`);
+    markViewed([`schedule:${id}`]);
+  }, [notifications, id, markViewed]);
   if (isNotFound(schedule.error)) {
     return <RecordNotFound title="Schedule not found" meta={`schedule ${id}`} text="This schedule was deleted or does not exist." back={{ to: "/schedules", label: "Back to schedules" }} />;
   }

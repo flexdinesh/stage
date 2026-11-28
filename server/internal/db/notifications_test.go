@@ -33,9 +33,9 @@ func TestNotificationsInbox(t *testing.T) {
 		}
 		return id
 	}
-	id1 := insert(db.NewNotification{Event: db.StateNeedsInput, TaskID: &task.ID, Title: "Say OK", ProjectTitle: &proj, URL: "/tasks/1"})
-	id2 := insert(db.NewNotification{Event: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Ext", ProjectTitle: &proj, URL: "/history?q=Ext"})
-	id3 := insert(db.NewNotification{Event: db.StateFailed, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Ext", URL: "/history?q=Ext"})
+	id1 := insert(db.NewNotification{Event: db.EventNeedsInput, TaskID: &task.ID, Title: "Say OK", ProjectTitle: &proj, URL: "/tasks/1"})
+	id2 := insert(db.NewNotification{Event: db.EventNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Ext", ProjectTitle: &proj, URL: "/history?q=Ext"})
+	id3 := insert(db.NewNotification{Event: db.EventFailed, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Ext", URL: "/history?q=Ext"})
 
 	all, err := s.ListNotifications(ctx, 10, nil)
 	if err != nil {
@@ -129,15 +129,15 @@ func TestNotificationGroups(t *testing.T) {
 		}
 		return id
 	}
-	waitingID := insert(db.NewNotification{Event: db.StateNeedsInput, TaskID: &waiting.ID,
+	waitingID := insert(db.NewNotification{Event: db.EventNeedsInput, TaskID: &waiting.ID,
 		Title: waiting.Title, URL: fmt.Sprintf("/tasks/%d", waiting.ID)})
 	thread1, thread2 := "ext-1", "ext-2"
-	insert(db.NewNotification{Event: db.StateDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread1}, Title: "Same title", URL: "/history?q=Same"})
-	insert(db.NewNotification{Event: db.StateFailed, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread2}, Title: "Same title", URL: "/history?q=Same"})
+	insert(db.NewNotification{Event: db.EventDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread1}, Title: "Same title", URL: "/history?q=Same"})
+	insert(db.NewNotification{Event: db.EventFailed, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread2}, Title: "Same title", URL: "/history?q=Same"})
 	var activeIDs []int64
 	for i := range 55 {
 		thread := fmt.Sprintf("attempt-%d", i)
-		activeIDs = append(activeIDs, insert(db.NewNotification{Event: db.StateFailed, TaskID: &active.ID,
+		activeIDs = append(activeIDs, insert(db.NewNotification{Event: db.EventFailed, TaskID: &active.ID,
 			Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: fmt.Sprintf("Renamed %d", i), URL: fmt.Sprintf("/tasks/%d", active.ID)}))
 	}
 	latest, unread, err := s.NotificationReadState(ctx)
@@ -145,7 +145,7 @@ func TestNotificationGroups(t *testing.T) {
 		t.Fatalf("read boundary: %d %d %v", latest, unread, err)
 	}
 	// An insert after capturing the boundary must not leak into this snapshot.
-	futureID := insert(db.NewNotification{Event: db.StateDone, TaskID: &active.ID, Title: "Future",
+	futureID := insert(db.NewNotification{Event: db.EventDone, TaskID: &active.ID, Title: "Future",
 		URL: fmt.Sprintf("/tasks/%d", active.ID)})
 	groups, err := s.ListNotificationGroups(ctx, 2, nil, latest)
 	if err != nil || len(groups) != 2 {
@@ -215,11 +215,11 @@ func TestNotificationGroupReadAndTags(t *testing.T) {
 		}
 	}
 	taskURL := fmt.Sprintf("/tasks/%d", task.ID)
-	insert(db.NewNotification{Event: db.StateNeedsInput, TaskID: &task.ID, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: other}, Title: "Say OK", URL: taskURL})
-	insert(db.NewNotification{Event: db.StateDone, TaskID: &task.ID, Title: "Say OK", URL: taskURL})
-	insert(db.NewNotification{Event: db.StateDone, Title: "Deleted task", URL: "/tasks/99"})
-	insert(db.NewNotification{Event: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: ext}, Title: "Ext", URL: "/sessions/ext-1"})
-	insert(db.NewNotification{Event: db.StateFailed, Title: "No identity", URL: "/"})
+	insert(db.NewNotification{Event: db.EventNeedsInput, TaskID: &task.ID, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: other}, Title: "Say OK", URL: taskURL})
+	insert(db.NewNotification{Event: db.EventDone, TaskID: &task.ID, Title: "Say OK", URL: taskURL})
+	insert(db.NewNotification{Event: db.EventDone, Title: "Deleted task", URL: "/tasks/99"})
+	insert(db.NewNotification{Event: db.EventNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: ext}, Title: "Ext", URL: "/sessions/ext-1"})
+	insert(db.NewNotification{Event: db.EventFailed, Title: "No identity", URL: "/"})
 
 	tags := func() []string {
 		t.Helper()
@@ -247,7 +247,7 @@ func TestNotificationGroupReadAndTags(t *testing.T) {
 	}
 
 	// A new event makes a read group unread again.
-	insert(db.NewNotification{Event: db.StateFailed, TaskID: &task.ID, Title: "Say OK", URL: taskURL})
+	insert(db.NewNotification{Event: db.EventFailed, TaskID: &task.ID, Title: "Say OK", URL: taskURL})
 	if got := fmt.Sprint(tags()); got != fmt.Sprint([]string{"session-1:ext-1", taskTag}) {
 		t.Fatalf("tags after new event %s", got)
 	}
@@ -261,13 +261,24 @@ func TestNotificationKeyParity(t *testing.T) {
 	task := mustTask(t, s, ctx, p.ID, "Say OK", nil)
 	deleted := mustTask(t, s, ctx, p.ID, "Gone", nil)
 	thread, other := "ext-1", "ext-2"
+	member := mustTask(t, s, ctx, p.ID, "Member", nil)
+	tree, err := s.CreateTree(ctx, db.NewTree{Title: "Ship", Tasks: []db.TreeMember{{TaskID: member.ID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc := mustSchedule(t, s, ctx, p.ID, "0 3 * * *")
 	for _, n := range []db.NewNotification{
-		{Event: db.StateNeedsInput, TaskID: &task.ID, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: other}, Title: "Say OK", URL: fmt.Sprintf("/tasks/%d", task.ID)},
-		{Event: db.StateDone, TaskID: &deleted.ID, Title: "Gone", URL: fmt.Sprintf("/tasks/%d", deleted.ID)},
-		{Event: db.StateDone, Title: "Old", URL: "/tasks/007"},
-		{Event: db.StateDone, Title: "Not a task", URL: "/tasks/7x"},
-		{Event: db.StateNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Ext", URL: "/sessions/ext-1"},
-		{Event: db.StateFailed, Title: "No identity", URL: "/"},
+		{Event: db.EventTreeCompleted, TreeID: &tree.ID, Title: "Ship", URL: fmt.Sprintf("/trees/%d", tree.ID)},
+		{Event: db.EventTreeCompleted, Title: "Gone tree", URL: "/trees/99"},
+		{Event: db.EventScheduleSkipped, ScheduleID: &sc.ID, Title: "nightly", URL: fmt.Sprintf("/schedules/%d", sc.ID)},
+		{Event: db.EventScheduleStarted, Title: "Gone schedule", URL: "/schedules/98"},
+		{Event: db.EventScheduleStarted, Title: "Not a schedule", URL: "/schedules/9x"},
+		{Event: db.EventNeedsInput, TaskID: &task.ID, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: other}, Title: "Say OK", URL: fmt.Sprintf("/tasks/%d", task.ID)},
+		{Event: db.EventDone, TaskID: &deleted.ID, Title: "Gone", URL: fmt.Sprintf("/tasks/%d", deleted.ID)},
+		{Event: db.EventDone, Title: "Old", URL: "/tasks/007"},
+		{Event: db.EventDone, Title: "Not a task", URL: "/tasks/7x"},
+		{Event: db.EventNeedsInput, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: "Ext", URL: "/sessions/ext-1"},
+		{Event: db.EventFailed, Title: "No identity", URL: "/"},
 	} {
 		if _, err := s.InsertNotification(ctx, n); err != nil {
 			t.Fatal(err)
@@ -281,12 +292,13 @@ func TestNotificationKeyParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	groups, err := s.ListNotificationGroups(ctx, 50, nil, latest)
-	if err != nil || len(groups) != 6 {
+	if err != nil || len(groups) != 11 {
 		t.Fatalf("groups %+v %v", groups, err)
 	}
 	want := map[string]bool{
 		fmt.Sprintf("task:%d", task.ID): true, fmt.Sprintf("task:%d", deleted.ID): true, "task:007": true,
-		"session:1:ext-1": true,
+		"session:1:ext-1": true, fmt.Sprintf("tree:%d", tree.ID): true, "tree:99": true,
+		fmt.Sprintf("schedule:%d", sc.ID): true, "schedule:98": true,
 	}
 	identityless := 0
 	for _, g := range groups {
@@ -300,8 +312,8 @@ func TestNotificationKeyParity(t *testing.T) {
 			}
 		}
 	}
-	if identityless != 2 {
-		t.Fatalf("identity-less groups %d, want 2 (bad task URL, none)", identityless)
+	if identityless != 3 {
+		t.Fatalf("identity-less groups %d, want 3 (bad task and schedule URLs, none)", identityless)
 	}
 }
 
@@ -317,7 +329,7 @@ func TestNotificationsAfter(t *testing.T) {
 	stale := "session-1"
 	var ids []int64
 	for i := range 5 {
-		id, err := s.InsertNotification(ctx, db.NewNotification{Event: db.StateDone, TaskID: &task.ID, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: stale},
+		id, err := s.InsertNotification(ctx, db.NewNotification{Event: db.EventDone, TaskID: &task.ID, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: stale},
 			Title: fmt.Sprintf("n%d", i), URL: fmt.Sprintf("/tasks/%d", task.ID)})
 		if err != nil {
 			t.Fatal(err)

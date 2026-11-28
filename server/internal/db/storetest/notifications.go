@@ -20,6 +20,9 @@ func init() {
 func caseTagForKey(t *testing.T, open Factory) {
 	for key, want := range map[string]string{
 		"task:7":          "task-7",
+		"tree:3":          "tree-3",
+		"schedule:4":      "schedule-4",
+		"project:5":       "",
 		"session:1:ext-1": "session-1:ext-1",
 		"session:1:a:b":   "session-1:a:b",
 		"notification:3":  "",
@@ -35,7 +38,7 @@ func caseTagForKey(t *testing.T, open Factory) {
 func caseNotificationRecipients(t *testing.T, open Factory) {
 	s, owner := setup(t, open)
 	const group = "task:7"
-	insert := func(ctx context.Context, event db.TaskState, at *time.Time) int64 {
+	insert := func(ctx context.Context, event db.NotificationEvent, at *time.Time) int64 {
 		t.Helper()
 		id, err := s.InsertNotification(ctx, db.NewNotification{
 			Event: event, Title: "Task", URL: "/tasks/7", ObservedAt: at,
@@ -63,7 +66,7 @@ func caseNotificationRecipients(t *testing.T, open Factory) {
 	}
 
 	old := time.Now().Add(-31 * 24 * time.Hour)
-	personal := insert(owner, db.StateDone, &old)
+	personal := insert(owner, db.EventDone, &old)
 	checkDelivery(owner, personal, true)
 	var memberID, disabledID int64
 	if err := s.WriteAccess(owner, func(r store.Access) error {
@@ -95,25 +98,25 @@ func caseNotificationRecipients(t *testing.T, open Factory) {
 	member, disabled := db.WithUser(owner, memberID), db.WithUser(owner, disabledID)
 	checkState(member, personal, 0)
 	checkDelivery(member, personal, false)
-	if p, err := s.GetPreferences(member); err != nil || !slices.Equal(p.NotifyEvents, db.NotificationEvents) {
+	if p, err := s.GetPreferences(member); err != nil || !slices.Equal(p.NotifyEvents, db.DefaultNotifyEvents) {
 		t.Fatalf("new member defaults: %+v, %v", p, err)
 	}
-	if _, err := s.SetNotifyEvents(owner, []db.TaskState{db.StateFailed, db.StateDone}); err != nil {
+	if _, err := s.SetNotifyEvents(owner, []db.NotificationEvent{db.EventFailed, db.EventDone}); err != nil {
 		t.Fatal(err)
 	}
-	memberEvents := []db.TaskState{db.StateNeedsInput, db.StateDone}
+	memberEvents := []db.NotificationEvent{db.EventNeedsInput, db.EventDone}
 	if _, err := s.SetNotifyEvents(member, memberEvents); err != nil {
 		t.Fatal(err)
 	}
-	if p, err := s.SetDefaultConnection(owner, ptr(dbtest.T3Connection)); err != nil || !slices.Equal(p.NotifyEvents, []db.TaskState{db.StateFailed, db.StateDone}) {
+	if p, err := s.SetDefaultConnection(owner, ptr(dbtest.T3Connection)); err != nil || !slices.Equal(p.NotifyEvents, []db.NotificationEvent{db.EventFailed, db.EventDone}) {
 		t.Fatalf("owner preferences: %+v, %v", p, err)
 	}
 	if p, err := s.GetPreferences(member); err != nil || p.DefaultConnectionID == nil || *p.DefaultConnectionID != dbtest.T3Connection || !slices.Equal(p.NotifyEvents, memberEvents) {
 		t.Fatalf("member preferences: %+v, %v", p, err)
 	}
 
-	failed := insert(member, db.StateFailed, nil)
-	done := insert(owner, db.StateDone, nil)
+	failed := insert(member, db.EventFailed, nil)
+	done := insert(owner, db.EventDone, nil)
 	muted := insert(owner, db.EventReady, nil)
 	checkDelivery(owner, failed, true)
 	checkDelivery(member, failed, false)

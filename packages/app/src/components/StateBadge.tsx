@@ -1,4 +1,5 @@
 import type { NotificationEvent, TaskState } from "../api/types.ts";
+import { notificationEventLabel, notificationEventTone, type NotificationSubject } from "../lib/notification-events.ts";
 import type { StatusChip } from "../lib/tasks.ts";
 import { Chip, type ChipTone } from "./ui.tsx";
 
@@ -42,13 +43,10 @@ export function statusChipView(c: StatusChip): { label: string; tone: ChipTone }
   }
 }
 
-/** Notification event copy: task states, plus "ready" (a manual tree task whose needs are completed; idle tone). */
-export const notificationEventLabel = (e: NotificationEvent) => (e === "ready" ? "ready" : TASK_LABELS[e]);
-export const notificationEventTone = (e: NotificationEvent): ChipTone => (e === "ready" ? "idle" : TASK_TONES[e]);
-
-export const NotificationEventBadge = ({ event }: { event: NotificationEvent }) => (
+/** A notification event's chip (lib/notification-events.ts): `subject` tells a session's done from an older task's. */
+export const NotificationEventBadge = ({ event, subject }: { event: NotificationEvent; subject?: NotificationSubject }) => (
   <Chip tone={notificationEventTone(event)} dot>
-    {notificationEventLabel(event)}
+    {notificationEventLabel(event, subject)}
   </Chip>
 );
 
