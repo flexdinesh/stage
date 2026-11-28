@@ -426,6 +426,50 @@ func TestLiveGateUserInputReplay(t *testing.T) {
 	}
 }
 
+// g11: for a moment after each send (turn/start, unsubscribe) Codex reads
+// the thread idle and the new turn interrupted without completedAt (#555).
+// Observe, polled through three sends, never reports interrupted.
+func TestLiveGateSendNeverReadsInterrupted(t *testing.T) {
+	g := newGate(t)
+	a := New(NewClient(CLI{}, "verify"), 1, "")
+	ctx := t.Context()
+	watch := g.dial("bystander")
+	defer watch.close()
+	id := g.start(map[string]any{"approvalPolicy": "never", "sandbox": "read-only"}, "Reply with exactly OK.", "g11-launch")
+	watch.await("idle", gateTurn, statusFlag(id, ""))
+	ref := execution.SessionRef{ConnectionID: 1, ExternalSessionID: id}
+	for i := range 3 {
+		stop := make(chan struct{})
+		seen := make(chan []string, 1)
+		go func() {
+			var states []string
+			for {
+				select {
+				case <-stop:
+					seen <- states
+					return
+				default:
+				}
+				if o, err := a.Observe(ctx, ref); err == nil && (len(states) == 0 || states[len(states)-1] != o.State) {
+					states = append(states, o.State)
+				}
+				time.Sleep(2 * time.Millisecond)
+			}
+		}()
+		if err := a.Send(ctx, ref, execution.Message{Text: "Reply with exactly OK.", RequestID: fmt.Sprintf("g11-send-%d", i)}); err != nil {
+			t.Fatal(err)
+		}
+		watch.await("idle", gateTurn, statusFlag(id, ""))
+		time.Sleep(300 * time.Millisecond)
+		close(stop)
+		states := <-seen
+		t.Logf("send %d: %v", i, states)
+		if slices.Contains(states, "interrupted") {
+			t.Fatalf("send %d read interrupted: %v", i, states)
+		}
+	}
+}
+
 // TestLiveGateCleanup deletes gate threads an aborted run left behind
 // (working directory under the temp dir's TestLive* folders).
 func TestLiveGateCleanup(t *testing.T) {

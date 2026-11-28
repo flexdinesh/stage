@@ -73,7 +73,39 @@ func (a *Adapter) archived(ctx context.Context, t thread) (bool, error) {
 }
 
 // Observe reads the thread, its newest turn and whether it is archived.
+// A snapshot taken while a just-started turn settles (errUnsettled,
+// errUnclosed) is read again for up to observeSettle. An interrupted turn
+// that stays without completedAt reads interrupted: Codex will not close
+// it.
 func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execution.Observation, error) {
+	o, err := a.snapshot(ctx, ref)
+	for deadline := time.Now().Add(observeSettle); unsettled(err) && time.Now().Before(deadline); {
+		select {
+		case <-ctx.Done():
+			return o, ctx.Err()
+		case <-time.After(observeStep):
+		}
+		o, err = a.snapshot(ctx, ref)
+	}
+	if errors.Is(err, errUnclosed) {
+		return o, o.Valid()
+	}
+	return o, err
+}
+
+// observeSettle bounds how long Observe rereads an unsettled snapshot
+// (the live window is about 20 ms); observeStep spaces the reads.
+const (
+	observeSettle = 500 * time.Millisecond
+	observeStep   = 20 * time.Millisecond
+)
+
+func unsettled(err error) bool {
+	return errors.Is(err, errUnsettled) || errors.Is(err, errUnclosed)
+}
+
+// snapshot is one read of the thread, its newest turn and archive state.
+func (a *Adapter) snapshot(ctx context.Context, ref execution.SessionRef) (execution.Observation, error) {
 	var o execution.Observation
 	if !a.valid(ref) {
 		return o, execution.ErrNotFound
@@ -97,6 +129,13 @@ func (a *Adapter) Observe(ctx context.Context, ref execution.SessionRef) (execut
 // running. It happens for a moment after a client that started a turn
 // unsubscribes (live in #551), so it is no evidence of an outcome.
 var errUnsettled = errors.New("codex shows a turn in progress on a thread it is not running; refresh again")
+
+// errUnclosed: Codex lists the newest turn interrupted without completedAt
+// on a loaded thread it reports idle. It happens for a moment after
+// turn/start and unsubscribe, before the thread reads active (live in
+// #555, every send); a real interrupt has completedAt. The observation
+// carries the interrupted state for a reading that persists.
+var errUnclosed = errors.New("codex shows an interrupted turn it has not closed; refresh again")
 
 // observation maps a thread snapshot to Stage's states. A turn in progress
 // on a thread the daemon is not running, or a system error, is not
@@ -162,6 +201,9 @@ func (a *Adapter) observation(t thread, last *turn, archived bool) (execution.Ob
 	}
 	o.EndedAt = unixPtr(last.CompletedAt)
 	o.Reply = finalReply(*last)
+	if last.Status == turnInterrupted && last.CompletedAt == nil && t.Status.Type == statusIdle {
+		return o, errUnclosed
+	}
 	return o, o.Valid()
 }
 

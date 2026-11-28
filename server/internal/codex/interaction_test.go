@@ -239,6 +239,44 @@ func TestSendStartsATurnOnAnIdleThread(t *testing.T) {
 	}
 }
 
+// For a moment after turn/start and unsubscribe, Codex reports the thread
+// idle and the new turn interrupted without completedAt (live in #555,
+// every send). Observe waits it out and reports the running turn: an
+// interrupted reading would release a steered tree's holds.
+func TestObserveAfterSendWaitsForTheTurnToSettle(t *testing.T) {
+	r := newRig(t)
+	ref := launched(t, r)
+	r.srv.Finish(ref.ExternalSessionID, "completed", "Done.")
+	r.srv.StartSettles(3)
+	if err := r.adapter.Send(t.Context(), ref, execution.Message{Text: "digest", RequestID: "steering-1-1"}); err != nil {
+		t.Fatal(err)
+	}
+	o, err := r.adapter.Observe(t.Context(), ref)
+	if err != nil || o.State != "running" || o.ExecutionID != r.srv.Thread(ref.ExternalSessionID).Turns[1].ID {
+		t.Fatalf("%+v %v", o, err)
+	}
+}
+
+// A real interrupt carries completedAt and reads interrupted at once; an
+// unclosed one that persists past the settle window reads interrupted too.
+func TestObserveReadsInterruptedTurns(t *testing.T) {
+	r := newRig(t)
+	ref := launched(t, r)
+	r.srv.Finish(ref.ExternalSessionID, "interrupted", "")
+	o, err := r.adapter.Observe(t.Context(), ref)
+	if err != nil || o.State != "interrupted" || o.EndedAt == nil {
+		t.Fatalf("closed %+v %v", o, err)
+	}
+	r.srv.StartSettles(-1)
+	if err := r.adapter.Send(t.Context(), ref, execution.Message{Text: "again"}); err != nil {
+		t.Fatal(err)
+	}
+	o, err = r.adapter.Observe(t.Context(), ref)
+	if err != nil || o.State != "interrupted" || o.EndedAt != nil || o.ExecutionID != r.srv.Thread(ref.ExternalSessionID).Turns[1].ID {
+		t.Fatalf("unclosed %+v %v", o, err)
+	}
+}
+
 func TestSendResumesAThreadTheDaemonUnloaded(t *testing.T) {
 	r := newRig(t)
 	ref := launched(t, r)

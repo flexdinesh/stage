@@ -1532,8 +1532,14 @@ server's `harness_settings` row for that machine
 - **Observation.** `thread/read`: `active` is running or needs_input (the
   waiting flags); the last turn's outcome is done, failed or interrupted;
   an in-progress turn on a thread the daemon unloaded, or a system error,
-  has no terminal evidence and is an error. Archive closes the session
-  (`archived` closure). The reply is the final answer, 4,000 characters.
+  has no terminal evidence and is an error. For a moment after every
+  `turn/start` and unsubscribe (launch and send) Codex reports the thread
+  `idle` and lists the new turn in progress or `interrupted` without
+  `completedAt`; a real interrupt has `completedAt` (codex-cli 0.172.0,
+  live in #555, gate g11). Observe rereads such a snapshot for up to
+  500 ms; an unclosed interrupt that persists reads interrupted. Archive
+  closes the session (`archived` closure). The reply is the final answer,
+  4,000 characters.
 - **Archive.** Archive in Codex relays `thread/archive`
   ([Actions and facts](#actions-and-facts)); unavailable once archived.
 - **Push.** `execution.EventSource`: the daemon broadcasts thread status,
@@ -1622,8 +1628,8 @@ cheap models, steerers mid-tier models.
 | Replace (old session stopped) | yes | yes | yes | yes |
 | R1 steerer answers | yes | yes | yes | yes, after the hold was released |
 | R2 user first, steerer 409 | yes | yes | yes | yes |
-| R3 `escalate_to_user` | yes | yes | yes | no: hold released `steerer_inactive` |
-| R4 hold expiry escalates | yes | yes | yes | no: hold released `steerer_inactive` |
+| R3 `escalate_to_user` | yes | yes | yes | yes (#555) |
+| R4 hold expiry escalates | yes | yes | yes | yes (#555) |
 | Follow-up task added | yes | yes | yes | yes |
 | Final digest, steerer auto-completed | yes | yes | yes | yes |
 
@@ -1634,9 +1640,12 @@ ADR 0005 decision 4); a Codex launch read the first turn before Codex could
 list it and reported the launch failed ([Codex adapter](#codex-adapter));
 a steerer's tree notes (`sourceTaskId` set to the steerer) were refused as
 not a member; the launch brief now says to percent-encode request IDs; and
-`stage tree steer` takes `--execution-config`. Open: a Codex steerer reads
-`interrupted` for a moment after a digest is sent, which releases its
-tree's holds as `steerer_inactive` (the Codex column's R3 and R4). Workers
+`stage tree steer` takes `--execution-config`. A Codex steerer read
+`interrupted` for a moment after each digest was sent, which released its
+tree's holds as `steerer_inactive`; Observe now waits that reading out
+([Codex adapter](#codex-adapter)), and a rerun (#555, one Codex-steered
+tree with Codex workers for R3 and R4) escalated both holds and
+auto-completed the steerer after the final digest. Workers
 on a harness without respond escalate at once; every harness here offers
 respond, so that path is covered by the `notify` hold tests only.
 
