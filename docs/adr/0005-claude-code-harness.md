@@ -6,6 +6,10 @@
   [storage adapters](0003-storage-adapters.md) first, so this is 0005.
 - **Amended** 2026-11-25 by #378: decision 11 (`rm` is the archived
   closure) and the "entry gone" row of decision 4.
+- **Amended** 2026-11-29 by #551: decision 4 (a background `working`
+  entry with `status: idle` whose transcript's last turn ended reads done,
+  and takes a follow-up; Claude lists finished steerer turns this way, so a
+  Claude steerer never received digests).
 - **Amended** 2026-11-25 by #375: decision 8 (approvals and questions are
   also answered in Stage, through a PermissionRequest HTTP hook) and
   [E11](#e11-permissionrequest-answers); the approval routes table records the
@@ -96,7 +100,7 @@ them. 2, 3, 13 and 14 come from the evidence.
 
    | Roster `state` | Stage state | Note |
    | --- | --- | --- |
-   | `working` | running | `status: busy` |
+   | `working` | running | `status: busy`; `status: idle` with the transcript's last turn ended reads done (amended by #551) |
    | `blocked` | needs_input | permission prompt (`status: waiting`, `waitingFor: "permission prompt"`), or a turn that ended waiting for the user (`status: idle`, no `waitingFor`) |
    | `done` | done | the process may stay alive and take more turns: a later `working` is new activity |
    | `failed` | failed | e.g. a session that never started |

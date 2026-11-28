@@ -91,7 +91,11 @@ type Server struct {
 	signedOut   bool
 	unsupported map[string]bool
 	drop        map[string]int
-	calls       map[string]int
+	// turnsNotYet: thread/turns/list calls left that answer "not supported
+	// yet" once a first turn started (TurnsNotYet); pendingNotYet arms it.
+	turnsNotYet   int
+	pendingNotYet int
+	calls         map[string]int
 	// mcpServers answers mcpServerStatus/list; rateLimits
 	// account/rateLimits/read (nil: Codex's auth error).
 	mcpServers []map[string]any
@@ -220,6 +224,12 @@ func (s *Server) Supported(method string) { s.mu.Lock(); delete(s.unsupported, m
 
 // DropReply performs method's next n calls without answering them.
 func (s *Server) DropReply(method string, n int) { s.mu.Lock(); s.drop[method] = n; s.mu.Unlock() }
+
+// TurnsNotYet makes the next n thread/turns/list calls after a thread's
+// first turn starts answer Codex's -32601 "list_turns is not supported yet"
+// (codex 0.172.0, live in #551: a just-started first turn is not listable
+// for a moment).
+func (s *Server) TurnsNotYet(n int) { s.mu.Lock(); s.turnsNotYet = n; s.mu.Unlock() }
 
 // SetMCPServers sets the configured MCP servers (MCPServer entries).
 func (s *Server) SetMCPServers(v ...map[string]any) { s.mu.Lock(); s.mcpServers = v; s.mu.Unlock() }
@@ -573,6 +583,9 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		}
 		s.now++
 		tu.Started = s.now
+		if len(th.Turns) == 0 {
+			s.pendingNotYet = s.turnsNotYet
+		}
 		th.Turns = append(th.Turns, tu)
 		th.Effort = str("effort")
 		th.persisted, th.Status, th.Flags, th.Updated = true, "active", []string{}, s.now
@@ -602,6 +615,10 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		th, e := thread()
 		if e != nil {
 			return nil, e
+		}
+		if s.pendingNotYet > 0 {
+			s.pendingNotYet--
+			return nil, &rpcError{Code: -32601, Message: "list_turns is not supported yet"}
 		}
 		turns := slices.Clone(th.Turns)
 		if str("sortDirection") == "desc" {

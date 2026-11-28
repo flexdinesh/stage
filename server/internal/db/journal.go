@@ -100,7 +100,15 @@ func appendNote(ctx context.Context, tx store.Tx, o JournalOwner, in AppendNoteI
 			return JournalEntry{}, err
 		}
 		if o.TreeID != nil && !equalPtr(tree, o.TreeID) {
-			return JournalEntry{}, Conflict("source task is no longer a member of this tree")
+			// The tree's active steerer is never a member but records its
+			// decisions on the tree (ADR 0013).
+			b, err := tx.Steering().ActiveByTask(ctx, *in.SourceTaskID)
+			if errors.Is(err, ErrNotFound) || err == nil && b.TreeID != *o.TreeID {
+				return JournalEntry{}, Conflict("source task is no longer a member of this tree")
+			}
+			if err != nil {
+				return JournalEntry{}, err
+			}
 		}
 	}
 	return insertNote(ctx, tx, o, in, sourceID)

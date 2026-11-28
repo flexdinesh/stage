@@ -123,7 +123,7 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 
 ## Context and destination
 
-- `get_context` returns your session, cwd, resolved Stage project, owning task and current tree. It includes `workspaceId` when the task has a pin or saved workspace. A named external session may have no tracked task.
+- `get_context` returns your session, cwd, resolved Stage project, owning task and current tree, and `steeringTreeId`, the tree your task steers ([Steer a tree](/docs/guides/steering)). It includes `workspaceId` when the task has a pin or saved workspace. A named external session may have no tracked task.
 - `list_projects` returns logical project summaries and available destinations. Choose a destination and pass its `connectionId` and `workspaceId` when creating an immediate or timed task or a schedule. An untimed backlog task can use a project for planning and omit the workspace. Caller context can supply the planning project or connection.
 - `list_models` takes `connectionId` and optional `workspaceId`. Use the same pair to load workspace-specific options and send the advertised values in `executionConfig`.
 - `list_actions` and `run_action` target one connection, task or project. A project target also requires `onConnectionId` and `workspaceId`. The action must allow the caller.
@@ -138,7 +138,7 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 |---|---|
 | `read_journal` | previews of 600 runes, notes by default (events or all are opt-in); exactly one of `taskId` or `treeId`; `filterTaskId` filters a tree read; follow `nextCursor` (pages of 20 by default, 100 max). A stale tree cursor requires restarting pagination. |
 | `get_journal_entry` | one entry in full |
-| `append_note` | up to 16 KiB; exactly one of `taskId` or `treeId`; `requestId` required. A tree note takes the current `sourceTaskId`. |
+| `append_note` | up to 16 KiB; exactly one of `taskId` or `treeId`; `requestId` required. A tree note takes the current `sourceTaskId`: a member, or the tree's active steerer. |
 
 - Categories are optional: `finding`, `decision`, `blocker`, `outcome`.
 - Retry a write with the same `requestId` and identical content.

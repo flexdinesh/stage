@@ -426,6 +426,15 @@ type session struct {
 	logPath string
 }
 
+// idleAfterTurn reports a background session Claude lists as working
+// although its turn is over: `status: idle` and the transcript's last turn
+// ended. Claude keeps `state: working` when the agent ends its turn still
+// waiting on something (a steerer waiting for updates), so nothing runs and
+// the session takes a message (ADR 0005 decision 4, amended by #551).
+func (s session) idleAfterTurn() bool {
+	return s.listed && s.entry.Background() && s.entry.State == "working" && s.entry.Status == "idle" && s.hasLog && s.transcript.TurnOver
+}
+
 func (s session) cwd() string {
 	if s.hasLog && s.transcript.Cwd != "" {
 		return s.transcript.Cwd
@@ -493,6 +502,9 @@ func (a *Adapter) observation(s session) (execution.Observation, error) {
 		}
 		if state == "interrupted" && a.isWaking(s.id) {
 			state = "running"
+		}
+		if state == "running" && s.idleAfterTurn() && !a.isWaking(s.id) {
+			state = "done"
 		}
 	}
 	cwd := s.cwd()

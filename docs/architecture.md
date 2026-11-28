@@ -62,6 +62,7 @@ Two homes, no shared or generated content between them:
 | [service.md](service.md) (worker service), [runtime.md](runtime.md) (worker process, agent gateway, remote main server), [storage.md](storage.md) (engines), `examples/kubernetes/`, `examples/postgres/` | `/docs/usage/workers` |
 | [features.md](features.md), [api.md](api.md) (MCP, tree rules) | `/docs/guides/first-tree`, `/docs/guides/agents` |
 | [features.md](features.md) (Claude Code), [execution.md](execution.md#claude-code-adapter) (Claude Code adapter), [api.md](api.md) (Claude setup, adopt) | `/docs/guides/claude-code` |
+| [ADR 0013](adr/0013-tree-steering.md), [features.md](features.md) (steering), [api.md](api.md) (tree steering, steering brief and delivery, notification rules), [execution.md](execution.md) (send semantics, steering delivery) | `/docs/guides/steering` |
 | [install.md](install.md), [release.md](release.md) (assets, platforms) | `/docs/reference/install` |
 | [features.md](features.md) (harness setup), [execution.md](execution.md) (placement and adapter behavior), [api.md](api.md) (connection setup) | `/docs/reference/connections` |
 | [service.md](service.md), [runtime.md](runtime.md) (listeners, data dir), [storage.md](storage.md) (engines), `.env.example` | `/docs/reference/configuration` |
