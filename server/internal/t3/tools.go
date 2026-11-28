@@ -46,19 +46,43 @@ func (c *MCPClient) ListProjects(ctx context.Context) ([]Project, error) {
 	return nil, fmt.Errorf("t3 t3_project_list: more than %d pages", maxPages)
 }
 
-func (c *MCPClient) CreateProject(ctx context.Context, in CreateProjectInput) (Project, error) {
+func (c *MCPClient) CreateProject(ctx context.Context, in CreateProjectInput) (CreatedProject, error) {
 	title, root := strings.TrimSpace(in.Title), strings.TrimSpace(in.WorkspaceRoot)
-	if title == "" || root == "" {
-		return Project{}, errors.New("t3 t3_project_create: title and workspaceRoot are required")
+	if title == "" {
+		return CreatedProject{}, errors.New("t3 t3_project_create: title is required")
+	}
+	args := map[string]any{"title": title}
+	if root != "" {
+		args["workspaceRoot"] = root
+		if in.CreateIfMissing {
+			args["createWorkspaceRootIfMissing"] = true
+		}
 	}
 	var p wireProject
-	if err := c.call(ctx, "t3_project_create", map[string]any{"title": title, "workspaceRoot": root}, &p); err != nil {
-		return Project{}, err
+	if err := c.call(ctx, "t3_project_create", args, &p); err != nil {
+		return CreatedProject{}, err
 	}
 	if p.CommitError != "" {
 		c.log.Warn("t3 project created with commit error", "projectId", p.ID, "commitError", p.CommitError)
 	}
-	return p.toProject(), nil
+	return CreatedProject{Project: p.toProject(), CommitError: p.CommitError}, nil
+}
+
+func (c *MCPClient) CloneProject(ctx context.Context, in CloneInput) (CloneResult, error) {
+	remote, dest := strings.TrimSpace(in.RemoteURL), strings.TrimSpace(in.DestinationPath)
+	if remote == "" || dest == "" {
+		return CloneResult{}, errors.New("t3 t3_project_clone: remoteUrl and destinationPath are required")
+	}
+	var out struct {
+		Cwd string `json:"cwd"`
+	}
+	if err := c.call(ctx, "t3_project_clone", map[string]any{"remoteUrl": remote, "destinationPath": dest}, &out); err != nil {
+		return CloneResult{}, err
+	}
+	if strings.TrimSpace(out.Cwd) == "" {
+		return CloneResult{}, errors.New("t3 t3_project_clone: missing cwd")
+	}
+	return CloneResult{Cwd: out.Cwd}, nil
 }
 
 func (c *MCPClient) ListThreads(ctx context.Context, in ListThreadsInput) (ThreadPage, error) {

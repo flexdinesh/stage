@@ -65,6 +65,20 @@ type Fake struct {
 	Pairs []string
 	// unpaired: Unpair ran since the last Pair; Status reports no token.
 	unpaired bool
+	// folders models the T3 host's folders for project create and clone
+	// (fake_projects.go).
+	folders fakeFolders
+	// ProjectsDir: where title-only creates make folders (T3's named
+	// projects root). CommitError: reported by title-only creates.
+	ProjectsDir string
+	CommitError string
+	// CreateErr / CloneErr fail before acting. LoseCreate / LoseClone: the
+	// next N calls act, then fail like a lost reply (a transport error).
+	CreateErr, CloneErr   error
+	LoseCreate, LoseClone int
+	// Created / Cloned: every CreateProject / CloneProject input.
+	Created []CreateProjectInput
+	Cloned  []CloneInput
 }
 
 type fakeMessage struct {
@@ -226,20 +240,6 @@ func (f *Fake) ListProjects(context.Context) ([]Project, error) {
 		out[i].Importable = out[i].ArchivedAt == nil && out[i].DeletedAt == nil
 	}
 	return out, nil
-}
-
-func (f *Fake) CreateProject(_ context.Context, in CreateProjectInput) (Project, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, p := range f.projects {
-		if p.WorkspaceRoot == in.WorkspaceRoot && p.DeletedAt == nil {
-			return Project{}, fmt.Errorf("workspace root already registered: %s", in.WorkspaceRoot)
-		}
-	}
-	now := f.now()
-	p := Project{ID: f.nextID("project"), Title: in.Title, WorkspaceRoot: in.WorkspaceRoot, CreatedAt: now, UpdatedAt: now}
-	f.projects = append(f.projects, p)
-	return p, nil
 }
 
 func (f *Fake) ListThreads(_ context.Context, in ListThreadsInput) (ThreadPage, error) {
@@ -719,8 +719,10 @@ func (f *Fake) Capabilities(context.Context) (Catalog, error) {
 
 // AddProject seeds a T3-side project (as if created in T3 directly).
 func (f *Fake) AddProject(title, workspaceRoot string) Project {
-	p, _ := f.CreateProject(context.Background(), CreateProjectInput{Title: title, WorkspaceRoot: workspaceRoot})
-	return p
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p, _ := f.createLocked(CreateProjectInput{Title: title, WorkspaceRoot: workspaceRoot})
+	return p.Project
 }
 
 // SetProject mutates a T3-side project in place (title, archive, delete...).

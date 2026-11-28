@@ -699,6 +699,7 @@ func TestClosedSessionRetriesOnlyIdempotentTools(t *testing.T) {
 		{"t3_thread_launch", map[string]any{}, false},
 		{"t3_thread_send", nil, false},
 		{"t3_thread_interrupt", nil, false},
+		{"t3_project_clone", nil, false},
 		{"t3_project_create", nil, false},
 	} {
 		if got := retrySafe(tc.tool, tc.args); got != tc.want {

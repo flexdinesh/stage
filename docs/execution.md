@@ -508,9 +508,10 @@ a `workspace_added` project event.
 
 On workers the operation requires the `workspaceAdder` trait and the
 `adapter.workspaceAdd` request kind, negotiated on the existing channel.
-OpenCode adds existing folders ([Adding folders](#adding-folders)). Codex
-trusts folders ([Codex adapter](#codex-adapter)). The other shipped
-harnesses declare the operation unavailable for now.
+T3 ([T3 workspace sources](#t3-workspace-sources)) adds folders, clones and
+new projects. OpenCode adds existing folders ([Adding folders](#adding-folders)).
+Codex trusts folders ([Codex adapter](#codex-adapter)). Claude Code declares
+the operation unavailable for now.
 [Workspace add API](api.md#add-a-workspace)
 
 ### Interaction
@@ -722,6 +723,42 @@ T3 implements `Interactive` over its MCP (`server/internal/t3/interaction.go`).
   (`*Busy`, 409 `session_busy`: answer its questions first, or approve its
   permission request in T3), nor does one T3 won't send to
   (`thread_not_sendable`, such as an archived thread).
+
+### T3 workspace sources
+
+T3 implements `WorkspaceAdder` over its MCP with Stage's mcp-client token
+(`server/internal/t3/workspace_add.go`). It declares three sources:
+
+| Source | Input | T3 calls |
+| --- | --- | --- |
+| `folder` "Existing folder" | `path` (required), `title` (defaults to the folder name), `createIfMissing` | `t3_project_create {title, workspaceRoot, createWorkspaceRootIfMissing}` |
+| `clone` "Clone repository" | `remoteUrl` (required), `destination` (required, new or empty), `title` | `t3_project_clone {remoteUrl, destinationPath}`, then `t3_project_create` on the returned `cwd` |
+| `new` "New project" | `title` (required) | `t3_project_create {title}`: T3 makes a Git repository in its projects folder |
+
+- **Paths.** Paths must be absolute on the T3 host; `~` and relative paths
+  are refused before T3 is called. Paths are compared cleaned, as T3
+  resolves them.
+- **Existing targets.** `t3_project_create` has no request ID, so every
+  source lists projects first. A folder or clone destination T3 already
+  registered returns `Existing: true` without a call. An archived T3
+  project there is refused: restore it in T3. T3's duplicate error ("The
+  workspace is already registered to a project.") lists again and returns
+  the match.
+- **Refusals.** A T3 tool error is `*Invalid` with T3's message. T3
+  reports a missing folder only as "The operation could not be
+  completed."; Stage adds a hint to create it. A clone into a non-empty
+  destination suggests Existing folder, for a checkout an earlier request
+  cloned. A register failure after a clone names the checkout.
+- **Lost replies.** A transport failure lists again. A folder at the
+  requested root is returned. After a clone, the register is retried once.
+  For `new`, exactly one project with that title that was not in the first
+  list is returned. Otherwise the outcome is uncertain (504). T3's clone has
+  no timeout, so a clone that outlasts the 5-minute deadline is uncertain
+  too. A retry then gets the non-empty destination refusal.
+- **New projects.** A retry of `new` after a 504 can create a second
+  project, because T3 adds a suffix to a taken folder name (`name-2`).
+  `commitError` (T3 created the project but not its first commit) is a
+  warn fact.
 
 ## OpenCode adapter
 
