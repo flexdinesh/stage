@@ -116,7 +116,8 @@ func (a *Adapter) boundProject(ctx context.Context, project, dir string) (wirePr
 		return wireProject{}, errors.New("OpenCode no longer lists this project. Refresh workspaces.")
 	}
 	if projects[i].Time.Archived > 0 {
-		return wireProject{}, errors.New("Archived in OpenCode. Unarchive it there, then refresh.")
+		// Typed so a project action listing relays the reason (400).
+		return wireProject{}, &execution.Invalid{Reason: "Archived in OpenCode. Unarchive it there, then refresh."}
 	}
 	return projects[i], nil
 }
@@ -192,7 +193,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 		ops[execution.OpRespond] = available
 	}
 	return execution.Capabilities{Operations: ops, ModeLabel: "Agent", Options: launchOptions(),
-		Actions:          sessionActions(contract),
+		Actions:          append(sessionActions(contract), projectActions(contract)...),
 		WorkspaceSources: []execution.WorkspaceSource{folderSource(contract.location)}}, nil
 }
 
@@ -236,6 +237,7 @@ func (a *Adapter) FeaturesForWorkspace(ctx context.Context, project, dir string)
 	if e := a.verifyLocation(ctx, project, dir); e != nil {
 		return c, e
 	}
+	c.Actions = projectActionStates(c.Actions, project)
 	var models envelope[[]struct {
 		ID, ProviderID, Name string
 		Enabled              bool

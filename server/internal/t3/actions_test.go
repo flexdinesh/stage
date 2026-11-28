@@ -16,9 +16,10 @@ func TestSessionActionsSettleAndArchiveThroughT3(t *testing.T) {
 	if err != nil || caps.DeclaresOperations() != nil {
 		t.Fatal(err, caps.DeclaresOperations())
 	}
-	if err := execution.ValidateActions(caps.Actions, execution.TargetSession); err != nil {
+	if err := execution.ValidateActions(caps.Actions, ""); err != nil {
 		t.Fatal(err)
 	}
+	caps.Actions = slices.DeleteFunc(caps.Actions, func(a execution.Action) bool { return a.Target != execution.TargetSession })
 	ids := []string{}
 	for _, a := range caps.Actions {
 		ids = append(ids, a.ID+":"+a.Label)

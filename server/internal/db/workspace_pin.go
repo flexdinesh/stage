@@ -42,10 +42,11 @@ func (s *Store) ResolveDestination(ctx context.Context, connection int64, select
 	})
 }
 
-// ResolveListedWorkspace resolves a selector like ResolveDestination but
-// also returns a listed row its harness will not launch in (BlockedReason):
-// project actions target listed rows, and one may fix what blocks it.
-func (s *Store) ResolveListedWorkspace(ctx context.Context, connection int64, selector string) (Workspace, error) {
+// ResolveActionWorkspace resolves a selector like ResolveDestination but
+// also returns a listed row its harness will not launch in (BlockedReason)
+// or has archived: project actions target both, and one may fix what
+// blocks the row (trusting the folder) or restore it.
+func (s *Store) ResolveActionWorkspace(ctx context.Context, connection int64, selector string) (Workspace, error) {
 	return read(ctx, s, func(tx store.Tx) (Workspace, error) {
 		return resolveWorkspace(ctx, tx, connection, selector, true)
 	})
@@ -55,7 +56,9 @@ func resolveDestination(ctx context.Context, tx store.Tx, connection int64, sele
 	return resolveWorkspace(ctx, tx, connection, selector, false)
 }
 
-func resolveWorkspace(ctx context.Context, tx store.Tx, connection int64, selector string, blocked bool) (Workspace, error) {
+// resolveWorkspace resolves a launch destination, or with action set, a
+// project action's target (blocked and harness-archived rows too).
+func resolveWorkspace(ctx context.Context, tx store.Tx, connection int64, selector string, action bool) (Workspace, error) {
 	if connection <= 0 || selector == "" {
 		return Workspace{}, DestinationRequired()
 	}
@@ -64,7 +67,7 @@ func resolveWorkspace(ctx context.Context, tx store.Tx, connection int64, select
 		return Workspace{}, err
 	}
 	for _, row := range rows {
-		if row.ConnectionID != connection || !row.ConnectionActive || !row.Available || row.HarnessArchived ||
+		if row.ConnectionID != connection || !row.ConnectionActive || !row.Available || row.HarnessArchived && !action ||
 			WorkspaceID(connection, row.ExternalID, row.Workspace.Workspace) != selector {
 			continue
 		}
@@ -75,7 +78,7 @@ func resolveWorkspace(ctx context.Context, tx store.Tx, connection int64, select
 		if status.RefreshedAt == nil || status.LastError != nil {
 			break
 		}
-		if row.BlockedReason != "" && !blocked {
+		if row.BlockedReason != "" && !action {
 			return Workspace{}, DestinationBlocked(row.BlockedReason)
 		}
 		row.WorkspaceID = selector

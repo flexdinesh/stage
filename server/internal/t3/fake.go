@@ -79,6 +79,13 @@ type Fake struct {
 	// Created / Cloned: every CreateProject / CloneProject input.
 	Created []CreateProjectInput
 	Cloned  []CloneInput
+	// Updated / Deleted: every UpdateProject / DeleteProject call.
+	// UpdateErr / DeleteErr fail before acting. LoseUpdate / LoseDelete:
+	// the next N calls act, then fail like a lost reply.
+	Updated                []FakeProjectUpdate
+	Deleted                []string
+	UpdateErr, DeleteErr   error
+	LoseUpdate, LoseDelete int
 }
 
 type fakeMessage struct {

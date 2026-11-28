@@ -19,8 +19,10 @@ const FakeHome = "/home/fake"
 // errFakeLostReply is a call that ran in T3 but whose reply never arrived.
 var errFakeLostReply = errors.New("fake: connection closed before the reply")
 
-// T3's messages for project create and clone failures.
+// T3's messages for project create, clone, update and delete failures.
 const (
+	msgProjectNotFound  = "The project was not found."
+	msgProjectNotEmpty  = "The project is not empty; force=true is required to delete it."
 	msgOperationFailed  = "The operation could not be completed."
 	msgAlreadyProject   = "The workspace is already registered to a project."
 	msgDestinationInUse = "Destination path already exists and is not empty."
@@ -205,4 +207,93 @@ func (f *Fake) CloneProject(_ context.Context, in CloneInput) (CloneResult, erro
 		return CloneResult{}, fmt.Errorf("t3 t3_project_clone: %w", errFakeLostReply)
 	}
 	return CloneResult{Cwd: dest}, nil
+}
+
+// FakeProjectUpdate is one UpdateProject call, its fields copied.
+type FakeProjectUpdate struct {
+	ProjectID string
+	Title     string // "" when unchanged
+	Archived  *bool
+}
+
+// projectIndexLocked finds a live project, as T3's readRow.
+func (f *Fake) projectIndexLocked(id string) int {
+	for i, p := range f.projects {
+		if p.ID == id && p.DeletedAt == nil {
+			return i
+		}
+	}
+	return -1
+}
+
+// UpdateProject models t3_project_update's title and archived fields.
+func (f *Fake) UpdateProject(_ context.Context, id string, in ProjectUpdate) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	call := FakeProjectUpdate{ProjectID: id}
+	if in.Title != nil {
+		call.Title = *in.Title
+	}
+	if in.Archived != nil {
+		archived := *in.Archived
+		call.Archived = &archived
+	}
+	f.Updated = append(f.Updated, call)
+	if f.UpdateErr != nil {
+		return f.UpdateErr
+	}
+	i := f.projectIndexLocked(id)
+	if i < 0 {
+		return &ToolError{Tool: "t3_project_update", Code: "invalid_request", Message: msgProjectNotFound}
+	}
+	p := &f.projects[i]
+	if in.Title != nil {
+		title := strings.TrimSpace(*in.Title)
+		if title == "" {
+			return &ToolError{Tool: "t3_project_update", Code: "invalid_request", Message: "title must be a non-empty string."}
+		}
+		p.Title = title
+	}
+	now := f.now()
+	if in.Archived != nil {
+		switch {
+		case !*in.Archived:
+			p.ArchivedAt = nil
+		case p.ArchivedAt == nil:
+			p.ArchivedAt = &now
+		}
+	}
+	p.UpdatedAt = now
+	if f.LoseUpdate > 0 {
+		f.LoseUpdate--
+		return fmt.Errorf("t3 t3_project_update: %w", errFakeLostReply)
+	}
+	return nil
+}
+
+// DeleteProject models t3_project_delete without force: a project with
+// threads (archived ones included) is refused; a deleted one leaves the
+// listing, as t3_project_list skips deleted projects.
+func (f *Fake) DeleteProject(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Deleted = append(f.Deleted, id)
+	if f.DeleteErr != nil {
+		return f.DeleteErr
+	}
+	i := f.projectIndexLocked(id)
+	if i < 0 {
+		return &ToolError{Tool: "t3_project_delete", Code: "invalid_request", Message: msgProjectNotFound}
+	}
+	for _, t := range f.threads {
+		if t.ProjectID == id {
+			return &ToolError{Tool: "t3_project_delete", Code: "invalid_request", Message: msgProjectNotEmpty}
+		}
+	}
+	f.projects = append(f.projects[:i], f.projects[i+1:]...)
+	if f.LoseDelete > 0 {
+		f.LoseDelete--
+		return fmt.Errorf("t3 t3_project_delete: %w", errFakeLostReply)
+	}
+	return nil
 }

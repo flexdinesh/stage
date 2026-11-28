@@ -47,6 +47,12 @@ type Client interface {
 	// CloneProject calls t3_project_clone (not retried). T3 sets no timeout;
 	// ctx bounds it.
 	CloneProject(ctx context.Context, in CloneInput) (CloneResult, error)
+	// UpdateProject calls t3_project_update with only the set fields. It
+	// sets values, so a call lost on a closed connection is retried once.
+	UpdateProject(ctx context.Context, projectID string, in ProjectUpdate) error
+	// DeleteProject calls t3_project_delete without force (not retried):
+	// T3 refuses a project that has threads.
+	DeleteProject(ctx context.Context, projectID string) error
 	// ListThreads calls t3_thread_list for one page.
 	ListThreads(ctx context.Context, in ListThreadsInput) (ThreadPage, error)
 	// ReadThread calls t3_thread_read (items limit 1). ErrNotFound if unknown.
@@ -232,6 +238,12 @@ type CreatedProject struct {
 type CloneInput struct {
 	RemoteURL       string
 	DestinationPath string
+}
+
+// ProjectUpdate is a t3_project_update change; nil fields stay unchanged.
+type ProjectUpdate struct {
+	Title    *string
+	Archived *bool
 }
 
 // CloneResult is the checkout T3 cloned (not yet a project).

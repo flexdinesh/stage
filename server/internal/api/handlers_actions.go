@@ -113,7 +113,7 @@ func (s *server) resolveActionSite(r *http.Request, target execution.ActionTarge
 }
 
 func (s *server) projectActionWorkspace(ctx context.Context, site actionSite) (*execution.ActionWorkspace, error) {
-	workspace, err := s.Store.ResolveListedWorkspace(ctx, site.connectionID, site.workspaceID)
+	workspace, err := s.Store.ResolveActionWorkspace(ctx, site.connectionID, site.workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -349,8 +349,9 @@ func (s *server) runAction(r *http.Request, site actionSite, setupRoute bool) (e
 				return result, actionError(err)
 			}
 			workspace := site.request.Project
+			// An archived row stays a target: restoring it is a project action.
 			if !slices.ContainsFunc(workspaces, func(w execution.WorkspaceInfo) bool {
-				return w.ID == workspace.ExternalProjectID && w.WorkspaceRoot == workspace.Directory && w.DeletedAt == nil && w.ArchivedAt == nil && (w.Evidence == nil || !w.Evidence.Gone)
+				return w.ID == workspace.ExternalProjectID && w.WorkspaceRoot == workspace.Directory && w.DeletedAt == nil && (w.Evidence == nil || !w.Evidence.Gone)
 			}) {
 				return result, fmt.Errorf("%w: the harness no longer reports the selected workspace", db.ErrNotFound)
 			}
@@ -367,6 +368,12 @@ func (s *server) runAction(r *http.Request, site actionSite, setupRoute bool) (e
 		}
 		result, err = actor.Act(ctx, site.request)
 		result.Replaced = 0 // only connection setup can replace an instance
+		var uncertain *execution.ActionUncertain
+		if site.request.Project != nil && (err == nil || errors.As(err, &uncertain)) {
+			// The harness may have changed the workspace (renamed, archived,
+			// removed, trusted): re-read its inventory before answering.
+			s.refreshAfterProjectAction(ctx, site.connectionID)
+		}
 	}
 	if err != nil {
 		return execution.ActionResult{}, actionError(err)
@@ -382,15 +389,13 @@ func (s *server) runAction(r *http.Request, site actionSite, setupRoute bool) (e
 	if site.request.Session != nil {
 		s.journalAction(ctx, r, site, caller, &result)
 	}
-	if site.request.Project != nil {
-		s.refreshAfterProjectAction(ctx, site.connectionID)
-	}
 	return result, nil
 }
 
 // refreshAfterProjectAction re-reads the connection's inventory, since a
-// project action can change a workspace (a trusted folder can launch). The
-// action already ran, so a failure is logged, not returned.
+// project action can change a workspace (a trusted folder can launch, a
+// renamed project shows its new title, a removed one leaves). The action
+// already ran, so a failure is logged, not returned.
 func (s *server) refreshAfterProjectAction(ctx context.Context, connection int64) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
