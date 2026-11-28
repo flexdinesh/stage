@@ -114,12 +114,14 @@ Tools that create tasks, write notes, adopt sessions or read context need the ca
 | `reopen_task` | `taskId`, `revision`, `requestId`; unclaimed dependents wait again |
 | `list_requests` | what a task's session waits on: approvals, questions, input, with options |
 | `respond_request` | `taskId`, `requestId`, and `option`, `text` or `answers`; optional `expectedStateRevision` |
-| `send_message` | `taskId`, `text`: a follow-up to the task's session; optional `expectedStateRevision` |
+| `send_message` | `taskId`, `text`, optional `delivery` (`send`, `steer`, `queue`) and `expectedStateRevision` |
+| `get_session_activity` | `taskId`, optional `attempt` and `limit`. Bounded items, plan and changed files |
+| `queued_messages` | `taskId`, `action` (`list`, `cancel`, `steer`), and `id` for cancel or steer |
 
-- Stage refuses complete, reopen, respond and send on your own task or session (403 `self_action_forbidden`). Report your own outcome with `append_note`.
+- Stage refuses complete, reopen, respond, send and queue writes on your own task or session (403 `self_action_forbidden`). Report your own outcome with `append_note`.
 - First answer wins: pass the task's `stateRevision` as `expectedStateRevision` when answering a task that needs input. If the user, another agent or the harness answered first, Stage sends nothing and returns 409 `already_answered` with the task's current state and revision.
 - Leave acceptance to the user unless asked. An agent's completion is recorded as the agent's, with its caller session.
-- CLI: `stage task preview|complete|reopen|requests|respond|send|opening-prompt` ([CLI](/docs/reference/cli#tasks)).
+- CLI: `stage task preview|complete|reopen|requests|respond|send|activity|queue|opening-prompt` ([CLI](/docs/reference/cli#tasks)).
 
 ## Context and destination
 

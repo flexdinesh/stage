@@ -1131,10 +1131,9 @@ supports the methods, `steer` targets the active turn by ID and `activity` reads
 items. Queue is unavailable with the reason "Codex queues messages only
 in its own client." Review, compaction and stale steer targets return
 `session_busy` with guidance. See [Codex interaction and activity](execution.md#codex-adapter).
-The app answers and sends on task detail
-(answers also on needs-input rows); agents use `list_requests`,
+The app answers and sends on the current Session tab and can also answer from needs-input rows. Agents use `list_requests`,
 `respond_request` and `send_message` (CLI `task requests|respond|send`).
-An answer or message whose `Stage-Caller-Session` belongs to the task gets 403
+An answer, message or queue write whose `Stage-Caller-Session` belongs to the task gets 403
 `{"code": "self_action_forbidden"}`: an agent never answers or messages its
 own session. Best effort: a request naming no caller session passes. Every
 agent route resolves `Stage-Caller-Session` once; a send or respond records
@@ -1148,7 +1147,7 @@ Stage requires the task in `needs_input` at that revision and not yet
 answered there, holding the task's lock through the harness call, else 409
 `{"code": "already_answered", "error", "state", "stateRevision"}` (the task's
 current state and revision; nothing was sent). The winner records the
-revision as answered. The app's Reply and Requests pass it; agents pass it
+revision as answered. The app's Requests and its Send while waiting for input pass it; agents pass it
 through `send_message`/`respond_request` `expectedStateRevision` (CLI
 `--expect-revision`). Without it nothing changes: follow-ups to done
 sessions keep working. An answer typed directly in the harness cannot be
@@ -1176,7 +1175,7 @@ prevented; Stage sees it only as the task's next state.
   Claude Code details can contain `permissionMode`, `effort` and `worktree` (path) when reported.
 
 - `GET /api/tasks/:id/queue` (operation `queueManage`, the caller's own task included). Returns 200 `{"messages": [{id, text, delivery, createdAt, source}]}` for the current session in native queue order. `text` is a preview capped at 2000 runes, `delivery` is `queue|steer`, and `source` is `stage|harness` or empty when unknown. An unknown `createdAt` is the zero timestamp. An empty queue returns `{"messages":[]}`.
-- `DELETE /api/tasks/:id/queue/:qid` cancels a queued message. `POST /api/tasks/:id/queue/:qid/steer` promotes it to a steer. Both require `queueManage` and return 204 on success, 404 if the item is gone or 403 `self_action_forbidden` on the caller's own task. A steer that cannot run now may return 409 `session_busy`. Success records the action on the task timeline without the message text.
+- `DELETE /api/tasks/:id/queue/:qid` cancels a queued message. `POST /api/tasks/:id/queue/:qid/steer` promotes it to a steer. Both require `queueManage` and return 204 on success, 404 if the item is gone or 403 `self_action_forbidden` on the caller's own task. An unavailable queue operation returns 409 `operation_unavailable` with its reason. A steer that cannot run now may return 409 `session_busy`. Success records the action on the task timeline without the message text.
 
 ### `POST /api/tasks/:id/duplicate`
 New `backlog` task with the same project, title, prompt, images (copied), execution config (launch options included); no copied notes, no tree, no needs, no start time, no schedule.
@@ -1481,14 +1480,14 @@ The server and workers roll forward together at API v9. Layer 07 raises the inde
 - MCP `get_task` describes session identity, `stop_task` interrupts a running session, and `list_tasks.states` accepts the current TaskState values. MCP and CLI handoff help names the final reply, branch and session link. `stage task show` drops its artifact lines, `stage show` uses web and native links, and the CLI journal source line uses `connection N session X` for a scoped source session.
 - Notification subjects (additive, no version bump): events `completed`, `tree_completed`, `schedule_started` and `schedule_skipped`; `Notification.treeId` and `scheduleId`; groups `tree:<id>` and `schedule:<id>` with tags `tree-<id>` and `schedule-<id>`. A task's finished run no longer notifies (`done` is for untracked sessions); acceptance by inference or an agent notifies `completed` (see "Notification rules"). Migration 0056 adds `completed`, `tree_completed` and `schedule_skipped` to saved filters.
 - Session rename (additive, no version bump): the `sessionRename` operation, and a task title change renames the session Stage launched where available (`PATCH /api/tasks/:id`).
-- Session surface contracts (additive, no version bump, [ADR 0014](adr/0014-session-surface.md)). Connections declare `steer`, `queue` and `activity`. Session messages accept `delivery` and the activity route returns a bounded session view. Worker kinds `adapter.deliver` and `adapter.activity` gate the new calls. MCP and CLI expose the same contracts.
+- Session surface contracts (additive, no version bump, [ADR 0014](adr/0014-session-surface.md)). Connections declare `steer`, `queue` and `activity`. Session messages accept `delivery` and the activity route returns a bounded session view. Worker kinds `adapter.deliver` and `adapter.activity` gate the new calls. MCP exposes `get_session_activity` and the `delivery` argument to `send_message`. The CLI adds `task activity` and `task send --steer | --queue`. The Task and Session tabs have distinct URLs, including a read-only route per recorded attempt.
 - Codex approvals use the existing request and response schemas and worker kinds. Tracked active threads list command, file-change and permission approvals. Permission approvals use the option IDs `turn`, `session` and `decline`. Use the options each request returns. Experimental Codex questions are answered through the resume command.
 - OpenCode declares native session delivery and activity with compatible V2 OpenAPI. During a running turn, choose `steer` or `queue`. The default `send` now requires an idle session. Permissions and forms use the existing request routes. [OpenCode interaction](execution.md#opencode-interaction)
 - Claude Code session delivery and activity (additive, no version bump). `steer` and `queue` use versioned launch hooks. `activity` reads the transcript on the machine running the session.
 - Codex declares `steer` and `activity` when the daemon supports their methods. The existing delivery and activity transports include worker support. Codex activity `details` can include `model`, `reasoningEffort`, `approvalPolicy` and `sandbox`. The Codex queue remains unavailable.
 - Task session history (additive, no version bump). Migration 0057 preserves session links by attempt. Task detail and MCP `get_task` expose `sessions`, and `GET /api/tasks/:id/sessions/:attempt` reads the cached snapshot. Activity accepts an attempt over HTTP, MCP and CLI. Historical session references return the owning task and attempt.
 - T3 declares question responses, idle Send, active Steer and Queue, and recent activity from its advertised MCP tools. A T3 Send during a turn returns `session_busy`. Activity file entries can carry `countsUnknown`.
-- Native queue management (additive, no version bump). OpenCode and T3 declare `queueManage` for current-session list, cancel and steer. HTTP, MCP and CLI expose the same actions. Workers relay them through `adapter.queue`.
+- Native queue management (additive, no version bump). OpenCode and T3 declare `queueManage` for current-session list, cancel and steer. HTTP adds `GET /api/tasks/:id/queue`, `DELETE /api/tasks/:id/queue/:qid` and `POST /api/tasks/:id/queue/:qid/steer`. MCP adds `queued_messages` and the CLI adds `task queue`. Workers relay them through `adapter.queue`.
 - Needs-input task notifications store and push `/tasks/<id>/session`. Task group keys and push tags keep the same IDs. Historical notification records keep their stored URLs.
 - Agent operation parity (additive, no version bump; [ADR 0011](adr/0011-agent-operation-parity.md)): agent callers may complete, reopen, list and answer requests, send messages, read opening prompts, create, rename and archive projects, read project events, edit group membership, manage snippets and delete attachments. 403 `agent_forbidden` on respond and send is now `self_action_forbidden`, only for the caller's own task. `PATCH /api/projects/:id` keeps omitted fields.
 

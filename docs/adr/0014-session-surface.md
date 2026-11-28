@@ -1,21 +1,21 @@
 # ADR 0014: Session surface
 
-Accepted on 2026-11-28. Planned in Stage task #530 (tree #215, journal
-entry #5766). The contract ships in task #531 (01). The plan calls this
-ADR 0012. [Harness workspace add](0012-harness-workspace-add.md) and
+**Status: Implemented.** Accepted on 2026-11-28. Planned in Stage task
+#530 (tree #215, journal entry #5766). The contract shipped in task #531
+(01) and the integrated review is in #540 (10). The plan calls this ADR
+0012. [Harness workspace add](0012-harness-workspace-add.md) and
 [tree steering](0013-tree-steering.md) already occupy 0012 and 0013.
 
-When task 03 ships, the bounded activity view supersedes the earlier
-[PRODUCT Transcript rule](../../PRODUCT.md#capabilities-and-constraints)
-and [DESIGN Transcript rule](../../DESIGN.md#transcript). The per-task
-attempt switcher supersedes the "No session list" clause of
-[DESIGN Sessions](../../DESIGN.md#sessions). Full transcripts and global
-session browsing stay in the harness.
+The bounded activity view and per-task attempt switcher are described in
+[PRODUCT](../../PRODUCT.md#capabilities-and-constraints) and
+[DESIGN](../../DESIGN.md#sessions). Full transcripts and global session
+browsing stay in the harness.
 
 Task 06 revises [ADR 0006 decision 7](0006-codex-app-server-harness.md#decisions)
 for Codex approvals. The base already answers command and file-change
 approvals and `requestUserInput` questions through `thread/resume`.
-The target adds permissions approvals and holds the subscription.
+Stage holds the subscription and also answers permission approvals.
+Experimental questions use the Codex client.
 This ADR extends [ADR 0007 decision 9](0007-harness-boundary.md#decisions)
 with additional optional, declared session operations.
 
@@ -143,10 +143,70 @@ shared session view and can add its own sections.
 | Claude Code | `PermissionRequest` hooks | Send between turns | `PostToolUse` / `PostToolBatch` context, with `Stop` fallback | `Stop` block | Owning-machine transcript | Claude Code has no message queue Stage can read. |
 
 Claude Code steer and queue apply only to sessions launched with the new
-hooks. Pending delivery is memory-only in the hook receiver, lost on Stage
-restart. The target matrix lands by adapter task. Task #530's journal and
+hooks. Pending delivery is memory-only in the hook receiver and is lost
+on Stage restart. Task #530's journal and
 the task prompts hold the API evidence. The plan checked the Codex
 0.172.0 schema, OpenCode v2.3.2 OpenAPI and T3 tool schemas.
+
+## P2 review checklist
+
+The integrated baseline was `0e1d80afa8cf764068413b4a5f073ee2bbc36e17`
+on freshly fetched `origin/main`. The embedded build served the browser,
+HTTP and MCP from a branch database at
+`.scratch/dev/session-surface-closeout/stage.db`. Interactive runs used
+new sessions in a scratch folder. T3 used a separate data directory and
+Stage pairing. OpenCode used a scripted local model. A foreground Stage
+worker joined the scratch server and hosted the OpenCode connection for
+delivery, queue and history checks.
+
+| Feature | Shared path | OpenCode | T3 | Codex | Claude Code |
+| --- | --- | --- | --- | --- | --- |
+| Requests and respond | Requests and needs-input rows · `/requests` · CLI `task requests`, `task respond` · MCP `list_requests`, `respond_request` | Task 20 native form answered in the browser. `TestLiveOpenCodeInteractive` checks permissions and forms | Task 3 question listed and answered via CLI. Task 15 displayed the native approval fallback | Task 13 command approval listed and answered via stdio MCP. `TestContractCodexAnswersTrackedApprovals` covers file and permission decisions and competing answers | Task 5 question answered in the browser. `TestLiveClaude` verifies permission hooks |
+| Idle Send | Composer · `POST /messages` · `task send` · `send_message` | Task 7 stdio MCP Send. `TestLiveOpenCodeInteractive/idle_send_and_recent_activity` | Task 2 CLI and stdio MCP Send | Task 1 CLI and stdio MCP Send. `TestLiveAdapterRoundTrip` checks idle delivery and retry | Task 4 CLI and stdio MCP Send. `TestLiveClaude` checks the same session wakes |
+| Active Steer | Composer · `delivery: steer` · `task send --steer` · `send_message` | Task 7 on the worker and `TestLiveOpenCodeInteractive/steer_the_current_turn` | Task 8 CLI steer | Task 6 CLI steer. `TestLiveAdapterRoundTrip` verifies the same active turn | Task 9 CLI accepted delivery. `TestLiveClaude` verifies both tool-hook boundaries |
+| Active Queue | Composer · `delivery: queue` · `task send --queue` · `send_message` | Task 7 on the worker and `TestLiveOpenCodeInteractive/queue_while_busy` | Task 8 native admission, confirmed by list | Task 6 returned 409. Codex queues messages only in its own client | Task 9 CLI accepted delivery. `TestLiveClaude` verifies delivery at Stop |
+| Native queue list, cancel and promote | Queue under composer · `/queue` · `task queue` · `queued_messages` | Task 7 listed two, cancelled one and promoted one through the worker. `TestLiveOpenCodeQueueManagement` | Task 8 listed two, cancelled one and promoted one through native MCP. T3 omitted time and source | Task 1 stdio MCP and task 6 CLI returned the Codex queue reason | Task 4 stdio MCP and task 9 CLI returned “Claude Code has no message queue Stage can read.” |
+| Bounded activity | Recent activity and optional session slot · `/activity` · `task activity` · `get_session_activity` | Task 7 and native diff check in `TestLiveOpenCodeInteractive` | Task 2 and `TestActivityReadsTailOnForwardOnlyT3` | Task 1 and `TestLiveAdapterRoundTrip` | Task 4 and `TestLiveClaude` |
+| Past attempts | Attempt switcher · `/session/:attempt` · `/sessions/:attempt` and activity by attempt | Task 10 distinct refs, snapshot and CLI/MCP activity | Task 12 distinct refs, snapshot and CLI/MCP activity | Task 11 distinct refs, snapshot and CLI/MCP activity | Task 14 distinct refs and snapshot. CLI/MCP activity returned an empty feed for the interrupted first turn |
+| Declared reasons | Connection Capabilities, per-action composer reasons, HTTP 409 propagated by CLI and MCP | `TestQueueManagementDegradesWithoutBreakingLegacyInboxRecovery` checks a service missing inbox management | Task 15 browser fallback. `TestFeaturesGateSessionSurface` checks missing tools | Queue and queue management reasons above. Questions and MCP elicitations use Copy resume | Queue management reason above. `TestOlderClaudeSessionCannotTakeDelivery` checks pre-hook launch guidance |
+
+### Evidence
+
+- Scratch task IDs in the table refer to the branch database. Browser
+  captures use `agent-browser set viewport`, `snapshot` and `screenshot`
+  at 390 and 1280 px. On the verification machine, see
+  `/var/tmp/stage-session-closeout-evidence/<stem>-<width>.png`.
+  The stems `opencode-running`, `t3-running`, `codex-running` and
+  `claude-running` show active controls. OpenCode and T3 queued and
+  promoted a message in the browser. The `opencode-form`,
+  `codex-approval`, `t3-request`, `t3-approval` and `claude-request`
+  stems show pending requests and native fallback. The `opencode-past`, `t3-past`,
+  `codex-past` and `claude-past` stems show read-only attempt routes.
+- Live adapter commands were `mise run codex:live`, `mise run claude:live`
+  with `STAGE_TEST_CLAUDE`, and `go test -count=1 -v -run
+  'TestLiveOpenCode(Interactive|QueueManagement)$' ./internal/opencode`
+  inside `server/` with `STAGE_TEST_OPENCODE`. The first Claude live
+  run missed its active-turn window. The retry passed.
+- The branch server used `bin/stage serve --local-harnesses` with an
+  explicit dev data dir. The worker used `bin/stage worker run --listen
+  unix` with isolated config and runtime dirs. `stage machine ping 2`
+  confirmed its channel. The CLI used `task requests`, `task respond
+  --answers --expect-revision`, `task send --steer`, `task send --queue`,
+  `task queue --cancel`, `task queue --steer` and `task activity --attempt
+  1 --limit 3`. A stdio client sent `tools/call` to `bin/stage mcp` for
+  the methods in the table.
+- The [engine tests](../../server/internal/engine/) ran
+  `TestT3SessionSurface`, `TestContractOpenCodeSessionSurface`,
+  `TestContractCodexAnswersTrackedApprovals`,
+  `TestContractCodexDeliveryAndActivity`, `TestContractClaudeHookDelivery`,
+  `TestContractClaudeActivity` and `TestContractQueueManagement` in local
+  and worker placements. `TestContractSessionSurfaceWithOlderWorker`
+  checks update guidance. `TestTaskSessionHistoryAfterTwoRestarts` checks
+  three distinct refs, cached snapshot reads and historical ref resolution.
+  `TestGuardedRespond`, `TestRespondRefusesOwnSession`,
+  `TestTaskSessionSurfaceCommands`, `TestTaskQueueCommand`,
+  `TestSessionSurfaceTools` and `TestQueuedMessagesTool` cover the shared
+  route and client contracts.
 
 ## Rollout
 
@@ -162,6 +222,26 @@ the task prompts hold the API evidence. The plan checked the Codex
 | #537 (08) | Claude Code steer, queue and activity | #533 |
 | #538 (09) | Queue management | #534, #536 |
 | #540 (10) | Closeout | #537, #538, #539 |
+
+## Follow-ups
+
+- **OpenCode SSE inbox and usage (#559).** Task #534 retained polling for
+  activity, usage and queue reconciliation. Verify native inbox and usage
+  events before using them to refresh those reads.
+- **T3 WebSocket approvals (#560).** Task #536 left permission approvals
+  in T3. Verify the stable endpoint, paired-client authentication and
+  scopes, pending request correlation and competing responses before
+  adding a Stage control.
+- **Queue edit and reorder (#561).** Task #538 shipped list, cancel and
+  promotion. Verify native edit and reorder APIs before adding either.
+  OpenCode can acknowledge a cancellation after another client consumed
+  the item. T3's queue response omits creation time and source.
+- **Codex experimental queue (#562).** Revisit queue and queue management
+  once Codex exposes stable operations outside its own client. Task #539
+  also recorded that `turn/start` has no atomic idle precondition and
+  native repeated client IDs can start another turn. Stage rechecks idle
+  status and reconciles same-ID retries against the latest finished
+  turn. Revisit those safeguards if the native guarantees change.
 
 ## Out of scope
 

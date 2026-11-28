@@ -8,26 +8,22 @@ showAskAi: false
 
 A **session** is the harness conversation behind a task: a T3 thread, an OpenCode session, a Codex thread or a Claude Code session. Stage starts a session when it launches a task and follows its state. The conversation itself, with its questions, approvals and detailed runs, stays in the harness.
 
-## Answering in the harness
+## Work in the Session tab
 
-When a task needs input, open its session in the source harness to answer questions and approve actions. Needs-input tasks and notifications link there.
+Open a task's **Session** tab to answer a request or message the current session. Needs-input rows and notifications open this tab. **Requests** shows the questions and approvals Stage can answer. The composer offers **Send** after a turn ends, and **Steer** or **Queue** while a turn runs, according to the connection's capabilities. Where the harness exposes a native queue, **Queued messages** lets you cancel or steer a pending message.
 
-- T3 opens in the T3 app on this machine, or the T3 web app from elsewhere.
-- OpenCode opens its configured web client.
-- Codex has no link to open: **Copy resume command** copies `cd <dir> && codex resume <id>` to run in a terminal.
-- When a separate client is configured, task detail also offers **Open on service** and **Copy session ID**.
-- Claude Code has no link to open. Task detail offers **Copy resume command** (`claude attach <id>`, or `cd <folder> && claude --resume <id>`); run it in a terminal to answer. Task rows and notifications offer it while the task needs input.
+| Harness | Answer in Stage | Message from Stage |
+| --- | --- | --- |
+| T3 Code | Questions | Send, Steer, Queue and manage pending messages when paired T3 advertises the tools |
+| OpenCode | Permissions and supported forms | Send, Steer, Queue and manage pending messages with a compatible V2 service |
+| Codex | Command, file-change and permission approvals on tracked active threads with a supported daemon | Send and Steer |
+| Claude Code | Questions and approvals for sessions Stage starts with its hooks | Send between turns. Steer and Queue during a turn with Stage's versioned launch hooks |
 
-Stage has no global session browser and keeps no transcript.
+T3 permissions, unsupported OpenCode forms, Codex questions and MCP prompts, and Claude Code requests without an active Stage hook are answered in the harness. **Open in T3** or **Open in OpenCode** uses the configured destination. For Codex and Claude Code, **Copy resume command** gives you the terminal command to open that session.
 
-## What Stage keeps
+## Review attempts
 
-Task detail keeps what you need to review without the harness:
-
-- The opening prompt.
-- The **final reply**: the latest assistant reply as markdown, up to 4000 characters. Longer replies link to the harness. Task rows show a one-line preview.
-
-These stay readable while the harness is offline.
+The Session header lists recorded attempts newest first. Open an earlier attempt to inspect its read-only state, last reply and recent activity where available. **Last word** shows the latest cached assistant reply for the selected attempt, including while the harness is offline. **Recent activity** reads a bounded feed with plan steps and changed files when available. Open the harness for the full conversation. The Task tab holds the opening prompt, acceptance and journal.
 
 ## Tracking an existing session
 

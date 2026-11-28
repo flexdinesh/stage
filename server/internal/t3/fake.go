@@ -40,8 +40,6 @@ type Fake struct {
 	Discarded []string
 	// Launched: every LaunchThread input that created or deduplicated a thread.
 	Launched []LaunchInput
-	// SentAttachments: every SendAttachments call.
-	SentAttachments []FakeSendAttachments
 	// LaunchErr, when set, fails LaunchThread (tests).
 	LaunchErr error
 	// SearchErr fails SearchThreads; SearchDelay holds it (until ctx ends).
@@ -113,11 +111,6 @@ type fakeRequest struct {
 type FakeUpload struct {
 	Attachment
 	Data []byte
-}
-
-type FakeSendAttachments struct {
-	ThreadID, Message string
-	Attachments       []Attachment
 }
 
 type FakeSend struct {
@@ -660,24 +653,6 @@ func (f *Fake) DiscardAttachment(_ context.Context, attachmentID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Discarded = append(f.Discarded, attachmentID)
-	return nil
-}
-
-func (f *Fake) SendAttachments(_ context.Context, threadID, message string, atts []Attachment) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if _, ok := f.threads[threadID]; !ok {
-		return ErrNotFound
-	}
-	if len(atts) == 0 || len(atts) > MaxAttachments {
-		return fmt.Errorf("1..%d attachments required", MaxAttachments)
-	}
-	for _, a := range atts {
-		if !f.pending(a.ID) {
-			return fmt.Errorf("unknown attachment %s", a.ID)
-		}
-	}
-	f.SentAttachments = append(f.SentAttachments, FakeSendAttachments{ThreadID: threadID, Message: message, Attachments: slices.Clone(atts)})
 	return nil
 }
 

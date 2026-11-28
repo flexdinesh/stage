@@ -440,7 +440,7 @@ Closing work: the Dashboard and the Tasks Open view never list closed work (arch
 
 ### Task detail
 
-The shared title, flag chips and needs-input alert sit above **Task** and **{Harness} session**. Task holds Stage’s actions, prompt, images and handoffs, accepted results, State, Tree, journal, timeline and Config. Session starts with a ruled header containing the harness, attempt, state, reason, session ID and session actions. Requests lead the session content when input is pending, followed by Message, Last word, Recent activity and optional harness sections. Usage and session details sit to the side on laptop. Before a session is recorded, show the empty state and launch details. Launch recovery lives on Session.
+The shared title, flag chips and needs-input alert sit above **Task** and **{Harness} session**. Task opens at `/tasks/:id` and the current Session at `/tasks/:id/session`. Task holds Stage’s actions, prompt, images and handoffs, accepted results, State, Tree, journal, timeline and Config. Session starts with a ruled header containing the harness, attempt, state, reason, session ID and session actions. Requests lead the session content when input is pending, followed by Message, Last word, Recent activity and optional harness sections. Usage and session details sit to the side on laptop. Before a session is recorded, show the empty state and launch details. Launch recovery lives on Session.
 
 Phone and tablet use one column, with State ahead of the Task prompt. At 1024px both tabs use a fluid main column and a 340px side column. Below 768px the fixed bar above bottom navigation carries Start/Restart on Task, and Open/Copy resume, Stop and declared actions on Session, as available. Both views keep Answer reachable while the current session needs input.
 
@@ -455,7 +455,7 @@ First panel in the Task tab’s main column. Preserve mono text, Copy, six-line 
 
 ### Transcript
 
-Full conversations stay in the harness. Where the harness declares `activity`, Session shows a bounded Recent activity panel. It has a plan checklist, changed files with addition and deletion counts, and ruled feed rows with kind icons, mono previews, status and relative time. Truncation adds “Older activity in {harness}”. “Full transcript in {harness}” reuses the header destination. The current session polls every five seconds while visible and running or waiting for input. A past attempt reads activity once per visit. [Session surface](docs/adr/0014-session-surface.md)
+Full conversations stay in the harness. Where the harness declares `activity`, Session shows a bounded Recent activity panel. It has a plan checklist, changed files with addition and deletion counts where reported, and ruled feed rows with kind icons, mono previews, status and relative time. Truncation adds “Older activity in {harness}”. “Full transcript in {harness}” reuses the header destination. The current session polls every five seconds while visible and running or waiting for input. A past attempt reads activity once per visit. [Session surface](docs/adr/0014-session-surface.md)
 
 The Claude Code session slot puts the reported model, permission mode and effort in the header as wrapping mono metadata. Missing values are omitted.
 
@@ -540,7 +540,7 @@ Task run span remains in metadata. Detailed harness runs are opened in the harne
 
 ### Sessions
 
-Explicit Track session drawer from Stage and Project; Add session from a tree. Paste a T3 link or ID, Preview session, inspect title/project/state, then confirm. Optional title and initial note for a new owner. Show actionable eligibility and lookup errors in place; keep input during retries. The Session header’s attempt switcher lists recorded attempts newest first and marks the current one. Past attempts have their own route at `/tasks/:id/session/:attempt` and show a read-only banner, their last observed state, reply, usage, facts, links and activity where available. A pending launch can leave every recorded attempt read-only. Past session references open the recorded attempt. The OpenCode header adds a wrapping mono line for the reported agent and model, with the variant beside the model. The shared Activity and Usage panels carry the rest.
+Explicit Track session drawer from Stage and Project; Add session from a tree. Choose a connection and use its roster, link or supported session ID. Preview the session's title, project and state, then confirm. Optional title and initial note for a new owner. Show actionable eligibility and lookup errors in place; keep input during retries. The Session header’s attempt switcher lists recorded attempts newest first and marks the current one. Past attempts have their own route at `/tasks/:id/session/:attempt` and show a read-only banner, their last observed state, reply, usage, facts, links and activity where available. A pending launch can leave every recorded attempt read-only. Past session references open the recorded attempt. The OpenCode header adds a wrapping mono line for the reported agent and model, with the variant beside the model. The shared Activity and Usage panels carry the rest.
 
 T3 adds provider instance, model and runtime mode as wrapping mono metadata
 below the Session header's state and thread ID. The Recent activity file
@@ -571,7 +571,7 @@ Approval detail preserves separate lines for the working directory and reason. T
 
 The current Session has a single multiline Message field. A running turn offers **Steer** and **Queue** when declared. An ended turn offers **Send**, including a needs-input turn once Stage knows there are no pending requests it needs to handle. When delivery is unavailable, show the reason and link to the session actions for Open or Copy resume when available.
 
-Ctrl/Cmd+Enter uses the first available delivery in Steer, Queue, Send order. The 32 KiB UTF-8 limit and blank validation disable delivery without clearing text. Drafts survive tab, attempt and state changes. Successful delivery shows “Steered · time”, “Queued · time” or “Sent · time”. A session_busy reply displays its reason inline and keeps the draft. A needs-input Send is guarded by the task’s revision, like a request answer.
+Ctrl/Cmd+Enter uses the first available delivery in Steer, Queue, Send order. The 32 KiB UTF-8 limit and blank validation disable delivery without clearing text. Drafts survive tab, attempt and state changes. Successful delivery shows “Steered · time”, “Queued · time” or “Sent · time”. A `session_busy` reply displays its reason inline and keeps the draft. A needs-input Send is guarded by the task’s revision, like a request answer.
 
 When the current session declares `queueManage`, a non-empty **Queued messages** list sits directly under the composer. Hairline rules divide text previews in native queue order. Each row shows time and source when reported, with **Steer now** and **Cancel** actions that wrap on phones. Cancel asks for inline confirmation. A promoted message that is still pending shows **Steering** and can be cancelled. Refresh on successful Queue sends and actions, and poll every five seconds during visible running or needs-input sessions.
 
