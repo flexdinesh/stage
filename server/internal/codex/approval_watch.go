@@ -25,8 +25,9 @@ type approvalWatch struct {
 }
 
 type threadApprovals struct {
-	pending map[string]*approval
-	files   map[fileItem]string // bounded path summaries for in-progress file items
+	pending  map[string]*approval
+	files    map[fileItem]string // bounded path summaries for in-progress file items
+	settings *threadSettings     // filled after the resume succeeds
 }
 
 type fileItem struct{ turn, id string }
@@ -162,6 +163,10 @@ func (w *approvalWatch) syncThread(ctx context.Context, id string, active bool) 
 	if res.Thread.Status.Type != statusActive {
 		return w.syncThread(ctx, id, false)
 	}
+	w.mu.Lock()
+	settings := res.settings()
+	w.threads[id].settings = &settings
+	w.mu.Unlock()
 	return nil
 }
 
@@ -232,8 +237,8 @@ func (w *approvalWatch) notify(n notification) {
 }
 
 type fileChange struct {
-	Path string `json:"path"`
-	Diff string `json:"diff"`
+	Path string  `json:"path"`
+	Diff *string `json:"diff"`
 	Kind struct {
 		Type     string `json:"type"`
 		MovePath string `json:"move_path"`
@@ -248,26 +253,8 @@ func filePreview(changes []fileChange) string {
 		if change.Kind.MovePath != "" {
 			path += " → " + change.Kind.MovePath
 		}
-		if change.Diff != "" {
-			var added, removed int
-			switch change.Kind.Type {
-			case "add":
-				added = strings.Count(strings.TrimSuffix(change.Diff, "\n"), "\n") + 1
-			case "delete":
-				removed = strings.Count(strings.TrimSuffix(change.Diff, "\n"), "\n") + 1
-			default:
-				inHunk := false
-				for line := range strings.SplitSeq(change.Diff, "\n") {
-					switch {
-					case strings.HasPrefix(line, "@@"):
-						inHunk = true
-					case inHunk && strings.HasPrefix(line, "+"):
-						added++
-					case inHunk && strings.HasPrefix(line, "-"):
-						removed++
-					}
-				}
-			}
+		if change.Diff != nil && *change.Diff != "" {
+			added, removed := change.lineCounts()
 			path += fmt.Sprintf("  +%d −%d", added, removed)
 		}
 		lines = append(lines, path)
@@ -278,6 +265,31 @@ func filePreview(changes []fileChange) string {
 	return strings.Join(lines, "\n")
 }
 
+func (c fileChange) lineCounts() (added, removed int) {
+	if c.Diff == nil || *c.Diff == "" {
+		return 0, 0
+	}
+	diff := *c.Diff
+	switch c.Kind.Type {
+	case "add":
+		return strings.Count(strings.TrimSuffix(diff, "\n"), "\n") + 1, 0
+	case "delete":
+		return 0, strings.Count(strings.TrimSuffix(diff, "\n"), "\n") + 1
+	}
+	inHunk := false
+	for line := range strings.SplitSeq(diff, "\n") {
+		switch {
+		case strings.HasPrefix(line, "@@"):
+			inHunk = true
+		case inHunk && strings.HasPrefix(line, "+"):
+			added++
+		case inHunk && strings.HasPrefix(line, "-"):
+			removed++
+		}
+	}
+	return added, removed
+}
+
 func (a *Adapter) approvalStream() *approvalWatch {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -286,6 +298,19 @@ func (a *Adapter) approvalStream() *approvalWatch {
 		return nil
 	}
 	return w
+}
+
+func (a *Adapter) heldThread(id string) (*conn, threadSettings, bool) {
+	w := a.approvalStream()
+	if w == nil {
+		return nil, threadSettings{}, false
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if t := w.threads[id]; t != nil && t.settings != nil {
+		return w.c, *t.settings, true
+	}
+	return nil, threadSettings{}, false
 }
 
 // Requests lists approvals currently pending on a tracked thread.

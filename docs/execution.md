@@ -1633,20 +1633,40 @@ server's `harness_settings` row for that machine
     and other server requests for the Codex client. The legacy
     `applyPatchApproval` and `execCommandApproval` methods are outside
     the v2 event path Stage uses.
-  - **Send.** `thread/read`: a thread with a turn running is `*Busy`
-    ("Codex is working…", or waiting on an approval or question); Stage
-    never steers a turn (`turn/steer` is unused). Otherwise resume (which
-    loads a thread the daemon unloaded: `turn/start` on one answers
-    -32600), check the status again, then `turn/start` with
-    `clientUserMessageId` = the message's request ID (a random `stage-` id
-    without one). A message whose request ID the newest turn's user message
-    already carries was delivered and is not sent again (the coordinator
-    sets a fresh request ID per API call). An archived thread is
-    `*Refused` (409 `session_refused`) and a `turn/start` Codex refuses
-    (-32600) is `*Busy`, each with Codex's message.
+  - **Send.** Stage checks for an idle thread with a finished turn,
+    reuses its held subscription or resumes it, then rechecks the
+    thread immediately before `turn/start`. A running turn is `*Busy`
+    ("Codex is working. Steer instead."). An archived thread is
+    `*Refused` (409 `session_refused`) with Codex's unarchive command.
+    Stage passes the request ID as `clientUserMessageId` and reconciles
+    a retry against the newest finished turn's user messages. The
+    coordinator assigns a fresh ID per API call. Codex 0.172 accepts
+    repeated native IDs and has no atomic idle precondition for
+    `turn/start`. If another Codex client starts a turn between the
+    final read and the write, the daemon can accept the input in that
+    turn.
+  - **Steer.** Stage reads the thread's status and its newest turn ID
+    with `thread/read` and `thread/turns/list` (no turn items), then
+    passes `expectedTurnId` and `clientUserMessageId` to stable
+    `turn/steer`. Reviews and compactions report busy with guidance to
+    wait. An ended or replaced turn reports busy with guidance to send.
+  - **Queue.** Unavailable. “Codex queues messages only in its own client.”
+  - **Availability.** Stage checks the methods needed by Send, Steer
+    and Activity per daemon connection without targeting a thread.
+    The live gate verifies Codex 0.172.
 
   Links carry `command` (`cd <dir> && codex resume <id>`), which task rows,
   notifications and task detail offer as Copy resume command.
+- **Activity** (`execution.ActivityReader`). `thread/items/list` reads the
+  newest page, including for read-only attempts. Stage displays supported
+  items oldest first: user and Codex messages, reasoning summary titles,
+  command previews with status and exit code, file paths, MCP tools and
+  plans. Only completed file edits contribute to file totals. The
+  latest plan item in the page supplies the checklist or proposed plan
+  text. Codex's live plan updates and token usage are outside this view.
+  `thread/read` supplies the model and reasoning effort. Effective
+  approval policy and sandbox come from the resumed thread when loaded.
+  Unloaded and archived threads can return history without resuming.
 - **Adoption.** `ResolveLink` takes a thread id or a `codex resume` command
   and refuses ephemeral and subagent threads. An observation's `origin` is
   the thread's originator, raw; the coordinator refuses a thread another
@@ -1661,8 +1681,9 @@ contract on it in both placements, and `codex/testdata` holds sanitized
 fixtures from the live gates. The fake also resumes threads (replaying
 their pending server requests), takes client replies to server requests
 and broadcasts `serverRequest/resolved` to subscribers. `mise run codex:live`
-launches a read-only scratch thread, answers a replayed approval in Stage,
-and verifies that the approved command ran. The raw protocol gates run
+launches a read-only scratch thread, steers it, answers a replayed approval,
+sends to the idle thread, and verifies native activity and retry behavior.
+The raw protocol gates run
 with `STAGE_CODEX_GATES=1 go test -tags codexlive -run TestLiveGate
 ./internal/codex/`. These gates use the signed-in account and delete their
 scratch threads afterwards.

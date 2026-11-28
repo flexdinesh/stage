@@ -1,11 +1,26 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { codexAccountText, codexDaemonText, codexDetails, codexState, codexVersionText, parseCodexStatus } from "../src/harnesses/codex/codex.ts";
+import { codexAccountText, codexDaemonText, codexDetails, codexState, codexThreadMetadata, codexVersionText, parseCodexStatus } from "../src/harnesses/codex/codex.ts";
 import { codexErrorText, codexRowDetail, codexStatusView, codexSummary } from "../src/harnesses/codex/status.ts";
 import { liveChip } from "../src/lib/connections.ts";
 import { rowSessionAction } from "../src/lib/harnesses.ts";
 
 const NOW = Date.parse("2026-11-25T10:00:00Z");
+
+test("Codex thread metadata labels native presets and tolerates missing settings", () => {
+  assert.deepEqual(codexThreadMetadata({
+    model: "gpt-test", reasoningEffort: "xhigh", approvalPolicy: "on-request", sandbox: "workspaceWrite",
+  }), [
+    { label: "Model", value: "gpt-test" },
+    { label: "Reasoning", value: "Extra high" },
+    { label: "Permissions", value: "Auto" },
+  ]);
+  assert.deepEqual(codexThreadMetadata({ approvalPolicy: "granular", sandbox: "externalSandbox", model: 7 }), [
+    { label: "Approvals", value: "granular" },
+    { label: "Sandbox", value: "External sandbox" },
+  ]);
+  assert.deepEqual(codexThreadMetadata(null), []);
+});
 
 const details = {
   binary: "",

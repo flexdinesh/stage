@@ -57,7 +57,7 @@ export function ActivitySection({
                       {step.status === "done" ? <IconCheck size={12} /> : step.status === "in_progress" ? <Marker tone="run" /> : null}
                     </span>
                     <span className="sr-only">{step.status.replaceAll("_", " ")}. </span>
-                    <span className="wrap-anywhere">{step.text}</span>
+                    <span className="whitespace-pre-wrap wrap-anywhere">{step.text}</span>
                   </li>
                 ))}
               </ul>
@@ -88,7 +88,7 @@ export function ActivitySection({
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="min-w-0 flex-1 text-small font-medium wrap-anywhere">{item.title}</span>
                       {item.status === "" ? null : <Chip tone={ITEM_TONE[item.status]}>{item.status}</Chip>}
-                      <Meta><RelTime at={item.at} /></Meta>
+                      {item.at === "0001-01-01T00:00:00Z" ? null : <Meta><RelTime at={item.at} /></Meta>}
                     </div>
                     {item.preview === "" ? null : (
                       <p className="mt-1 font-mono text-meta whitespace-pre-wrap wrap-anywhere text-muted">{item.preview}</p>

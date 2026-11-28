@@ -502,6 +502,11 @@ func TestLiveAdapterRoundTrip(t *testing.T) {
 	defer client.Close()
 	a := New(client, 1, "")
 	ctx := t.Context()
+	caps, err := a.Features(ctx)
+	if err != nil || !caps.Operations[execution.OpSend].Available || !caps.Operations[execution.OpSteer].Available ||
+		!caps.Operations[execution.OpActivity].Available || caps.Operations[execution.OpQueue].Available {
+		t.Fatalf("capabilities %+v %v", caps.Operations, err)
+	}
 	launch, err := a.Launch(ctx, execution.Intent{
 		ConnectionID: 1, RequestID: "verify-approval", Directory: g.work, Title: "Stage scratch approval",
 		Prompt: "Run exactly `touch x` in the shell. Request escalation before running it. Then reply OK.",
@@ -563,6 +568,11 @@ func TestLiveAdapterRoundTrip(t *testing.T) {
 	} else {
 		t.Logf("send while waiting: %v", err)
 	}
+	if err := a.Send(ctx, ref, execution.Message{
+		Text: "After running the approved command, reply STEERED.", Delivery: execution.DeliverySteer, RequestID: "verify-steer",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := a.Respond(ctx, ref, rs[0].ID, execution.Response{Option: "accept"}); err != nil {
 		t.Fatal(err)
 	}
@@ -581,6 +591,9 @@ func TestLiveAdapterRoundTrip(t *testing.T) {
 	}
 	done = poll("done")
 	t.Logf("second reply %q (run %s)", done.Reply.Text, done.ExecutionID)
+	if err := a.Send(ctx, ref, execution.Message{Text: "Reply with exactly AGAIN.", RequestID: "verify-send"}); err != nil {
+		t.Fatal("reconcile completed send", err)
+	}
 	var page turnsPage
 	c := gateDial(t, g.sock, "check", &gateRecorder{})
 	defer c.close()
@@ -588,7 +601,33 @@ func TestLiveAdapterRoundTrip(t *testing.T) {
 	if len(page.Data) != 2 {
 		t.Fatalf("turns %d", len(page.Data))
 	}
+	if !page.Data[0].hasClientMessage("verify-steer") || !page.Data[1].hasClientMessage("verify-send") {
+		t.Fatal("Codex did not retain both client IDs in their intended turns")
+	}
+	activity, err := a.Activity(ctx, ref, execution.ActivityQuery{})
+	if err != nil || activity.Model == "" || !slices.ContainsFunc(activity.Items, func(it execution.ActivityItem) bool {
+		return it.Kind == "command" && strings.Contains(it.Preview, "touch x")
+	}) || !slices.ContainsFunc(activity.Items, func(it execution.ActivityItem) bool {
+		return it.Kind == "message_user" && strings.Contains(it.Text, "reply STEERED")
+	}) {
+		t.Fatalf("activity %+v %v", activity, err)
+	}
 	if _, err := os.Stat(g.work + "/x"); err != nil {
 		t.Fatalf("approved command did not run: %v", err)
+	}
+
+	// This deliberately bypasses Stage's read-before-retry to check whether
+	// Codex itself deduplicates a completed turn's client message ID.
+	c.must("thread/resume", map[string]any{"threadId": ref.ExternalSessionID, "excludeTurns": true})
+	raw := c.must("turn/start", messageParams(ref.ExternalSessionID, execution.Message{
+		Text: "Reply with exactly AGAIN.", RequestID: "verify-send",
+	}))
+	var replay turnResponse
+	if err := json.Unmarshal(raw, &replay); err != nil || replay.Turn.ID == "" {
+		t.Fatalf("raw replay %v: %s", err, raw)
+	}
+	t.Logf("native client ID deduplication after completion: %v", replay.Turn.ID == done.ExecutionID)
+	if replay.Turn.ID != done.ExecutionID {
+		poll("done")
 	}
 }

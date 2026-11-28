@@ -2,8 +2,10 @@
 import { connectionStatusChip } from "../../lib/connections.ts";
 import { ConnectionRow } from "../../components/ConnectionRow.tsx";
 import { statusRead } from "../../lib/connections.ts";
+import { Meta } from "../../components/ui.tsx";
 import { statusSlots } from "../status.ts";
-import type { ConnectionRowProps, HarnessSlots } from "../types.ts";
+import type { ConnectionRowProps, HarnessSlots, SessionSlotProps } from "../types.ts";
+import { codexThreadMetadata } from "./codex.ts";
 import { CODEX_STATUS, CODEX_STATUS_KEY, useCodexStatus } from "./queries.ts";
 import { CODEX_DISCONNECT_PROMPT, CodexSetup, useDisconnectCodex } from "./Setup.tsx";
 import { codexRowDetail, codexSummary } from "./status.ts";
@@ -14,7 +16,23 @@ export const CODEX_SLOTS: HarnessSlots = {
   ...statusSlots(CODEX_STATUS),
   handledSetupActions: (id) => id === "connect" || id === "check",
   statusKey: () => CODEX_STATUS_KEY,
+  session: { HeaderExtra: CodexThreadMeta, activityModelInHeader: true },
 };
+
+function CodexThreadMeta({ activity }: SessionSlotProps) {
+  const parts = codexThreadMetadata(activity?.details);
+  if (parts.length === 0) return null;
+  return (
+    <dl aria-label="Codex thread settings" className="flex min-w-0 basis-full flex-wrap gap-x-3 gap-y-1">
+      {parts.map(({ label, value }) => (
+        <div key={label} className="min-w-0">
+          <dt className="sr-only">{label}</dt>
+          <dd><Meta title={label} className="wrap-anywhere">{value}</Meta></dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 function CodexRow({ descriptor, machine, onManage, isDefault, overflow }: ConnectionRowProps) {
   const read = statusRead(useCodexStatus());
