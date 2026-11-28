@@ -179,6 +179,69 @@ func TestContractCodexAnswersTrackedApprovals(t *testing.T) {
 	})
 }
 
+func TestContractCodexDeliveryAndActivity(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		store, srv, svc, task := codexSetup(t, p, t.TempDir())
+		ctx := t.Context()
+		running, err := svc.Coordinator.StartTask(ctx, task.ID)
+		if err != nil || running.Session == nil {
+			t.Fatal(running, err)
+		}
+		id := running.Session.ExternalSessionID
+		send := func(delivery execution.Delivery, text string) (db.Task, error) {
+			t.Helper()
+			return svc.Coordinator.Send(ctx, task.ID, execution.Message{Text: text, Delivery: delivery}, nil)
+		}
+		var conflict *db.ConflictError
+		if _, err := send(execution.DeliveryQueue, "later"); !errors.As(err, &conflict) ||
+			conflict.Code != "operation_unavailable" || !strings.Contains(conflict.Msg, "Codex queues messages only in its own client.") {
+			t.Fatal(err)
+		}
+		if _, err := send(execution.DeliverySend, "busy"); !errors.As(err, &conflict) || conflict.Code != "session_busy" {
+			t.Fatal(err)
+		}
+		srv.SetTurnKind(id, "review")
+		if _, err := send(execution.DeliverySteer, "review"); !errors.As(err, &conflict) || conflict.Code != "session_busy" ||
+			!strings.Contains(conflict.Msg, "can't steer a review or compaction turn") {
+			t.Fatal(err)
+		}
+		srv.SetTurnKind(id, "")
+		if _, err := send(execution.DeliverySteer, "Change direction"); err != nil {
+			t.Fatal(err)
+		}
+		srv.AddItems(id, map[string]any{"type": "plan", "id": "plan-1", "text": "- [ ] Test the new direction"})
+		activity, err := svc.Coordinator.Activity(ctx, task.ID, nil, execution.ActivityQuery{Limit: 2})
+		if err != nil || len(activity.Items) != 2 || activity.Items[0].Kind != "message_user" ||
+			activity.Items[0].Text != "Change direction" || !activity.Truncated ||
+			len(activity.Plan) != 1 || activity.Plan[0].Text != "Test the new direction" {
+			t.Fatalf("activity %+v %v", activity, err)
+		}
+		srv.Finish(id, "completed", "Done.")
+		next, err := send(execution.DeliverySend, "One more")
+		if err != nil || next.State != db.StateRunning {
+			t.Fatal(next, err)
+		}
+		if turns := srv.Thread(id).Turns; len(turns) != 2 || turns[1].Prompt != "One more" || turns[1].ClientID == "" {
+			t.Fatalf("turns %+v", turns)
+		}
+		events, err := store.TaskEvents(ctx, task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sent, steered := false, false
+		for _, ev := range events {
+			sent = sent || ev.Detail == "Follow-up sent from Stage"
+			steered = steered || ev.Detail == "Steer sent from Stage"
+			if strings.Contains(ev.Detail, "Change direction") || strings.Contains(ev.Detail, "One more") {
+				t.Fatalf("message text leaked to timeline: %+v", ev)
+			}
+		}
+		if !sent || !steered {
+			t.Fatalf("delivery events missing: %+v", events)
+		}
+	})
+}
+
 // A lost turn/start reply leaves the attempt unconfirmed; recovery
 // reconciles the same thread and turn, never a second one.
 func TestContractCodexLostTurnReplyReconcilesOnce(t *testing.T) {

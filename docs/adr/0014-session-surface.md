@@ -136,7 +136,7 @@ shared session view and can add its own sections.
 | --- | --- | --- | --- | --- | --- | --- |
 | OpenCode (shipped in 04) | Permissions (once/always/reject) and forms | Idle prompt | Prompt with `steer` | Prompt with `queue` | `/message`, `/diff`, `Session.Info` | `/inbox` (task 09) |
 | T3 (shipped in 05) | Questions via `t3_pending_request`. Permission approvals use **Open in T3**. | `t3_thread_send` with `queue` after the turn ends | `t3_thread_send` with `steer` | `t3_thread_send` with `queue` while a turn runs | `t3_thread_read` activity | `t3_queue` (task 09) |
-| Codex | Command, file-change and permissions approvals on tracked active threads through `thread/resume` and a held subscription (task 06, Codex 0.172+) | `turn/start` | `turn/steer` | Unavailable (experimental) | `thread/items/list` | Unavailable |
+| Codex (shipped in 06 and 07) | Command, file-change and permissions approvals on tracked active threads through `thread/resume` and a held subscription (0.172+) | `turn/start` after a finished turn | `turn/steer` with `expectedTurnId` | Unavailable (experimental) | `thread/items/list` with thread metadata | Unavailable |
 | Claude Code | `PermissionRequest` hooks | Send between turns | `PostToolUse` / `PostToolBatch` context, with `Stop` fallback | `Stop` block | Owning-machine transcript | Unavailable |
 
 Claude Code steer and queue apply only to sessions launched with the new

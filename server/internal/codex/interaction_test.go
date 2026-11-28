@@ -224,11 +224,11 @@ func TestSendIsBusyWhileATurnRuns(t *testing.T) {
 	r := newRig(t)
 	ref := launched(t, r)
 	var busy *execution.Busy
-	if err := r.adapter.Send(t.Context(), ref, execution.Message{Text: "more"}); !errors.As(err, &busy) || busy.Reason != "Codex is working. Send once it finishes." {
+	if err := r.adapter.Send(t.Context(), ref, execution.Message{Text: "more"}); !errors.As(err, &busy) || busy.Reason != "Codex is working. Steer instead." {
 		t.Fatal("running", err)
 	}
 	r.srv.Request(ref.ExternalSessionID, "item/commandExecution/requestApproval", commandApproval())
-	if err := r.adapter.Send(t.Context(), ref, execution.Message{Text: "more"}); !errors.As(err, &busy) || busy.Reason != "Codex is waiting on an approval or question. Answer that first." {
+	if err := r.adapter.Send(t.Context(), ref, execution.Message{Text: "more"}); !errors.As(err, &busy) || busy.Reason != "Codex is working. Steer instead." {
 		t.Fatal("waiting", err)
 	}
 	if n := len(r.srv.Thread(ref.ExternalSessionID).Turns); n != 1 || r.srv.Calls("thread/resume") != 0 {

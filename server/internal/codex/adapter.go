@@ -32,6 +32,7 @@ type Adapter struct {
 	modelsAt  time.Time
 	modelsErr error
 	approvals *approvalWatch
+	sends     [32]sync.Mutex // serialize Stage follow-ups to the same thread
 }
 
 // Cache windows: health is read on every sync tick; the model catalog
@@ -154,7 +155,7 @@ var archiveAction = execution.Action{
 
 // Features reads Codex's model catalog (cached a minute).
 func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) {
-	_, connectErr := a.client.connect(ctx)
+	link, connectErr := a.client.connect(ctx)
 	if connectErr != nil {
 		if ctx.Err() != nil {
 			return execution.Capabilities{}, ctx.Err()
@@ -163,6 +164,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 		for _, op := range execution.Ops {
 			c.Operations[op] = execution.Availability{Reason: Problem(connectErr)}
 		}
+		c.Operations[execution.OpQueue] = execution.Availability{Reason: queueUnavailable}
 		return c, nil
 	}
 	ms, err := a.catalog(ctx)
@@ -175,10 +177,10 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 			execution.OpSessionSearch:   available,
 			execution.OpImages:          available,
 			execution.OpRespond:         a.client.respondAvailability(),
-			execution.OpSend:            available,
-			execution.OpSteer:           {Reason: "Steer in Codex: copy the resume command."},
-			execution.OpQueue:           {Reason: "Queue in Codex: copy the resume command."},
-			execution.OpActivity:        {Reason: "Recent activity is in Codex."},
+			execution.OpSend:            a.client.interactionAvailability(ctx, link, "Update Codex to send from Stage.", "turn/start", "thread/resume", "thread/turns/list"),
+			execution.OpSteer:           a.client.interactionAvailability(ctx, link, "Update Codex to steer from Stage.", "turn/steer", "thread/turns/list"),
+			execution.OpQueue:           {Reason: queueUnavailable},
+			execution.OpActivity:        a.client.interactionAvailability(ctx, link, "Update Codex to read recent activity in Stage.", "thread/items/list"),
 			execution.OpSessionRename:   available,
 			execution.OpWorkspaceAdd:    available,
 			execution.OpDirectoryBrowse: available,

@@ -6,6 +6,33 @@ import type { CodexAccount, CodexDetails, CodexState, CodexStatus } from "./type
 
 export const CODEX_KIND = "codex";
 
+const EFFORT: Readonly<Record<string, string>> = {
+  none: "None", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high",
+};
+const SANDBOX: Readonly<Record<string, string>> = {
+  readOnly: "Read only", workspaceWrite: "Workspace write", dangerFullAccess: "Full access", externalSandbox: "External sandbox",
+};
+
+/** Labels for the current settings reported by the Codex thread. */
+export function codexThreadMetadata(details: unknown) {
+  if (!isRecord(details)) return [];
+  const model = text(details.model) ?? "";
+  const effort = text(details.reasoningEffort) ?? "";
+  const policy = text(details.approvalPolicy) ?? "";
+  const sandbox = text(details.sandbox) ?? "";
+  const preset = policy === "on-request" && sandbox === "workspaceWrite" ? "Auto"
+    : policy === "on-request" && sandbox === "readOnly" ? "Read only"
+    : policy === "never" && sandbox === "dangerFullAccess" ? "Full access"
+    : "";
+  return [
+    { label: "Model", value: model },
+    { label: "Reasoning", value: Object.hasOwn(EFFORT, effort) ? EFFORT[effort] : effort },
+    { label: "Permissions", value: preset },
+    { label: "Approvals", value: preset ? "" : policy },
+    { label: "Sandbox", value: preset ? "" : Object.hasOwn(SANDBOX, sandbox) ? SANDBOX[sandbox] : sandbox },
+  ].filter(({ value }) => value);
+}
+
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** A string field: absent reads "", any other type is malformed (null). */

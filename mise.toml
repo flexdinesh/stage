@@ -90,7 +90,7 @@ cd server && go test -count=1 -v -timeout 15m -run TestLiveClaude ./internal/cla
 '''
 
 [tasks."codex:live"]
-description = "Approve a command from Stage against the signed-in Codex daemon in a scratch folder"
+description = "Approve, steer, send and read activity from Stage against the signed-in Codex daemon in a scratch folder"
 run = "cd server && STAGE_CODEX_GATES=1 go test -tags codexlive -count=1 -v -timeout 6m -run '^TestLiveAdapterRoundTrip$' ./internal/codex"
 
 [tasks."opencode:live"]

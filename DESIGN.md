@@ -546,6 +546,8 @@ T3 adds provider instance, model and runtime mode as wrapping mono metadata
 below the Session header's state and thread ID. The Recent activity file
 list shows paths alone when the harness has no change counts.
 
+The Codex header uses a wrapping mono metadata row for the thread's model, reasoning effort and reported permission preset. Custom settings show the approval policy and sandbox individually.
+
 ### Image dropzone
 
 Backlog task prompts accept image drops and Add image. Preserve thumbnails, upload/error states, the 8-image limit and read-only image links on launched tasks.

@@ -12,6 +12,9 @@
 - **Amended** 2026-11-28 by #545 ([ADR 0013](0013-tree-steering.md)):
   decision 7. Stage answers listed requests and sends messages, verified
   by live gates g8, g9 and g10 against codex-cli 0.172.0.
+- **Amended** by the [Session surface](0014-session-surface.md): Stage
+  answers approvals, sends to idle threads, steers active turns and reads
+  bounded thread activity through the declared operations.
 - **Sources:** live gates against `codex` 0.171.0 (app-server 0.171.0) on
   Linux x86_64 with a ChatGPT login, 2026-11-25, in scratch directories.
   Probe threads were deleted afterwards. Sanitized protocol fixtures:

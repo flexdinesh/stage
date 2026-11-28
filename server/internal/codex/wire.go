@@ -36,18 +36,19 @@ const (
 )
 
 type thread struct {
-	ID             string       `json:"id"`
-	ParentThreadID *string      `json:"parentThreadId"`
-	Preview        string       `json:"preview"`
-	Ephemeral      bool         `json:"ephemeral"`
-	Model          *string      `json:"model"`
-	CreatedAt      int64        `json:"createdAt"`
-	UpdatedAt      int64        `json:"updatedAt"`
-	Status         threadStatus `json:"status"`
-	Cwd            string       `json:"cwd"`
-	Originator     string       `json:"originator"`
-	Name           *string      `json:"name"`
-	GitInfo        *struct {
+	ID              string       `json:"id"`
+	ParentThreadID  *string      `json:"parentThreadId"`
+	Preview         string       `json:"preview"`
+	Ephemeral       bool         `json:"ephemeral"`
+	Model           *string      `json:"model"`
+	ReasoningEffort string       `json:"reasoningEffort"`
+	CreatedAt       int64        `json:"createdAt"`
+	UpdatedAt       int64        `json:"updatedAt"`
+	Status          threadStatus `json:"status"`
+	Cwd             string       `json:"cwd"`
+	Originator      string       `json:"originator"`
+	Name            *string      `json:"name"`
+	GitInfo         *struct {
 		Branch *string `json:"branch"`
 	} `json:"gitInfo"`
 	Turns []turn `json:"turns"`
@@ -89,7 +90,11 @@ const (
 )
 
 type threadResponse struct {
-	Thread thread `json:"thread"`
+	Thread         thread          `json:"thread"`
+	ApprovalPolicy json.RawMessage `json:"approvalPolicy"` // thread/resume only
+	Sandbox        struct {
+		Type string `json:"type"`
+	} `json:"sandbox"`
 }
 
 type turnsPage struct {

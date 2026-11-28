@@ -38,6 +38,7 @@ type Client struct {
 	lastStart time.Time
 	listeners map[int]func(notification)
 	nextL     int
+	methods   map[string]bool // known method support on this connection
 }
 
 // NewClient connects through daemon; version is Stage's, sent as clientInfo.
@@ -80,6 +81,7 @@ func (cl *Client) connect(ctx context.Context) (*conn, error) {
 		return nil, err
 	}
 	cl.c, cl.init = c, res
+	cl.methods = make(map[string]bool)
 	return c, nil
 }
 
@@ -176,6 +178,66 @@ func (cl *Client) respondAvailability() execution.Availability {
 		return execution.Availability{Reason: "Update Codex to answer in Stage."}
 	}
 	return available
+}
+
+// interactionAvailability checks method dispatch with no thread ID or input.
+// Codex validates the empty request before it can touch any thread.
+func (cl *Client) interactionAvailability(ctx context.Context, c *conn, update string, methods ...string) execution.Availability {
+	for _, method := range methods {
+		supported, err := cl.supportsMethod(ctx, c, method)
+		if err != nil {
+			return execution.Availability{Reason: Problem(err)}
+		}
+		if !supported {
+			return execution.Availability{Reason: update}
+		}
+	}
+	return available
+}
+
+func (cl *Client) supportsMethod(ctx context.Context, c *conn, method string) (bool, error) {
+	cl.mu.Lock()
+	supported, checked := cl.methods[method]
+	connected := cl.c == c && c.alive()
+	cl.mu.Unlock()
+	if !connected {
+		return false, &DaemonDownError{Reason: "The Codex daemon is disconnected."}
+	}
+	if checked {
+		return supported, nil
+	}
+	call, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	err := c.call(call, method, struct{}{}, nil)
+	var re *RPCError
+	if err != nil && !errors.As(err, &re) {
+		return false, err
+	}
+	supported = !unsupported(err)
+	cl.mu.Lock()
+	if cl.c == c {
+		cl.methods[method] = supported
+	}
+	cl.mu.Unlock()
+	return supported, nil
+}
+
+// deliveryError remembers an unavailable protocol method after a definite
+// native rejection. A thread store without pagination can reject just its own
+// reads, so that reply must not disable activity on the entire connection.
+func (cl *Client) deliveryError(err error) error {
+	var re *RPCError
+	if !errors.As(err, &re) || !unsupported(err) {
+		return sessionErr(err)
+	}
+	if !strings.Contains(re.Message, "not supported yet") {
+		cl.mu.Lock()
+		if cl.methods != nil {
+			cl.methods[re.Method] = false
+		}
+		cl.mu.Unlock()
+	}
+	return fmt.Errorf("%w: %s", execution.ErrUnavailable, Problem(err))
 }
 
 // call runs method on the daemon. Reaching the daemon failed:

@@ -28,8 +28,10 @@ import (
 // Turn is one fake turn.
 type Turn struct {
 	ID, Status, ClientID, Prompt, Final string
+	Kind                                string
 	Images                              int
 	Started, Completed                  int64
+	ExtraItems                          []map[string]any
 }
 
 // Thread is one fake thread.
@@ -106,6 +108,7 @@ type Server struct {
 	mcpServers []map[string]any
 	rateLimits map[string]any
 	answers    []Answer
+	steerRace  string
 }
 
 type wsClient struct {
@@ -258,6 +261,25 @@ func (s *Server) TurnsNotYet(n int) { s.mu.Lock(); s.turnsNotYet = n; s.mu.Unloc
 // completedAt. Each such list call uses one; n < 0 never settles.
 func (s *Server) StartSettles(n int) { s.mu.Lock(); s.startSettle = n; s.mu.Unlock() }
 
+// SteerRace simulates the observed turn ending or being replaced before the
+// next steer reaches the daemon.
+func (s *Server) SteerRace(kind string) { s.mu.Lock(); s.steerRace = kind; s.mu.Unlock() }
+
+func (s *Server) SetTurnKind(id, kind string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	th := s.threads[id]
+	th.Turns[len(th.Turns)-1].Kind = kind
+}
+
+func (s *Server) AddItems(id string, items ...map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	th := s.threads[id]
+	t := th.Turns[len(th.Turns)-1]
+	t.ExtraItems = append(t.ExtraItems, items...)
+}
+
 // SetMCPServers sets the configured MCP servers (MCPServer entries).
 func (s *Server) SetMCPServers(v ...map[string]any) { s.mu.Lock(); s.mcpServers = v; s.mu.Unlock() }
 
@@ -321,6 +343,7 @@ func (s *Server) Thread(id string) *Thread {
 	c.Turns = make([]*Turn, len(th.Turns))
 	for i, tu := range th.Turns {
 		x := *tu
+		x.ExtraItems = slices.Clone(tu.ExtraItems)
 		c.Turns[i] = &x
 	}
 	return &c
@@ -465,11 +488,18 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			initialized = true
 		}
 		result, rpcErr := s.handle(m.Method, m.Params)
+		key := m.Method
+		if string(m.Params) == "{}" {
+			switch key {
+			case "turn/start", "turn/steer", "thread/resume", "thread/turns/list", "thread/items/list":
+				key += " (probe)"
+			}
+		}
 		s.mu.Lock()
-		s.calls[m.Method]++
-		drop := s.drop[m.Method] > 0
+		s.calls[key]++
+		drop := s.drop[key] > 0
 		if drop {
-			s.drop[m.Method]--
+			s.drop[key]--
 		}
 		s.mu.Unlock()
 		if drop {
@@ -599,7 +629,9 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		if th.Status == "notLoaded" {
 			th.Status, th.Flags = "idle", nil
 		}
-		return map[string]any{"thread": wireThread(th, false), "model": th.Model, "cwd": th.Cwd}, nil
+		return map[string]any{"thread": wireThread(th, false), "model": th.Model, "cwd": th.Cwd, "approvalPolicy": th.Approval,
+			"sandbox": map[string]any{"type": map[string]string{"read-only": "readOnly", "workspace-write": "workspaceWrite", "danger-full-access": "dangerFullAccess"}[th.Sandbox]},
+		}, nil
 	case "turn/start":
 		th, e := thread()
 		if e != nil {
@@ -610,6 +642,11 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		}
 		if th.Status == "notLoaded" {
 			return nil, invalid("thread not found: %s", th.ID)
+		}
+		if th.Status == "active" {
+			tu := th.Turns[len(th.Turns)-1]
+			tu.ExtraItems = append(tu.ExtraItems, messageItem(tu.ID, len(tu.ExtraItems)+1, str("clientUserMessageId"), textInput(p["input"])))
+			return map[string]any{"turn": wireTurn(tu, "notLoaded")}, nil
 		}
 		var input []struct {
 			Type, Text, URL string
@@ -633,12 +670,39 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		}
 		s.pendingSettle = s.startSettle
 		th.Turns = append(th.Turns, tu)
-		th.Effort = str("effort")
+		if effort := str("effort"); effort != "" {
+			th.Effort = effort
+		}
 		th.persisted, th.Status, th.Flags, th.Updated = true, "active", []string{}, s.now
 		if th.Preview == "" {
 			th.Preview = tu.Prompt
 		}
 		return map[string]any{"turn": wireTurn(tu, "notLoaded")}, nil
+	case "turn/steer":
+		th, e := thread()
+		if e != nil {
+			return nil, e
+		}
+		race := s.steerRace
+		s.steerRace = ""
+		if th.Status != "active" || race == "ended" {
+			return nil, invalid("no active turn to steer")
+		}
+		tu := th.Turns[len(th.Turns)-1]
+		active := tu.ID
+		if race == "replaced" {
+			active += "-replacement"
+		}
+		if expected := str("expectedTurnId"); active != expected {
+			return nil, invalid("expected active turn id `%s` but found `%s`", expected, active)
+		}
+		if tu.Kind == "review" || tu.Kind == "compact" {
+			e := invalid("cannot steer a %s turn", tu.Kind)
+			e.Data = map[string]any{"codexErrorInfo": map[string]any{"activeTurnNotSteerable": map[string]string{"turnKind": tu.Kind}}}
+			return nil, e
+		}
+		tu.ExtraItems = append(tu.ExtraItems, messageItem(tu.ID, len(tu.ExtraItems)+1, str("clientUserMessageId"), textInput(p["input"])))
+		return map[string]any{"turnId": active}, nil
 	case "thread/archive":
 		th, e := thread()
 		if e != nil {
@@ -693,6 +757,27 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 			out = append(out, w)
 		}
 		return map[string]any{"data": out, "nextCursor": nil, "backwardsCursor": nil}, nil
+	case "thread/items/list":
+		th, e := thread()
+		if e != nil {
+			return nil, e
+		}
+		out := []map[string]any{}
+		for _, tu := range th.Turns {
+			for _, it := range turnItems(tu, "full") {
+				out = append(out, map[string]any{"turnId": tu.ID, "item": it, "startedAtMs": tu.Started * 1000})
+			}
+		}
+		if str("sortDirection") == "desc" {
+			slices.Reverse(out)
+		}
+		var limit int
+		_ = json.Unmarshal(p["limit"], &limit)
+		var cursor any
+		if limit > 0 && len(out) > limit {
+			out, cursor = out[:limit], "older"
+		}
+		return map[string]any{"data": out, "nextCursor": cursor}, nil
 	case "thread/list":
 		var ids []string
 		_ = json.Unmarshal(p["includedThreadIds"], &ids)
@@ -953,7 +1038,7 @@ func (s *Server) Subscribed(id string) int { return len(s.subscribers(id)) }
 func wireThread(th *Thread, turns bool) map[string]any {
 	m := map[string]any{
 		"id": th.ID, "preview": th.Preview, "ephemeral": th.Ephemeral, "createdAt": th.Created, "updatedAt": th.Updated,
-		"status": statusOf(th), "cwd": th.Cwd, "originator": th.Originator, "model": th.Model,
+		"status": statusOf(th), "cwd": th.Cwd, "originator": th.Originator, "model": th.Model, "reasoningEffort": th.Effort,
 		"parentThreadId": nil, "name": nil, "gitInfo": map[string]any{"branch": "main"}, "turns": []any{},
 	}
 	if th.Parent != "" {
@@ -972,16 +1057,35 @@ func wireThread(th *Thread, turns bool) map[string]any {
 	return m
 }
 
-func wireTurn(tu *Turn, view string) map[string]any {
+func messageItem(turn string, index int, client, text string) map[string]any {
+	return map[string]any{"type": "userMessage", "id": fmt.Sprintf("%s-u%d", turn, index), "clientId": client,
+		"content": []map[string]any{{"type": "text", "text": text, "text_elements": []any{}}}}
+}
+
+func textInput(raw json.RawMessage) string {
+	var in []struct{ Type, Text string }
+	_ = json.Unmarshal(raw, &in)
+	for _, item := range in {
+		if item.Type == "text" {
+			return item.Text
+		}
+	}
+	return ""
+}
+
+func turnItems(tu *Turn, view string) []any {
 	items := []any{}
 	if view != "notLoaded" {
 		if view == "full" {
-			client := any(nil)
-			if tu.ClientID != "" {
-				client = tu.ClientID
+			it := messageItem(tu.ID, 0, tu.ClientID, tu.Prompt)
+			it["id"] = tu.ID + "-u"
+			if tu.ClientID == "" {
+				it["clientId"] = nil
 			}
-			items = append(items, map[string]any{"type": "userMessage", "id": tu.ID + "-u", "clientId": client,
-				"content": []map[string]any{{"type": "text", "text": tu.Prompt, "text_elements": []any{}}}})
+			items = append(items, it)
+			for _, it := range tu.ExtraItems {
+				items = append(items, it)
+			}
 		}
 		if tu.Final != "" {
 			items = append(items,
@@ -989,7 +1093,11 @@ func wireTurn(tu *Turn, view string) map[string]any {
 				map[string]any{"type": "agentMessage", "id": tu.ID + "-a", "text": tu.Final, "phase": "final_answer"})
 		}
 	}
-	m := map[string]any{"id": tu.ID, "items": items, "itemsView": view, "status": tu.Status, "error": nil, "startedAt": nil, "completedAt": nil}
+	return items
+}
+
+func wireTurn(tu *Turn, view string) map[string]any {
+	m := map[string]any{"id": tu.ID, "items": turnItems(tu, view), "itemsView": view, "status": tu.Status, "error": nil, "startedAt": nil, "completedAt": nil}
 	if tu.Started > 0 {
 		m["startedAt"] = tu.Started
 	}

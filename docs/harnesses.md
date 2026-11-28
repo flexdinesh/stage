@@ -144,6 +144,10 @@ receiver holds a bounded, memory-only list of pending deliveries. Read
 transcript activity on the owning machine. The same adapter methods serve
 local and worker calls. [Claude Code adapter](execution.md#claude-code-adapter)
 
+Codex uses the shared `adapter.send`, `adapter.deliver` and
+`adapter.activity` kinds. Its activity details carry the thread's model,
+reasoning effort and reported permission settings.
+
 ### Workspace and session selection
 
 [ADR 0010](adr/0010-harness-workspaces-and-logical-projects.md) defines
