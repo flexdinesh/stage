@@ -508,7 +508,8 @@ a `workspace_added` project event.
 
 On workers the operation requires the `workspaceAdder` trait and the
 `adapter.workspaceAdd` request kind, negotiated on the existing channel.
-Every shipped harness declares the operation unavailable for now.
+OpenCode adds existing folders ([Adding folders](#adding-folders)). The
+other shipped harnesses declare the operation unavailable for now.
 [Workspace add API](api.md#add-a-workspace)
 
 ### Interaction
@@ -753,7 +754,45 @@ directory must be the project's canonical directory or a listed worktree).
 workspace catalog reads `/api/model` and `/api/agent` with the location only
 after verification passes, when the project exists unarchived and the read
 can neither create nor unarchive it. Launch passes the location for its own
-directory.
+directory. Only an explicit add calls `/api/location`.
+
+### Adding folders
+
+OpenCode declares one [workspace source](#workspace-add), `folder`
+("Existing folder", a required `path`: "Absolute path on the OpenCode
+host"). OpenCode v2 has no create-project endpoint. Its location side
+effect is the add: `GET /api/location?location[directory]=<dir>` for an
+existing directory resolves and persists the project, and clears an
+archived time. This behavior is undocumented. It was read from OpenCode's
+bundled source (the `@opencode/Location` and `@opencode/Project` modules
+of `@opencode/cli` 2.3.2) and checked once against a throwaway
+`opencode serve` with temporary `HOME` and XDG directories. The fake in
+`server/internal/opencode/workspace_add_test.go` pins it.
+
+The source and `workspaceAdd` are available when `/openapi.json` has
+`location.get` (`project.list` is already required). Otherwise both say
+"This OpenCode version cannot add folders (location.get is missing)."
+
+The adapter requires an absolute path and cleans it. It lists projects
+(`GET /api/project?archived=true`), calls the location, then lists them
+again. The location's project must be listed, unarchived, and its resolved
+checkout must be the project's canonical directory or a saved worktree
+(`GET /api/worktree?projectID=`). Stage gets that project's row (its ID
+and canonical root). `existing` is true when the project was listed and
+unarchived before the call.
+
+| Folder | OpenCode 2.3.2 | Stage |
+| --- | --- | --- |
+| Plain folder, no VCS | Its own project (`vcs` unset, canonical is the folder) | A row of its own. Not importable, so it groups standalone. |
+| Repository checkout | The repository's project | The project's row |
+| Subfolder, linked worktree, symlink | The repository's project; a linked worktree also gets a worktree row | The project's row at its canonical root. The message names the folder OpenCode keeps under it. |
+| Git repository with no commit or remote | The catch-all `global` project | 400: "OpenCode files this folder under its global project. Give the repository a commit or a remote, then add it again." |
+| Missing folder | 404 `LocationNotFoundError` | 400: "Folder not found on the OpenCode host." |
+| A file | 500 | 502 |
+
+A lost or unreadable location answer, or a failed listing after the
+location answered, is an uncertain outcome (504): OpenCode may have saved
+the project, and retrying with the same `requestId` is safe.
 
 ### Launch and recovery
 

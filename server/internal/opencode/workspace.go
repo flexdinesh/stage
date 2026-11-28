@@ -82,19 +82,23 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 	}
 	out := make([]execution.WorkspaceInfo, 0, len(projects))
 	for _, p := range projects {
-		// A project binding pins the canonical checkout. Created worktrees
-		// belong to its separate per-project inventory.
-		w := execution.WorkspaceInfo{
-			ID: p.ID, Title: title(p.Name, p.Canonical), WorkspaceRoot: p.Canonical,
-			ArchivedAt: millis(p.Time.Archived), CreatedAt: *millis(p.Time.Created), UpdatedAt: *millis(p.Time.Updated),
-			ActiveAt:   millis(p.Time.Active),
-			Importable: p.Vcs != "" && p.Time.Archived <= 0 && p.ID != globalProject,
-			// Only a service on Stage's machine shares its filesystem.
-			Local: a.local,
-		}
-		out = append(out, w)
+		out = append(out, a.workspace(p))
 	}
 	return out, nil
+}
+
+// workspace is the inventory row of a validated project (projects).
+func (a *Adapter) workspace(p wireProject) execution.WorkspaceInfo {
+	// A project binding pins the canonical checkout. Created worktrees
+	// belong to its separate per-project inventory.
+	return execution.WorkspaceInfo{
+		ID: p.ID, Title: title(p.Name, p.Canonical), WorkspaceRoot: p.Canonical,
+		ArchivedAt: millis(p.Time.Archived), CreatedAt: *millis(p.Time.Created), UpdatedAt: *millis(p.Time.Updated),
+		ActiveAt:   millis(p.Time.Active),
+		Importable: p.Vcs != "" && p.Time.Archived <= 0 && p.ID != globalProject,
+		// Only a service on Stage's machine shares its filesystem.
+		Local: a.local,
+	}
 }
 
 // boundProject finds project in OpenCode's inventory and requires it to be
@@ -181,7 +185,12 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	if contract.rename {
 		ops[execution.OpSessionRename] = available
 	}
-	return execution.Capabilities{Operations: ops, ModeLabel: "Agent", Options: launchOptions(), Actions: sessionActions(contract)}, nil
+	if contract.location {
+		ops[execution.OpWorkspaceAdd] = available
+	}
+	return execution.Capabilities{Operations: ops, ModeLabel: "Agent", Options: launchOptions(),
+		Actions:          sessionActions(contract),
+		WorkspaceSources: []execution.WorkspaceSource{folderSource(contract.location)}}, nil
 }
 
 // optionWorktree is the worktree launch option: OpenCode creates the
@@ -204,7 +213,7 @@ func operations() map[execution.Op]execution.Availability {
 		execution.OpRespond:       answer,
 		execution.OpSend:          answer,
 		execution.OpSessionRename: {Reason: sessionRenameUnavailable},
-		execution.OpWorkspaceAdd:  execution.WorkspaceAddNotSupported(Descriptor.Name),
+		execution.OpWorkspaceAdd:  {Reason: workspaceAddUnavailable},
 	}
 }
 

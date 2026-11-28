@@ -164,6 +164,14 @@ func (a *Adapter) request(ctx context.Context, method, path string, input, out i
 				return execution.ErrSessionSearchCursor
 			}
 		}
+		if resp.StatusCode == http.StatusNotFound && method == http.MethodGet && strings.HasPrefix(path, "/api/location?") {
+			var body struct {
+				Tag string `json:"_tag"`
+			}
+			if e := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&body); e == nil && body.Tag == "LocationNotFoundError" {
+				return errLocationNotFound
+			}
+		}
 		return responseError{resp.StatusCode}
 	}
 	if out == nil {
@@ -215,6 +223,9 @@ type serverContract struct {
 	// archive: PATCH /api/session/{sessionID} (session.update) takes
 	// "archived". Optional: an older service keeps its other operations.
 	archive bool
+	// location: GET /api/location (location.get) resolves a directory; the
+	// folder workspace source calls it.
+	location bool
 }
 
 func (a *Adapter) check(ctx context.Context) (serverInfo, error) {
@@ -284,6 +295,7 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 	update := spec.Paths["/api/session/{sessionID}"]["patch"]
 	contract.rename = sessionUpdateTakes(update, spec.Components.Schemas, "title")
 	contract.archive = sessionUpdateTakes(update, spec.Components.Schemas, "archived")
+	contract.location = spec.Paths["/api/location"]["get"].OperationID == "location.get"
 	a.verified = contract
 	return contract, nil
 }
