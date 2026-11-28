@@ -230,6 +230,9 @@ type serverContract struct {
 	// location: GET /api/location (location.get) resolves a directory; the
 	// folder workspace source calls it.
 	location bool
+	// projectRename: PATCH /api/project/{projectID} (project.update) takes
+	// a name (the project rename action).
+	projectRename bool
 	// respond: session.permission.reply takes a decision and
 	// session.form.reply an answer (Interactive.Respond).
 	respond bool
@@ -305,6 +308,7 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 	update := spec.Paths["/api/session/{sessionID}"]["patch"]
 	contract.rename = sessionUpdateTakes(update, spec.Components.Schemas, "title")
 	contract.archive = sessionUpdateTakes(update, spec.Components.Schemas, "archived")
+	contract.projectRename = operationTakes(spec.Paths["/api/project/{projectID}"]["patch"], spec.Components.Schemas, "project.update", "name")
 	contract.location = spec.Paths["/api/location"]["get"].OperationID == "location.get"
 	contract.respond = inspectReplies(spec.Paths, spec.Components.Schemas)
 	contract.events = inspectEvents(spec.Paths["/api/event"]["get"])

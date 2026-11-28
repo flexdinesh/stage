@@ -1,13 +1,13 @@
 // Package opencodetest is a fake OpenCode V2 service for tests: health and
-// contract, HTTP Basic auth, pairing codes and session tokens, and session
-// update (title and archive, session.update).
+// contract, HTTP Basic auth, pairing codes and session tokens, session
+// update (title and archive, session.update), and project listing and
+// rename (project.update).
 package opencodetest
 
 import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,6 +36,27 @@ type Server struct {
 	noUpdate bool
 	// archived: known session IDs and whether each is archived.
 	archived map[string]bool
+	// projects: GET /api/project, in insertion order (AddProject).
+	projects []*Project
+	// noProjectUpdate drops project.update from the contract.
+	noProjectUpdate bool
+	// projectFail answers the next PATCH /api/project/{id} with this status
+	// and message, without renaming (0: succeed).
+	projectFail    int
+	projectFailMsg string
+}
+
+// Project is an OpenCode project as GET /api/project lists it.
+type Project struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Canonical string `json:"canonical"`
+	Vcs       string `json:"vcs,omitempty"`
+	Time      struct {
+		Created  int64 `json:"created"`
+		Updated  int64 `json:"updated"`
+		Archived int64 `json:"archived,omitempty"`
+	} `json:"time"`
 }
 
 // New starts a fake service; password "" requires no auth.
@@ -88,6 +109,45 @@ func (s *Server) WithoutSessionUpdate() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.noUpdate = true
+}
+
+// AddProject lists a git project; archived marks it archived in OpenCode.
+func (s *Server) AddProject(id, canonical string, archived bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := &Project{ID: id, Canonical: canonical, Vcs: "git"}
+	p.Time.Created, p.Time.Updated = 1_700_000_000_000, 1_700_000_000_000
+	if archived {
+		p.Time.Archived = 1_700_000_000_001
+	}
+	s.projects = append(s.projects, p)
+}
+
+// ProjectName is the project's name ("" when unnamed or unknown).
+func (s *Server) ProjectName(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.projects {
+		if p.ID == id {
+			return p.Name
+		}
+	}
+	return ""
+}
+
+// WithoutProjectUpdate serves a contract without project.update.
+func (s *Server) WithoutProjectUpdate() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noProjectUpdate = true
+}
+
+// FailProjectUpdate answers the next project.update with code and an
+// error body carrying message.
+func (s *Server) FailProjectUpdate(code int, message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.projectFail, s.projectFailMsg = code, message
 }
 
 // AddSession registers a session PATCH /api/session/{id} can archive.
@@ -189,13 +249,21 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": version, "hostname": "fake", "pid": 42})
 	case r.URL.Path == "/openapi.json":
 		s.mu.Lock()
-		update := !s.noUpdate
+		update, projectUpdate := !s.noUpdate, !s.noProjectUpdate
 		s.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(spec(update))
+		_ = json.NewEncoder(w).Encode(spec(update, projectUpdate))
 	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/session/"):
 		s.patchSession(w, r, strings.TrimPrefix(r.URL.Path, "/api/session/"))
+	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/project/"):
+		s.patchProject(w, r, strings.TrimPrefix(r.URL.Path, "/api/project/"))
 	case r.URL.Path == "/api/project":
-		fmt.Fprint(w, `[]`)
+		s.mu.Lock()
+		projects := []Project{}
+		for _, p := range s.projects {
+			projects = append(projects, *p)
+		}
+		s.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(projects)
 	case r.Method == http.MethodGet && r.URL.Path == "/api/mcp":
 		s.mu.Lock()
 		servers, delay, fail := s.mcp, s.mcpDelay, s.mcpFail
@@ -252,9 +320,51 @@ func (s *Server) patchSession(w http.ResponseWriter, r *http.Request, id string)
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// patchProject is project.update for a name (additionalProperties: false
+// rejects other unknown fields).
+func (s *Server) patchProject(w http.ResponseWriter, r *http.Request, id string) {
+	var body map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"_tag":"InvalidRequestError"}`, http.StatusBadRequest)
+		return
+	}
+	var name *string
+	for k, v := range body {
+		if k != "name" || json.Unmarshal(v, &name) != nil || name == nil {
+			http.Error(w, `{"_tag":"InvalidRequestError"}`, http.StatusBadRequest)
+			return
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.noProjectUpdate {
+		http.NotFound(w, r)
+		return
+	}
+	if s.projectFail != 0 {
+		code, msg := s.projectFail, s.projectFailMsg
+		s.projectFail, s.projectFailMsg = 0, ""
+		b, _ := json.Marshal(map[string]string{"_tag": "InvalidRequestError", "message": msg})
+		http.Error(w, string(b), code)
+		return
+	}
+	for _, p := range s.projects {
+		if p.ID == id {
+			if name != nil {
+				p.Name = *name
+			}
+			p.Time.Updated++
+			_ = json.NewEncoder(w).Encode(p)
+			return
+		}
+	}
+	http.Error(w, `{"_tag":"ProjectNotFoundError"}`, http.StatusNotFound)
+}
+
 // spec is the contract the adapter's health check requires, with
-// session.update unless update is false.
-func spec(update bool) map[string]any {
+// session.update unless update is false and project.update unless
+// projectUpdate is false.
+func spec(update, projectUpdate bool) map[string]any {
 	bodies := map[string][]string{
 		"/api/worktree":                   {"projectID", "from", "name"},
 		"/api/session":                    {"id", "location", "metadata"},
@@ -298,6 +408,14 @@ func spec(update bool) map[string]any {
 				"title": map[string]any{}, "metadata": map[string]any{}, "permissions": map[string]any{}, "archived": map[string]any{},
 			}}}}},
 		}
+	}
+	if projectUpdate {
+		paths["/api/project/{projectID}"] = map[string]any{"patch": map[string]any{
+			"operationId": "project.update",
+			"requestBody": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"properties": map[string]any{
+				"canonical": map[string]any{}, "name": map[string]any{}, "icon": map[string]any{}, "commands": map[string]any{},
+			}}}}},
+		}}
 	}
 	return map[string]any{"paths": paths}
 }

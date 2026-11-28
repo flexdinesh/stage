@@ -24,8 +24,17 @@ test("project actions require a current, listed workspace in that exact group", 
   assert.equal(canRunProjectActions(8, workspace, [{ ...row, connectionId: 9 }]), false);
   assert.equal(canRunProjectActions(8, workspace, [{ ...row, workspaceId: "ws_other" }]), false);
   assert.equal(canRunProjectActions(8, workspace, [{ ...row, available: false }]), false);
-  assert.equal(canRunProjectActions(8, { ...workspace, catalogState: "archived" }, [row]), false);
+  assert.equal(canRunProjectActions(8, { ...workspace, catalogState: "missing" }, [row]), false);
+  assert.equal(canRunProjectActions(8, { ...workspace, catalogState: "retired" }, [row]), false);
   assert.equal(canRunProjectActions(8, workspace, undefined), false);
+});
+
+test("a workspace its harness archived keeps its project actions, so it can be restored", () => {
+  const workspace = { workspaceId: "ws_old", connectionId: 5, catalogState: "archived", path: "/old", title: "Old" };
+  // Archived rows are never destinations; membership comes from the group itself.
+  assert.equal(canRunProjectActions(8, workspace, []), true);
+  assert.equal(canRunProjectActions(8, workspace, undefined), true);
+  assert.equal(groupWorkspaceBlocked({ ...workspace, blockedReason: "x" }), null);
 });
 
 test("a listed workspace the harness won't start in carries its reason and keeps its project actions", () => {

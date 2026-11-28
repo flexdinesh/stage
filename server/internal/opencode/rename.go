@@ -16,7 +16,13 @@ const sessionRenameUnavailable = "This OpenCode version cannot rename sessions (
 // sessionUpdateTakes reports whether session.update takes field (title,
 // archived).
 func sessionUpdateTakes(op operation, components map[string]json.RawMessage, field string) bool {
-	if op.OperationID != "session.update" {
+	return operationTakes(op, components, "session.update", field)
+}
+
+// operationTakes reports whether op is the operation id and its JSON
+// request takes field.
+func operationTakes(op operation, components map[string]json.RawMessage, id, field string) bool {
+	if op.OperationID != id {
 		return false
 	}
 	shape, err := requestShape(op, components)

@@ -87,7 +87,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 		out.Modes = append(out.Modes, execution.Choice{ID: mode, Label: mode, Availability: yes})
 	}
 	out.Options = launchOptions()
-	out.Actions = sessionActions()
+	out.Actions = append(sessionActions(), projectActions()...)
 	for _, p := range c.Providers {
 		av := yes
 		if len(p.Constraints) > 0 {

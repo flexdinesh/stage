@@ -41,8 +41,11 @@ func sessionActionStates(archived bool) []execution.ActionState {
 	return []execution.ActionState{{ID: ActionArchive, Availability: execution.Availability{Reason: "Already archived in OpenCode."}}}
 }
 
-// Act runs a declared session action.
+// Act runs a declared session or project action.
 func (a *Adapter) Act(ctx context.Context, r execution.ActionRequest) (execution.ActionResult, error) {
+	if r.Target == execution.TargetProject {
+		return a.actOnProject(ctx, r)
+	}
 	if r.Target != execution.TargetSession || r.Session == nil || !a.valid(*r.Session) {
 		return execution.ActionResult{}, &execution.Invalid{Reason: "An OpenCode action needs a session on this connection."}
 	}

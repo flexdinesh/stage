@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -57,8 +58,12 @@ func archiveDeclaration(t *testing.T, a *Adapter) execution.Action {
 	if err := c.DeclaresOperations(); err != nil {
 		t.Fatal(err)
 	}
-	if err := execution.ValidateActions(c.Actions, execution.TargetSession); err != nil || len(c.Actions) != 1 {
-		t.Fatalf("actions %+v: %v", c.Actions, err)
+	if err := execution.ValidateActions(c.Actions, ""); err != nil {
+		t.Fatal(err)
+	}
+	c.Actions = slices.DeleteFunc(c.Actions, func(a execution.Action) bool { return a.Target != execution.TargetSession })
+	if len(c.Actions) != 1 {
+		t.Fatalf("session actions %+v", c.Actions)
 	}
 	return c.Actions[0]
 }

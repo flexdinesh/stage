@@ -541,9 +541,12 @@ carries the target, stable ID, caller policy, availability, confirmation
 and input schema. Connectors own connection actions, including setup.
 `Capabilities.Actions` describes session and project actions. Project
 actions use the exact workspace on the selected connection, including a
-listed row its harness will not launch in (an action may fix that), and
-Stage refreshes the connection's inventory after one succeeds (best
-effort). Stage resolves that scope, checks caller policy and schema, and
+listed row its harness will not launch in (an action may fix that) or has
+archived (restoring it is one), and Stage refreshes the connection's
+inventory after one succeeds or ends uncertain (best effort). A harness
+whose project actions depend on the workspace (T3's archive state)
+declares them through `WorkspaceFeatures`. Project actions change the
+harness's project only: Stage group titles stay as they are. Stage resolves that scope, checks caller policy and schema, and
 reaches the owner through `execution.As[execution.Actor]`. The owner
 validates semantic input. `ActionRequest.confirmed` tells the owner the
 caller sent `Stage-Action-Confirmed: 1` (MCP `run_action` `confirmed`); an
@@ -575,8 +578,15 @@ unchanged: the action itself never completes a task.
 | OpenCode | `archive` "Archive in OpenCode" | `PATCH /api/session/{id} {archived: true}` (`session.update`) | archived; the service's spec lacks `session.update` with `archived` |
 | Claude Code | none | | |
 
-Claude Code's one project action, `trust` "Trust in Claude Code", is
-described with its [adapter](#claude-code-adapter).
+| Harness | Project actions | Harness call | Unavailable when |
+| --- | --- | --- | --- |
+| T3 | `rename` "Rename in T3" (`title`), `archive` "Archive in T3", `restore` "Restore in T3", `remove` "Remove from T3" | `t3_project_update {projectId, title}` or `{projectId, archived}`; `t3_project_delete {projectId}` | archive: archived; restore: not archived; all: T3 no longer lists the project or its list fails |
+| OpenCode | `rename` "Rename in OpenCode" (`name`) | `PATCH /api/project/{id} {name}` (`project.update`) | the `global` project; the service's spec lacks `project.update` with `name` |
+| Claude Code | `trust` "Trust in Claude Code" | described with its [adapter](#claude-code-adapter) | |
+| Codex | none | | |
+
+Renames, archives and restores are open to people and agents. T3's remove
+is destructive and user-only, so it needs confirmation.
 
 Each confirms first. T3's archive does not settle a thread, so only Settle
 in T3 can infer completion; its confirmation says so. The harness's own
@@ -708,6 +718,37 @@ inferred completion. Settle in T3 and Archive in T3 relay
 `t3_thread_organize` ([Actions and facts](#actions-and-facts)); the
 observation's action states mirror T3's own refusals.
 
+### T3 project actions
+
+T3's project actions relay its project management over MCP
+(`server/internal/t3/project_actions.go`) on the T3 project behind a
+workspace row. The Stage group keeps its title.
+
+- **Rename** sets T3's title (`t3_project_update {projectId, title}`).
+- **Archive and restore** set `archived` (`t3_project_update`). T3 keeps the
+  threads and files. Archive confirms first. An archived row stays a
+  project action target, so it can be restored from Stage.
+- **Remove** calls `t3_project_delete {projectId}` and never sends `force`.
+  It is destructive and user-only, and it confirms: "Remove this project
+  from T3? T3 keeps the files on disk. A project with threads can't be
+  removed; archive it instead." T3 refuses a project with threads
+  (archived threads included); Stage relays that as "T3 can't remove a
+  project with threads. Archive it instead." (400), since T3's own wording
+  names the force flag.
+- **Availability.** The adapter implements `WorkspaceFeatures`: it lists
+  T3's projects and marks Archive unavailable on an archived project
+  ("Already archived in T3.") and Restore on any other ("Not archived in
+  T3."). When T3 no longer lists the project, or the list fails, all four
+  are unavailable, and the capabilities still answer, since launches read
+  them too. Rename and remove work on archived projects, as in T3.
+- **Refusals.** T3's other refusals are 400 with its message; "The project
+  was not found." is 404.
+- **Lost replies.** `t3_project_update` with only a title or `archived`
+  sets values, so the client retries it once on a closed connection. A
+  transport failure on either call lists again: an update the listing
+  shows, or a project it no longer lists after remove, succeeds. Otherwise
+  the outcome is uncertain (502).
+
 ### T3 interaction
 
 T3 implements `Interactive` over its MCP (`server/internal/t3/interaction.go`).
@@ -791,6 +832,16 @@ unavailable. Archive in OpenCode relays `PATCH /api/session/{id}`
 (`session.update` with `archived`, checked softly in `/openapi.json`: a
 service without it keeps connecting and declares the action unavailable;
 [Actions and facts](#actions-and-facts)).
+
+Rename in OpenCode, a project action, sets the project's name with
+`PATCH /api/project/{id} {name}` (`project.update`, checked softly in the
+spec like `session.update`; `server/internal/opencode/project_actions.go`).
+The Stage group keeps its title. OpenCode's catch-all `global` project
+can't be renamed. A 404 is not found, a 400 relays OpenCode's message, and
+a lost reply checks the project listing for the new name, else the outcome
+is uncertain. An archived OpenCode project lists no actions: verification
+refuses it with "Archived in OpenCode. Unarchive it there, then refresh."
+(400).
 
 Every location-scoped OpenCode request (`/api/location`, `/api/model`,
 `/api/agent` with `location[directory]`) builds that location on first load,

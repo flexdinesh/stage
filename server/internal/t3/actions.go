@@ -50,6 +50,9 @@ func (d ThreadDetail) actionStates(state string) []execution.ActionState {
 }
 
 func (a *Adapter) Act(ctx context.Context, r execution.ActionRequest) (execution.ActionResult, error) {
+	if r.Target == execution.TargetProject {
+		return a.actOnProject(ctx, r)
+	}
 	if r.Target != execution.TargetSession || r.Session == nil || r.Session.ConnectionID != a.ConnectionID {
 		return execution.ActionResult{}, &execution.Invalid{Reason: "T3 actions apply to a session on this connection."}
 	}
@@ -76,4 +79,7 @@ func (a *Adapter) Act(ctx context.Context, r execution.ActionRequest) (execution
 	return execution.ActionResult{}, err
 }
 
-var _ execution.Actor = (*Adapter)(nil)
+var (
+	_ execution.Actor             = (*Adapter)(nil)
+	_ execution.WorkspaceFeatures = (*Adapter)(nil)
+)

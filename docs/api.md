@@ -975,8 +975,9 @@ Both project action routes require the exact workspace on the named
 connection and check its current membership in the project. A workspace
 that no longer belongs to the project returns 404. A listed workspace its
 harness will not launch in (`blockedReason`) still takes project actions,
-since one may fix it, and a successful project action refreshes the
-connection's inventory. The selected
+since one may fix it, and so does one its harness archived
+(`catalogState: "archived"`), so it can be restored. A project action that
+succeeds, or ends uncertain (502), refreshes the connection's inventory. The selected
 workspace determines the action's capabilities and target. Lists return
 an array of declarations, including unavailable actions with their reasons.
 

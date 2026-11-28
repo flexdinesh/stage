@@ -85,6 +85,34 @@ func (c *MCPClient) CloneProject(ctx context.Context, in CloneInput) (CloneResul
 	return CloneResult{Cwd: out.Cwd}, nil
 }
 
+func (c *MCPClient) UpdateProject(ctx context.Context, projectID string, in ProjectUpdate) error {
+	if projectID == "" {
+		return ErrNotFound
+	}
+	args := map[string]any{"projectId": projectID}
+	if in.Title != nil {
+		title := strings.TrimSpace(*in.Title)
+		if title == "" {
+			return errors.New("t3 t3_project_update: title is required")
+		}
+		args["title"] = title
+	}
+	if in.Archived != nil {
+		args["archived"] = *in.Archived
+	}
+	if len(args) == 1 {
+		return errors.New("t3 t3_project_update: nothing to change")
+	}
+	return c.call(ctx, "t3_project_update", args, nil)
+}
+
+func (c *MCPClient) DeleteProject(ctx context.Context, projectID string) error {
+	if projectID == "" {
+		return ErrNotFound
+	}
+	return c.call(ctx, "t3_project_delete", map[string]any{"projectId": projectID}, nil)
+}
+
 func (c *MCPClient) ListThreads(ctx context.Context, in ListThreadsInput) (ThreadPage, error) {
 	args := map[string]any{"includeSubagents": in.IncludeSubagents}
 	if in.AllProjects {
