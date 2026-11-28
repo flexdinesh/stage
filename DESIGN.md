@@ -534,6 +534,10 @@ Task run span remains in metadata. Detailed harness runs are opened in the harne
 
 Explicit Track session drawer from Stage and Project; Add session from a tree. Paste a T3 link or ID, Preview session, inspect title/project/state, then confirm. Optional title and initial note for a new owner. Show actionable eligibility and lookup errors in place; keep input during retries. When task #533 ships, the Session header offers a task-scoped attempt switcher, newest first. An attempt opens at `/tasks/:id/session/:attempt`. Only the current session can receive actions. Earlier attempts show read-only snapshots with their last observation, reply, usage, facts, links and activity by session reference.
 
+The attempt switcher reads recorded attempts from task detail and uses
+its current marker. A pending launch can leave every recorded attempt
+read-only. Until task #533, a past session reference opens task detail.
+
 ### Image dropzone
 
 Backlog task prompts accept image drops and Add image. Preserve thumbnails, upload/error states, the 8-image limit and read-only image links on launched tasks.

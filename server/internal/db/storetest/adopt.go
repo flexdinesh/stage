@@ -131,6 +131,22 @@ func caseAdoptSession(t *testing.T, open Factory) {
 	if owner, err := s.TaskBySession(ctx, session("planner-1")); err != nil || owner.ID != task.ID {
 		t.Fatalf("session now owned: %+v %v", owner, err)
 	}
+	history, err := s.TaskSessions(ctx, task.ID)
+	if err != nil || len(history) != 1 || history[0].Attempt != task.LaunchAttempt || !history[0].Current || history[0].Session != *task.Session {
+		t.Fatalf("adopted session history: %+v %v", history, err)
+	}
+	idle := session("never-ran")
+	if err := s.PutObservation(ctx, execution.Observation{Session: idle, State: "idle", Project: "proj-1", UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	neverRan, created, err := s.AdoptSession(ctx, db.AdoptInput{Session: idle})
+	if err != nil || !created || neverRan.LaunchAttempt != 0 || neverRan.State != db.StateBacklog {
+		t.Fatalf("never-launched adoption: %+v %v %v", neverRan, created, err)
+	}
+	zero, err := s.TaskSession(ctx, neverRan.ID, 0)
+	if err != nil || !zero.Current || zero.Session != idle {
+		t.Fatalf("adopted attempt zero: %+v %v", zero, err)
+	}
 	// Adopting again returns the owner.
 	again, created, err := s.AdoptSession(ctx, db.AdoptInput{Session: session("planner-1"), Title: ptr("ignored")})
 	if err != nil || created || again.ID != task.ID || again.Title != "Planner" {

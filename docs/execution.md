@@ -174,6 +174,13 @@ for the active connection. [Workspace discovery](discovery.md)
 `Opening` reads its first prompt, including the item ID. `Attention` lists
 sessions the harness surfaces to Stage, such as sessions waiting on the user. Stage adds a task through explicit adoption.
 
+Stage records one scoped session per confirmed or linked launch attempt
+and the session attached by adoption. A newly adopted session that has
+never run uses attempt 0. Restarting clears the current pointer while the
+launch is pending and preserves earlier rows. Session history reads the
+latest stored observation for each recorded ref. All task interaction
+targets the current session.
+
 ### Launcher
 
 `Launch` starts execution from a frozen intent and reconciles a prior
@@ -587,8 +594,9 @@ event. Stage keeps the message text in the dispatch only. Workers relay
 `send` on `adapter.send` and `steer` and `queue` on `adapter.deliver`.
 The legacy send channel accepts only the send mode.
 
-`ActivityReader` reads the current session's bounded recent activity
-behind `activity`, with no Stage-side persistence. The adapter returns the
+`ActivityReader` reads bounded recent activity for the current session or
+a recorded attempt behind that session connection's `activity` operation.
+Stage passes the recorded ref and keeps no activity items. The adapter returns the
 last N items in chronological order, the current plan, changed files,
 model and optional harness details. The coordinator validates kinds and
 statuses and enforces the item, title, text and details limits.

@@ -671,6 +671,15 @@ and paging. (Thread search was removed with API v3.)
   (appended in SQL, order kept). Keys and tags add `tree:<id>`/`tree-<id>`
   and `schedule:<id>`/`schedule-<id>`, with `/trees/<id>` and
   `/schedules/<id>` URL fallbacks once the subject is deleted.
+  Paired migration 0057 `task_sessions` records a scoped session per task
+  attempt. The primary key is `(task_id, attempt)` and `session_id` is
+  unique across current and past attempts. The migration backfills each
+  current link using its existing `launch_attempt` and
+  `COALESCE(launched_at, created_at)`. Earlier links already superseded
+  before the migration may be unavailable. Task confirmation, linking
+  and adoption update history in the same transaction as the current
+  pointer. Deleting a task cascades to its history. Database copies
+  preserve the rows and timestamps.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.

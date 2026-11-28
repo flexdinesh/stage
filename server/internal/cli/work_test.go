@@ -117,10 +117,18 @@ func TestTaskSessionSurfaceCommands(t *testing.T) {
 	if len(h.fake.Sent) != 0 {
 		t.Fatalf("unavailable delivery reached the harness: %+v", h.fake.Sent)
 	}
+	if a.Session == nil {
+		t.Fatal("started task has no session")
+	}
+	code, stdout, stderr := h.run("", "task", "show", id)
+	wantSession := fmt.Sprintf("attempt 1  running  %s (current)", a.Session.ExternalSessionID)
+	if code != 0 || !strings.Contains(stdout, wantSession) {
+		t.Fatalf("task show missing %q: %d %s %s", wantSession, code, stdout, stderr)
+	}
 
 	now := time.Date(2026, 11, 29, 4, 30, 0, 0, time.UTC)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/tasks/1/activity" || r.URL.Query().Get("limit") != "5" {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/tasks/1/activity" || r.URL.Query().Get("limit") != "5" || r.URL.Query().Get("attempt") != "0" {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL)
 		}
 		_ = json.NewEncoder(w).Encode(client.SessionActivity{Activity: execution.Activity{
@@ -131,13 +139,13 @@ func TestTaskSessionSurfaceCommands(t *testing.T) {
 	}))
 	defer srv.Close()
 	h.url = srv.URL
-	code, stdout, stderr := h.run("", "task", "activity", "1", "--limit", "5")
+	code, stdout, stderr = h.run("", "task", "activity", "1", "--attempt", "0", "--limit", "5")
 	for _, want := range []string{now.Format(time.RFC3339), "command", "Run tests", "go test", "Check result", "work.go", "+2 -1"} {
 		if code != 0 || !strings.Contains(stdout, want) {
 			t.Fatalf("activity missing %q: %d %s %s", want, code, stdout, stderr)
 		}
 	}
-	code, stdout, stderr = h.run("", "task", "activity", "1", "--limit", "5", "--json")
+	code, stdout, stderr = h.run("", "task", "activity", "1", "--attempt", "0", "--limit", "5", "--json")
 	out := decode[client.SessionActivity](t, stdout)
 	if code != 0 || len(out.Activity.Items) != 1 || out.Activity.Items[0].ID != "one" {
 		t.Fatalf("activity JSON: %d %s %s", code, stdout, stderr)

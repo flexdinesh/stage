@@ -268,10 +268,20 @@ func (s *server) getTask(w http.ResponseWriter, r *http.Request) error {
 	s.loadTaskAttempt(ctx, &task)
 	task.ExecutionConfig = configForClient(task.ExecutionConfig)
 	out := taskDetailJSON{taskJSON: taskJSON{Task: task}, Events: events, CurrentHandoffs: []db.Handoff{}}
+	sessions, err := s.Store.TaskSessions(ctx, id)
+	if err != nil {
+		return err
+	}
+	out.Sessions = make([]taskSessionJSON, 0, len(sessions))
+	for _, session := range sessions {
+		state := taskSessionState(session)
+		state.Current = task.Session != nil && *task.Session == state.Session
+		out.Sessions = append(out.Sessions, taskSessionJSON{taskSessionStateJSON: state, RecordedAt: session.RecordedAt})
+	}
 	if task.Session != nil {
 		obs, e := s.Store.Observation(ctx, *task.Session)
 		if e == nil {
-			out.Links, out.FinalReply, out.Usage = obs.Links, obs.Reply, obs.Usage
+			out.Links, out.FinalReply, out.Usage = obs.Links, boundedTaskReply(obs.Reply), obs.Usage
 			d, _ := s.registry().Lookup(task.Harness)
 			out.Facts = d.DisplayFacts(obs.Facts)
 			if obs.Branch != "" || obs.Directory != "" {

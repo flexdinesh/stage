@@ -194,6 +194,16 @@ func printAnyTask(w io.Writer, v any) {
 
 func printTaskDetail(w io.Writer, d client.TaskDetail) {
 	printTask(w, d.Task)
+	for _, session := range d.Sessions {
+		state, current := session.State, ""
+		if state == "" {
+			state = "unknown"
+		}
+		if session.Current {
+			current = " (current)"
+		}
+		fmt.Fprintf(w, "  attempt %d  %s  %s%s\n", session.Attempt, state, session.Session.ExternalSessionID, current)
+	}
 	printUsage(w, d.Usage)
 	printHandoff(w, d)
 	fmt.Fprintf(w, "\n%s\n", strings.TrimRight(d.Prompt, "\n"))

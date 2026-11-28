@@ -772,8 +772,38 @@ export interface Usage {
   costUsd: number | null;
 }
 
+interface TaskSessionState {
+  attempt: number;
+  session: SessionRef;
+  current: boolean;
+  state: string;
+  stateReason: string;
+  observedAt: string | null;
+  links?: ExecutionLinks;
+}
+
+export interface TaskSessionSummary extends TaskSessionState {
+  recordedAt: string;
+}
+
+interface TaskReply {
+  itemId: string;
+  runId: string;
+  text: string;
+  truncated: boolean;
+  updatedAt: string;
+}
+
+export interface TaskSessionSnapshot extends TaskSessionState {
+  reply: TaskReply | null;
+  usage: Usage | null;
+  facts: HarnessFact[];
+  reported?: { branch?: string; directory?: string };
+}
+
 export interface TaskDetail extends Task {
-  finalReply?: { text: string; truncated: boolean; updatedAt: string; runId: string };
+  finalReply?: TaskReply;
+  sessions: TaskSessionSummary[];
   /** The current session's usage, when its harness reports one. */
   usage?: Usage;
   facts?: HarnessFact[];

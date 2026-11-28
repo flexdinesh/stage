@@ -70,6 +70,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	54: {{name: "one held notification per task; tree hold defaults to 300", seed: seedV0040SharedAccess, check: checkV0054NotificationHolds}},
 	55: {{name: "existing binding has no finish or completion", seed: seedV0055Steerer, check: checkV0055SteeringFinish}},
 	56: {{name: "notification subjects keep history and extend saved filters", seed: seedV0056NotificationSubjects, check: checkV0056NotificationSubjects}},
+	57: {{name: "current task sessions backfilled", seed: seedV0057TaskSessions, check: checkV0057TaskSessions}},
 }
 
 func checkV0054NotificationHolds(t *testing.T, pool *sql.DB) {
@@ -115,6 +116,21 @@ func checkV0053SteeringLaunchContext(t *testing.T, pool *sql.DB) {
 		t.Fatal(err)
 	}
 	wantPGRows(t, pool, `SELECT count(*)::text FROM steering_launch_context`, "0")
+}
+
+func seedV0057TaskSessions(t *testing.T, pool *sql.DB) {
+	migrationfixture.SeedTaskSessions(t, func(query string) error {
+		_, err := pool.Exec(query)
+		return err
+	})
+}
+
+func checkV0057TaskSessions(t *testing.T, pool *sql.DB) {
+	migrationfixture.CheckTaskSessions(t, func(query string) (int, error) {
+		var n int
+		err := pool.QueryRow(query).Scan(&n)
+		return n, err
+	})
 }
 
 func seedV0056NotificationSubjects(t *testing.T, pool *sql.DB) {

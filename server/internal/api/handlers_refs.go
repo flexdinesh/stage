@@ -26,6 +26,7 @@ type refJSON struct {
 	Session      *db.SessionRef  `json:"session"`
 	Kind         refs.Kind       `json:"kind"`
 	TaskID       *int64          `json:"taskId"`
+	Attempt      *int            `json:"attempt,omitempty"`
 	TreeID       *int64          `json:"treeId,omitempty"`
 	ScheduleID   *int64          `json:"scheduleId,omitempty"`
 	ProjectID    *int64          `json:"projectId,omitempty"`
@@ -139,6 +140,23 @@ func (s *server) resolveRef(w http.ResponseWriter, r *http.Request) error {
 			out.TaskID = &owner.ID
 			out.State = &owner.State
 			out.SessionTitle = owner.Title
+			break
+		}
+		if !errors.Is(err, db.ErrNotFound) {
+			return err
+		}
+		history, err := s.Store.TaskSessionOwner(ctx, target)
+		if err == nil {
+			session, err := s.Store.TaskSession(ctx, history.TaskID, history.Attempt)
+			if err != nil {
+				return err
+			}
+			out.TaskID, out.Attempt = &history.TaskID, &history.Attempt
+			out.SessionTitle, out.Links = session.Observation.Title, session.Observation.Links
+			if state := session.Observation.State; state != "" && state != "idle" {
+				shaped := db.TaskState(state)
+				out.State = &shaped
+			}
 			break
 		}
 		if !errors.Is(err, db.ErrNotFound) {

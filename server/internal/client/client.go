@@ -222,6 +222,7 @@ type TaskDetail struct {
 	FinalReply  *execution.Reply `json:"finalReply,omitempty"`
 	Usage       *execution.Usage `json:"usage,omitempty"` // the current session's, when its harness reports one
 	Facts       []execution.Fact `json:"facts,omitempty"`
+	Sessions    []TaskSession    `json:"sessions"`
 	Acceptances []db.Acceptance  `json:"acceptances"`
 	Task
 	Events []db.TaskEvent `json:"events"`
@@ -231,6 +232,18 @@ type TaskDetail struct {
 	// CurrentSteering: the steering brief the current launch attempt
 	// appended (nil: none).
 	CurrentSteering *db.SteeringBrief `json:"currentSteering"`
+}
+
+// TaskSession summarizes a recorded attempt for task detail.
+type TaskSession struct {
+	Attempt     int              `json:"attempt"`
+	Session     db.SessionRef    `json:"session"`
+	Current     bool             `json:"current"`
+	RecordedAt  time.Time        `json:"recordedAt"`
+	State       string           `json:"state"`
+	StateReason string           `json:"stateReason"`
+	ObservedAt  *time.Time       `json:"observedAt"`
+	Links       *execution.Links `json:"links,omitempty"`
 }
 
 // TreeDetail is a tree with its members, edges and levels.
@@ -871,6 +884,7 @@ type Ref struct {
 	Session      *db.SessionRef  `json:"session"`
 	Kind         string          `json:"kind"` // task | tree | schedule | project | journal | session
 	TaskID       *int64          `json:"taskId"`
+	Attempt      *int            `json:"attempt,omitempty"`
 	TreeID       *int64          `json:"treeId,omitempty"`
 	ScheduleID   *int64          `json:"scheduleId,omitempty"`
 	ProjectID    *int64          `json:"projectId,omitempty"`

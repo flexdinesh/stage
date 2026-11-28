@@ -114,6 +114,9 @@ func (s *server) prepareAdoption(ctx context.Context, ref db.SessionRef) (*db.Ad
 	if !errors.Is(err, db.ErrNotFound) {
 		return nil, err
 	}
+	if _, err := s.Store.TaskSessionOwner(ctx, ref); !errors.Is(err, db.ErrNotFound) {
+		return nil, err
+	}
 	_, workspace, err := s.verifyAdoption(ctx, ref, execution.SessionReadConfirm, true)
 	return workspace, err
 }

@@ -495,6 +495,11 @@ func (s *Store) TransitionTask(ctx context.Context, t Transition) (TransitionRes
 		if err != nil {
 			return err
 		}
+		if sessionID != nil && !t.BeginAttempt {
+			if err := s.recordTaskSession(ctx, tx, t.TaskID, res.Attempt, *sessionID); err != nil {
+				return err
+			}
+		}
 		if t.BeginAttempt {
 			a := tx.Attempts()
 			cause := WorkAttribution(ctx).Cause
