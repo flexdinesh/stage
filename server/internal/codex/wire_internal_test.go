@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -122,10 +123,16 @@ func TestObservationNeverInfersAnOutcomeFromUnknownState(t *testing.T) {
 	if o, err := a.observation(th, nil, false); err != nil || o.State != "idle" {
 		t.Fatal(o, err)
 	}
+	ended := int64(2)
 	for status, want := range map[string]string{turnFailed: "failed", turnInterrupted: "interrupted"} {
-		if o, err := a.observation(th, &turn{ID: "t", Status: status}, false); err != nil || o.State != want || o.StateReason != "" {
+		if o, err := a.observation(th, &turn{ID: "t", Status: status, CompletedAt: &ended}, false); err != nil || o.State != want || o.StateReason != "" {
 			t.Fatal(status, o, err)
 		}
+	}
+	// Interrupted without completedAt on an idle thread: a turn still
+	// settling after turn/start, no evidence yet (Observe rereads it).
+	if o, err := a.observation(th, &turn{ID: "t", Status: turnInterrupted}, false); !errors.Is(err, errUnclosed) || o.State != "interrupted" {
+		t.Fatal(o, err)
 	}
 }
 

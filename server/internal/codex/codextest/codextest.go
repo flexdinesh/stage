@@ -95,6 +95,11 @@ type Server struct {
 	// yet" once a first turn started (TurnsNotYet); pendingNotYet arms it.
 	turnsNotYet   int
 	pendingNotYet int
+	// startSettle: thread/turns/list calls left, after a turn/start, that
+	// see the thread idle and the new turn interrupted without completedAt
+	// (StartSettles); pendingSettle arms it.
+	startSettle   int
+	pendingSettle int
 	calls         map[string]int
 	// mcpServers answers mcpServerStatus/list; rateLimits
 	// account/rateLimits/read (nil: Codex's auth error).
@@ -230,6 +235,13 @@ func (s *Server) DropReply(method string, n int) { s.mu.Lock(); s.drop[method] =
 // (codex 0.172.0, live in #551: a just-started first turn is not listable
 // for a moment).
 func (s *Server) TurnsNotYet(n int) { s.mu.Lock(); s.turnsNotYet = n; s.mu.Unlock() }
+
+// StartSettles makes the next n thread/turns/list calls after each
+// turn/start see Codex's view while the turn settles (codex 0.172.0, live
+// in #555: for about 20 ms after turn/start and unsubscribe): thread/read
+// reports the thread idle and the new turn reads interrupted without
+// completedAt. Each such list call uses one; n < 0 never settles.
+func (s *Server) StartSettles(n int) { s.mu.Lock(); s.startSettle = n; s.mu.Unlock() }
 
 // SetMCPServers sets the configured MCP servers (MCPServer entries).
 func (s *Server) SetMCPServers(v ...map[string]any) { s.mu.Lock(); s.mcpServers = v; s.mu.Unlock() }
@@ -586,6 +598,7 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		if len(th.Turns) == 0 {
 			s.pendingNotYet = s.turnsNotYet
 		}
+		s.pendingSettle = s.startSettle
 		th.Turns = append(th.Turns, tu)
 		th.Effort = str("effort")
 		th.persisted, th.Status, th.Flags, th.Updated = true, "active", []string{}, s.now
@@ -610,7 +623,11 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		}
 		var include bool
 		_ = json.Unmarshal(p["includeTurns"], &include)
-		return map[string]any{"thread": wireThread(th, include)}, nil
+		m := wireThread(th, include)
+		if s.pendingSettle != 0 && th.Status == "active" {
+			m["status"] = map[string]any{"type": "idle"}
+		}
+		return map[string]any{"thread": m}, nil
 	case "thread/turns/list":
 		th, e := thread()
 		if e != nil {
@@ -631,8 +648,16 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		}
 		view := str("itemsView")
 		out := make([]any, 0, len(turns))
+		settling := s.pendingSettle != 0 && th.Status == "active"
+		if settling && s.pendingSettle > 0 {
+			s.pendingSettle--
+		}
 		for _, tu := range turns {
-			out = append(out, wireTurn(tu, view))
+			w := wireTurn(tu, view)
+			if settling && tu.Status == "inProgress" {
+				w["status"] = "interrupted"
+			}
+			out = append(out, w)
 		}
 		return map[string]any{"data": out, "nextCursor": nil, "backwardsCursor": nil}, nil
 	case "thread/list":

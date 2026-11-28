@@ -251,6 +251,18 @@ func TestLaunchWaitsForTheFirstTurnToBeListable(t *testing.T) {
 	}
 }
 
+// The launch's own observation waits out the turn settling (thread idle,
+// turn interrupted without completedAt) and reports it running.
+func TestLaunchWaitsForTheFirstTurnToSettle(t *testing.T) {
+	r := newRig(t)
+	r.srv.StartSettles(2)
+	var cps checkpoints
+	o, err := r.adapter.Launch(t.Context(), intent("/w/app"), execution.Checkpoint{}, cps.save)
+	if err != nil || o.State != "running" {
+		t.Fatalf("%+v %v", o, err)
+	}
+}
+
 func TestLaunchStopsWhenCheckpointFails(t *testing.T) {
 	r := newRig(t)
 	cps := checkpoints{fail: true}
