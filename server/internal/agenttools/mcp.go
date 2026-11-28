@@ -113,7 +113,7 @@ func NewServer(o *Ops) *mcp.Server {
 	add(s, o, "list_trees", "List trees (compact rows: member counts by state, levels, projects, status); default active trees (status done|archived|all for others).", ro, o.ListTrees)
 	add(s, o, "get_tree", "Read a tree: members (with needs, dependents, readiness), edges and levels (task ids per level, roots first).", ro, o.GetTree)
 	add(s, o, "create_tree", "Create a tree from existing tasks with the needs between them (a task in another tree moves).", nil, o.CreateTree)
-	add(s, o, "update_tree", "Rename a tree, set its start mode (auto | manual; inherited by default, preserves explicit task overrides), or set its status: done (you will not work on the rest; members keep their states, nothing more starts), archived, or open (reopen). Done and archived trees leave the default lists; member activity does not reopen the tree.", nil, o.UpdateTree)
+	add(s, o, "update_tree", "Rename a tree, set its start mode (auto | manual; inherited by default, preserves explicit task overrides), its steeringHoldSeconds, or its status: done (you will not work on the rest; members keep their states, nothing more starts), archived, or open (reopen). Done and archived trees leave the default lists; member activity does not reopen the tree.", nil, o.UpdateTree)
 	add(s, o, "delete_tree", "Delete a tree and all its tasks only when no recorded work is protected, including work from former members; otherwise archive it.", del, o.DeleteTree)
 	add(s, o, "dissolve_tree", "Dissolve a tree: detach every member (each becomes standalone and its needs go) and archive the tree. Tasks, the tree's identity and its journal stay readable.", nil, o.DissolveTree)
 	add(s, o, "add_to_tree", "Add a task to a tree: without needs it is a parallel root; with needs it runs after those members (a task in another tree moves).", nil, o.AddToTree)
@@ -122,6 +122,7 @@ func NewServer(o *Ops) *mcp.Server {
 	add(s, o, "start_tree", "Start every ready member of a tree (manual trees, ready roots).", nil, o.StartTree)
 	add(s, o, "set_tree_steerer", "Give a tree a steerer: Stage creates a standalone task with your prompt, binds it to the tree and launches it. The steerer hears about member changes (get_steering_events) and acts on them; it is never a member. One per tree: replace ends and stops the current one. The connection's harness must offer send.", nil, o.SetTreeSteerer)
 	add(s, o, "end_tree_steering", "Stop steering a tree: end its steerer binding and stop the steerer's session.", nil, o.EndTreeSteering)
+	add(s, o, "escalate_to_user", "As a tree's steerer, hand a member's wait to the user now: Stage releases the member's held needs-input notification (or notifies at once when nothing is held) with your reason. Only the tree's active steerer may call it.", nil, o.EscalateToUser)
 	add(s, o, "get_steering_events", "Read a tree's steering events after a cursor, oldest first: member state changes, answers, acceptances, notes, tree status and steering changes. self marks events the steerer caused.", ro, o.GetSteeringEvents)
 	add(s, o, "adopt_session", "Track a top-level harness session as a task (default: your own session) so it can be a tree node; stage never starts it. Returns the existing task when one owns the session.", nil, o.AdoptSession)
 

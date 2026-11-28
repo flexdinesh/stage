@@ -175,6 +175,8 @@ type TreePatch struct {
 	StartMode Optional[StartMode] `json:"startMode"`
 	// Status is applied by SetTreeStatus (UpdateTree ignores it).
 	Status Optional[TreeStatus] `json:"status"`
+	// SteeringHoldSeconds: 0 (off) to MaxSteeringHold (ADR 0013).
+	SteeringHoldSeconds Optional[int64] `json:"steeringHoldSeconds"`
 }
 
 // TreeLevels groups ids into levels: a task's level is the longest need path
@@ -417,6 +419,14 @@ func (s *Store) UpdateTree(ctx context.Context, id int64, p TreePatch) (Tree, er
 		}
 		if p.StartMode.Set {
 			if err := treeOpen(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		if hold := p.SteeringHoldSeconds; hold.Set {
+			if hold.Null || hold.V < 0 || hold.V > MaxSteeringHold {
+				return Invalid("steeringHoldSeconds must be 0 to %d", MaxSteeringHold)
+			}
+			if err := setSteeringHold(ctx, tx, id, hold.V); err != nil {
 				return err
 			}
 		}

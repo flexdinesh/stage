@@ -165,6 +165,25 @@ func runTaskWork(ctx context.Context, c *cmd, v string, rest []string) error {
 			return err
 		}
 		return printTask(res)
+	case "escalate":
+		var reason string
+		c.fs.StringVar(&reason, "reason", "", "why the user must answer (at most 500 characters)")
+		if err := c.parse(rest); err != nil {
+			return err
+		}
+		id, err := c.oneID()
+		if err != nil {
+			return err
+		}
+		ca, err := callerArgs()
+		if err != nil {
+			return err
+		}
+		res, err := c.ops().EscalateToUser(ctx, agenttools.EscalateToUserArgs{CallerArgs: ca, TaskID: id, Reason: reason})
+		if err != nil {
+			return err
+		}
+		return printTask(res)
 	case "opening-prompt":
 		var full bool
 		c.fs.BoolVar(&full, "full", false, "untruncated")

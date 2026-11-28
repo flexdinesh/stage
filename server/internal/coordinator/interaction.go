@@ -40,6 +40,20 @@ func (s *Service) interactive(ctx context.Context, id int64, op execution.Op) (d
 	return t, in, nil
 }
 
+// CanAnswer reports whether connection id offers respond or send, so a
+// steerer can answer its tasks' waits (ADR 0013 notification hold).
+func (s *Service) CanAnswer(ctx context.Context, id int64) (bool, error) {
+	a, err := s.conns.Catalog(id)
+	if err != nil {
+		return false, err
+	}
+	features, err := a.Features(ctx)
+	if err != nil {
+		return false, harnessErr(err)
+	}
+	return features.Operations[execution.OpRespond].Available || features.Operations[execution.OpSend].Available, nil
+}
+
 func unavailable(op execution.Op, reason string) error {
 	if strings.TrimSpace(reason) == "" {
 		reason = "the harness reports it unavailable"

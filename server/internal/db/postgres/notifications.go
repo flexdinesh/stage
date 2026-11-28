@@ -25,7 +25,7 @@ const notificationKeySQL = `CASE
 const notificationColumns = `COALESCE((SELECT connection_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),0), n.id, n.event, n.task_id, (SELECT external_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)), n.title, n.project_title,
   n.url, n.created_at, CASE WHEN r.notification_id IS NULL THEN n.created_at ELSE r.read_at END AS read_at,
   CASE WHEN n.task_id IS NOT NULL THEN tk.state
-       WHEN o.session_id IS NOT NULL THEN o.observation->>'state' END AS current_state`
+       WHEN o.session_id IS NOT NULL THEN o.observation->>'state' END AS current_state, n.note`
 
 const notificationJoins = `
 LEFT JOIN tasks tk ON tk.id = n.task_id
@@ -39,8 +39,8 @@ func (r notifications) Insert(ctx context.Context, n store.NewNotification, sid 
 		return 0, err
 	}
 	var id int64
-	err := r.QueryRow(ctx, `INSERT INTO notifications(event,task_id,title,project_title,url,session_id,created_at) VALUES($1,$2,$3,$4,$5,$6,COALESCE($7::timestamptz,now())) RETURNING id`,
-		string(n.Event), n.TaskID, n.Title, n.ProjectTitle, n.URL, sid, n.ObservedAt).Scan(&id)
+	err := r.QueryRow(ctx, `INSERT INTO notifications(event,task_id,title,project_title,url,session_id,created_at,note) VALUES($1,$2,$3,$4,$5,$6,COALESCE($7::timestamptz,now()),$8) RETURNING id`,
+		string(n.Event), n.TaskID, n.Title, n.ProjectTitle, n.URL, sid, n.ObservedAt, n.Note).Scan(&id)
 	return id, err
 }
 
@@ -80,7 +80,7 @@ LIMIT $1`, limit, beforeID, key, userID)
 func scanNotification(row rowScanner) (store.Notification, error) {
 	var n store.Notification
 	err := row.Scan(&n.ConnectionID, &n.ID, &n.Event, &n.TaskID, &n.ExternalSessionID, &n.Title, &n.ProjectTitle,
-		&n.URL, &n.CreatedAt, &n.ReadAt, &n.CurrentState)
+		&n.URL, &n.CreatedAt, &n.ReadAt, &n.CurrentState, &n.Note)
 	return n, err
 }
 
@@ -145,7 +145,7 @@ LIMIT $1`, limit, waiting, beforeID, upToID, userID)
 	for rows.Next() {
 		var g store.NotificationGroup
 		if err := rows.Scan(&g.ConnectionID, &g.ID, &g.Event, &g.TaskID, &g.ExternalSessionID, &g.Title, &g.ProjectTitle,
-			&g.URL, &g.CreatedAt, &g.ReadAt, &g.CurrentState, &g.Key, &g.EventCount, &g.UnreadCount); err != nil {
+			&g.URL, &g.CreatedAt, &g.ReadAt, &g.CurrentState, &g.Note, &g.Key, &g.EventCount, &g.UnreadCount); err != nil {
 			return nil, err
 		}
 		out = append(out, g)

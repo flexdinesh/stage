@@ -67,6 +67,37 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	51: {{name: "existing task starts at revision 0, unanswered", seed: seedV0040SharedAccess, check: checkV0051StateRevision}},
 	52: {{name: "one active steerer per tree and per task", seed: seedV0040SharedAccess, check: checkV0052TreeSteering}},
 	53: {{name: "one steering brief per task attempt", seed: seedV0040SharedAccess, check: checkV0053SteeringLaunchContext}},
+	54: {{name: "one held notification per task; tree hold defaults to 300", seed: seedV0040SharedAccess, check: checkV0054NotificationHolds}},
+}
+
+func checkV0054NotificationHolds(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	exec := func(q string) {
+		t.Helper()
+		if _, err := pool.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	exec(`INSERT INTO task_trees(id,title) VALUES(9,'Steered')`)
+	wantPGRows(t, pool, `SELECT steering_hold_seconds::text FROM task_trees WHERE id=9`, "300")
+	exec(`INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest) VALUES(9,6,'r1','d')`)
+	held := `INSERT INTO notification_holds(task_id,state_revision,steerer_id,held_at,hold_until) SELECT 6,1,id,now(),now() FROM tree_steerers WHERE request_id='r1'`
+	exec(held)
+	for _, q := range []string{
+		held,
+		`UPDATE task_trees SET steering_hold_seconds=3601 WHERE id=9`,
+		`UPDATE task_trees SET steering_hold_seconds=-1 WHERE id=9`,
+		`UPDATE notification_holds SET state='unknown'`,
+	} {
+		if _, err := pool.Exec(q); err == nil {
+			t.Fatalf("accepted %s", q)
+		}
+	}
+	exec(`UPDATE notification_holds SET state='cancelled',reason='answered'`)
+	exec(held)
+	exec(`INSERT INTO notifications(event,task_id,title,url,note) VALUES('needs_input',6,'T','/tasks/6','Steerer did not answer')`)
+	wantPGRows(t, pool, `SELECT state || '|' || count(*)::text FROM notification_holds GROUP BY state ORDER BY state`, "cancelled|1", "held|1")
+	wantPGRows(t, pool, `SELECT note FROM notifications`, "Steerer did not answer")
 }
 
 func checkV0053SteeringLaunchContext(t *testing.T, pool *sql.DB) {

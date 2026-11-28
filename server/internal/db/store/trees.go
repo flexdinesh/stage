@@ -24,6 +24,9 @@ type Tree struct {
 	JournalActivityAt time.Time `json:"-"`
 	// Steerer: the tree's active steerer (nil: none; ADR 0013).
 	Steerer *TreeSteerer `json:"steerer"`
+	// SteeringHoldSeconds: how long a member's needs_input notification
+	// waits for the steerer (0: off; ADR 0013).
+	SteeringHoldSeconds int64 `json:"steeringHoldSeconds"`
 }
 
 // TreeEdge: TaskID needs NeedID.
@@ -94,6 +97,10 @@ type Trees interface {
 	Config(ctx context.Context, id int64) (string, StartMode, error)
 	// Update sets the title and start mode when set, and updated_at.
 	Update(ctx context.Context, id int64, title Optional[string], mode Optional[StartMode]) error
+	// SteeringHold is the tree's steering_hold_seconds.
+	SteeringHold(ctx context.Context, id int64) (int64, error)
+	// SetSteeringHold sets it.
+	SetSteeringHold(ctx context.Context, id, seconds int64) error
 	SetStatus(ctx context.Context, id int64, status TreeStatus) error
 	// MarkRecordedWork protects the tree from deletion and, with touched,
 	// sets its updated_at.

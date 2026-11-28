@@ -83,7 +83,7 @@ var seedSQL = []string{
 	`DELETE FROM project_events WHERE id = 9`,
 	`INSERT INTO project_merge_dismissals (project_id, other_id) VALUES (1, 2)`,
 	`INSERT INTO schedules (id, project_id, title, prompt, cron, tz, next_run_at, connection_id, origin_session_id, execution_config, binding_id, workspace_pin) VALUES (1, 1, 'Nightly', 'p', '0 0 * * *', 'UTC', '2026-11-07T00:00:00.000000Z', 1, 1, '{"model":"x","options":[]}', 2, '{"root":"/old/w2","externalId":"ext-1-secondary"}')`,
-	`INSERT INTO task_trees (id, title, status, closed_at, recorded_work, membership_revision) VALUES (1, 'Tree', 'done', '2026-11-08T00:00:00.000000Z', 1, 2)`,
+	`INSERT INTO task_trees (id, title, status, closed_at, recorded_work, membership_revision, steering_hold_seconds) VALUES (1, 'Tree', 'done', '2026-11-08T00:00:00.000000Z', 1, 2, 120)`,
 	`INSERT INTO tasks (id, project_id, title, prompt, state, launch_attempt, launched_at, finished_at, schedule_id, tree_id, start_at, start_tz, connection_id, session_id, execution_config, recorded_work, acceptance_revision, acceptance_id, binding_id) VALUES (1, 1, 'First', 'do it', 'done', 1, '2026-11-09T00:00:00.000001Z', '2026-11-09T01:00:00.999999Z', 1, 1, '2026-11-09T00:00:00.000000Z', 'UTC', 1, 1, '{"permission":"full-access","options":[{"id":"worktree","value":true},{"id":"branch","value":"b"}]}', 1, 1, 1, 1)`,
 	`INSERT INTO tasks (id, project_id, title, prompt, tree_id, workspace_pin, launch_attempt) VALUES (2, 1, 'needle %_\ "quoted"', 'prompt with
 newline and 日本語', 1, '{"externalId":"next","root":"/next"}', 1)`,
@@ -112,7 +112,9 @@ newline and 日本語', 1, '{"externalId":"next","root":"/next"}', 1)`,
 	`INSERT INTO task_attachments (task_id, name, mime_type, size_bytes, data) VALUES (1, 'a.png', 'image/png', 4, X'89504E47')`,
 	`INSERT INTO task_attachments (schedule_id, name, mime_type, size_bytes, data) VALUES (1, 'b.gif', 'image/gif', 3, X'00FF00')`,
 	`INSERT INTO schedule_runs (schedule_id, fire_at, outcome, task_id) VALUES (1, '2026-11-07T00:00:00.000000Z', 'started', 1)`,
-	`INSERT INTO notifications (event, task_id, title, project_title, url, session_id) VALUES ('done', 1, 'Done', 'Proj', '/tasks/1', 1)`,
+	`INSERT INTO notifications (event, task_id, title, project_title, url, session_id, note) VALUES ('done', 1, 'Done', 'Proj', '/tasks/1', 1, 'Steerer: why ✓')`,
+	`INSERT INTO notification_holds (id, task_id, state_revision, steerer_id, held_at, hold_until, state, notification_id, reason, attribution) VALUES
+	  (1, 2, 3, 1, '2026-11-09T00:00:00.000001Z', '2026-11-09T00:05:00.000001Z', 'escalated', 1, 'why', '{ "actor": { "kind": "agent" } }')`,
 	`INSERT INTO notification_recipients (notification_id, user_id, read_at) VALUES (1, 1, '2026-11-06T01:00:00.000000Z')`,
 	`UPDATE notification_preferences SET notify_events = '["done", "failed"]' WHERE user_id = 1`,
 	`INSERT INTO push_subscriptions (endpoint, p256dh, auth, auth_session_id, binding)

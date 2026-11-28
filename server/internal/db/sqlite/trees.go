@@ -21,11 +21,11 @@ const treeActivitySQL = `max(tr.created_at, tr.updated_at, COALESCE((SELECT max(
  FROM tasks m LEFT JOIN execution_observations o ON o.session_id = m.session_id WHERE m.tree_id = tr.id), ''))`
 
 const treeColumns = `tr.id, tr.title, tr.start_mode, tr.status, tr.closed_at, tr.created_at, tr.created_by_user_id, tr.source_machine_id, tr.updated_at,
-  (tr.recorded_work = 0 AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.tree_id = tr.id AND NOT ` + unstartedSQL + `)), ` + treeActivitySQL
+  (tr.recorded_work = 0 AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.tree_id = tr.id AND NOT ` + unstartedSQL + `)), ` + treeActivitySQL + `, tr.steering_hold_seconds`
 
 func scanTree(row rowScanner) (store.Tree, error) {
 	var t store.Tree
-	err := row.Scan(&t.ID, &t.Title, &t.StartMode, &t.Status, &t.ClosedAt, &t.CreatedAt, &t.CreatedBy, &t.SourceMachineID, &t.UpdatedAt, &t.Deletable, &t.JournalActivityAt)
+	err := row.Scan(&t.ID, &t.Title, &t.StartMode, &t.Status, &t.ClosedAt, &t.CreatedAt, &t.CreatedBy, &t.SourceMachineID, &t.UpdatedAt, &t.Deletable, &t.JournalActivityAt, &t.SteeringHoldSeconds)
 	return t, notFound(err)
 }
 
@@ -124,6 +124,17 @@ func (r trees) Update(ctx context.Context, id int64, title store.Optional[string
 		sets = append(sets, "start_mode = "+w.arg(mode.V))
 	}
 	_, err := r.Exec(ctx, `UPDATE task_trees SET `+strings.Join(sets, ", ")+` WHERE id = $1`, w.args...)
+	return err
+}
+
+func (r trees) SteeringHold(ctx context.Context, id int64) (int64, error) {
+	var seconds int64
+	err := r.QueryRow(ctx, `SELECT steering_hold_seconds FROM task_trees WHERE id = $1`, id).Scan(&seconds)
+	return seconds, notFound(err)
+}
+
+func (r trees) SetSteeringHold(ctx context.Context, id, seconds int64) error {
+	_, err := r.Exec(ctx, `UPDATE task_trees SET steering_hold_seconds = $2, updated_at = `+nowSQL+` WHERE id = $1`, id, seconds)
 	return err
 }
 

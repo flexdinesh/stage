@@ -54,6 +54,7 @@ type Tx interface {
 	Schedules() Schedules
 	Trees() Trees
 	Steering() Steering
+	Holds() Holds
 }
 
 // Migrator applies the engine's embedded migrations (same version numbers

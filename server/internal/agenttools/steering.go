@@ -67,3 +67,18 @@ type SteeringEventsArgs struct {
 func (o *Ops) GetSteeringEvents(ctx context.Context, a SteeringEventsArgs) (client.SteeringEvents, error) {
 	return o.Client.TreeSteeringEvents(ctx, a.TreeID, a.After, a.Limit)
 }
+
+// EscalateToUserArgs is escalate_to_user.
+type EscalateToUserArgs struct {
+	CallerArgs
+	TaskID int64  `json:"taskId" jsonschema:"member task whose wait the user must answer"`
+	Reason string `json:"reason" jsonschema:"why the user must answer (at most 500 characters); shown in the notification"`
+}
+
+func (o *Ops) EscalateToUser(ctx context.Context, a EscalateToUserArgs) (client.Task, error) {
+	c, err := o.caller(ctx, a.CallerArgs)
+	if err != nil {
+		return client.Task{}, err
+	}
+	return o.Client.EscalateTask(ctx, a.TaskID, a.Reason, c.Session)
+}

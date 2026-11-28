@@ -59,3 +59,11 @@ func (c *Client) TreeSteeringEvents(ctx context.Context, id, after int64, limit 
 	err := c.do(ctx, http.MethodGet, path, nil, &out)
 	return out, err
 }
+
+// EscalateTask is escalate_to_user: the caller (the active steerer of the
+// task's tree) notifies the user about task id's wait now, with reason.
+func (c *Client) EscalateTask(ctx context.Context, id int64, reason string, caller *db.SessionRef) (Task, error) {
+	var out Task
+	err := c.doCaller(ctx, http.MethodPost, taskPath(id, "escalate"), map[string]string{"reason": reason}, caller, &out)
+	return out, err
+}

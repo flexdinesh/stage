@@ -219,6 +219,20 @@ first composition (`INSERT … ON CONFLICT (name) DO NOTHING`, then read
 back, so concurrent launches agree) rather than seeded by a migration, so
 data copies and baselines carry no default row.
 
+`notification_holds` holds a member's `needs_input` notification while its
+tree's steerer can answer (`task_trees.steering_hold_seconds`, 0 off, at most
+3600, default 300; docs/api.md "Notification rules"). A partial unique index
+allows one `held` row per task; `state_revision` is the wait it holds,
+`steerer_id` the binding (cascades with it and with the task). The
+notification row is inserted only at release (the inbox cursor is
+id-ordered), in the same `Write` that moves the hold to `escalated` or
+`released` and sets `notification_id`. A real state transition and a
+guarded answer at the held revision cancel it in their own `Write`
+(`addTaskEventType`, `RecordTaskAnswer`). `reason`: an escalation's text
+(null on expiry), a release code (`steerer_ended`, `steerer_inactive`,
+`left_tree`, `unanswerable`) or a cancel code (`answered`, `state_changed`).
+`notifications.note` carries the released notification's note.
+
 ## Journal events
 
 Rows derived from a change are written by Go in `internal/db`
@@ -625,6 +639,10 @@ and paging. (Thread search was removed with API v3.)
   Paired migration 0052 `tree_steering` adds `tree_steerers` and
   `steering_events` ([Tree steering](#tree-steering)). New tables, no
   backfill; copies carry both with their id sequences.
+  Paired migration 0054 `notification_holds` adds `notification_holds`,
+  `task_trees.steering_hold_seconds` (integer, default 300, checked 0 to
+  3600) and nullable `notifications.note` ([Tree steering](#tree-steering)).
+  Existing trees take the default; no backfill; copies carry them.
 - **No business rules in triggers.** Journal events are written by Go in the
   same `Write` as their cause ([Journal events](#journal-events)). A trigger may only maintain
   engine-internal structures (for example FTS tables), on one engine.

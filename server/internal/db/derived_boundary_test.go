@@ -19,8 +19,9 @@ var derivedWrites = map[string]map[string]string{
 	"Attempts":    {"RecordHandoff": "recordHandoff"},
 	"Threads":     {"Mirror": "mirrorThread"},
 	"Steering":    {"InsertEvent": "enqueueSteering", "Bind": "bindSteerer", "End": "endSteerer"},
+	"Holds":       {"Finish": "finishHold"},
 	"Trees": {
-		"Insert": "insertTree", "Update": "updateTree", "SetStatus": "setTreeStatus",
+		"Insert": "insertTree", "Update": "updateTree", "SetStatus": "setTreeStatus", "SetSteeringHold": "setSteeringHold",
 		"ArchiveDissolved": "archiveDissolved", "ArchiveIfEmpty": "setMembership",
 		"SetMembership": "setMembership", "AddNeed": "addNeed", "KeepNeeds": "keepNeeds",
 		"InheritNeeds": "inheritNeeds", "DropNeeds": "dropNeeds", "DropMemberNeeds": "detachMembers",
