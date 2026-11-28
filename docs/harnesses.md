@@ -169,7 +169,9 @@ with the harness's own API inside the adapter or setup package:
 - Return the native ID and root the next `Workspaces` call will list. Stage
   refreshes inventory and refuses a row the harness does not list.
 - Return `*execution.OutcomeUncertain` when the harness may have acted but
-  did not confirm. Use `requestId` to reconcile a retry.
+  did not confirm. Use `requestId` to reconcile a retry. When the harness
+  takes no request ID, list its workspaces before the call and again after a
+  lost reply, and return the match (T3 does this).
 - Put irreversible or trust-granting effects behind `Confirm`. Stage requires
   `confirmed: true` per request.
 

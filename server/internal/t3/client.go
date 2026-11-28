@@ -41,8 +41,12 @@ type Client interface {
 	Unpair(ctx context.Context) error
 	// ListProjects pages t3_project_list to completion.
 	ListProjects(ctx context.Context) ([]Project, error)
-	// CreateProject calls t3_project_create.
-	CreateProject(ctx context.Context, in CreateProjectInput) (Project, error)
+	// CreateProject calls t3_project_create (not retried: T3 has no request
+	// id for it).
+	CreateProject(ctx context.Context, in CreateProjectInput) (CreatedProject, error)
+	// CloneProject calls t3_project_clone (not retried). T3 sets no timeout;
+	// ctx bounds it.
+	CloneProject(ctx context.Context, in CloneInput) (CloneResult, error)
 	// ListThreads calls t3_thread_list for one page.
 	ListThreads(ctx context.Context, in ListThreadsInput) (ThreadPage, error)
 	// ReadThread calls t3_thread_read (items limit 1). ErrNotFound if unknown.
@@ -208,9 +212,31 @@ const (
 
 type Project = execution.WorkspaceInfo
 
+// CreateProjectInput is t3_project_create. An empty WorkspaceRoot asks T3
+// to start a new project from Title (a Git repository in its projects
+// folder); CreateIfMissing is then not sent.
 type CreateProjectInput struct {
-	Title         string
-	WorkspaceRoot string
+	Title           string
+	WorkspaceRoot   string
+	CreateIfMissing bool
+}
+
+// CreatedProject is t3_project_create's result. CommitError: T3 created the
+// project from its title but could not make the first commit.
+type CreatedProject struct {
+	Project
+	CommitError string
+}
+
+// CloneInput is t3_project_clone. DestinationPath must be new or empty.
+type CloneInput struct {
+	RemoteURL       string
+	DestinationPath string
+}
+
+// CloneResult is the checkout T3 cloned (not yet a project).
+type CloneResult struct {
+	Cwd string
 }
 
 type ListThreadsInput struct {

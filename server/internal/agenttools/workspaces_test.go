@@ -56,7 +56,7 @@ func TestWorkspaceTools(t *testing.T) {
 		t.Fatalf("sources %+v", sources)
 	}
 	mustCall(t, cs, "list_workspace_sources", map[string]any{"connectionId": 1}, &sources)
-	if sources.Availability.Available || sources.Availability.Reason != "Adding workspaces from Stage is not supported for T3 yet." || sources.Sources == nil {
+	if !sources.Availability.Available || len(sources.Sources) != 3 || sources.Sources[0].ID != t3.SourceFolder || sources.Sources[1].ID != t3.SourceClone || sources.Sources[2].ID != t3.SourceNew {
 		t.Fatalf("T3 sources %+v", sources)
 	}
 

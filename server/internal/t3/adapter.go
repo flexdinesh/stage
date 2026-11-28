@@ -78,7 +78,8 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	for _, op := range []execution.Op{execution.OpLaunch, execution.OpStop, execution.OpAdopt, execution.OpOpening, execution.OpReply, execution.OpAttention, execution.OpImages, execution.OpSessionSearch, execution.OpSessionRename, execution.OpRespond, execution.OpSend} {
 		out.Operations[op] = yes
 	}
-	out.Operations[execution.OpWorkspaceAdd] = execution.WorkspaceAddNotSupported(Descriptor.Name)
+	out.Operations[execution.OpWorkspaceAdd] = yes
+	out.WorkspaceSources = workspaceSources()
 	for _, mode := range []string{"approval-required", "auto-accept-edits", "auto", "full-access"} {
 		out.Permissions = append(out.Permissions, execution.Choice{ID: mode, Label: mode, Availability: yes})
 	}
@@ -530,8 +531,9 @@ func (a *Adapter) Launch(ctx context.Context, in execution.Intent, checkpoint ex
 }
 
 var (
-	_ execution.Adapter      = (*Adapter)(nil)
-	_ execution.SessionNamer = (*Adapter)(nil)
+	_ execution.Adapter        = (*Adapter)(nil)
+	_ execution.SessionNamer   = (*Adapter)(nil)
+	_ execution.WorkspaceAdder = (*Adapter)(nil)
 )
 
 func (a *Adapter) ResolveLink(ctx context.Context, raw string) (execution.SessionRef, error) {

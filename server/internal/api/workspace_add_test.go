@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -240,8 +241,19 @@ func TestWorkspaceAddLocalAndWorker(t *testing.T) {
 	}
 }
 
+// noWorkspaceAdd is T3 declaring workspaceAdd unsupported.
+type noWorkspaceAdd struct{ *t3.Adapter }
+
+func (a noWorkspaceAdd) Features(ctx context.Context) (execution.Capabilities, error) {
+	c, err := a.Adapter.Features(ctx)
+	if err == nil {
+		c.Operations[execution.OpWorkspaceAdd], c.WorkspaceSources = execution.WorkspaceAddNotSupported(t3.Descriptor.Name), nil
+	}
+	return c, err
+}
+
 func TestWorkspaceAddUnsupportedHarness(t *testing.T) {
-	e := newEnv(t)
+	e := newEnvWrapped(t, func(a *t3.Adapter) execution.Adapter { return noWorkspaceAdd{a} })
 	var caps execution.Capabilities
 	e.must("GET", "/api/connections/1/capabilities", nil, 200, &caps)
 	if op := caps.Operations[execution.OpWorkspaceAdd]; op.Available || op.Reason != "Adding workspaces from Stage is not supported for T3 yet." {
