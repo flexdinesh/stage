@@ -19,7 +19,7 @@ type Coordinator interface {
 	ReconcileLaunch(context.Context, db.Task) error
 	CheckObservation(string, execution.Observation) error
 	ApplyObservation(context.Context, *db.Store, db.Task, execution.Observation, time.Time, time.Time) (*workevent.TaskChange, bool, error)
-	PublishObservation(context.Context, *workevent.TaskChange, bool, bool)
+	PublishObservation(context.Context, *workevent.TaskChange, int64, bool)
 }
 
 type Adapters interface {

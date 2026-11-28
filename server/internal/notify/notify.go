@@ -49,30 +49,44 @@ type PushError struct {
 
 func (e *PushError) Error() string { return e.Msg }
 
-// event is a queued notification: exactly one of task / session / ready set.
+// event is a queued notification: exactly one of task / session / ready /
+// completed / schedule / saved set.
 type event struct {
-	task    *workevent.TaskChange
-	session *workevent.SessionChange
-	ready   *int64 // a manual tree member whose needs are completed
-	saved   *db.NewNotification
-	savedID int64
+	task      *workevent.TaskChange
+	session   *workevent.SessionChange
+	ready     *int64 // a manual tree member whose needs are completed
+	completed *completion
+	schedule  *scheduleRun
+	saved     *db.NewNotification
+	savedID   int64
 }
 
-func (e event) to() db.TaskState {
+// completion is a task accepted by inference or by an agent. AcceptanceID 0
+// stands for the task's current acceptance when the event is handled.
+type completion struct {
+	TaskID, AcceptanceID int64
+}
+
+// scheduleRun is a recorded cron fire (db.RunStarted, RunSkipped, RunMissed).
+type scheduleRun struct {
+	ScheduleID int64
+	Outcome    string
+}
+
+// direct is the event of a task or session change, and whether it notifies.
+func (e event) direct() (db.NotificationEvent, bool) {
 	switch {
-	case e.saved != nil:
-		return e.saved.Event
 	case e.task != nil:
-		return e.task.To
-	case e.ready != nil:
-		return db.EventReady
+		return db.NotificationEvent(e.task.To), workevent.TaskNotifiable(e.task.To)
+	case e.session != nil:
+		return db.NotificationEvent(e.session.To), workevent.SessionNotifiable(e.session.To)
 	}
-	return e.session.To
+	return "", false
 }
 
 // urgencyFor: high for needs input, normal otherwise.
-func urgencyFor(to db.TaskState) webpush.Urgency {
-	if to == db.StateNeedsInput {
+func urgencyFor(ev db.NotificationEvent) webpush.Urgency {
+	if ev == db.EventNeedsInput {
 		return webpush.UrgencyHigh
 	}
 	return webpush.UrgencyNormal
@@ -125,17 +139,17 @@ func New(store *db.Store, publicURL string, log *slog.Logger) *Notifier {
 	}
 }
 
-// OnTransition is the sync.Service task hook: transitions into needs_input,
-// done or failed are queued.
+// OnTransition is the sync.Service task hook: transitions into needs_input
+// or failed are queued.
 func (n *Notifier) OnTransition(_ context.Context, c workevent.TaskChange) {
-	if workevent.Notifiable(c.To) {
+	if workevent.TaskNotifiable(c.To) {
 		n.enqueue(event{task: &c})
 	}
 }
 
 // OnSessionChange is the sync.Service external session hook.
 func (n *Notifier) OnSessionChange(_ context.Context, c workevent.SessionChange) {
-	if workevent.Notifiable(c.To) {
+	if workevent.SessionNotifiable(c.To) {
 		n.enqueue(event{session: &c})
 	}
 }
@@ -144,6 +158,23 @@ func (n *Notifier) OnSessionChange(_ context.Context, c workevent.SessionChange)
 // completed (the ready event).
 func (n *Notifier) OnReady(_ context.Context, taskID int64) {
 	n.enqueue(event{ready: &taskID})
+}
+
+// OnCompleted queues a task accepted by inference (harness closure) or by an
+// agent; a person's own completion never calls it. acceptanceID 0 = the
+// task's current acceptance. It records completed, and tree_completed when
+// that acceptance was the last one its open tree needed.
+func (n *Notifier) OnCompleted(_ context.Context, taskID, acceptanceID int64) {
+	n.enqueue(event{completed: &completion{TaskID: taskID, AcceptanceID: acceptanceID}})
+}
+
+// OnScheduleRun is the schedule runner hook for a cron fire's outcome:
+// started notifies schedule_started, skipped and missed schedule_skipped.
+func (n *Notifier) OnScheduleRun(_ context.Context, scheduleID int64, outcome string) {
+	switch outcome {
+	case db.RunStarted, db.RunSkipped, db.RunMissed:
+		n.enqueue(event{schedule: &scheduleRun{ScheduleID: scheduleID, Outcome: outcome}})
+	}
 }
 
 func (n *Notifier) enqueue(e event) {
@@ -169,7 +200,7 @@ func (n *Notifier) Run(ctx context.Context) {
 func (n *Notifier) handle(ctx context.Context, e event) {
 	if e.saved != nil {
 		if n.SharedAccess {
-			n.sendAll(ctx, e.savedID, e.to(), PayloadFor(notificationFrom(*e.saved), 0))
+			n.sendAll(ctx, e.savedID, e.saved.Event, PayloadFor(notificationFrom(*e.saved), 0))
 			return
 		}
 		badge, err := n.store.NeedsInputCount(ctx)
@@ -177,7 +208,7 @@ func (n *Notifier) handle(ctx context.Context, e event) {
 			n.log.Warn("build notification", "err", err)
 			return
 		}
-		n.sendAll(ctx, e.savedID, e.to(), PayloadFor(notificationFrom(*e.saved), badge))
+		n.sendAll(ctx, e.savedID, e.saved.Event, PayloadFor(notificationFrom(*e.saved), badge))
 		return
 	}
 	// A hold comes before the filter: release applies it (holds.go).
@@ -191,22 +222,31 @@ func (n *Notifier) handle(ctx context.Context, e event) {
 			return
 		}
 	}
-	if !n.SharedAccess && !n.enabled(ctx, e.to()) {
-		return
-	}
-	var p Payload
-	var rec db.NewNotification
-	var err error
-	if n.SharedAccess {
-		rec, err = notificationRecord(ctx, n.store, e)
-		p = PayloadFor(notificationFrom(rec), 0)
-	} else {
-		p, rec, err = n.payload(ctx, e)
-	}
+	recs, err := notificationRecords(ctx, n.store, e)
 	if err != nil {
 		n.log.Warn("build notification", "err", err)
 		return
 	}
+	for _, rec := range recs {
+		n.deliver(ctx, rec)
+	}
+}
+
+// deliver records rec (personal mode: only when the owner's filter allows
+// it) and pushes it.
+func (n *Notifier) deliver(ctx context.Context, rec db.NewNotification) {
+	if !n.SharedAccess && !n.enabled(ctx, rec.Event) {
+		return
+	}
+	badge := 0
+	if !n.SharedAccess {
+		var err error
+		if badge, err = n.store.NeedsInputCount(ctx); err != nil {
+			n.log.Warn("build notification", "err", err)
+			return
+		}
+	}
+	p := PayloadFor(notificationFrom(rec), badge)
 	// Shared delivery needs a committed event and receipt to resolve. Personal
 	// mode keeps its best-effort direct push if recording fails.
 	id, err := n.store.InsertNotification(ctx, rec)
@@ -220,10 +260,10 @@ func (n *Notifier) handle(ctx context.Context, e event) {
 	} else {
 		n.Inbox.Signal()
 	}
-	n.sendAll(ctx, id, e.to(), p)
+	n.sendAll(ctx, id, rec.Event, p)
 }
 
-func (n *Notifier) sendAll(ctx context.Context, id int64, to db.TaskState, p Payload) {
+func (n *Notifier) sendAll(ctx context.Context, id int64, ev db.NotificationEvent, p Payload) {
 	subs, err := n.store.ListPushSubscriptions(ctx)
 	if err != nil {
 		n.log.Warn("list push subscriptions", "err", err)
@@ -243,7 +283,7 @@ func (n *Notifier) sendAll(ctx context.Context, id int64, to db.TaskState, p Pay
 		} else if n.SharedAccess {
 			continue
 		}
-		if err := n.send(ctx, sub, message, p.Tag, urgencyFor(to)); err != nil && ctx.Err() == nil {
+		if err := n.send(ctx, sub, message, p.Tag, urgencyFor(ev)); err != nil && ctx.Err() == nil {
 			n.log.Warn("push failed", "subscription", sub.ID)
 		}
 	}
@@ -253,7 +293,8 @@ func (n *Notifier) sendAll(ctx context.Context, id int64, to db.TaskState, p Pay
 // The returned callback signals the inbox and queues Web Push after commit.
 func (n *Notifier) RecordObservation(ctx context.Context, tx *db.Store, change workevent.ObservationChange) (func(), error) {
 	e := event{task: change.Task, session: change.Session}
-	if !workevent.Notifiable(e.to()) {
+	ev, ok := e.direct()
+	if !ok {
 		return nil, nil
 	}
 	if n.Holds != nil {
@@ -267,14 +308,15 @@ func (n *Notifier) RecordObservation(ctx context.Context, tx *db.Store, change w
 	}
 	if !n.SharedAccess {
 		prefs, err := tx.GetPreferences(db.WithUser(ctx, db.DefaultUser))
-		if err != nil || !slices.Contains(prefs.NotifyEvents, e.to()) {
+		if err != nil || !slices.Contains(prefs.NotifyEvents, ev) {
 			return nil, err
 		}
 	}
-	rec, err := notificationRecord(ctx, tx, e)
-	if err != nil {
+	recs, err := notificationRecords(ctx, tx, e)
+	if err != nil || len(recs) != 1 {
 		return nil, err
 	}
+	rec := recs[0]
 	rec.ObservedAt = &change.At
 	id, err := tx.InsertNotification(ctx, rec)
 	if err != nil {
@@ -288,7 +330,7 @@ func (n *Notifier) RecordObservation(ctx context.Context, tx *db.Store, change w
 
 // enabled checks the personal-mode filter.
 // Read at send time; a failed read notifies (a missed event costs more).
-func (n *Notifier) enabled(ctx context.Context, to db.TaskState) bool {
+func (n *Notifier) enabled(ctx context.Context, ev db.NotificationEvent) bool {
 	p, err := n.store.GetPreferences(db.WithUser(ctx, db.DefaultUser))
 	if err != nil {
 		if ctx.Err() == nil {
@@ -296,18 +338,25 @@ func (n *Notifier) enabled(ctx context.Context, to db.TaskState) bool {
 		}
 		return true
 	}
-	return slices.Contains(p.NotifyEvents, to)
+	return slices.Contains(p.NotifyEvents, ev)
 }
 
-var titles = map[db.TaskState]string{
-	db.StateNeedsInput: "Needs input",
-	db.EventReady:      "Ready",
-	db.StateDone:       "Done",
-	db.StateFailed:     "Failed",
+// titles name each event with its subject. A done row is a session's
+// ("Session finished"), or an older task row's ("Run finished").
+var titles = map[db.NotificationEvent]string{
+	db.EventNeedsInput:      "Needs input",
+	db.EventFailed:          "Failed",
+	db.EventReady:           "Ready to start",
+	db.EventCompleted:       "Task completed",
+	db.EventTreeCompleted:   "Tree completed",
+	db.EventScheduleStarted: "Schedule started",
+	db.EventScheduleSkipped: "Schedule skipped",
+	db.EventDone:            "Session finished",
 }
 
 // PayloadFor is the notification shown for a stored inbox row (Web Push and
-// GET /api/notifications/stream): task rows with a session open the task.
+// GET /api/notifications/stream): task rows with a session open the task,
+// tree and schedule rows their page, session rows the inbox.
 func PayloadFor(n db.Notification, badge int) Payload {
 	key := db.NotificationKey(n)
 	p := Payload{Title: titles[n.Event], Body: n.Title, URL: n.URL, Tag: db.TagForKey(key), Badge: badge}
@@ -317,10 +366,20 @@ func PayloadFor(n db.Notification, badge int) Payload {
 	if n.Note != nil {
 		p.Body += " · " + *n.Note
 	}
-	if strings.HasPrefix(key, "task:") && n.ExternalSessionID != nil {
-		p.URL = "/tasks/" + strings.TrimPrefix(key, "task:")
-	}
-	if !strings.HasPrefix(key, "task:") {
+	kind, id, _ := strings.Cut(key, ":")
+	switch kind {
+	case "task":
+		if n.Event == db.EventDone {
+			p.Title = "Run finished"
+		}
+		if n.ExternalSessionID != nil {
+			p.URL = "/tasks/" + id
+		}
+	case "tree":
+		p.URL = "/trees/" + id
+	case "schedule":
+		p.URL = "/schedules/" + id
+	default:
 		p.URL = "/?inbox"
 	}
 	return p
@@ -328,7 +387,8 @@ func PayloadFor(n db.Notification, badge int) Payload {
 
 // notificationFrom is the row rec will be stored as (no id or timestamps).
 func notificationFrom(rec db.NewNotification) db.Notification {
-	n := db.Notification{Event: rec.Event, TaskID: rec.TaskID, Title: rec.Title, ProjectTitle: rec.ProjectTitle, URL: rec.URL, Note: rec.Note}
+	n := db.Notification{Event: rec.Event, TaskID: rec.TaskID, TreeID: rec.TreeID, ScheduleID: rec.ScheduleID,
+		Title: rec.Title, ProjectTitle: rec.ProjectTitle, URL: rec.URL, Note: rec.Note}
 	if rec.Session != nil {
 		n.ConnectionID = rec.Session.ConnectionID
 		n.ExternalSessionID = &rec.Session.ExternalSessionID
@@ -336,42 +396,40 @@ func notificationFrom(rec db.NewNotification) db.Notification {
 	return n
 }
 
-// payload builds the push payload and its inbox record (lookups at send time).
-func (n *Notifier) payload(ctx context.Context, e event) (Payload, db.NewNotification, error) {
-	rec, err := notificationRecord(ctx, n.store, e)
-	if err != nil {
-		return Payload{}, rec, err
-	}
-	badge, err := n.store.NeedsInputCount(ctx)
-	if err != nil {
-		return Payload{}, rec, err
-	}
-	return PayloadFor(notificationFrom(rec), badge), rec, nil
-}
-
-func notificationRecord(ctx context.Context, store *db.Store, e event) (db.NewNotification, error) {
-	var rec db.NewNotification
+// notificationRecords builds the inbox records for e (lookups at send
+// time): one, or none when its subject no longer qualifies; a completion
+// may add tree_completed.
+func notificationRecords(ctx context.Context, store *db.Store, e event) ([]db.NewNotification, error) {
 	switch {
 	case e.task != nil:
 		t, err := store.GetTask(ctx, e.task.TaskID)
 		if err != nil {
-			return rec, fmt.Errorf("task %d: %w", e.task.TaskID, err)
+			return nil, fmt.Errorf("task %d: %w", e.task.TaskID, err)
 		}
-		id := strconv.FormatInt(t.ID, 10)
-		project := t.ProjectTitle
 		// Retain task identity across restarts and ON DELETE SET NULL. Push
 		// navigation can open the current session without changing this key.
-		rec = db.NewNotification{Event: e.task.To, TaskID: &t.ID, Session: t.Session,
-			Title: t.Title, ProjectTitle: &project, URL: "/tasks/" + id}
+		return []db.NewNotification{taskRecord(db.NotificationEvent(e.task.To), t, t.Session)}, nil
 	case e.ready != nil:
 		t, err := store.GetTask(ctx, *e.ready)
 		if err != nil {
-			return rec, fmt.Errorf("task %d: %w", *e.ready, err)
+			return nil, fmt.Errorf("task %d: %w", *e.ready, err)
 		}
 		// A backlog task (no session yet): the payload opens the task.
-		project := t.ProjectTitle
-		rec = db.NewNotification{Event: db.EventReady, TaskID: &t.ID, Title: t.Title, ProjectTitle: &project,
-			URL: "/tasks/" + strconv.FormatInt(t.ID, 10)}
+		return []db.NewNotification{taskRecord(db.EventReady, t, nil)}, nil
+	case e.completed != nil:
+		return completionRecords(ctx, store, *e.completed)
+	case e.schedule != nil:
+		sc, err := store.GetSchedule(ctx, e.schedule.ScheduleID)
+		if err != nil {
+			return nil, fmt.Errorf("schedule %d: %w", e.schedule.ScheduleID, err)
+		}
+		ev := db.EventScheduleSkipped
+		if e.schedule.Outcome == db.RunStarted {
+			ev = db.EventScheduleStarted
+		}
+		project := sc.ProjectTitle
+		return []db.NewNotification{{Event: ev, ScheduleID: &sc.ID, Title: sc.Title, ProjectTitle: &project,
+			URL: "/schedules/" + strconv.FormatInt(sc.ID, 10)}}, nil
 	case e.session != nil:
 		// A session no task owns: its observed title and, when its harness
 		// project is bound to one Stage project, that project's title.
@@ -380,17 +438,54 @@ func notificationRecord(ctx context.Context, store *db.Store, e event) (db.NewNo
 		if c.Session != nil {
 			title, ok, err := store.BoundProjectTitle(ctx, c.Session.ConnectionID, c.ProjectID)
 			if err != nil {
-				return rec, fmt.Errorf("session %s: %w", c.Session.ExternalSessionID, err)
+				return nil, fmt.Errorf("session %s: %w", c.Session.ExternalSessionID, err)
 			}
 			if ok {
 				project = title
 			}
 		}
-		rec = db.NewNotification{Event: c.To, Session: c.Session, Title: c.Title, ProjectTitle: &project, URL: "/?inbox"}
-	default:
-		return rec, errors.New("empty event")
+		return []db.NewNotification{{Event: db.NotificationEvent(c.To), Session: c.Session, Title: c.Title, ProjectTitle: &project, URL: "/?inbox"}}, nil
 	}
-	return rec, nil
+	return nil, errors.New("empty event")
+}
+
+func taskRecord(ev db.NotificationEvent, t db.Task, session *db.SessionRef) db.NewNotification {
+	project := t.ProjectTitle
+	return db.NewNotification{Event: ev, TaskID: &t.ID, Session: session, Title: t.Title, ProjectTitle: &project,
+		URL: "/tasks/" + strconv.FormatInt(t.ID, 10)}
+}
+
+// completionRecords: completed while c's acceptance is still the task's
+// current one, plus tree_completed when every member of its open tree is
+// accepted and c's acceptance is the newest of them (so concurrent last
+// completions record the tree once; a reopen starts a new episode).
+func completionRecords(ctx context.Context, store *db.Store, c completion) ([]db.NewNotification, error) {
+	t, err := store.GetTask(ctx, c.TaskID)
+	if err != nil {
+		return nil, fmt.Errorf("task %d: %w", c.TaskID, err)
+	}
+	if t.AcceptanceID == nil || c.AcceptanceID != 0 && *t.AcceptanceID != c.AcceptanceID {
+		return nil, nil // reopened or replaced since
+	}
+	accepted := *t.AcceptanceID
+	recs := []db.NewNotification{taskRecord(db.EventCompleted, t, t.Session)}
+	if t.TreeID == nil {
+		return recs, nil
+	}
+	tree, err := store.GetTree(ctx, *t.TreeID)
+	if err != nil {
+		return nil, fmt.Errorf("tree %d: %w", *t.TreeID, err)
+	}
+	if tree.Status != db.TreeOpen {
+		return recs, nil
+	}
+	for _, m := range tree.Tasks {
+		if m.AcceptanceID == nil || *m.AcceptanceID > accepted {
+			return recs, nil
+		}
+	}
+	return append(recs, db.NewNotification{Event: db.EventTreeCompleted, TreeID: &tree.ID, Title: tree.Title,
+		URL: "/trees/" + strconv.FormatInt(tree.ID, 10)}), nil
 }
 
 // PublicKey is the VAPID public key (generated on first use).

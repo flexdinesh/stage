@@ -16,8 +16,9 @@ import type { Badge, Notification, NotificationEvent, NotificationGroup, Notific
 import { folderName, type SessionAction } from "../lib/harnesses.ts";
 import { pushFooterNote } from "../lib/push.ts";
 import { newToastEvents, reconcileToasts } from "../lib/notification-toasts.ts";
+import { notificationEventLabel, notificationEventTone, notificationPath, notificationSubject, type NotificationSubject } from "../lib/notification-events.ts";
 import { IconBell, IconClose } from "./icons.tsx";
-import { NotificationEventBadge, TaskStateBadge, notificationEventLabel, notificationEventTone } from "./StateBadge.tsx";
+import { NotificationEventBadge, TaskStateBadge } from "./StateBadge.tsx";
 import {
   Button,
   Chip,
@@ -80,9 +81,7 @@ function StartButton({ taskId, onStarted }: { taskId: number; onStarted?: () => 
   );
 }
 
-const notificationPath = (n: Notification) => n.taskId === null ? "/?inbox" : `/tasks/${n.taskId}`;
-
-const projectOf = (n: Notification) => n.projectTitle ?? (n.taskId === null ? "external session" : "");
+const projectOf = (n: Notification) => n.projectTitle ?? (notificationSubject(n) === "session" ? "external session" : "");
 
 // ---- Delivered notification → app ----
 
@@ -303,7 +302,7 @@ function Toast({ n, onDismiss }: { n: Notification; onDismiss: () => void }) {
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1.5">
         <div className="flex min-w-0 items-center gap-2">
-          <NotificationEventBadge event={n.event} />
+          <NotificationEventBadge event={n.event} subject={notificationSubject(n)} />
           <Meta className="min-w-0 truncate">
             {project === "" ? "" : `${project} · `}
             <RelTime at={n.createdAt} className="tabular" />
@@ -510,14 +509,19 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
   const historyId = useId();
   const action = useNotificationAction()(n);
   const { name } = useHarnesses();
-  const waiting = n.currentState === "needs_input";
+  const subject = notificationSubject(n);
+  // Tasks and sessions have a live state; a tree or schedule row reads as its event.
+  const live = subject === "task" || subject === "session";
+  const waiting = live && n.currentState === "needs_input";
   // The task's requests Stage can answer: one approval on the row, else Answer on the task.
   const { requests } = useSessionRequests({ taskId: n.taskId, connectionId: n.connectionId, needsInput: waiting });
   const answer = useRowRequest(n.taskId, requests);
   const project = projectOf(n);
-  // A ready task still in backlog reads "ready": that is its current state, not a change.
+  // A ready task still in backlog reads "ready", and a completed task whose run stays done reads "completed":
+  // that is its current state, not a change.
   const ready = startable(n);
-  const changed = n.currentState !== null && n.currentState !== n.event && !ready;
+  const showEvent = !live || ready || (n.event === "completed" && n.currentState === "done");
+  const changed = !showEvent && n.currentState !== n.event;
   return (
     <div className={cx(needEdgeClass(waiting), "px-3 py-row")}>
       <div className="flex items-center justify-between gap-2.5">
@@ -533,8 +537,8 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
           </TextLink>
         </div>
         <div className="shrink-0">
-          {ready ? (
-            <NotificationEventBadge event="ready" />
+          {showEvent ? (
+            <NotificationEventBadge event={n.event} subject={subject} />
           ) : n.currentState === null ? (
             <Chip className="text-muted">unavailable</Chip>
           ) : (
@@ -549,14 +553,14 @@ function NotificationRow({ n, unread, expanded, onToggle, onNavigate }: {
             {project === "" ? null : <><span className="min-w-0 truncate">{project}</span><MetaDot /></>}
             <RelTime at={n.createdAt} className="shrink-0 tabular" />
           </span>
-          {changed || n.currentState === null ? (
+          {changed ? (
             <>
               {/* Phone: the historical event starts its own line, so no separator dangles. */}
               <span aria-hidden="true" className="basis-full md:hidden" />
               <span className="flex items-center gap-2">
                 <MetaDot className="max-md:hidden" />
                 <span>
-                  was <NotificationEventLabel event={n.event} />
+                  was <NotificationEventLabel event={n.event} subject={subject} />
                 </span>
               </span>
             </>
@@ -598,10 +602,10 @@ function MetaDot({ className }: { className?: string }) {
   return <span aria-hidden="true" className={className}>·</span>;
 }
 
-function NotificationEventLabel({ event }: { event: NotificationEvent }) {
+function NotificationEventLabel({ event, subject }: { event: NotificationEvent; subject: NotificationSubject }) {
   return (
     <span className={cx(toneClass(notificationEventTone(event)), "font-mono text-meta text-[var(--cf)]")}>
-      {notificationEventLabel(event)}
+      {notificationEventLabel(event, subject)}
     </span>
   );
 }
@@ -621,7 +625,7 @@ function NotificationHistory({ groupKey }: { groupKey: string }) {
                 className={cx(toneClass(notificationEventTone(event.event)), "relative flex items-baseline justify-between gap-3 py-1")}
               >
                 <Marker tone={notificationEventTone(event.event)} className="absolute top-2.5 -left-[19.5px] outline-3 outline-surface" />
-                <NotificationEventLabel event={event.event} />
+                <NotificationEventLabel event={event.event} subject={notificationSubject(event)} />
                 <RelTime at={event.createdAt} className="shrink-0 font-mono text-meta-sm tabular text-muted" />
               </li>
             ))}

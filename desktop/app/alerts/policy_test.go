@@ -60,6 +60,7 @@ func TestTarget(t *testing.T) {
 		"task-10":           "/tasks/10",
 		"session-x":         "/sessions/x#answer",
 		"session-../../etc": "/sessions/..",
+		"schedule-4":        "/schedules/4#x",
 	}
 	cases := map[string]string{
 		"task-7":            "/tasks/7",
@@ -81,6 +82,10 @@ func TestTarget(t *testing.T) {
 		"unknown":           "/",
 		"":                  "/",
 		"session-y":         "/?inbox",
+		"tree-3":            "/trees/3",
+		"tree-x":            "/",
+		"schedule-4":        "/schedules/4",
+		"schedule-0":        "/",
 	}
 	for id, want := range cases {
 		if got := Target(id, known); got != want {
@@ -107,5 +112,16 @@ func TestParseTime(t *testing.T) {
 	}
 	if !parseTime("yesterday").IsZero() {
 		t.Error("garbage parsed")
+	}
+}
+
+func TestIsGroupTag(t *testing.T) {
+	for tag, want := range map[string]bool{
+		"task-7": true, "tree-3": true, "schedule-4": true, "session-1:a": true,
+		"summary": false, "test": false, "notification-5": false, "project-1": false, "": false,
+	} {
+		if got := isGroupTag(tag); got != want {
+			t.Errorf("isGroupTag(%q) = %v, want %v", tag, got, want)
+		}
 	}
 }

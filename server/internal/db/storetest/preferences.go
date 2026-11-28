@@ -18,17 +18,18 @@ func caseNotifyEvents(t *testing.T, open Factory) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	all := []db.TaskState{db.StateNeedsInput, db.StateFailed, db.EventReady, db.StateDone}
+	// The owner's filter, extended by migration 0053 (schedule_started opt-in).
+	all := []db.NotificationEvent{db.EventNeedsInput, db.EventFailed, db.EventReady, db.EventCompleted, db.EventTreeCompleted, db.EventScheduleSkipped, db.EventDone}
 	if !slices.Equal(p.NotifyEvents, all) {
-		t.Fatalf("default %v, want all", p.NotifyEvents)
+		t.Fatalf("default %v, want %v", p.NotifyEvents, all)
 	}
 
 	// Deduplicated, stored in display order.
-	p, err = s.SetNotifyEvents(ctx, []db.TaskState{db.EventReady, db.StateFailed, db.StateNeedsInput, db.StateFailed})
+	p, err = s.SetNotifyEvents(ctx, []db.NotificationEvent{db.EventScheduleStarted, db.EventReady, db.EventFailed, db.EventNeedsInput, db.EventFailed})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []db.TaskState{db.StateNeedsInput, db.StateFailed, db.EventReady}; !slices.Equal(p.NotifyEvents, want) {
+	if want := []db.NotificationEvent{db.EventNeedsInput, db.EventFailed, db.EventReady, db.EventScheduleStarted}; !slices.Equal(p.NotifyEvents, want) {
 		t.Fatalf("set %v, want %v", p.NotifyEvents, want)
 	}
 
@@ -42,10 +43,10 @@ func caseNotifyEvents(t *testing.T, open Factory) {
 	}
 
 	var inv *db.InvalidError
-	if _, err := s.SetNotifyEvents(ctx, []db.TaskState{db.StateRunning}); !errors.As(err, &inv) {
+	if _, err := s.SetNotifyEvents(ctx, []db.NotificationEvent{"running"}); !errors.As(err, &inv) {
 		t.Fatalf("running: %v, want InvalidError", err)
 	}
-	if _, err := s.SetNotifyEvents(ctx, []db.TaskState{"settled"}); !errors.As(err, &inv) || err.Error() != "event settled was removed in API v9; completion sends no notification (want needs_input, failed, ready or done)" {
+	if _, err := s.SetNotifyEvents(ctx, []db.NotificationEvent{"settled"}); !errors.As(err, &inv) || err.Error() != "event settled was removed in API v9; use completed (want needs_input, failed, ready, completed, tree_completed, schedule_started, schedule_skipped, done)" {
 		t.Fatalf("removed event: %v", err)
 	}
 	if p, _ = s.GetPreferences(ctx); len(p.NotifyEvents) != 0 {

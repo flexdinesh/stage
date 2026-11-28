@@ -357,7 +357,7 @@ func openObserverChannel(t *testing.T, initialState db.TaskState) *observerChann
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SetNotifyEvents(ctx, []db.TaskState{db.StateNeedsInput, db.StateDone, db.StateFailed}); err != nil {
+	if _, err := store.SetNotifyEvents(ctx, []db.NotificationEvent{db.EventNeedsInput, db.EventDone, db.EventFailed}); err != nil {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -663,8 +663,9 @@ func (r *observerChannel) assertEffects(got observerEffects, states []db.TaskSta
 			journal.SourceSession == nil || *journal.SourceSession != r.adapter.baseline.Session || !journal.CreatedAt.Equal(times[i]) {
 			t.Fatalf("journal entry %+v, want %s to %s at %v", journal, from, state, times[i])
 		}
-		if state == db.StateNeedsInput || state == db.StateDone {
-			if len(inbox) == 0 || inbox[0].Event != state || inbox[0].TaskID == nil || *inbox[0].TaskID != r.task.ID ||
+		// A task's finished run records no inbox row; needs input does.
+		if state == db.StateNeedsInput {
+			if len(inbox) == 0 || inbox[0].Event != db.NotificationEvent(state) || inbox[0].TaskID == nil || *inbox[0].TaskID != r.task.ID ||
 				!inbox[0].CreatedAt.Equal(times[i]) {
 				t.Fatalf("inbox %+v, want %s for task %d at %v", inbox, state, r.task.ID, times[i])
 			}

@@ -13,11 +13,13 @@ import (
 // Item is one inbox row from the stream (`notification` event).
 type Item struct {
 	ID int64
-	// Event: needs_input, failed, ready or done.
+	// Event: needs_input, failed, ready, completed, tree_completed,
+	// schedule_started, schedule_skipped or done.
 	Event     string
 	CreatedAt time.Time
 	Read      bool
-	// Tag is the group (task-<n>, session-<id>), "" for identity-less rows.
+	// Tag is the group (task-<n>, tree-<n>, schedule-<n>, session-<id>), ""
+	// for identity-less rows.
 	Tag   string
 	Title string
 	Body  string
@@ -95,6 +97,10 @@ func Target(id string, known map[string]string) string {
 		derived = "/settings"
 	case strings.HasPrefix(id, "task-"):
 		derived = "/tasks/" + strings.TrimPrefix(id, "task-")
+	case strings.HasPrefix(id, "tree-"):
+		derived = "/trees/" + strings.TrimPrefix(id, "tree-")
+	case strings.HasPrefix(id, "schedule-"):
+		derived = "/schedules/" + strings.TrimPrefix(id, "schedule-")
 	case strings.HasPrefix(id, "session-"):
 		derived = "/?inbox"
 	}
@@ -104,10 +110,15 @@ func Target(id string, known map[string]string) string {
 	return "/"
 }
 
-// isGroupTag reports whether id is a task- or session- group (closed when
-// its group has no unread rows).
+// isGroupTag reports whether id is a task-, tree-, schedule- or session-
+// group (closed when its group has no unread rows).
 func isGroupTag(id string) bool {
-	return strings.HasPrefix(id, "task-") || strings.HasPrefix(id, "session-")
+	for _, prefix := range []string{"task-", "tree-", "schedule-", "session-"} {
+		if strings.HasPrefix(id, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseTime parses a stream createdAt (RFC 3339, with or without

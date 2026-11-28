@@ -302,6 +302,7 @@ func Run(ctx context.Context, o Options) error {
 		sc := schedule.NewRunner(store, eng.Coordinator, logger)
 		sc.ConnectionID = id
 		sc.Since = scheduleSince
+		sc.OnRun = notifier.OnScheduleRun
 		return sc
 	})
 	// Steering delivery: digests to each tree's steerer, and tree finish.
@@ -345,6 +346,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	eng.Observe.RecordNotification = notifier.RecordObservation
 	eng.Coordinator.OnAccepted = kickTrees
+	eng.Coordinator.OnInferred = func(ctx context.Context, taskID int64) { notifier.OnCompleted(ctx, taskID, 0) }
 	if err := local.compose(ctx, store, cfg, registry, o.HarnessOverrides, eng.Kick, cliName, logger); err != nil {
 		return err
 	}

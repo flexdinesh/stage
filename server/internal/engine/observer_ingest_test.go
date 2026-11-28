@@ -24,7 +24,7 @@ func observationTask(t *testing.T, placement placement) (*db.Store, db.Task, exe
 	if _, err := store.TransitionTask(t.Context(), db.Transition{TaskID: task.ID, To: db.StateRunning, Session: &ref}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SetNotifyEvents(t.Context(), []db.TaskState{db.StateNeedsInput, db.StateDone}); err != nil {
+	if _, err := store.SetNotifyEvents(t.Context(), []db.NotificationEvent{db.EventNeedsInput, db.EventFailed, db.EventDone}); err != nil {
 		t.Fatal(err)
 	}
 	return store, task, ref
@@ -56,6 +56,9 @@ func TestObservationBatchRollbackReplayAndBridgeOrdering(t *testing.T) {
 		}
 		if c.Task.To == db.StateNeedsInput && fail {
 			return nil, abort
+		}
+		if after == nil {
+			return nil, nil
 		}
 		return func() {
 			published++
@@ -90,7 +93,8 @@ func TestObservationBatchRollbackReplayAndBridgeOrdering(t *testing.T) {
 			t.Fatalf("retry ack = %+v, %v", ack, err)
 		}
 	}
-	done := sample(ref, db.StateDone, at.Add(3*time.Second))
+	// A finished run records no task notification; a failed one does.
+	done := sample(ref, db.StateFailed, at.Add(3*time.Second))
 	if _, err := svc.Observe.Ingest(ctx, done); err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +118,7 @@ func TestObservationBatchRollbackReplayAndBridgeOrdering(t *testing.T) {
 		t.Fatalf("cross-machine batch ack = %+v, %v", ack, err)
 	}
 	got, err := store.GetTask(ctx, task.ID)
-	if err != nil || got.State != db.StateDone || got.FinishedAt == nil || !got.FinishedAt.Equal(done.UpdatedAt) {
+	if err != nil || got.State != db.StateFailed || got.FinishedAt == nil || !got.FinishedAt.Equal(done.UpdatedAt) {
 		t.Fatalf("bridge state = %s finished %v, %v", got.State, got.FinishedAt, err)
 	}
 	rows, err := store.ListNotifications(ctx, 10, nil)
@@ -215,7 +219,7 @@ func TestInitialAttentionRearmsInactiveTask(t *testing.T) {
 				t.Fatalf("first active attention sample: task state %s, want needs_input: %v", got.State, err)
 			}
 			rows, err := store.ListNotifications(ctx, 10, nil)
-			if err != nil || len(rows) != 1 || rows[0].Event != db.StateNeedsInput || rows[0].TaskID == nil || *rows[0].TaskID != task.ID {
+			if err != nil || len(rows) != 1 || rows[0].Event != db.EventNeedsInput || rows[0].TaskID == nil || *rows[0].TaskID != task.ID {
 				t.Fatalf("notifications = %+v, %v", rows, err)
 			}
 		})
@@ -255,8 +259,9 @@ func TestObservationRunnerLocalUsesTransactionalIngest(t *testing.T) {
 	if n := len(events); err != nil || n != 5 || events[n-3].ToState != db.StateNeedsInput || events[n-2].ToState != db.StateRunning || events[n-1].ToState != db.StateDone {
 		t.Fatalf("task events = %+v, %v", events, err)
 	}
+	// Needs input notifies; the finished run does not.
 	notifications, err := store.ListNotifications(ctx, 10, nil)
-	if err != nil || len(notifications) != 2 {
+	if err != nil || len(notifications) != 1 || notifications[0].Event != db.EventNeedsInput {
 		t.Fatalf("notifications = %+v, %v", notifications, err)
 	}
 }

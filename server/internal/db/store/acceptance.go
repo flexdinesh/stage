@@ -85,6 +85,9 @@ type AcceptanceImpact struct {
 type AcceptanceResult struct {
 	Revision     int64  `json:"revision"`
 	AcceptanceID *int64 `json:"acceptanceId"`
+	// Replayed: an exact requestId replay returned the original result
+	// without applying it again (not part of the response).
+	Replayed bool `json:"-"`
 }
 
 // ClaimState is what a launch claim checks.

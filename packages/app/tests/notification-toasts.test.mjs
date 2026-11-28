@@ -167,3 +167,14 @@ test("reconciliation preserves queue order and inputs and never adds latest-only
   assert.deepEqual(latest, beforeLatest);
   assert.deepEqual(reconcileToasts([], latest), []);
 });
+
+test("tree and schedule rows reconcile by their own identity", () => {
+  const tree = notification(1, { event: "tree_completed", taskId: null, externalSessionId: null, treeId: 7, currentState: null });
+  const schedule = notification(2, { event: "schedule_skipped", taskId: null, externalSessionId: null, scheduleId: 7, currentState: null });
+  const latest = [
+    notification(10, { taskId: null, externalSessionId: null, treeId: 7, currentState: "done" }),
+    notification(11, { taskId: 7, currentState: "running" }),
+  ];
+  // A task, tree and schedule sharing id 7 stay distinct.
+  assert.deepEqual(reconcileToasts([tree, schedule], latest), [{ ...tree, currentState: "done" }, schedule]);
+});

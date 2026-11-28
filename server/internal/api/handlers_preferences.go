@@ -17,7 +17,7 @@ type preferencesJSON struct {
 func (s *server) preferencesResponse(w http.ResponseWriter, r *http.Request, p db.Preferences) {
 	actor, _ := principal.From(r.Context())
 	if s.Access != nil && !actor.IsHuman() {
-		p.NotifyEvents = []db.TaskState{}
+		p.NotifyEvents = []db.NotificationEvent{}
 	}
 	writeJSON(w, http.StatusOK, preferencesJSON{p, s.Access != nil && actor.IsHuman()})
 }
@@ -47,10 +47,10 @@ func (s *server) putDefaultConnection(w http.ResponseWriter, r *http.Request) er
 	return nil
 }
 
-// putNotifyEvents: body {"events": TaskState[]} (needs_input|failed|ready|done).
+// putNotifyEvents: body {"events": NotificationEvent[]} (db.NotificationEvents).
 func (s *server) putNotifyEvents(w http.ResponseWriter, r *http.Request) error {
 	var body struct {
-		Events *[]db.TaskState `json:"events"`
+		Events *[]db.NotificationEvent `json:"events"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
 		return db.Invalid("invalid JSON: %v", err)

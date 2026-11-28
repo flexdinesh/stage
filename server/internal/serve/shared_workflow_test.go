@@ -243,6 +243,20 @@ func sharedWorkflowAcrossPairedWorkers(t *testing.T, configure func(*testing.T, 
 		note.SourceMachineID == nil || *note.SourceMachineID != firstID || note.SourceSession == nil || *note.SourceSession != session {
 		t.Fatalf("worker report attribution: %+v", note)
 	}
+	// The worker run waits on an approval: needs input is a shared work
+	// event in every account's inbox (a finished run is not).
+	request, err := workerHarness.AddApproval(session.ExternalSessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awaitSharedWorkflow(t, "worker task to need input", func() bool {
+		var waiting client.TaskDetail
+		get(member, taskPath, http.StatusOK, &waiting)
+		return waiting.State == db.StateNeedsInput
+	})
+	if err := workerHarness.ResolveRequest(session.ExternalSessionID, request, "resolved"); err != nil {
+		t.Fatal(err)
+	}
 	const reply = "Fixture passed on the worker."
 	if err := workerHarness.SetReply(session.ExternalSessionID, t3.Reply{ItemID: "worker-reply", Text: reply}); err != nil {
 		t.Fatal(err)
@@ -571,7 +585,7 @@ func assertSharedWorkflowInbox(t *testing.T, origin string, owner, member *http.
 		var page struct{ Notifications []db.Notification }
 		(transportRequest{method: "GET", path: "/api/notifications"}).send(t, h, origin, http.StatusOK, &page)
 		for _, row := range page.Notifications {
-			if row.TaskID != nil && *row.TaskID == taskID && row.Event == db.StateDone {
+			if row.TaskID != nil && *row.TaskID == taskID && row.Event == db.EventNeedsInput {
 				return row
 			}
 		}

@@ -7,8 +7,13 @@ test("closes task/session notifications whose group was viewed on any device", (
   assert.deepEqual([...stale].toSorted(), ["session-abc", "task-1"]);
 });
 
+test("closes tree and schedule notifications whose group was viewed", () => {
+  const stale = staleTags(["tree-3", "schedule-4", "tree-5", "schedule-6"], new Set(["tree-5", "schedule-6"]));
+  assert.deepEqual([...stale].toSorted(), ["schedule-4", "tree-3"]);
+});
+
 test("keeps unread groups, foreign tags and untagged notifications", () => {
-  const stale = staleTags(["task-1", "test", null, "other-1", "thread-legacy", "tasks-1"], new Set(["task-1"]));
+  const stale = staleTags(["task-1", "test", null, "other-1", "thread-legacy", "tasks-1", "trees-1", "project-1"], new Set(["task-1"]));
   assert.deepEqual([...stale], []);
 });
 

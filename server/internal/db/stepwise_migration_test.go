@@ -103,6 +103,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	53: {{"one steering brief per task attempt", seedV0040SharedAccess, checkV0053SteeringLaunchContext}},
 	54: {{"one held notification per task; tree hold defaults to 300", seedV0040SharedAccess, checkV0054NotificationHolds}},
 	55: {{"existing binding has no finish or completion", seedV0055Steerer, checkV0055SteeringFinish}},
+	56: {{"notification subjects keep history and extend saved filters", seedV0056NotificationSubjects, checkV0056NotificationSubjects}},
 }
 
 func checkV0053SteeringLaunchContext(t *testing.T, pool *sqlite.DB) {
@@ -154,6 +155,41 @@ func checkV0055SteeringFinish(t *testing.T, pool *sqlite.DB) {
 		t.Fatal("accepted an unknown completion")
 	}
 	mustExec(t, pool, `UPDATE tree_steerers SET finish_event_id=3,final_state_revision=4,completion='completed' WHERE id=1`)
+}
+
+func seedV0056NotificationSubjects(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	mustExec(t, pool, `INSERT INTO users(id, display_name, email, email_key) VALUES (2, 'Member', 'member@example.test', 'member@example.test')`)
+	mustExec(t, pool, `DELETE FROM notification_preferences`)
+	mustExec(t, pool, `INSERT INTO notification_preferences(user_id, notify_events) VALUES (1, '["failed","done"]'), (2, '["completed"]')`)
+	mustExec(t, pool, `INSERT INTO notifications(id, event, title, url) VALUES (1, 'done', 'Old run', '/tasks/5')`)
+	mustExec(t, pool, `UPDATE notifications SET note = 'late' WHERE id = 1`)
+	mustExec(t, pool, `INSERT INTO notification_recipients(notification_id, user_id) VALUES (1, 1)`)
+}
+
+func checkV0056NotificationSubjects(t *testing.T, pool *sqlite.DB) {
+	t.Helper()
+	wantRows(t, pool, `SELECT id, event, title, url, tree_id, schedule_id FROM notifications`, "1|done|Old run|/tasks/5|NULL|NULL")
+	wantRows(t, pool, `SELECT notification_id, user_id, read_at FROM notification_recipients`, "1|1|NULL")
+	wantRows(t, pool, `SELECT note FROM notifications`, "late")
+	// The rebuild keeps the recipients' and holds' references to notifications.
+	wantRows(t, pool, `SELECT "table" FROM pragma_foreign_key_list('notification_holds') WHERE "from" = 'notification_id'`, "notifications")
+	wantRows(t, pool, `SELECT "table" FROM pragma_foreign_key_list('notification_recipients') WHERE "from" = 'notification_id'`, "notifications")
+	wantRows(t, pool, `SELECT user_id, notify_events FROM notification_preferences ORDER BY user_id`,
+		`1|["failed","done","completed","tree_completed","schedule_skipped"]`, `2|["completed","tree_completed","schedule_skipped"]`)
+	mustExec(t, pool, `INSERT INTO task_trees(id, title) VALUES (9, 'Ship')`)
+	mustExec(t, pool, `INSERT INTO notifications(event, title, url, tree_id) VALUES ('tree_completed', 'Ship', '/trees/9', 9)`)
+	wantRows(t, pool, `SELECT id, tree_id FROM notifications WHERE event = 'tree_completed'`, "2|9")
+	mustExec(t, pool, `DELETE FROM task_trees WHERE id = 9`)
+	wantRows(t, pool, `SELECT tree_id FROM notifications WHERE id = 2`, "NULL")
+	for _, e := range []string{"completed", "schedule_started", "schedule_skipped"} {
+		mustExec(t, pool, `INSERT INTO notifications(event, title, url) VALUES ('`+e+`', 't', '/')`)
+	}
+	if _, err := pool.Exec(`INSERT INTO notifications(event, title, url) VALUES ('settled', 't', '/')`); err == nil {
+		t.Fatal("notification event check accepted settled")
+	}
+	mustExec(t, pool, `DELETE FROM notifications WHERE id = 1`)
+	wantRows(t, pool, `SELECT count(*) FROM notification_recipients`, "0")
 }
 
 func checkV0051StateRevision(t *testing.T, pool *sqlite.DB) {

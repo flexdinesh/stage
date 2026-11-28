@@ -178,15 +178,15 @@ func (n *Notifier) heldRecord(ctx context.Context, tx *db.Store, t db.Task) (*db
 		if err != nil && ctx.Err() == nil {
 			n.log.Warn("read notification filter; notifying", "err", err)
 		}
-		if err == nil && !slices.Contains(p.NotifyEvents, db.StateNeedsInput) {
+		if err == nil && !slices.Contains(p.NotifyEvents, db.EventNeedsInput) {
 			return nil, nil
 		}
 	}
-	rec, err := notificationRecord(ctx, tx, event{task: &workevent.TaskChange{TaskID: t.ID, To: db.StateNeedsInput}})
-	if err != nil {
+	recs, err := notificationRecords(ctx, tx, event{task: &workevent.TaskChange{TaskID: t.ID, To: db.StateNeedsInput}})
+	if err != nil || len(recs) == 0 {
 		return nil, err
 	}
-	return &rec, nil
+	return &recs[0], nil
 }
 
 // publishHeld signals the inbox and queues Web Push for a released hold's

@@ -3,14 +3,13 @@ import { PreviousConnections } from "../components/ConnectionRows.tsx";
 // Connections: machines and their harness connections (components/Machines.tsx), each with its new-task defaults.
 // Notifications: events and this device's delivery.
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { useApi, usePlatform } from "../platform/context.tsx";
 import { invalidateWork, keys, useHarnesses, useMachines, useMe, usePreferences } from "../api/queries.ts";
 import { type NotificationEvent, type Preferences } from "../api/types.ts";
 import { harnessStatusKeys } from "../harnesses/index.ts";
 import { InfoPanel } from "../components/InfoPanel.tsx";
 import { AddMachineDrawer, MachinesPanel } from "../components/Machines.tsx";
-import { notificationEventTone } from "../components/StateBadge.tsx";
 import { useStatusAlert } from "../components/StatusRow.tsx";
 import { ServersCard } from "../components/Servers.tsx";
 import {
@@ -36,6 +35,7 @@ import {
   type ChipTone,
 } from "../components/ui.tsx";
 import { HTTPS_DOCS_URL, type PushState } from "../lib/push.ts";
+import { NOTIFICATION_EVENT_GROUPS, NOTIFICATION_EVENTS, notificationEventTone } from "../lib/notification-events.ts";
 import type { NotificationDelivery } from "../platform/index.ts";
 import { connectedRows, connectionRows } from "../lib/connectionRows.ts";
 import { settingsTabs, settingsTabLabel, type SettingsTab } from "../lib/settings.ts";
@@ -80,14 +80,6 @@ const PUSH_CHIP: Record<PushState, { tone: ChipTone; label: string }> = {
   on: { tone: "ok", label: "on" },
 };
 
-/** Display order and copy for the account's notification filter. */
-const EVENTS: readonly { event: NotificationEvent; label: string; hint: string }[] = [
-  { event: "needs_input", label: "Needs input", hint: "waits on you" },
-  { event: "failed", label: "Failed", hint: "run failed" },
-  { event: "ready", label: "Ready", hint: "needs are completed, start it" },
-  { event: "done", label: "Done", hint: "run finished" },
-];
-
 const NOTIFY_EVENTS_KEY = ["setNotifyEvents"];
 
 /** The account filter applies on every device. Each toggle saves immediately and reverts on failure. */
@@ -115,35 +107,52 @@ function EventFilter() {
   });
   const enabled = prefs.data?.notifyEvents ?? [];
   const shared = prefs.data?.sharedNotifications === true;
+  const eventsId = useId();
   const personalCopy = enabled.length === 0
     ? "All events off. Nothing is recorded or pushed."
     : "Checked events push to every device and appear in the inbox. Unchecked events are dropped.";
   const toggle = (event: NotificationEvent, on: boolean) =>
-    save.mutate(EVENTS.map((e) => e.event).filter((e) => (e === event ? on : enabled.includes(e))));
+    save.mutate(NOTIFICATION_EVENTS.filter((e) => (e === event ? on : enabled.includes(e))));
   return (
     <FieldGroup label="Events" meta={shared ? "your devices" : "all devices"} aria-busy={pending > 0}>
       <QueryState isPending={prefs.isPending} error={prefs.error} hasData={prefs.data !== undefined}>
         <Muted>
           {shared ? "Checked events arrive unread and can notify your devices. Unchecked events stay in history as read." : personalCopy}
         </Muted>
-        <RowList className="border-y border-line">
-          {EVENTS.map(({ event, label, hint }) => (
-            <Row key={event} bare>
-              <ChoiceRow
-                inset
-                control={
-                  <>
-                    <Checkbox checked={enabled.includes(event)} onChange={(e) => toggle(event, e.target.checked)} />
-                    <Marker tone={notificationEventTone(event)} />
-                  </>
-                }
-                detail={hint}
-              >
-                {label}
-              </ChoiceRow>
-            </Row>
+        {/* One ruled list per subject; each hint names what triggers the event. */}
+        <div className="mt-1.5 flex flex-col gap-4">
+          {NOTIFICATION_EVENT_GROUPS.map((group) => (
+            <section key={group.title} aria-labelledby={`${eventsId}-${group.title}`} className="flex flex-col gap-1">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-3">
+                <h4 id={`${eventsId}-${group.title}`} className="text-small font-medium text-fg">
+                  {group.title}
+                </h4>
+                {group.note === undefined ? null : <span className="font-mono text-meta-sm text-muted">{group.note}</span>}
+              </div>
+              <RowList className="border-y border-line">
+                {group.events.map(({ event, label, hint }) => (
+                  <Row key={event} bare>
+                    <ChoiceRow
+                      inset
+                      control={
+                        <>
+                          <Checkbox checked={enabled.includes(event)} onChange={(e) => toggle(event, e.target.checked)} />
+                          <Marker tone={notificationEventTone(event)} />
+                        </>
+                      }
+                    >
+                      {/* The hint stacks under the label on phones, where it would not fit beside it. */}
+                      <span className="flex flex-col md:flex-row md:items-baseline md:justify-between md:gap-3">
+                        <span>{label}</span>
+                        <span className="font-mono text-meta text-muted">{hint}</span>
+                      </span>
+                    </ChoiceRow>
+                  </Row>
+                ))}
+              </RowList>
+            </section>
           ))}
-        </RowList>
+        </div>
       </QueryState>
       <ErrorText error={save.error} />
     </FieldGroup>

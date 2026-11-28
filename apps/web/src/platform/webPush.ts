@@ -85,14 +85,17 @@ export async function clearPushSession(): Promise<void> {
   await closeSystemNotifications();
 }
 
+/** Group tags (task-, tree-, schedule-, session-) close once their group has no unread notification. */
+const GROUP_TAG = /^(task|tree|schedule|session)-/;
+
 /**
- * Shown tags to close: task/thread tags whose group has no unread notification
+ * Shown tags to close: group tags whose group has no unread notification
  * (viewed on any device). Other tags (e.g. `test`) and untagged ones stay.
  */
 export function staleTags(shown: readonly (string | null)[], unread: ReadonlySet<string>): Set<string> {
   const stale = new Set<string>();
   for (const tag of shown) {
-    if (tag !== null && (tag.startsWith("task-") || tag.startsWith("session-")) && !unread.has(tag)) stale.add(tag);
+    if (tag !== null && GROUP_TAG.test(tag) && !unread.has(tag)) stale.add(tag);
   }
   return stale;
 }

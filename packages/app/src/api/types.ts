@@ -1302,16 +1302,33 @@ export interface Badge {
 
 // ---- Notifications inbox ----
 
-/** States a notification is sent for. */
-export type NotificationEvent = Extract<TaskState, "needs_input" | "done" | "failed"> | "ready";
+/**
+ * What a notification reports, by subject. Tasks: needs_input, failed, ready, completed (accepted by inference or
+ * an agent, never your own completion). Trees: tree_completed. Schedules: schedule_started, schedule_skipped
+ * (skipped or missed). Untracked sessions: needs_input, failed, done ("Session finished"); older task rows also
+ * carry done ("Run finished").
+ */
+export type NotificationEvent =
+  | "needs_input"
+  | "failed"
+  | "ready"
+  | "completed"
+  | "tree_completed"
+  | "schedule_started"
+  | "schedule_skipped"
+  | "done";
 
 export interface Notification {
   links?: ExecutionLinks;
   connectionId: number;
   id: number;
   event: NotificationEvent;
-  /** null for external sessions (or once the task is deleted). */
+  /** null for external sessions, tree and schedule rows (or once the task is deleted). */
   taskId: number | null;
+  /** The tree of a tree_completed row (null otherwise, or once deleted). */
+  treeId: number | null;
+  /** The schedule of a schedule_started or schedule_skipped row (null otherwise, or once deleted). */
+  scheduleId: number | null;
   externalSessionId: string | null;
   /** Snapshot at send time. */
   title: string;
@@ -1320,7 +1337,7 @@ export interface Notification {
   url: string;
   createdAt: string;
   readAt: string | null;
-  /** Live: the task's state, or the external session's. null = unknown. */
+  /** Live: the task's state, or the external session's. null = unknown, and always for tree and schedule rows. */
   currentState: TaskState | null;
 }
 

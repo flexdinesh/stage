@@ -69,6 +69,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	53: {{name: "one steering brief per task attempt", seed: seedV0040SharedAccess, check: checkV0053SteeringLaunchContext}},
 	54: {{name: "one held notification per task; tree hold defaults to 300", seed: seedV0040SharedAccess, check: checkV0054NotificationHolds}},
 	55: {{name: "existing binding has no finish or completion", seed: seedV0055Steerer, check: checkV0055SteeringFinish}},
+	56: {{name: "notification subjects keep history and extend saved filters", seed: seedV0056NotificationSubjects, check: checkV0056NotificationSubjects}},
 }
 
 func checkV0054NotificationHolds(t *testing.T, pool *sql.DB) {
@@ -114,6 +115,37 @@ func checkV0053SteeringLaunchContext(t *testing.T, pool *sql.DB) {
 		t.Fatal(err)
 	}
 	wantPGRows(t, pool, `SELECT count(*)::text FROM steering_launch_context`, "0")
+}
+
+func seedV0056NotificationSubjects(t *testing.T, pool *sql.DB) {
+	seedV0032(
+		`INSERT INTO users(id, display_name, email, email_key) VALUES (2, 'Member', 'member@example.test', 'member@example.test')`,
+		`DELETE FROM notification_preferences`,
+		`INSERT INTO notification_preferences(user_id, notify_events) VALUES (1, '["failed","done"]'), (2, '["completed"]')`,
+		`INSERT INTO notifications(id, event, title, url) VALUES (1, 'done', 'Old run', '/tasks/5')`,
+		`UPDATE notifications SET note = 'late' WHERE id = 1`,
+		`INSERT INTO notification_recipients(notification_id, user_id) VALUES (1, 1)`,
+	)(t, pool)
+}
+
+func checkV0056NotificationSubjects(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	wantPGRows(t, pool, `SELECT id || '|' || event || '|' || url || '|' || COALESCE(tree_id::text,'NULL') || '|' || COALESCE(schedule_id::text,'NULL') FROM notifications`,
+		"1|done|/tasks/5|NULL|NULL")
+	wantPGRows(t, pool, `SELECT notification_id || '|' || user_id FROM notification_recipients`, "1|1")
+	wantPGRows(t, pool, `SELECT note FROM notifications`, "late")
+	wantPGRows(t, pool, `SELECT user_id || '|' || notify_events::text FROM notification_preferences ORDER BY user_id`,
+		`1|["failed", "done", "completed", "tree_completed", "schedule_skipped"]`, `2|["completed", "tree_completed", "schedule_skipped"]`)
+	seedV0032(
+		`INSERT INTO task_trees(id, title) VALUES (9, 'Ship')`,
+		`INSERT INTO notifications(id, event, title, url, tree_id) VALUES (2, 'tree_completed', 'Ship', '/trees/9', 9)`,
+		`DELETE FROM task_trees WHERE id = 9`,
+		`INSERT INTO notifications(id, event, title, url) VALUES (3, 'completed', 't', '/'), (4, 'schedule_started', 't', '/'), (5, 'schedule_skipped', 't', '/')`,
+	)(t, pool)
+	wantPGRows(t, pool, `SELECT COALESCE(tree_id::text,'NULL') FROM notifications WHERE id = 2`, "NULL")
+	if _, err := pool.ExecContext(context.Background(), `INSERT INTO notifications(event, title, url) VALUES ('settled', 't', '/')`); err == nil {
+		t.Fatal("notification event check accepted settled")
+	}
 }
 
 func checkV0051StateRevision(t *testing.T, pool *sql.DB) {

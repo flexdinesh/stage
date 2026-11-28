@@ -33,6 +33,14 @@ type SessionChange struct {
 	To        db.TaskState
 }
 
-func Notifiable(s db.TaskState) bool {
+// TaskNotifiable: a task transition into needs_input or failed notifies. A
+// finished run does not; acceptance notifies as completed instead.
+func TaskNotifiable(s db.TaskState) bool {
+	return s == db.StateNeedsInput || s == db.StateFailed
+}
+
+// SessionNotifiable: an untracked session's change into needs_input, done
+// ("Session finished") or failed notifies.
+func SessionNotifiable(s db.TaskState) bool {
 	return s == db.StateNeedsInput || s == db.StateDone || s == db.StateFailed
 }

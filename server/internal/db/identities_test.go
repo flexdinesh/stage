@@ -172,7 +172,7 @@ func TestScopedHistoryNeverReadsAnotherConnection(t *testing.T) {
 		t.Fatalf("cross-connection evidence %+v %v", preview, err)
 	}
 	for _, ref := range []SessionRef{a, b} {
-		if _, err = s.InsertNotification(ctx, NewNotification{Event: StateDone, Session: &ref, Title: "Reply", URL: "/"}); err != nil {
+		if _, err = s.InsertNotification(ctx, NewNotification{Event: EventDone, Session: &ref, Title: "Reply", URL: "/"}); err != nil {
 			t.Fatal(err)
 		}
 	}

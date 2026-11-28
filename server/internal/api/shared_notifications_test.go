@@ -40,7 +40,7 @@ func sharedNotificationEnv(t *testing.T) (*env, *notify.Hub, *auth.Service, auth
 	var owner auth.SignInResult
 	var historical int64
 	e := newEnv(t, func(d *api.Deps) {
-		id, err := d.Store.InsertNotification(ctx, db.NewNotification{Event: db.StateDone, Title: "Existing work", URL: "/tasks/12"})
+		id, err := d.Store.InsertNotification(ctx, db.NewNotification{Event: db.EventDone, Title: "Existing work", URL: "/tasks/12"})
 		historical = mustValue(t, id, err)
 		if err := d.Store.UpsertPushSubscription(ctx, 0, "https://push.example/legacy", "key", "secret", "personal device"); err != nil {
 			t.Fatal(err)
@@ -125,11 +125,11 @@ func TestSharedInboxPreferencesAndReconnect(t *testing.T) {
 	if !p.Shared || strings.Join(p.Events, ",") != "needs_input" {
 		t.Fatalf("second device preferences: %+v", p)
 	}
-	insert := func(event db.TaskState) int64 {
+	insert := func(event db.NotificationEvent) int64 {
 		id, err := e.store.InsertNotification(t.Context(), db.NewNotification{Event: event, Title: "Shared work", URL: "/tasks/12"})
 		return mustValue(t, id, err)
 	}
-	done, waiting := insert(db.StateDone), insert(db.StateNeedsInput)
+	done, waiting := insert(db.EventDone), insert(db.EventNeedsInput)
 	checkBadge := func(session auth.SignInResult, want int) {
 		t.Helper()
 		var badge struct{ NeedsInput, Unread int }
@@ -184,7 +184,7 @@ func TestSharedInboxPreferencesAndReconnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A wake with fresh private work must not bypass the stream credential check.
-	insert(db.StateDone)
+	insert(db.EventDone)
 	hub.Signal()
 	for _, stream := range []<-chan sseEvent{replay, reconnect} {
 		if ev := nextSSE(t, stream, true); ev.name != "access-ended" {
@@ -224,7 +224,7 @@ func TestSharedPushBindingLifecycle(t *testing.T) {
 	notifyRequest(t, e, member, "POST", "/api/push/test", endpointBody, 404, nil)
 	notifyRequest(t, e, member, "DELETE", "/api/push/subscriptions", endpointBody, 204, nil)
 	bound(owner, true)
-	id, err := e.store.InsertNotification(ctx, db.NewNotification{Event: db.StateNeedsInput, Title: "Private work title", URL: "/tasks/12"})
+	id, err := e.store.InsertNotification(ctx, db.NewNotification{Event: db.EventNeedsInput, Title: "Private work title", URL: "/tasks/12"})
 	id = mustValue(t, id, err)
 	redeem := func(session auth.SignInResult, binding string, status int, out any) {
 		t.Helper()

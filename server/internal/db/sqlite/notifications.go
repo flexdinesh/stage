@@ -16,11 +16,15 @@ func (t *tx) Notifications() store.Notifications { return notifications{t.r} }
 // Titles are snapshots and cannot identify a task or an external session.
 const notificationKeySQL = `CASE
   WHEN n.task_id IS NOT NULL THEN 'task:' || n.task_id
+  WHEN n.tree_id IS NOT NULL THEN 'tree:' || n.tree_id
+  WHEN n.schedule_id IS NOT NULL THEN 'schedule:' || n.schedule_id
   WHEN n.url GLOB '/tasks/[0-9]*' AND substr(n.url, 8) NOT GLOB '*[^0-9]*' THEN 'task:' || substr(n.url, 8)
+  WHEN n.url GLOB '/trees/[0-9]*' AND substr(n.url, 8) NOT GLOB '*[^0-9]*' THEN 'tree:' || substr(n.url, 8)
+  WHEN n.url GLOB '/schedules/[0-9]*' AND substr(n.url, 12) NOT GLOB '*[^0-9]*' THEN 'schedule:' || substr(n.url, 12)
   WHEN n.session_id IS NOT NULL THEN 'session:' || (SELECT connection_id || ':' || external_id FROM session_identities WHERE id=n.session_id)
   ELSE 'notification:' || n.id END`
 
-const notificationColumns = `COALESCE((SELECT connection_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),0), n.id, n.event, n.task_id, (SELECT external_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)), n.title, n.project_title,
+const notificationColumns = `COALESCE((SELECT connection_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)),0), n.id, n.event, n.task_id, n.tree_id, n.schedule_id, (SELECT external_id FROM session_identities WHERE id=COALESCE(tk.session_id,n.session_id)), n.title, n.project_title,
   n.url, n.created_at, CASE WHEN r.notification_id IS NULL THEN n.created_at ELSE r.read_at END AS read_at,
   CASE WHEN n.task_id IS NOT NULL THEN tk.state
        WHEN o.session_id IS NOT NULL THEN json_extract(o.observation,'$.state') END AS current_state, n.note`
@@ -31,8 +35,8 @@ LEFT JOIN execution_observations o ON o.session_id=n.session_id`
 
 func (r notifications) Insert(ctx context.Context, n store.NewNotification, sid *int64) (int64, error) {
 	var id int64
-	err := r.QueryRow(ctx, `INSERT INTO notifications(event,task_id,title,project_title,url,session_id,created_at,note) VALUES($1,$2,$3,$4,$5,$6,COALESCE($7,strftime('%Y-%m-%dT%H:%M:%f000Z','now')),$8) RETURNING id`,
-		string(n.Event), n.TaskID, n.Title, n.ProjectTitle, n.URL, sid, n.ObservedAt, n.Note).Scan(&id)
+	err := r.QueryRow(ctx, `INSERT INTO notifications(event,task_id,title,project_title,url,session_id,created_at,note,tree_id,schedule_id) VALUES($1,$2,$3,$4,$5,$6,COALESCE($7,strftime('%Y-%m-%dT%H:%M:%f000Z','now')),$8,$9,$10) RETURNING id`,
+		string(n.Event), n.TaskID, n.Title, n.ProjectTitle, n.URL, sid, n.ObservedAt, n.Note, n.TreeID, n.ScheduleID).Scan(&id)
 	return id, err
 }
 
@@ -43,7 +47,7 @@ LEFT JOIN notification_preferences p ON p.user_id = u.id
 WHERE n.id = $1 AND a.id = 1 AND (
   (a.mode = 'personal' AND u.id = $2) OR
   (a.mode <> 'personal' AND u.email IS NOT NULL AND u.status = 'active'
-    AND (p.user_id IS NULL OR n.event IN (SELECT value FROM json_each(p.notify_events))))
+    AND (p.user_id IS NULL AND n.event <> 'schedule_started' OR n.event IN (SELECT value FROM json_each(p.notify_events))))
 )`, id, ownerID)
 	return err
 }
@@ -71,7 +75,7 @@ LIMIT $1`, limit, beforeID, key, userID)
 
 func scanNotification(row rowScanner) (store.Notification, error) {
 	var n store.Notification
-	err := row.Scan(&n.ConnectionID, &n.ID, &n.Event, &n.TaskID, &n.ExternalSessionID, &n.Title, &n.ProjectTitle,
+	err := row.Scan(&n.ConnectionID, &n.ID, &n.Event, &n.TaskID, &n.TreeID, &n.ScheduleID, &n.ExternalSessionID, &n.Title, &n.ProjectTitle,
 		&n.URL, &n.CreatedAt, &n.ReadAt, &n.CurrentState, &n.Note)
 	return n, err
 }
@@ -136,7 +140,7 @@ LIMIT $1`, limit, waiting, beforeID, upToID, userID)
 	out := []store.NotificationGroup{}
 	for rows.Next() {
 		var g store.NotificationGroup
-		if err := rows.Scan(&g.ConnectionID, &g.ID, &g.Event, &g.TaskID, &g.ExternalSessionID, &g.Title, &g.ProjectTitle,
+		if err := rows.Scan(&g.ConnectionID, &g.ID, &g.Event, &g.TaskID, &g.TreeID, &g.ScheduleID, &g.ExternalSessionID, &g.Title, &g.ProjectTitle,
 			&g.URL, &g.CreatedAt, &g.ReadAt, &g.CurrentState, &g.Note, &g.Key, &g.EventCount, &g.UnreadCount); err != nil {
 			return nil, err
 		}

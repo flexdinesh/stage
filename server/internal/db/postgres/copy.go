@@ -26,7 +26,7 @@ var baselineSeeds = map[string]string{
 	"installation_access":      "id = 1 AND mode = 'personal'",
 	"machines":                 "id = 1",
 	"preferences":              "id = 1",
-	"notification_preferences": `user_id = 1 AND notify_events = '["needs_input","failed","done","ready"]'::jsonb`,
+	"notification_preferences": `user_id = 1 AND notify_events = '["needs_input","failed","done","ready","completed","tree_completed","schedule_skipped"]'::jsonb`,
 	"harness_settings":         `machine_id = 1 AND settings = '{}'::jsonb`,
 	"harness_sync_status":      `last_error IS NULL AND last_full_sync_at IS NULL`,
 }

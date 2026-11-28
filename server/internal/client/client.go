@@ -913,7 +913,7 @@ func (c *Client) Upload(ctx context.Context, name string, data []byte) (db.Attac
 type Preferences struct {
 	DefaultConnectionID *int64 `json:"defaultConnectionId"`
 	// NotifyEvents is empty for agents on a shared server.
-	NotifyEvents []db.TaskState `json:"notifyEvents"`
+	NotifyEvents []db.NotificationEvent `json:"notifyEvents"`
 }
 
 // Preferences reads the default connection for new tasks and notify events.

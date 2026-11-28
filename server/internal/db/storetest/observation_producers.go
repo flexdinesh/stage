@@ -164,7 +164,7 @@ func caseObservationWriteTransaction(t *testing.T, open Factory) {
 			return fmt.Errorf("scoped inference %t: %v", inferred, err)
 		}
 		_, err = tx.InsertNotification(ctx, db.NewNotification{
-			Event: db.StateDone, TaskID: &tracked.ID, Session: &ref, Title: tracked.Title, ObservedAt: &seen,
+			Event: db.EventDone, TaskID: &tracked.ID, Session: &ref, Title: tracked.Title, ObservedAt: &seen,
 		})
 		return err
 	}

@@ -158,6 +158,7 @@ func (s *Store) ChangeAcceptance(ctx context.Context, id int64, in AcceptanceReq
 				return Conflict("requestId already used with different content")
 			}
 			result = recorded
+			result.Replayed = true
 			return nil
 		}
 		if !errors.Is(err, ErrNotFound) {

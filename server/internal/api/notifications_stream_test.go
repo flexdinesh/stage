@@ -98,7 +98,7 @@ func readHello(t *testing.T, events <-chan sseEvent) (helloEvent, string) {
 func insertDone(t *testing.T, e *env, thread string) int64 {
 	t.Helper()
 	id, err := e.store.InsertNotification(context.Background(), db.NewNotification{
-		Event: db.StateDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: thread, URL: "/sessions/" + thread,
+		Event: db.EventDone, Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: thread, URL: "/sessions/" + thread,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func TestNotificationStreamNoCursorThenLive(t *testing.T) {
 	id := insertDone(t, e, "ext-2")
 	ev := nextSSE(t, events, true)
 	row := decodeEvent[streamRow](t, ev, "notification")
-	if row.ID != id || ev.id != fmt.Sprint(id) || row.Tag != "session-1:ext-2" || row.Title != "Done" {
+	if row.ID != id || ev.id != fmt.Sprint(id) || row.Tag != "session-1:ext-2" || row.Title != "Session finished" {
 		t.Fatalf("live row %+v id %s", row, ev.id)
 	}
 	if u := decodeEvent[unreadEvent](t, nextSSE(t, events, true), "unread"); fmt.Sprint(u.Tags) != "[session-1:ext-1 session-1:ext-2]" {
@@ -159,7 +159,7 @@ func TestNotificationStreamReplay(t *testing.T) {
 	first := insertDone(t, e, "ext-1")
 	project := tk.ProjectTitle
 	thread := "provider:session/x"
-	taskRow, err := e.store.InsertNotification(ctx, db.NewNotification{Event: db.StateNeedsInput, TaskID: &tk.ID,
+	taskRow, err := e.store.InsertNotification(ctx, db.NewNotification{Event: db.EventNeedsInput, TaskID: &tk.ID,
 		Session: &db.SessionRef{ConnectionID: dbtest.T3Connection, ExternalSessionID: thread}, Title: tk.Title, ProjectTitle: &project, URL: fmt.Sprintf("/tasks/%d", tk.ID)})
 	if err != nil {
 		t.Fatal(err)
