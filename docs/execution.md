@@ -1011,11 +1011,12 @@ only to work Stage can launch.
 ### OpenCode interaction
 
 OpenCode implements `Interactive` over its V2 session endpoints
-(`server/internal/opencode/interaction.go`). `send` is available on every
-connection: it uses `session.prompt`, which launch already requires.
-`respond` is available when OpenAPI advertises `session.permission.reply`
-with a `decision` body and `session.form.reply` with an `answer` body;
-otherwise it is unavailable with a version reason.
+(`server/internal/opencode/interaction.go`). `send` is available when
+OpenAPI's `session.prompt` body has a `delivery` field. `respond` is
+available when OpenAPI advertises `session.permission.reply` with a
+`decision` body and `session.form.reply` with an `answer` body. Otherwise
+each is unavailable with a reason naming the missing OpenCode capability;
+the connection stays healthy.
 
 - **Requests.** `GET /api/session/{id}/permission` then
   `GET /api/session/{id}/form`, in OpenCode's order. A request whose
@@ -1023,8 +1024,10 @@ otherwise it is unavailable with a version reason.
   missing session is `ErrNotFound`. OpenCode reports no request time, so
   `createdAt` is zero.
   - A permission is an `approval` with OpenCode's options: `once` "Allow
-    once", `always` "Allow always" and `reject` "Deny" (`textOption`, sent
-    as the message). Its title is OpenCode's description of the action
+    once", `always` "Allow always" (only when the request has non-empty
+    `save` patterns, the rules OpenCode would save) and `reject` "Deny"
+    (`textOption`, sent as the message; OpenCode treats it as correction
+    feedback and rejects the run's sibling asks). Its title is OpenCode's description of the action
     ("Run shell commands"), or "Permission required: <action>" for an
     action OpenCode does not describe. Its detail is the request's message.
     Its preview is the tool input as `key: value` lines, then the resources.
@@ -1038,7 +1041,8 @@ otherwise it is unavailable with a version reason.
     descriptor's `unlistedRequests` says to answer it in OpenCode.
 - **Respond.** The request ID prefix picks the endpoint, and Stage re-reads
   the session's list first: a request no longer listed is `ErrNotFound`. A
-  permission takes one of its three options, with text only on Deny
+  permission takes one of its options (`always` only when offered), with
+  text only on Deny
   (`POST .../permission/{id}/reply {decision, message?}`). A form takes
   answers by field key: option labels become option values, Yes or No a
   boolean, a number its value; fields left out stay unanswered and OpenCode
@@ -1046,13 +1050,20 @@ otherwise it is unavailable with a version reason.
   that does not fit is `*Invalid` (400) before anything is sent. OpenCode
   answering 404, or 409 for a settled form, is `ErrNotFound` (404); its 400
   is `*Invalid` with OpenCode's message.
-- **Send.** `POST /api/session/{id}/prompt {text}` with OpenCode's default
-  delivery, `steer`: an idle session starts a run and a running one takes
-  the message at its next step. OpenCode's own composer is hidden while a
-  request is pending, so a session waiting on a permission or form takes no
-  message (`*Busy`, 409 `session_busy`: answer it first, or answer a form
-  Stage can't show in OpenCode). The admission must be a user item of the
-  session. A missing session is `ErrNotFound`.
+- **Send.** `POST /api/session/{id}/prompt {id, text, metadata:
+  {stageMessage}, delivery: "queue"}`: an idle session starts a run, and a
+  running one takes the message when its current turn ends. Stage never
+  uses `steer`, which joins a running turn ([ADR 0013](adr/0013-tree-steering.md#send-semantics)).
+  The message ID is `msg_` plus 32 hex characters derived (SHA-256) from
+  the session and `Message.RequestID` (the coordinator sets one per call;
+  a retrying caller such as steering delivery passes its own), so a retry
+  is admitted once: OpenCode reconciles a repeated ID with the same
+  delivery. Without a request ID it is random. `stageMessage` is the
+  request ID, else the message ID. OpenCode's own composer is hidden while a request is
+  pending, so a session waiting on a permission or form takes no message
+  (`*Busy`, 409 `session_busy`: answer it first, or answer a form Stage
+  can't show in OpenCode). The admission must be a user item of the
+  session with the sent ID. A missing session is `ErrNotFound`.
 
 Workers reach the same methods through `adapter.requests`,
 `adapter.respond` and `adapter.send` and the `interactive` trait.
@@ -1101,6 +1112,12 @@ service exposed through a no-auth loopback proxy.
 The verified Linux amd64 binary reported `2.3.0`, SHA-256
 `2e0e4656521ca56e5ba16a00d48429958b8105b3fa6466710a4350e68759381f`.
 The source reference was `df46f6931da0c934a59d375ac44525846f21c718`.
+`TestLiveOpenCodeInteractive` (the interaction gate) was added later and
+verified on `2.3.2` (Linux amd64, SHA-256
+`e6543f6e5c39c40971ba38afd1819ac852c29ac735b5a89065d3d148d47f27ad`), with
+the rest of the suite: a bash permission (asked by config) answered Allow
+once, the question tool's form answered, and a message sent twice with one
+request ID while a turn runs, delivered once after that turn ends.
 Fault injection covers every launch checkpoint, lost HTTP responses, racing Stage
 retries, failed worktree setup, session identity collisions and server reconnect.
 The suite also checks adoption, input requests, the web-client route and offline

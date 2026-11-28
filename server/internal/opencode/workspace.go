@@ -192,6 +192,9 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 	if contract.respond {
 		ops[execution.OpRespond] = available
 	}
+	if contract.send {
+		ops[execution.OpSend] = available
+	}
 	if contract.fsList {
 		ops[execution.OpDirectoryBrowse] = available
 	}
@@ -214,7 +217,7 @@ func launchOptions() []execution.Option {
 func operations() map[execution.Op]execution.Availability {
 	return map[execution.Op]execution.Availability{
 		execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
-		execution.OpSend:            available,
+		execution.OpSend:            {Reason: sendUnavailable},
 		execution.OpSessionSearch:   {Reason: sessionSearchUnavailable},
 		execution.OpImages:          {Reason: "Image attachment delivery has not been verified for this adapter."},
 		execution.OpRespond:         {Reason: respondUnavailable},

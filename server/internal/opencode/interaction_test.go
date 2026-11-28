@@ -39,7 +39,9 @@ type interactionFake struct {
 	replyBody   string
 	replies     []recorded
 	prompts     []string
-	gone        bool
+	// admitID overrides the admitted message ID (else the prompt's id).
+	admitID string
+	gone    bool
 }
 
 type recorded struct{ path, body string }
@@ -68,9 +70,13 @@ func (f *interactionFake) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPost && rest == "/prompt":
 		f.prompts = append(f.prompts, string(body))
-		var in struct{ Text string }
+		var in struct{ ID, Text, Delivery string }
 		_ = json.Unmarshal(body, &in)
-		writeJSON(w, map[string]any{"data": map[string]any{"id": "msg_new", "sessionID": liveSession, "type": "user", "time": map[string]any{"created": 1}, "payload": map[string]any{"text": in.Text}, "delivery": "steer"}})
+		id := in.ID
+		if f.admitID != "" {
+			id = f.admitID
+		}
+		writeJSON(w, map[string]any{"data": map[string]any{"id": id, "sessionID": liveSession, "type": "user", "time": map[string]any{"created": 1}, "payload": map[string]any{"text": in.Text}, "delivery": in.Delivery}})
 	default:
 		http.NotFound(w, r)
 	}
@@ -86,6 +92,9 @@ func writeJSON(w http.ResponseWriter, v any) {
 func interactionFixture(t *testing.T, replies bool) (*Adapter, *interactionFake) {
 	t.Helper()
 	fake := opencodetest.New(t, "")
+	if !replies {
+		fake.WithoutInteraction()
+	}
 	base := fake.Config.Handler
 	rec := httptest.NewRecorder()
 	base.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
@@ -125,7 +134,7 @@ var liveRef = execution.SessionRef{ConnectionID: 17, ExternalSessionID: liveSess
 func bashPermission(id string) map[string]any {
 	return map[string]any{
 		"id": id, "sessionID": liveSession, "action": "bash", "resources": []string{"npm test"},
-		"message": "Runs the suite", "metadata": map[string]any{"input": map[string]any{"description": "Run tests", "command": "npm test"}},
+		"message": "Runs the suite", "metadata": map[string]any{"input": map[string]any{"description": "Run tests", "command": "npm test"}}, "save": []string{"npm *"},
 		"source": map[string]any{"type": "tool", "messageID": "msg_1", "id": "call_1"},
 	}
 }
@@ -163,8 +172,9 @@ func TestFeaturesGatesRespondOnReplyOperations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !c.Operations[execution.OpSend].Available {
-			t.Fatalf("send unavailable: %+v", c.Operations[execution.OpSend])
+		send := c.Operations[execution.OpSend]
+		if send.Available != replies || (!replies && send.Reason != sendUnavailable) {
+			t.Fatalf("replies=%v send %+v", replies, send)
 		}
 		got := c.Operations[execution.OpRespond]
 		if got.Available != replies || (!replies && got.Reason != respondUnavailable) {
@@ -202,7 +212,9 @@ func TestRequestsMapPermissionsAndShowableForms(t *testing.T) {
 		p.Preview != "command: npm test\ndescription: Run tests\nnpm test" || p.TextOption != "reject" || !reflect.DeepEqual(p.Options, wantOptions) {
 		t.Fatalf("permission %+v", p)
 	}
-	if rs[1].Title != "Permission required: mcp_thing" || rs[1].Preview != "" {
+	// No save patterns: OpenCode would save nothing, so Allow always is not offered.
+	if rs[1].Title != "Permission required: mcp_thing" || rs[1].Preview != "" ||
+		!reflect.DeepEqual(rs[1].Options, []execution.Choice{choice("once", "Allow once"), choice("reject", "Deny")}) {
 		t.Fatalf("unknown action %+v", rs[1])
 	}
 	q := rs[2]
@@ -285,6 +297,13 @@ func TestRespondPermission(t *testing.T) {
 	}
 	if err := a.Respond(ctx, liveRef, "per_gone", execution.Response{Option: "once"}); !errors.Is(err, execution.ErrNotFound) {
 		t.Fatalf("stale request: %v", err)
+	}
+	unsaved := bashPermission("per_2")
+	delete(unsaved, "save")
+	fake.permissions = append(fake.permissions, unsaved)
+	var invalid *execution.Invalid
+	if err := a.Respond(ctx, liveRef, "per_2", execution.Response{Option: "always"}); !errors.As(err, &invalid) || len(fake.replies) != 2 {
+		t.Fatalf("always without save: %v %+v", err, fake.replies)
 	}
 	fake.replyStatus, fake.replyBody = http.StatusNotFound, `{"_tag":"PermissionNotFoundError","requestID":"per_1","message":"gone"}`
 	if err := a.Respond(ctx, liveRef, "per_1", execution.Response{Option: "once"}); !errors.Is(err, execution.ErrNotFound) {
@@ -378,13 +397,78 @@ func TestRespondRequiresReplyOperations(t *testing.T) {
 	}
 }
 
+// promptBody is a recorded session.prompt body.
+type promptBody struct {
+	ID       string            `json:"id"`
+	Text     string            `json:"text"`
+	Metadata map[string]string `json:"metadata"`
+	Delivery string            `json:"delivery"`
+}
+
+func decodePrompt(t *testing.T, raw string) promptBody {
+	t.Helper()
+	var p promptBody
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestSendQueuesWithAStageMessageID(t *testing.T) {
+	a, fake := interactionFixture(t, true)
+	ctx := t.Context()
+	if err := a.Send(ctx, liveRef, execution.Message{Text: "also run lint"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Send(ctx, liveRef, execution.Message{Text: "and docs"}); err != nil {
+		t.Fatal(err)
+	}
+	first, second := decodePrompt(t, fake.prompts[0]), decodePrompt(t, fake.prompts[1])
+	if first.Text != "also run lint" || first.Delivery != "queue" || !strings.HasPrefix(first.ID, "msg_") || len(first.ID) != 36 ||
+		!reflect.DeepEqual(first.Metadata, map[string]string{"stageMessage": first.ID}) {
+		t.Fatalf("prompt %+v", first)
+	}
+	if second.ID == first.ID {
+		t.Fatalf("fresh sends share message ID %s", first.ID)
+	}
+
+	// A RequestID derives the ID, so a retry is the same message to OpenCode.
+	steer := execution.Message{Text: "digest", RequestID: "steering-3-41"}
+	for range 2 {
+		if err := a.Send(ctx, liveRef, steer); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r1, r2 := decodePrompt(t, fake.prompts[2]), decodePrompt(t, fake.prompts[3])
+	want, _ := messageID(liveSession, "steering-3-41")
+	if r1.ID != want || r2.ID != want || r1.Metadata["stageMessage"] != "steering-3-41" || r1.Delivery != "queue" {
+		t.Fatalf("retried prompts %+v %+v", r1, r2)
+	}
+	if other, _ := messageID("ses_other", "steering-3-41"); other == want {
+		t.Fatal("request IDs collide across sessions")
+	}
+
+	fake.admitID = "msg_someone_else"
+	if err := a.Send(ctx, liveRef, execution.Message{Text: "hi"}); err == nil {
+		t.Fatal("mismatched admission accepted")
+	}
+}
+
+func TestSendRequiresPromptDelivery(t *testing.T) {
+	a, fake := interactionFixture(t, false)
+	err := a.Send(t.Context(), liveRef, execution.Message{Text: "hi"})
+	if err == nil || err.Error() != sendUnavailable || len(fake.prompts) != 0 {
+		t.Fatalf("send without contract: %v %q", err, fake.prompts)
+	}
+}
+
 func TestSendPromptsUnlessARequestIsPending(t *testing.T) {
 	a, fake := interactionFixture(t, true)
 	ctx := t.Context()
 	if err := a.Send(ctx, liveRef, execution.Message{Text: "also run lint"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(fake.prompts) != 1 || strings.TrimSpace(fake.prompts[0]) != `{"text":"also run lint"}` {
+	if len(fake.prompts) != 1 {
 		t.Fatalf("prompts %q", fake.prompts)
 	}
 	for _, tc := range []struct {

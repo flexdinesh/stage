@@ -246,6 +246,9 @@ type serverContract struct {
 	// respond: session.permission.reply takes a decision and
 	// session.form.reply an answer (Interactive.Respond).
 	respond bool
+	// send: session.prompt takes a delivery, so Send can queue a message
+	// for the end of the current turn (Interactive.Send).
+	send bool
 	// events: the event types Stage subscribes to on GET /api/event
 	// (event.subscribe); nil: no stream, polling only (EventSource).
 	events []string
@@ -322,6 +325,7 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 	contract.location = spec.Paths["/api/location"]["get"].OperationID == "location.get"
 	contract.fsList = spec.Paths["/api/fs/list"]["get"].OperationID == "fs.list"
 	contract.respond = inspectReplies(spec.Paths, spec.Components.Schemas)
+	contract.send = requestTakes(spec.Paths["/api/session/{sessionID}/prompt"]["post"], "session.prompt", "delivery", spec.Components.Schemas)
 	contract.events = inspectEvents(spec.Paths["/api/event"]["get"])
 	a.verified = contract
 	return contract, nil

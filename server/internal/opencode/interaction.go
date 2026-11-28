@@ -2,6 +2,9 @@ package opencode
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,13 +19,21 @@ import (
 
 // Answering a session's pending permissions and forms and sending it
 // messages from Stage (execution.Interactive), over OpenCode's V2 session
-// endpoints. A form whose fields Stage's question model can't carry
-// (conditions, hidden or external fields) is left out of Requests and
-// answered in OpenCode (Descriptor.UnlistedRequests).
+// endpoints. Messages are queued (delivery "queue"): OpenCode delivers them
+// when the current turn ends, never mid-turn (ADR 0013). A form whose
+// fields Stage's question model can't carry (conditions, hidden or external
+// fields) is left out of Requests and answered in OpenCode
+// (Descriptor.UnlistedRequests).
 
 var _ execution.Interactive = (*Adapter)(nil)
 
 const respondUnavailable = "This OpenCode version cannot answer permissions and forms from Stage (session.permission.reply with a decision, session.form.reply with an answer)."
+
+const sendUnavailable = "This OpenCode version cannot queue a message for the end of a turn (session.prompt with a delivery)."
+
+// deliveryQueue is session.prompt's delivery that waits for the current
+// turn to end (OpenCode's default, steer, joins a running turn).
+const deliveryQueue = "queue"
 
 // Permission decisions (Permission.Reply), in OpenCode's order: proceed first.
 const (
@@ -83,6 +94,8 @@ type permissionRequest struct {
 	Resources []string        `json:"resources"`
 	Message   string          `json:"message"`
 	Metadata  json.RawMessage `json:"metadata"`
+	// Save: the rules "always" saves; none means always is not offered.
+	Save []string `json:"save"`
 }
 
 // formInfo is a Form.Info.
@@ -201,15 +214,21 @@ func permissionToRequest(p permissionRequest) execution.Request {
 	}
 	lines := toolInput(p.Metadata)
 	lines = append(lines, p.Resources...)
+	options := []execution.Choice{choice(decisionOnce, "Allow once")}
+	if p.savesRules() {
+		options = append(options, choice(decisionAlways, "Allow always"))
+	}
 	return execution.Request{
 		ID: p.ID, Kind: execution.RequestApproval, Title: title, Detail: p.Message,
 		Preview: strings.Join(lines, "\n"), TextOption: decisionReject,
-		Options: []execution.Choice{
-			choice(decisionOnce, "Allow once"),
-			choice(decisionAlways, "Allow always"),
-			choice(decisionReject, "Deny"),
-		},
+		Options: append(options, choice(decisionReject, "Deny")),
 	}
+}
+
+// savesRules reports whether "always" would save a rule: OpenCode saves
+// nothing for a request without save patterns, so always is not offered.
+func (p permissionRequest) savesRules() bool {
+	return slices.ContainsFunc(p.Save, func(s string) bool { return strings.TrimSpace(s) != "" })
 }
 
 // toolInput is metadata.input as "key: value" lines, keys sorted; none
@@ -347,12 +366,15 @@ func (a *Adapter) respondPermission(ctx context.Context, session, id string, r e
 	if err != nil {
 		return err
 	}
-	if !slices.ContainsFunc(perms, func(p permissionRequest) bool { return p.ID == id }) {
+	i := slices.IndexFunc(perms, func(p permissionRequest) bool { return p.ID == id })
+	if i < 0 {
 		return execution.ErrNotFound
 	}
 	switch {
 	case len(r.Answers) > 0:
 		return &execution.Invalid{Reason: "Answer an OpenCode permission request with an option, not answers."}
+	case r.Option == decisionAlways && !perms[i].savesRules():
+		return &execution.Invalid{Reason: "OpenCode offers no Allow always for this request. Choose Allow once or Deny."}
 	case r.Option != decisionOnce && r.Option != decisionAlways && r.Option != decisionReject:
 		return &execution.Invalid{Reason: "Choose Allow once, Allow always or Deny."}
 	case strings.TrimSpace(r.Text) != "" && r.Option != decisionReject:
@@ -481,13 +503,21 @@ func replyErr(err error) error {
 	return err
 }
 
-// Send admits a message into the session (OpenCode's default delivery,
-// steer: an idle session starts a run, a running one takes it at its next
-// step). A session waiting on a permission or form takes no message
-// (*execution.Busy), as OpenCode's own composer does.
+// Send queues a message in the session (delivery "queue"): an idle session
+// starts a run, a running one takes it when its turn ends. A session
+// waiting on a permission or form takes no message (*execution.Busy), as
+// OpenCode's own composer does. The message ID derives from m.RequestID
+// when set, so a retry is admitted once.
 func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m execution.Message) error {
 	if !a.valid(ref) {
 		return execution.ErrNotFound
+	}
+	contract, err := a.checkContract(ctx)
+	if err != nil {
+		return err
+	}
+	if !contract.send {
+		return errors.New(sendUnavailable)
 	}
 	id := ref.ExternalSessionID
 	perms, err := a.permissions(ctx, id)
@@ -509,15 +539,39 @@ func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m executio
 		}
 		return &execution.Busy{Reason: busyQuestions}
 	}
+	msg, err := messageID(id, m.RequestID)
+	if err != nil {
+		return err
+	}
+	marker := m.RequestID
+	if marker == "" {
+		marker = msg
+	}
+	body := map[string]any{"id": msg, "text": m.Text, "metadata": map[string]string{"stageMessage": marker}, "delivery": deliveryQueue}
 	var result envelope[admitted]
-	if err := a.request(ctx, "POST", "/api/session/"+url.PathEscape(id)+"/prompt", map[string]string{"text": m.Text}, &result); missing(err) {
+	if err := a.request(ctx, "POST", "/api/session/"+url.PathEscape(id)+"/prompt", body, &result); missing(err) {
 		return execution.ErrNotFound
 	} else if err != nil {
 		return err
 	}
 	// A plugin may rewrite the text, so only the admission's identity is checked.
-	if v := result.Data; v.Type != "user" || v.ID == "" || v.SessionID != id {
+	if v := result.Data; v.Type != "user" || v.ID != msg || v.SessionID != id {
 		return errors.New("OpenCode returned a mismatched message admission")
 	}
 	return nil
+}
+
+// messageID is the prompt's message ID: derived from the session and
+// requestID when set (a retry reuses it and OpenCode admits it once),
+// else random.
+func messageID(session, requestID string) (string, error) {
+	if requestID != "" {
+		sum := sha256.Sum256([]byte(session + "\n" + requestID))
+		return "msg_" + hex.EncodeToString(sum[:16]), nil
+	}
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "msg_" + hex.EncodeToString(b), nil
 }
