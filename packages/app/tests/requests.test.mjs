@@ -8,6 +8,7 @@ import {
   draftOf,
   emptyDraft,
   expiredText,
+  freeText,
   optionNote,
   optionResponse,
   pick,
@@ -101,6 +102,17 @@ test("every question needs an answer; blank Other does not count", () => {
   assert.equal(allAnswered(qs, draft), true);
   assert.deepEqual(answersResponse(qs, draft), { answers: { 0: ["teal"], 1: ["S", "M"] } });
   assert.equal(allAnswered([], {}), false);
+});
+
+test("a free-text question (custom, no options) answers with its text alone", () => {
+  const q = { id: "n", prompt: "Name?", options: [], custom: true };
+  assert.equal(freeText(q), true);
+  assert.equal(freeText({ id: "x", prompt: "Pick", options: [{ label: "A" }], custom: true }), false);
+  assert.equal(freeText({ id: "y", prompt: "Pick", options: [] }), false);
+  assert.equal(allAnswered([q], { n: { picked: [], otherOn: false, other: "  " } }), false);
+  const draft = { n: { picked: [], otherOn: false, other: " api " } };
+  assert.equal(allAnswered([q], draft), true);
+  assert.deepEqual(answersResponse([q], draft), { answers: { n: ["api"] } });
 });
 
 test("Other text is ignored where free answers are not allowed", () => {

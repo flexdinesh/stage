@@ -108,6 +108,7 @@ const SAMPLE_QUESTION: SessionRequest = {
   questions: [
     { id: "0", header: "Color", prompt: "Which color do you prefer?", options: [{ label: "Red", description: "Warm" }, { label: "Blue", description: "Cool" }], custom: true },
     { id: "1", header: "Sizes", prompt: "Which sizes ship first?", options: [{ label: "Small" }, { label: "Medium" }, { label: "Large" }], multi: true },
+    { id: "2", header: "Name", prompt: "What should the release be called?", options: [], custom: true },
   ],
   createdAt: "2026-11-25T07:00:00Z",
 };
