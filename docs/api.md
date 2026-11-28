@@ -650,7 +650,8 @@ Each success records a `workspace_added` project event on the group with
 the actor and a `workspace_add` cause carrying `requestId` and the caller
 session. A `membership_failed` 409 means the workspace was added but not
 moved; retrying with the same `requestId` is safe. OpenCode adds existing
-folders ([source `folder`](execution.md#adding-folders)). The other shipped
+folders ([source `folder`](execution.md#adding-folders)). Codex trusts
+folders ([source `trust`](execution.md#codex-adapter)). The other shipped
 harnesses declare the operation unavailable with "Adding workspaces from
 Stage is not supported for <name> yet."
 

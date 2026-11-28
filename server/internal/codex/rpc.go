@@ -28,6 +28,9 @@ type RPCError struct {
 	Method  string `json:"-"`
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+	// Data carries method-specific detail, such as a config write's
+	// config_write_error_code.
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 func (e *RPCError) Error() string {

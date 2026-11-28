@@ -3,6 +3,9 @@ package engine_test
 import (
 	"context"
 	"errors"
+	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -194,6 +197,52 @@ func TestContractCodexStop(t *testing.T) {
 		}
 		if got, _ = store.GetTask(ctx, task.ID); got.State != db.StateInterrupted {
 			t.Fatal("stop", got.State)
+		}
+	})
+}
+
+// Trusting a folder through the real Codex adapter, in process and behind
+// a worker: the declared source, the result with its facts, an existing
+// folder and a refusal all survive the channel.
+func TestContractCodexWorkspaceAddTrustsAFolder(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		_, srv, svc, _ := codexSetup(t, p, t.TempDir())
+		ctx := t.Context()
+		a, err := svc.Connections.Adapter(3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := a.Features(ctx)
+		if err != nil || !f.Operations[execution.OpWorkspaceAdd].Available || len(f.WorkspaceSources) != 1 || f.WorkspaceSources[0].ID != codex.SourceTrust {
+			t.Fatalf("declaration %+v %+v %v", f.Operations[execution.OpWorkspaceAdd], f.WorkspaceSources, err)
+		}
+		adder, ok := execution.As[execution.WorkspaceAdder](a)
+		if !ok {
+			t.Fatal("WorkspaceAdder hidden")
+		}
+		req := func(path string) execution.WorkspaceAddRequest {
+			return execution.WorkspaceAddRequest{Source: codex.SourceTrust, Input: []byte(`{"path":` + strconv.Quote(path) + `}`), RequestID: "r1", Confirmed: true}
+		}
+		dir := t.TempDir() + "/v1.2"
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		srv.Override(dir, "", "A managed layer also sets this project")
+		got, err := adder.AddWorkspace(ctx, req(dir))
+		if err != nil || got.Existing || got.Workspace.ID != dir || got.Message != "Codex trusts this folder now." ||
+			len(got.Facts) != 1 || got.Facts[0].Tone != execution.ToneWarn {
+			t.Fatalf("added %+v %v", got, err)
+		}
+		if srv.Project(dir)["trust_level"] != "trusted" {
+			t.Fatal("trust not written")
+		}
+		if got, err = adder.AddWorkspace(ctx, req(dir)); err != nil || !got.Existing {
+			t.Fatalf("existing %+v %v", got, err)
+		}
+		_, err = adder.AddWorkspace(ctx, req(dir+"/missing"))
+		var invalid *execution.Invalid
+		if !errors.As(err, &invalid) || !strings.Contains(invalid.Reason, "Codex cannot read") {
+			t.Fatalf("refusal %T %v", err, err)
 		}
 	})
 }

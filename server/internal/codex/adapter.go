@@ -166,9 +166,10 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 			execution.OpRespond:       {Reason: answerInCodex},
 			execution.OpSend:          {Reason: answerInCodex},
 			execution.OpSessionRename: available,
-			execution.OpWorkspaceAdd:  execution.WorkspaceAddNotSupported(Descriptor.Name),
+			execution.OpWorkspaceAdd:  available,
 		},
-		Actions: []execution.Action{archiveAction},
+		Actions:          []execution.Action{archiveAction},
+		WorkspaceSources: []execution.WorkspaceSource{trustSource},
 	}
 	for _, p := range permissions {
 		c.Permissions = append(c.Permissions, execution.Choice{ID: p.ID, Label: p.Label, Availability: available})
@@ -237,24 +238,17 @@ func (a *Adapter) catalog(ctx context.Context) ([]model, error) {
 // machine's ops decide (ImportInCheckout); others stay manual-bind only.
 // Codex reports no archive or activity for them.
 func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, error) {
-	var res configResponse
-	if err := a.client.call(ctx, "config/read", map[string]any{}, &res); err != nil {
+	res, err := a.readConfig(ctx, false)
+	if err != nil {
 		return nil, err
 	}
-	if res.Config == nil {
-		return nil, errors.New("codex config/read: missing config")
-	}
-	var projects map[string]struct {
-		TrustLevel string `json:"trust_level"`
-	}
-	if raw, ok := res.Config["projects"]; ok && string(raw) != "null" {
-		if err := json.Unmarshal(raw, &projects); err != nil {
-			return nil, fmt.Errorf("codex config projects: %w", err)
-		}
+	projects, err := projectTrust(res.Config)
+	if err != nil {
+		return nil, err
 	}
 	paths := make([]string, 0, len(projects))
-	for p, v := range projects {
-		if v.TrustLevel == "trusted" && filepath.IsAbs(p) {
+	for p, level := range projects {
+		if level == trustTrusted && filepath.IsAbs(p) {
 			paths = append(paths, filepath.Clean(p))
 		}
 	}
@@ -263,6 +257,43 @@ func (a *Adapter) Workspaces(ctx context.Context) ([]execution.WorkspaceInfo, er
 	out := make([]execution.WorkspaceInfo, 0, len(paths))
 	for _, p := range paths {
 		out = append(out, workspace(p))
+	}
+	return out, nil
+}
+
+const trustTrusted = "trusted"
+
+// readConfig reads the effective config (config/read), with its layers
+// when layers is set.
+func (a *Adapter) readConfig(ctx context.Context, layers bool) (configResponse, error) {
+	var res configResponse
+	params := map[string]any{}
+	if layers {
+		params["includeLayers"] = true
+	}
+	if err := a.client.call(ctx, "config/read", params, &res); err != nil {
+		return res, err
+	}
+	if res.Config == nil {
+		return res, errors.New("codex config/read: missing config")
+	}
+	return res, nil
+}
+
+// projectTrust maps each configured project path, as Codex keys it, to its
+// trust level.
+func projectTrust(config map[string]json.RawMessage) (map[string]string, error) {
+	var projects map[string]struct {
+		TrustLevel string `json:"trust_level"`
+	}
+	if raw, ok := config["projects"]; ok && string(raw) != "null" {
+		if err := json.Unmarshal(raw, &projects); err != nil {
+			return nil, fmt.Errorf("codex config projects: %w", err)
+		}
+	}
+	out := make(map[string]string, len(projects))
+	for p, v := range projects {
+		out[p] = v.TrustLevel
 	}
 	return out, nil
 }
