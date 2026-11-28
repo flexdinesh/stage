@@ -26,7 +26,7 @@ If Stage cannot find `claude`, set **Claude command** in the card (or `stage har
 
 ### Let Claude trust the folder
 
-Claude runs only in folders it trusts. Run `claude` once in each project folder and accept the prompt. A task in a folder Claude does not trust returns to backlog saying so.
+Claude runs only in folders it trusts. Run `claude` once in each project folder and accept the prompt, or use **Trust in Claude Code**: on the folder's row in project detail, or as a workspace source (`stage workspaces add`). Stage sets only that folder's trust flag in Claude's state file, after you confirm that the folder's `.claude` settings, hooks and MCP servers will run in Claude sessions. A task in a folder Claude does not trust returns to backlog saying so.
 
 Stage discovers workspaces from folders Claude knows and groups them using repository and directory evidence. [Projects](/docs/concepts/projects)
 

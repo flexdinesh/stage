@@ -173,11 +173,16 @@ with the harness's own API inside the adapter or setup package:
   takes no request ID, list its workspaces before the call and again after a
   lost reply, and return the match (T3 does this).
 - Put irreversible or trust-granting effects behind `Confirm`. Stage requires
-  `confirmed: true` per request.
+  `confirmed: true` per request. A project action that performs the same
+  effect also declares `Confirm` and refuses an `ActionRequest` without
+  `Confirmed` (Claude Code's `trust`).
+- Return `*execution.Busy` when the harness refused for now and nothing
+  changed (409 `harness_busy`).
 
 Never create directories, run git or edit harness files from Stage core.
 Claude Code's documented trust key is the only file write ADR 0012
-allows, and only in its adapter. Until a harness supports it, declare
+allows, and only in its adapter ([trust.go](../server/internal/claudecode/trust.go)).
+Until a harness supports it, declare
 `execution.WorkspaceAddNotSupported(name)`. Workers relay the call as
 `adapter.workspaceAdd` behind the `workspaceAdder` trait.
 [Workspace add API](api.md#add-a-workspace) ·

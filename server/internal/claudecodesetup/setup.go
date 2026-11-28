@@ -176,7 +176,7 @@ func (s *Service) adapter(conn int64, bin, identity string) execution.Adapter {
 	if s.hooks != nil {
 		s.hooks.Reset()
 	}
-	return s.opts.NewAdapter(claudecode.Options{Connection: conn, CLI: s.cli(bin), Identity: identity, ImageRoot: s.imageRoot(), Hooks: s.hooks, Logger: s.log})
+	return s.opts.NewAdapter(claudecode.Options{Connection: conn, CLI: s.cli(bin), Identity: identity, ImageRoot: s.imageRoot(), Hooks: s.hooks, Inventory: machine.LocalOps{}, Logger: s.log})
 }
 
 // imageRoot is where launches write their images: <StateDir>/images.

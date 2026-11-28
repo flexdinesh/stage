@@ -500,7 +500,8 @@ reports the operation unavailable.
 `AddWorkspace` receives the source ID, input already validated against the
 source fields, the caller's `requestId` and the confirmation. It returns
 the added workspace's native ID and root, `Existing`, a message and facts.
-`*execution.Invalid` is a 400. `*execution.OutcomeUncertain`, a lost worker
+`*execution.Invalid` is a 400. `*execution.Busy` (the harness changed
+nothing; retry) is a 409 `harness_busy`. `*execution.OutcomeUncertain`, a lost worker
 reply or the 5-minute deadline is a 504 `outcome_uncertain`; the caller
 retries with the same `requestId`. After success Stage refreshes the
 connection's inventory, resolves the row by native ID and root, and records
@@ -511,7 +512,7 @@ On workers the operation requires the `workspaceAdder` trait and the
 T3 ([T3 workspace sources](#t3-workspace-sources)) adds folders, clones and
 new projects. OpenCode adds existing folders ([Adding folders](#adding-folders)).
 Codex trusts folders ([Codex adapter](#codex-adapter)). Claude Code declares
-the operation unavailable for now.
+the source `trust` ([Trust in Claude Code](#claude-code-adapter)).
 [Workspace add API](api.md#add-a-workspace)
 
 ### Interaction
@@ -539,9 +540,14 @@ A declared action is a harness-owned operation Stage relays. `execution.Action`
 carries the target, stable ID, caller policy, availability, confirmation
 and input schema. Connectors own connection actions, including setup.
 `Capabilities.Actions` describes session and project actions. Project
-actions use the exact workspace on the selected connection. Stage resolves
-that scope, checks caller policy and schema, and reaches the owner through
-`execution.As[execution.Actor]`. The owner validates semantic input.
+actions use the exact workspace on the selected connection, including a
+listed row its harness will not launch in (an action may fix that), and
+Stage refreshes the connection's inventory after one succeeds (best
+effort). Stage resolves that scope, checks caller policy and schema, and
+reaches the owner through `execution.As[execution.Actor]`. The owner
+validates semantic input. `ActionRequest.confirmed` tells the owner the
+caller sent `Stage-Action-Confirmed: 1` (MCP `run_action` `confirmed`); an
+owner may require it, as Claude Code's `trust` does.
 Workers advertise the `actor` trait and receive `adapter.act`.
 A lost reply leaves the outcome uncertain. Stage does not replay the action.
 
@@ -568,6 +574,9 @@ unchanged: the action itself never completes a task.
 | Codex | `archive` "Archive in Codex" | `thread/archive {threadId}` | archived |
 | OpenCode | `archive` "Archive in OpenCode" | `PATCH /api/session/{id} {archived: true}` (`session.update`) | archived; the service's spec lacks `session.update` with `archived` |
 | Claude Code | none | | |
+
+Claude Code's one project action, `trust` "Trust in Claude Code", is
+described with its [adapter](#claude-code-adapter).
 
 Each confirms first. T3's archive does not settle a thread, so only Settle
 in T3 can infer completion; its confirmation says so. The harness's own
@@ -1091,23 +1100,65 @@ to run on that machine.
   repository root (a linked worktree's main checkout), then on the nearest
   record from the folder up to the checkout top, or up to the filesystem root
   outside a checkout. A `false` record does not stop a trusted ancestor.
-  Untrusted rows stay listed with "Not trusted in Claude Code. Run claude in
-  this folder once and accept the trust prompt, then refresh." The home
+  Untrusted rows stay listed with "Not trusted in Claude Code. Use Trust in
+  Claude Code, or run claude in this folder once and accept the trust
+  prompt." The home
   folder is trusted one interactive session at a time, so it gets its own
   reason unless a record above it covers it. A truthy
   `CLAUDE_CODE_SANDBOXED` (`1`, `true`, `yes`, `on`) trusts every folder.
   Not mirrored: Claude's fallback for a record reached through a symlinked
   launch path. Stage launches with the folder as the working directory, so
   only the real path matters.
+- **Trust in Claude Code** ([ADR 0012](adr/0012-harness-workspace-add.md)
+  decision 8). Claude has no project or trust API; its documented fix is
+  `projects["<folder>"].hasTrustDialogAccepted: true` in the state file.
+  Stage keeps `claude --bg` launches, which need it. The workspace source
+  `trust` (input `path`, an absolute existing folder on the adapter's
+  machine) and the project action `trust` on a row Claude does not trust
+  share one code path; both are labelled "Trust in Claude Code", allow
+  people and agents, and run only with the confirmation (`confirmed: true`,
+  or `Stage-Action-Confirmed: 1` for the action, which reaches the adapter
+  as `ActionRequest.confirmed`): "Claude Code will trust this folder. Its
+  .claude settings, hooks and MCP servers will run in Claude sessions
+  there." Nothing writes automatically.
+  - Target: the folder's canonical path (symlinks resolved), the key Claude
+    looks up. Refused: home (its trust is session-only), the filesystem
+    root and home's ancestors (a record there trusts every folder below,
+    home included), Claude-managed worktrees, and a missing state file.
+  - Existing: Claude already trusts the folder (the inventory trust rule,
+    settled by `machine.Ops` evidence the setup injects, or
+    `CLAUDE_CODE_SANDBOXED`) and the folder has its own project entry, so
+    Claude lists it. Nothing is written. A folder trusted only through an
+    ancestor or its main checkout gets its own record, so it is listed.
+  - The project action is available only on a row Claude does not trust
+    (`FeaturesForWorkspace`); otherwise "Claude Code already trusts this
+    folder."
+  - Safe write, mirroring Claude Code 2.1.332: Claude saves its state under
+    a proper-lockfile lock (the directory `<state file>.lock`, touched every
+    5s, stale after 10s) and merges `projects` from disk under it. Stage
+    takes the same lock (a stale one is taken over; a live holder past 12s
+    answers busy), reads the raw bytes, and patches only that key: the
+    value, or one inserted member laid out like its neighbors (a missing
+    entry is Claude's minimal `{"hasTrustDialogAccepted": true}`, the shape
+    its runner writes). A semantic check proves nothing else changed. It
+    writes a temp file beside the real file (through a symlinked state
+    file), fsyncs it, keeps the file mode, and renames only if the hash,
+    size and mtime still match the read. Three changed reads answer busy
+    (409 `harness_busy` from the add route, `action_busy` from the
+    action); nothing was written, so a retry is safe.
+  - The result names the folder; a person's response adds a "Trust record"
+    fact naming the key and file.
 - **Features.** Models: Claude's default, `opus`, `sonnet`, `haiku`,
   `fable` (aliases for the latest). Harness-wide option `effort` (`low` to
   `max`) and launch option `worktree` (boolean, default off; Claude
   starts the worktree from origin's default branch and names the branch,
   so there is no base ref or branch option). Permissions: `manual`,
   `acceptEdits`, `auto`, `plan`, `dontAsk`, `bypassPermissions`. Images
-  and send are available. Unavailable with reasons: registering a folder,
-  and respond without the hook receiver (no state folder, or it could not
-  open).
+  and send are available. `workspaceAdd` offers the source `trust`, and the
+  project action `trust` is scoped per folder (`FeaturesForWorkspace`);
+  both are unavailable without the machine evidence the setup injects.
+  Unavailable with reasons: respond without the hook receiver (no state
+  folder, or it could not open).
 - **Follow-ups** ([ADR 0005](adr/0005-claude-code-harness.md) decision 18,
   E12). **Send** reads the session list fresh (one send at a time) and
   takes a message only for a listed background session that is `done`, or

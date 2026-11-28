@@ -82,7 +82,11 @@ membership and appears in the destination summary with `available: false`
 and its `reason`. Creating or editing a task or schedule with it, and the
 launch claim after the pre-launch refresh, return `destination_unavailable`
 with that reason. The next refresh after the person fixes it in the harness
-makes the row eligible again. See the
+makes the row eligible again. A blocked row still takes project actions,
+and a harness may declare one that fixes it: Claude Code's "Trust in Claude
+Code" trusts the folder, and the inventory refresh after the action makes
+the row eligible. Project detail opens a blocked row's harness actions
+under its reason. See the
 [Claude Code inventory](execution.md#claude-code-adapter).
 
 ## Refresh and adapter contract (07 behavior, 09 ownership)

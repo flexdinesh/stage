@@ -18,6 +18,7 @@ import (
 
 	"github.com/flexdinesh/stage/server/internal/claudecode"
 	"github.com/flexdinesh/stage/server/internal/claudecode/claudetest/fakestate"
+	"github.com/flexdinesh/stage/server/internal/machine"
 )
 
 var (
@@ -145,7 +146,12 @@ func (f *Fake) ImageRoot() string { return filepath.Join(f.Home, "stage-claude",
 
 // Adapter is an adapter on connection over the fake.
 func (f *Fake) Adapter(connection int64) *claudecode.Adapter {
-	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), ImageRoot: f.ImageRoot(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second, ProcessAlive: fakePID})
+	return claudecode.New(f.Options(connection))
+}
+
+// Options are the adapter options Adapter uses, for tests that change one.
+func (f *Fake) Options(connection int64) claudecode.Options {
+	return claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), ImageRoot: f.ImageRoot(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second, ProcessAlive: fakePID, Inventory: machine.LocalOps{}}
 }
 
 // Hooks opens a hook receiver in a temporary folder, closed when the test
@@ -163,7 +169,7 @@ func (f *Fake) Hooks() *claudecode.Hooks {
 // HookedAdapter is Adapter with hooks: launches pass their settings file
 // and Events pushes what hooks announce.
 func (f *Fake) HookedAdapter(connection int64, h *claudecode.Hooks) *claudecode.Adapter {
-	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), ImageRoot: f.ImageRoot(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second, Hooks: h, ProcessAlive: fakePID,
+	return claudecode.New(claudecode.Options{Connection: connection, CLI: f.CLI(), Identity: f.ConfigDir(), ImageRoot: f.ImageRoot(), RosterTTL: time.Nanosecond, LaunchWait: 2 * time.Second, Hooks: h, ProcessAlive: fakePID, Inventory: machine.LocalOps{},
 		SettleDelays: []time.Duration{0, 20 * time.Millisecond, 40 * time.Millisecond, 80 * time.Millisecond}})
 }
 

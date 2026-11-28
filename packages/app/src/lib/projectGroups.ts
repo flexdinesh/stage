@@ -18,9 +18,10 @@ export function groupWorkspaceBlocked(workspace: GroupWorkspace): string | null 
   return workspace.catalogState === "listed" && workspace.blockedReason ? workspace.blockedReason : null;
 }
 
+/** A listed workspace in this exact group runs project actions, also one its harness won't start in: an action may fix that. */
 export function canRunProjectActions(projectId: number, workspace: GroupWorkspace, destinations: readonly Destination[] | undefined): boolean {
   return workspace.catalogState === "listed" && destinations?.some((row) =>
-    row.available && row.connectionId === workspace.connectionId && row.workspaceId === workspace.workspaceId &&
+    (row.available || Boolean(row.reason)) && row.connectionId === workspace.connectionId && row.workspaceId === workspace.workspaceId &&
     row.groupProjectId === projectId,
   ) === true;
 }

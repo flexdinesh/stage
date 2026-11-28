@@ -98,7 +98,7 @@ export function ProjectGroupWorkspaces({ group, connections }: {
                     </div>
                     {blocked === null ? null : <p className="text-small text-muted wrap-anywhere">{blocked}</p>}
                     {canRunProjectActions(group.id, workspace, destinations.data?.destinations)
-                      ? <ProjectHarnessActions projectId={group.id} workspace={workspace} /> : null}
+                      ? <ProjectHarnessActions projectId={group.id} workspace={workspace} initiallyOpen={blocked !== null} /> : null}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button small aria-label={`Move workspace ${path} on ${site} to another project`}
@@ -134,10 +134,11 @@ function RecordedWorkspaces({ projectId, connections }: {
   );
 }
 
-function ProjectHarnessActions({ projectId, workspace }: { projectId: number; workspace: GroupWorkspace }) {
+/** A blocked workspace opens its actions at once: one of them may be the fix (trusting the folder). */
+function ProjectHarnessActions({ projectId, workspace, initiallyOpen }: { projectId: number; workspace: GroupWorkspace; initiallyOpen: boolean }) {
   const api = useApi();
   const refresh = useInvalidateProjects();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initiallyOpen);
   const scope = { connectionId: workspace.connectionId, workspaceId: workspace.workspaceId };
   const query = useQuery({
     queryKey: [...keys.projectActions, projectId, scope.connectionId, scope.workspaceId],

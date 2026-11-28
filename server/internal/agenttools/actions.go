@@ -22,6 +22,9 @@ type RunActionArgs struct {
 	ListActionsArgs
 	ActionID string         `json:"actionId" jsonschema:"stable action ID from list_actions"`
 	Input    map[string]any `json:"input,omitempty" jsonschema:"action input object matching its declared fields"`
+	// Confirmed sends Stage-Action-Confirmed: the caller agreed to the
+	// action's confirm text for this request.
+	Confirmed bool `json:"confirmed,omitempty" jsonschema:"true only after the user confirmed the action's confirm text"`
 }
 
 // ActionCaller derives action transport context using the same caller
@@ -54,6 +57,6 @@ func (o *Ops) RunAction(ctx context.Context, args RunActionArgs) (execution.Acti
 	if err != nil {
 		return execution.ActionResult{}, err
 	}
-	caller.Agent = true
+	caller.Agent, caller.Confirmed = true, args.Confirmed
 	return o.Client.RunAction(ctx, args.ActionScope, args.ActionID, input, caller)
 }
