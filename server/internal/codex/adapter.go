@@ -31,6 +31,7 @@ type Adapter struct {
 	models    []model
 	modelsAt  time.Time
 	modelsErr error
+	approvals *approvalWatch
 }
 
 // Cache windows: health is read on every sync tick; the model catalog
@@ -52,6 +53,7 @@ func New(client *Client, connection int64, command string) *Adapter {
 var _ execution.Adapter = (*Adapter)(nil)
 var _ execution.LinkResolver = (*Adapter)(nil)
 var _ execution.EventSource = (*Adapter)(nil)
+var _ execution.TrackedEventSource = (*Adapter)(nil)
 
 // threadID: Codex thread ids are UUIDs (v7 for new threads).
 var threadID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -152,6 +154,17 @@ var archiveAction = execution.Action{
 
 // Features reads Codex's model catalog (cached a minute).
 func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) {
+	_, connectErr := a.client.connect(ctx)
+	if connectErr != nil {
+		if ctx.Err() != nil {
+			return execution.Capabilities{}, ctx.Err()
+		}
+		c := execution.Capabilities{Operations: make(map[execution.Op]execution.Availability)}
+		for _, op := range execution.Ops {
+			c.Operations[op] = execution.Availability{Reason: Problem(connectErr)}
+		}
+		return c, nil
+	}
 	ms, err := a.catalog(ctx)
 	if err != nil {
 		return execution.Capabilities{}, err
@@ -161,7 +174,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 			execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
 			execution.OpSessionSearch:   available,
 			execution.OpImages:          available,
-			execution.OpRespond:         available,
+			execution.OpRespond:         a.client.respondAvailability(),
 			execution.OpSend:            available,
 			execution.OpSteer:           {Reason: "Steer in Codex: copy the resume command."},
 			execution.OpQueue:           {Reason: "Queue in Codex: copy the resume command."},

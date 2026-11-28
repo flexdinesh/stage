@@ -1,0 +1,39 @@
+[
+  {
+    "id": 17,
+    "method": "item/commandExecution/requestApproval",
+    "params": {
+      "threadId": "019a0000-0000-7000-8000-00000000aaaa",
+      "turnId": "turn-a",
+      "itemId": "exec-a",
+      "startedAtMs": 1795860205938,
+      "kind": "command",
+      "command": "touch x",
+      "cwd": "/home/u/work",
+      "availableDecisions": [
+        "accept", "acceptForSession",
+        {"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["touch","x"]}},
+        {"applyNetworkPolicyAmendment":{"network_policy_amendment":{"host":"example.test","action":"allow"}}},
+        {"applyNetworkPolicyAmendment":{"network_policy_amendment":{"host":"example.test","action":"deny"}}},
+        "decline", "cancel"
+      ]
+    }
+  },
+  {
+    "id": 18,
+    "method": "item/permissions/requestApproval",
+    "params": {
+      "threadId": "019a0000-0000-7000-8000-00000000aaaa",
+      "turnId": "turn-a",
+      "itemId": "permissions-a",
+      "environmentId": "local",
+      "startedAtMs": 1795860210055,
+      "cwd": "/home/u/work",
+      "reason": "Read and write scratch files",
+      "permissions": {
+        "network": null,
+        "fileSystem": {"read":["/home/u/work"],"write":["/home/u/work"]}
+      }
+    }
+  }
+]

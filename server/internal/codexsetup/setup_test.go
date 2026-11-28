@@ -94,7 +94,7 @@ func TestConnectCreatesConnectionAndSurvivesRestart(t *testing.T) {
 	}
 	st = r.status(t)
 	d := details(t, st)
-	if st.State != codexsetup.StateConnected || !st.Connected || !st.Configured || st.ConnectionID != id || d.CodexHome != r.srv.CodexHome || d.Account == nil || d.Account.Type != "chatgpt" || d.CLIVersion != "0.171.0" || d.Fix != "" {
+	if st.State != codexsetup.StateConnected || !st.Connected || !st.Configured || st.ConnectionID != id || d.CodexHome != r.srv.CodexHome || d.Account == nil || d.Account.Type != "chatgpt" || d.CLIVersion != "0.172.0" || d.Fix != "" {
 		t.Fatalf("connected %+v %+v", st, d)
 	}
 	if st.Phase != harness.PhaseConnected || st.Fix != nil ||

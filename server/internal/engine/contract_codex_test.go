@@ -40,7 +40,18 @@ func codexSetup(t *testing.T, p placement, codexDir string) (*db.Store, *codexte
 	srv.Trust(codexDir, "trusted")
 	client := codex.NewClient(&codextest.Daemon{Srv: srv, T: t}, "test")
 	t.Cleanup(client.Close)
-	svc := p.engine(t, store, harness.MustRegistry(t3.Descriptor, codex.Descriptor), map[int64]execution.Adapter{3: codex.New(client, 3, "")}, nil)
+	reg := harness.MustRegistry(t3.Descriptor, codex.Descriptor)
+	adapters := map[int64]execution.Adapter{3: codex.New(client, 3, "")}
+	if p.remote {
+		rig := newContractWorker(t, store, adapters)
+		svc := engine.NewForMachines(store, reg, rig.Set(), nil)
+		// The worker reads the main server's upcall kinds on attachment.
+		rig.StopWorker()
+		svc.ServeWorkers(rig.Hub())
+		rig.StartWorker()
+		return store, srv, svc, task
+	}
+	svc := engine.NewWithAdapters(store, reg, adapters, nil)
 	return store, srv, svc, task
 }
 
@@ -101,6 +112,70 @@ func TestContractCodexLaunchToDoneWithReplyAndResumeCommand(t *testing.T) {
 		if err != nil || o.Reply == nil || o.Reply.Text != "Fixed." || o.Links.Command != "cd "+codexDir+" && codex resume "+id {
 			t.Fatalf("stored observation %+v %v", o, err)
 		}
+	})
+}
+
+func TestContractCodexAnswersTrackedApprovals(t *testing.T) {
+	forPlacements(t, func(t *testing.T, p placement) {
+		store, srv, svc, task := codexSetup(t, p, t.TempDir())
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		svc.Observe.PollEvery = 20 * time.Millisecond
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			svc.Observe.Run(ctx)
+		}()
+		defer func() {
+			cancel()
+			<-done
+		}()
+		got, err := svc.Coordinator.StartTask(ctx, task.ID)
+		if err != nil || got.Session == nil {
+			t.Fatal(got, err)
+		}
+		id := got.Session.ExternalSessionID
+		waitObserver(t, "Stage subscribed to the running turn", func() bool { return srv.Subscribed(id) == 1 })
+		cmd := func(item string) int {
+			return srv.Request(id, "item/commandExecution/requestApproval", map[string]any{
+				"itemId": item, "command": "touch x", "availableDecisions": []string{"accept", "decline"},
+			})
+		}
+		wants := func(item string) {
+			t.Helper()
+			waitObserver(t, "tracked request "+item, func() bool {
+				rs, err := svc.Coordinator.Requests(ctx, task.ID)
+				current, taskErr := store.GetTask(ctx, task.ID)
+				return err == nil && taskErr == nil && len(rs) == 1 && rs[0].ID == item &&
+					rs[0].Preview == "touch x" && current.State == db.StateNeedsInput
+			})
+		}
+		cmd("first")
+		wants("first")
+		if _, err := svc.Coordinator.Respond(ctx, task.ID, "first", execution.Response{Option: "accept"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		waitObserver(t, "allow result", func() bool {
+			as := srv.Answers()
+			return len(as) == 1 && string(as[0].Result) == `{"decision":"accept"}`
+		})
+		requestID := cmd("second")
+		wants("second")
+		if err := srv.AnswerFromAnotherClient(ctx, id, requestID, map[string]any{"decision": "decline"}); err != nil {
+			t.Fatal(err)
+		}
+		waitObserver(t, "other client removed request", func() bool {
+			rs, err := svc.Coordinator.Requests(ctx, task.ID)
+			return err == nil && len(rs) == 0
+		})
+		if _, err := svc.Coordinator.Respond(ctx, task.ID, "second", execution.Response{Option: "accept"}, nil); !errors.Is(err, db.ErrNotFound) {
+			t.Fatalf("late answer: %v", err)
+		}
+		srv.Finish(id, "completed", "Done.")
+		waitObserver(t, "settled and unsubscribed", func() bool {
+			current, err := store.GetTask(ctx, task.ID)
+			return err == nil && current.State == db.StateDone && srv.Subscribed(id) == 0
+		})
 	})
 }
 

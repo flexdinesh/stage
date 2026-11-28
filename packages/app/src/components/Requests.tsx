@@ -218,7 +218,7 @@ export function RequestCard({
     <article className={cx(rowClass, "flex flex-col gap-2.5")} aria-label={request.title}>
       <div className="min-w-0">
         <h3 className="text-body font-medium break-words">{request.title}</h3>
-        {request.detail === undefined || request.detail === "" ? null : <p className="mt-0.5 text-small text-muted break-words">{request.detail}</p>}
+        {request.detail === undefined || request.detail === "" ? null : <p className="mt-0.5 text-small text-muted whitespace-pre-line break-words">{request.detail}</p>}
       </div>
       {request.preview === undefined || request.preview === "" ? null : <Preview text={request.preview} />}
       {outcome !== null ? (

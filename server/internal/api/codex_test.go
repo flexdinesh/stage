@@ -68,7 +68,7 @@ func TestCodexSetupEndpoints(t *testing.T) {
 
 	code, st := e.raw("GET", "/api/harnesses/codex/status?refresh=1", "")
 	d, _ := st["details"].(map[string]any)
-	if code != 200 || st["state"] != codexsetup.StateNotConnected || d["daemon"] != "running" || d["cliVersion"] != "0.171.0" {
+	if code != 200 || st["state"] != codexsetup.StateNotConnected || d["daemon"] != "running" || d["cliVersion"] != "0.172.0" {
 		t.Fatalf("initial status %d %v", code, st)
 	}
 	if acts, _ := st["actions"].([]any); len(acts) != 2 {

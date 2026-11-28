@@ -1,11 +1,15 @@
 package codex_test
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/flexdinesh/stage/server/internal/codex"
+	"github.com/flexdinesh/stage/server/internal/codex/codextest"
 
 	"github.com/flexdinesh/stage/server/internal/execution"
 )
@@ -22,73 +26,189 @@ func launched(t *testing.T, r rig) execution.SessionRef {
 	return o.Session
 }
 
-// Recorded request shapes (codex-cli 0.172.0, gates g9 and g10).
 func commandApproval() map[string]any {
 	return map[string]any{
-		"kind": "command", "turnId": "t1", "itemId": "exec-1", "startedAtMs": 1795860205938, "environmentId": "local",
-		"reason": "Allow creating x with the requested touch x command?", "command": "/usr/bin/bash -lc 'touch x'", "cwd": "/w/app",
-		"availableDecisions": []any{"accept", map[string]any{"acceptWithExecpolicyAmendment": map[string]any{"execpolicy_amendment": []string{"touch", "x"}}}, "cancel"},
+		"kind": "command", "itemId": "exec-1", "startedAtMs": 1795860205938,
+		"reason": "Create the scratch file?", "command": "touch x", "cwd": "/w/app",
+		"availableDecisions": []string{"accept", "decline", "cancel"},
 	}
 }
 
-func fileApproval() map[string]any {
-	return map[string]any{"turnId": "t1", "itemId": "exec-2", "startedAtMs": 1795860210055, "reason": nil, "grantRoot": nil}
+func track(t *testing.T, r rig, refs ...execution.SessionRef) <-chan error {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		done <- r.adapter.TrackedEvents(ctx, refs, func(context.Context, execution.Observation) error { return nil })
+	}()
+	t.Cleanup(cancel)
+	return done
 }
 
-func userInput(secret bool) map[string]any {
-	return map[string]any{"turnId": "t1", "itemId": "call_3a5f", "isBlocking": false, "autoResolutionMs": nil, "questions": []any{
-		map[string]any{"id": "color", "header": "Color", "question": "Which color?", "isOther": true, "isSecret": false,
-			"options": []any{map[string]any{"label": "Red", "description": "Choose Red."}, map[string]any{"label": "Blue", "description": "Choose Blue."}}},
-		map[string]any{"id": "token", "header": "Token", "question": "Paste the token", "isOther": true, "isSecret": secret, "options": nil},
-	}}
+func until(t *testing.T, what string, ok func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("never observed %s", what)
 }
 
-func TestRequestsListAnswerableKindsWithCodexWords(t *testing.T) {
+func requests(t *testing.T, r rig, ref execution.SessionRef, count int) []execution.Request {
+	t.Helper()
+	var out []execution.Request
+	until(t, "pending requests", func() bool {
+		var err error
+		out, err = r.adapter.Requests(t.Context(), ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(out) == count
+	})
+	return out
+}
+
+func TestTrackedApprovalsReplayAndKeepTheTurn(t *testing.T) {
 	r := newRig(t)
 	ref := launched(t, r)
-	r.srv.Request(ref.ExternalSessionID, "item/commandExecution/requestApproval", commandApproval())
-	r.srv.Request(ref.ExternalSessionID, "item/fileChange/requestApproval", fileApproval())
-	r.srv.Request(ref.ExternalSessionID, "item/tool/requestUserInput", userInput(false))
-	// Answered in Codex: permissions, MCP elicitations, secret questions.
-	r.srv.Request(ref.ExternalSessionID, "item/permissions/requestApproval", map[string]any{"itemId": "perm-1", "permissions": map[string]any{}})
-	r.srv.Request(ref.ExternalSessionID, "mcpServer/elicitation/request", map[string]any{"serverName": "x", "message": "?"})
-	r.srv.Request(ref.ExternalSessionID, "item/tool/requestUserInput", map[string]any{"itemId": "call_secret", "questions": userInput(true)["questions"]})
-
-	rs, err := r.adapter.Requests(t.Context(), ref)
-	if err != nil {
-		t.Fatal(err)
+	other := r.srv.AddThread(codextest.Thread{ID: "019a0000-0000-7000-8000-00000000ffff", Cwd: "/w/app", Status: "active"})
+	r.srv.Request(other.ID, "item/commandExecution/requestApproval", commandApproval())
+	id := r.srv.Request(ref.ExternalSessionID, "item/commandExecution/requestApproval", commandApproval())
+	requests(t, r, ref, 0) // a query alone never resumes
+	if n := r.srv.Calls("thread/resume"); n != 0 {
+		t.Fatalf("query resumed %d threads", n)
 	}
-	if len(rs) != 3 {
-		t.Fatalf("requests %+v", rs)
-	}
-	cmd := rs[0]
-	if cmd.ID != "exec-1" || cmd.Kind != execution.RequestApproval || cmd.Title != "Run a command" || cmd.Preview != "/usr/bin/bash -lc 'touch x'" ||
-		cmd.Detail != "Allow creating x with the requested touch x command?" || cmd.CreatedAt.IsZero() || cmd.TextOption != "" {
+	before := r.srv.Thread(ref.ExternalSessionID)
+	track(t, r, ref)
+	cmd := requests(t, r, ref, 1)[0]
+	if cmd.ID != "exec-1" || cmd.Title != "Run a command" || cmd.Preview != "touch x" ||
+		!strings.Contains(cmd.Detail, "Working directory /w/app") || !strings.Contains(cmd.Detail, "Create the scratch file?") {
 		t.Fatalf("command %+v", cmd)
 	}
-	// Offered plain decisions only, in Codex's order (the amendment stays in Codex).
-	if ids := choiceIDs(cmd.Options); !slices.Equal(ids, []string{"accept", "cancel"}) || cmd.Options[0].Label != "Run command" || cmd.Options[1].Label != "Stop the turn" {
+	if !slices.Equal(choiceIDs(cmd.Options), []string{"accept", "decline", "cancel"}) {
 		t.Fatalf("command options %+v", cmd.Options)
 	}
-	file := rs[1]
-	if file.ID != "exec-2" || file.Title != "Edit files" || file.Preview != "" || file.Detail == "" {
-		t.Fatalf("file change %+v", file)
+	for range 3 {
+		requests(t, r, ref, 1)
 	}
-	if ids := choiceIDs(file.Options); !slices.Equal(ids, []string{"accept", "acceptForSession", "decline", "cancel"}) || file.Options[1].Label != "Apply, and don't ask again for these files" {
-		t.Fatalf("file change options %+v", file.Options)
+	after := r.srv.Thread(ref.ExternalSessionID)
+	if len(after.Turns) != 1 || after.Turns[0].ID != before.Turns[0].ID || after.Model != before.Model ||
+		after.Approval != before.Approval || after.Sandbox != before.Sandbox || r.srv.Subscribed(other.ID) != 0 ||
+		r.srv.Subscribed(ref.ExternalSessionID) != 1 || r.srv.Calls("thread/resume") != 1 {
+		t.Fatalf("resumed thread %+v, resumes %d", after, r.srv.Calls("thread/resume"))
 	}
-	q := rs[2]
-	if q.ID != "call_3a5f" || q.Kind != execution.RequestQuestion || q.Title != "Codex asks 2 questions" || len(q.Questions) != 2 {
-		t.Fatalf("question %+v", q)
+	var invalid *execution.Invalid
+	if err := r.adapter.Respond(t.Context(), ref, cmd.ID, execution.Response{Option: "acceptForSession"}); !errors.As(err, &invalid) {
+		t.Fatal("unexpected option", err)
 	}
-	if c := q.Questions[0]; c.ID != "color" || c.Header != "Color" || c.Prompt != "Which color?" || !c.Custom || len(c.Options) != 2 || c.Options[1].Description != "Choose Blue." {
-		t.Fatalf("color %+v", c)
+	if err := r.adapter.Respond(t.Context(), ref, cmd.ID, execution.Response{Option: "accept"}); err != nil {
+		t.Fatal(err)
 	}
-	if tok := q.Questions[1]; !tok.Custom || len(tok.Options) != 0 {
-		t.Fatalf("free text %+v", tok)
+	until(t, "answer", func() bool { return len(r.srv.Answers()) == 1 })
+	if got := r.srv.Answers()[0]; got.ID != id || string(got.Result) != `{"decision":"accept"}` {
+		t.Fatalf("answer %+v", got)
 	}
-	if n := r.srv.Subscribed(ref.ExternalSessionID); n != 0 {
-		t.Fatalf("still subscribed: %d", n)
+	if err := r.adapter.Respond(t.Context(), ref, cmd.ID, execution.Response{Option: "accept"}); !errors.Is(err, execution.ErrNotFound) {
+		t.Fatal("second answer", err)
+	}
+	r.srv.Finish(ref.ExternalSessionID, "completed", "Done.")
+	until(t, "terminal unsubscribe", func() bool { return r.srv.Subscribed(ref.ExternalSessionID) == 0 })
+}
+
+func TestTrackedApprovalsReconnectAndCompetingAnswer(t *testing.T) {
+	r := newRig(t)
+	ref := launched(t, r)
+	done := track(t, r, ref)
+	until(t, "running subscription", func() bool { return r.srv.Subscribed(ref.ExternalSessionID) == 1 })
+	id := r.srv.Request(ref.ExternalSessionID, "item/commandExecution/requestApproval", commandApproval())
+	cmd := requests(t, r, ref, 1)[0]
+	r.srv.DropClients()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("watch stayed open")
+	}
+	requests(t, r, ref, 0)
+	track(t, r, ref)
+	if got := requests(t, r, ref, 1)[0]; got.ID != cmd.ID {
+		t.Fatalf("replay changed request ID: %s", got.ID)
+	}
+	if err := r.srv.AnswerFromAnotherClient(t.Context(), ref.ExternalSessionID, id, map[string]any{"decision": "decline"}); err != nil {
+		t.Fatal(err)
+	}
+	requests(t, r, ref, 0)
+	if err := r.adapter.Respond(t.Context(), ref, cmd.ID, execution.Response{Option: "accept"}); !errors.Is(err, execution.ErrNotFound) {
+		t.Fatal(err)
+	}
+	if got := r.srv.Answers(); len(got) != 1 || string(got[0].Result) != `{"decision":"decline"}` {
+		t.Fatalf("answers %+v", got)
+	}
+}
+
+func TestTrackedApprovalsFileAndPermissionDetails(t *testing.T) {
+	r := newRig(t)
+	ref := launched(t, r)
+	track(t, r, ref)
+	until(t, "running subscription", func() bool { return r.srv.Subscribed(ref.ExternalSessionID) == 1 })
+	const fileID = "file-1"
+	r.srv.StartFileChange(ref.ExternalSessionID, fileID, []map[string]any{{
+		"path": "src/main.go", "kind": map[string]any{"type": "update"},
+		"diff": "--- a/src/main.go\n+++ b/src/main.go\n@@ -1 +1,2 @@\n-old\n+new\n+another\n",
+	}})
+	r.srv.Request(ref.ExternalSessionID, "item/fileChange/requestApproval", map[string]any{"itemId": fileID})
+	permissions := map[string]any{"network": map[string]bool{"enabled": true}, "fileSystem": nil}
+	r.srv.Request(ref.ExternalSessionID, "item/permissions/requestApproval", map[string]any{"itemId": "perm-1", "permissions": permissions})
+	for _, method := range []string{"item/tool/requestUserInput", "mcpServer/elicitation/request", "applyPatchApproval", "execCommandApproval"} {
+		r.srv.Request(ref.ExternalSessionID, method, map[string]any{"itemId": method})
+	}
+	rs := requests(t, r, ref, 2)
+	if rs[0].Title != "Apply file changes" || rs[0].Preview != "src/main.go  +2 −1" ||
+		!slices.Equal(choiceIDs(rs[0].Options), []string{"accept", "acceptForSession", "decline", "cancel"}) {
+		t.Fatalf("file request %+v", rs[0])
+	}
+	if rs[1].Title != "Grant permissions" || !strings.Contains(rs[1].Preview, "network") ||
+		!slices.Equal(choiceIDs(rs[1].Options), []string{"turn", "session", "decline"}) {
+		t.Fatalf("permissions request %+v", rs[1])
+	}
+	if err := r.adapter.Respond(t.Context(), ref, rs[0].ID, execution.Response{Option: "decline"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.adapter.Respond(t.Context(), ref, rs[1].ID, execution.Response{Option: "session"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.adapter.Respond(t.Context(), ref, "item/tool/requestUserInput", execution.Response{Option: "accept"}); !errors.Is(err, execution.ErrNotFound) {
+		t.Fatal(err)
+	}
+	until(t, "two supported answers", func() bool { return len(r.srv.Answers()) == 2 })
+	as := r.srv.Answers()
+	if string(as[0].Result) != `{"decision":"decline"}` || string(as[1].Result) != `{"permissions":{"network":{"enabled":true}},"scope":"session"}` {
+		t.Fatalf("answers %s / %s", as[0].Result, as[1].Result)
+	}
+	r.srv.Request(ref.ExternalSessionID, "item/commandExecution/requestApproval", commandApproval())
+	cmd := requests(t, r, ref, 1)[0]
+	r.srv.Finish(ref.ExternalSessionID, "interrupted", "")
+	requests(t, r, ref, 0)
+	if err := r.adapter.Respond(t.Context(), ref, cmd.ID, execution.Response{Option: "accept"}); !errors.Is(err, execution.ErrNotFound) {
+		t.Fatal("answer after turn completion", err)
+	}
+}
+
+func TestRespondAvailabilityRequiresVerifiedDaemon(t *testing.T) {
+	r := newRig(t)
+	r.daemon.VersionTag = "0.171.0"
+	ctx := t.Context()
+	c, err := r.adapter.Features(ctx)
+	if op := c.Operations[execution.OpRespond]; err != nil || op.Available || op.Reason != "Update Codex to answer in Stage." {
+		t.Fatal(op, err)
+	}
+	client := codex.NewClient(failingStart{r.daemon}, "test")
+	t.Cleanup(client.Close)
+	r.srv.Stop()
+	c, err = codex.New(client, conn, "").Features(ctx)
+	if op := c.Operations[execution.OpRespond]; err != nil || op.Available || !strings.Contains(op.Reason, "could not start the Codex daemon") {
+		t.Fatal(op, err)
 	}
 }
 
@@ -98,98 +218,6 @@ func choiceIDs(cs []execution.Choice) []string {
 		out = append(out, c.ID)
 	}
 	return out
-}
-
-func TestRequestsOfAThreadWaitingOnNothingDoNotResume(t *testing.T) {
-	r := newRig(t)
-	ref := launched(t, r)
-	rs, err := r.adapter.Requests(t.Context(), ref)
-	if err != nil || len(rs) != 0 {
-		t.Fatalf("%+v %v", rs, err)
-	}
-	if n := r.srv.Calls("thread/resume"); n != 0 {
-		t.Fatalf("resumed %d times", n)
-	}
-	if _, err := r.adapter.Requests(t.Context(), execution.SessionRef{ConnectionID: conn, ExternalSessionID: "bad"}); !errors.Is(err, execution.ErrNotFound) {
-		t.Fatal("bad ref", err)
-	}
-}
-
-func TestRespondAnswersApprovalAndClearsIt(t *testing.T) {
-	r := newRig(t)
-	ref := launched(t, r)
-	id := r.srv.Request(ref.ExternalSessionID, "item/commandExecution/requestApproval", commandApproval())
-	if err := r.adapter.Respond(t.Context(), ref, "exec-1", execution.Response{Option: "accept"}); err != nil {
-		t.Fatal(err)
-	}
-	as := r.srv.Answers()
-	if len(as) != 1 || as[0].ID != id || as[0].Method != "item/commandExecution/requestApproval" || string(as[0].Result) != `{"decision":"accept"}` {
-		t.Fatalf("answers %+v", as)
-	}
-	if th := r.srv.Thread(ref.ExternalSessionID); th.Status != "active" || len(th.Flags) != 0 {
-		t.Fatalf("thread still waits %+v", th)
-	}
-	// Answered: no longer pending.
-	if err := r.adapter.Respond(t.Context(), ref, "exec-1", execution.Response{Option: "accept"}); !errors.Is(err, execution.ErrNotFound) {
-		t.Fatal("second answer", err)
-	}
-	if n := r.srv.Subscribed(ref.ExternalSessionID); n != 0 {
-		t.Fatalf("still subscribed: %d", n)
-	}
-}
-
-func TestRespondRefusesAnswersThatDoNotFit(t *testing.T) {
-	r := newRig(t)
-	ref := launched(t, r)
-	r.srv.Request(ref.ExternalSessionID, "item/commandExecution/requestApproval", commandApproval())
-	r.srv.Request(ref.ExternalSessionID, "item/tool/requestUserInput", userInput(false))
-	r.srv.Request(ref.ExternalSessionID, "item/permissions/requestApproval", map[string]any{"itemId": "perm-1"})
-	var invalid *execution.Invalid
-	for name, tc := range map[string]struct {
-		id string
-		r  execution.Response
-	}{
-		"not offered":       {"exec-1", execution.Response{Option: "decline"}},
-		"approval text":     {"exec-1", execution.Response{Option: "accept", Text: "because"}},
-		"question option":   {"call_3a5f", execution.Response{Option: "accept"}},
-		"missing answer":    {"call_3a5f", execution.Response{Answers: map[string][]string{"color": {"Red"}}}},
-		"unknown question":  {"call_3a5f", execution.Response{Answers: map[string][]string{"color": {"Red"}, "token": {"t"}, "size": {"L"}}}},
-		"two single answer": {"call_3a5f", execution.Response{Answers: map[string][]string{"color": {"Red", "Blue"}, "token": {"t"}}}},
-	} {
-		if err := r.adapter.Respond(t.Context(), ref, tc.id, tc.r); !errors.As(err, &invalid) {
-			t.Fatalf("%s: %v", name, err)
-		}
-	}
-	if err := r.adapter.Respond(t.Context(), ref, "perm-1", execution.Response{Option: "accept"}); !errors.Is(err, execution.ErrNotFound) {
-		t.Fatal("unlisted kind answered", err)
-	}
-	if as := r.srv.Answers(); len(as) != 0 {
-		t.Fatalf("sent %+v", as)
-	}
-}
-
-func TestRespondAnswersQuestionsInCodexShape(t *testing.T) {
-	r := newRig(t)
-	ref := launched(t, r)
-	r.srv.Request(ref.ExternalSessionID, "item/tool/requestUserInput", userInput(false))
-	err := r.adapter.Respond(t.Context(), ref, "call_3a5f", execution.Response{Answers: map[string][]string{"color": {"Blue"}, "token": {"abc"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	as := r.srv.Answers()
-	if len(as) != 1 {
-		t.Fatalf("answers %+v", as)
-	}
-	var got map[string]map[string]map[string][]string
-	if err := json.Unmarshal(as[0].Result, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got["answers"]["color"]["answers"][0] != "Blue" || got["answers"]["token"]["answers"][0] != "abc" {
-		t.Fatalf("result %s", as[0].Result)
-	}
-	if th := r.srv.Thread(ref.ExternalSessionID); len(th.Flags) != 0 {
-		t.Fatalf("thread still waits %+v", th.Flags)
-	}
 }
 
 func TestSendIsBusyWhileATurnRuns(t *testing.T) {

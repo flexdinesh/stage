@@ -31,6 +31,13 @@ type EventSource interface {
 	Events(ctx context.Context, sink Sink) error
 }
 
+// TrackedEventSource is an adapter-local event stream that can subscribe to
+// sessions Stage owns. refs is the runner's current set of tracked sessions,
+// excluding discovery. Canceling ctx releases the subscriptions.
+type TrackedEventSource interface {
+	TrackedEvents(ctx context.Context, refs []SessionRef, sink Sink) error
+}
+
 // Request kinds.
 const (
 	RequestApproval = "approval" // pick an option

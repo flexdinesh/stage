@@ -130,6 +130,9 @@ func NewWithConnectors(t *testing.T, machineID int64, adapters map[int64]executi
 // Set is the main server's machines: local machine 1 and the remote one.
 func (r *Rig) Set() *machine.Set { return r.set }
 
+// Hub lets tests register main-side handlers for worker upcalls.
+func (r *Rig) Hub() *workerchan.Hub { return r.hub }
+
 // Machine is the remote machine as the main server hosts it.
 func (r *Rig) Machine() *remote.Machine {
 	m, ok := r.hosts.Machine(r.machineID)

@@ -15,23 +15,7 @@ import (
 // ignore. Returns when ctx ends or the connection drops.
 func (a *Adapter) Events(ctx context.Context, sink execution.Sink) error {
 	queue := make(chan string, 256)
-	stop := a.client.listen(func(n notification) {
-		switch n.Method {
-		case "thread/status/changed", "thread/archived", "thread/unarchived", "turn/completed":
-		default:
-			return
-		}
-		var p struct {
-			ThreadID string `json:"threadId"`
-		}
-		if json.Unmarshal(n.Params, &p) != nil || !threadID.MatchString(p.ThreadID) {
-			return
-		}
-		select {
-		case queue <- p.ThreadID:
-		default: // polling reconciles a dropped event
-		}
-	})
+	stop := a.client.listen(func(n notification) { queueObservation(queue, n) })
 	defer stop()
 	// Connect (and start the daemon) so notifications flow.
 	if err := a.client.call(ctx, "thread/loaded/list", map[string]any{"limit": 1}, nil); err != nil {
@@ -56,5 +40,23 @@ func (a *Adapter) Events(ctx context.Context, sink execution.Sink) error {
 				return ctx.Err()
 			}
 		}
+	}
+}
+
+func queueObservation(queue chan<- string, n notification) {
+	switch n.Method {
+	case "thread/status/changed", "thread/archived", "thread/unarchived", "turn/completed":
+	default:
+		return
+	}
+	var p struct {
+		ThreadID string `json:"threadId"`
+	}
+	if json.Unmarshal(n.Params, &p) != nil || !threadID.MatchString(p.ThreadID) {
+		return
+	}
+	select {
+	case queue <- p.ThreadID:
+	default: // polling reconciles a dropped event
 	}
 }

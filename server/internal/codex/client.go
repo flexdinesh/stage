@@ -163,6 +163,21 @@ func (cl *Client) done() <-chan struct{} {
 	return cl.c.done
 }
 
+// The daemon exposes its version, but no server-request schema discovery.
+// 0.172 is the known baseline for the v2 approval and replay contract.
+func (cl *Client) respondAvailability() execution.Availability {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	if cl.c == nil || !cl.c.alive() {
+		return execution.Availability{Reason: "The Codex daemon is disconnected."}
+	}
+	var major, minor int
+	if n, _ := fmt.Sscanf(cl.info.AppServerVersion, "%d.%d", &major, &minor); n != 2 || (major == 0 && minor < 172) {
+		return execution.Availability{Reason: "Update Codex to answer in Stage."}
+	}
+	return available
+}
+
 // call runs method on the daemon. Reaching the daemon failed:
 // execution.ErrUnavailable. A dropped connection mid-call: the outcome is
 // unknown (also ErrUnavailable, wrapping errClosed).
