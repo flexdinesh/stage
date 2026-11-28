@@ -30,6 +30,9 @@ type Adapter struct {
 	// local: the service runs on Stage's machine (local auth), so its
 	// checkout paths are readable here for repository metadata.
 	local bool
+	// eventsIdle ends the event stream when nothing, not even a heartbeat,
+	// arrives this long (0: defaultEventsIdle).
+	eventsIdle time.Duration
 }
 
 var _ execution.Adapter = (*Adapter)(nil)
@@ -230,6 +233,9 @@ type serverContract struct {
 	// respond: session.permission.reply takes a decision and
 	// session.form.reply an answer (Interactive.Respond).
 	respond bool
+	// events: the event types Stage subscribes to on GET /api/event
+	// (event.subscribe); nil: no stream, polling only (EventSource).
+	events []string
 }
 
 func (a *Adapter) check(ctx context.Context) (serverInfo, error) {
@@ -301,6 +307,7 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 	contract.archive = sessionUpdateTakes(update, spec.Components.Schemas, "archived")
 	contract.location = spec.Paths["/api/location"]["get"].OperationID == "location.get"
 	contract.respond = inspectReplies(spec.Paths, spec.Components.Schemas)
+	contract.events = inspectEvents(spec.Paths["/api/event"]["get"])
 	a.verified = contract
 	return contract, nil
 }

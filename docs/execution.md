@@ -923,6 +923,39 @@ otherwise it is unavailable with a version reason.
 Workers reach the same methods through `adapter.requests`,
 `adapter.respond` and `adapter.send` and the `interactive` trait.
 
+### OpenCode push
+
+OpenCode is an `execution.EventSource` over its V2 event stream
+(`server/internal/opencode/events.go`): `GET /api/event`
+(`event.subscribe`), which streams events of every location. Stage
+subscribes with one repeated `types` query per event: session status and
+idle, execution started, succeeded, failed and interrupted, permission
+asked and replied, form created, replied and cancelled, session archived
+and unarchived, and `session.renamed` when advertised. The stream is
+available when OpenAPI advertises `event.subscribe` and its `types`
+parameter lists every one of those events except `session.renamed`.
+Otherwise `Events` returns at once and the connection is polled only, with
+no stream error.
+
+- **Wake-ups.** An event is a wake-up, not evidence. Stage reads the
+  session `data.sessionID` names (`data.form.sessionID` for a created form)
+  through `Observe`, the same snapshot polling takes, and passes it to the
+  local runner. Events of other types, events with no valid session ID,
+  heartbeat comments and repeated `server.connected` frames are ignored.
+- **Coalescing.** The stream reader never waits on a read: it marks the
+  session, and one worker observes each marked session in turn, once however many
+  events named it meanwhile (at most 256 sessions waiting; more are left to
+  polling). A failed read is skipped.
+- **Reconnects.** The stream is volatile: a slow consumer overflows and
+  fails it, and events during a disconnection are missed. A failure frame
+  (`event: effect/http-api/stream/failure`), any other named event, a first
+  frame other than `server.connected`, invalid JSON, the end of the stream,
+  45 seconds without a frame (OpenCode sends a heartbeat every 15 seconds)
+  or no response within 20 seconds return an error. The runner calls again
+  after five seconds, and polling reconciles what the stream missed.
+
+Workers serve it through `adapter.events` and the `eventSource` trait.
+
 ### Reproduce the live gate
 
 Run `STAGE_TEST_OPENCODE=/absolute/path/to/opencode mise run opencode:live`. Include `STAGE_TEST_T3` (T3 executable) and `STAGE_TEST_FX` (upstream `scripts/mobile-behavior/fake-fx.ts`) to exercise a real T3 to OpenCode to T3 tree with both predecessor services disconnected in turn.
