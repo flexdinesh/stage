@@ -18,6 +18,10 @@ import type {
   TreeList,
   TreeListQuery,
   UpdateTreeRequest,
+  SetSteererRequest,
+  SetSteererResponse,
+  EndSteeringResponse,
+  SteeringEventPage,
   Attachment,
   SessionRef, SessionPreview, SessionSearchPage,
   Badge,
@@ -316,6 +320,16 @@ export function createApi(transport: Transport) {
     removeFromTree: (id: number, taskId: number) => apiSend(`/trees/${id}/tasks/${taskId}`, del),
     /** Starts every ready member. */
     startTree: (id: number) => apiFetch<StartTreeResponse>(`/trees/${id}/start`, post()),
+    /**
+     * Creates, binds and launches the tree's steerer (ADR 0013). 409 `steerer_exists` without `replace`, `operation_unavailable` when the
+     * connection can't send; `requestId` replays an identical request.
+     */
+    setTreeSteerer: (id: number, body: SetSteererRequest) => apiFetch<SetSteererResponse>(`/trees/${id}/steerer`, post(body)),
+    /** Ends steering and stops the steerer's session (409 `no_steerer`). */
+    endTreeSteering: (id: number) => apiFetch<EndSteeringResponse>(`/trees/${id}/steerer`, del),
+    /** The tree's steering feed, ascending by id, after event `after`. */
+    steeringEvents: (id: number, after = 0, limit = 50) =>
+      apiFetch<SteeringEventPage>(`/trees/${id}/steering/events${toQuery({ after, limit })}`),
 
     schedules: (q: ScheduleListQuery = {}) =>
       apiFetch<ScheduleList>(`/schedules${toQuery({ project: q.project, dueWithin: q.dueWithin })}`),

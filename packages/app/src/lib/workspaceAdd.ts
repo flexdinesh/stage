@@ -102,10 +102,10 @@ export function nextRequestKey(previous: RequestKey | null, signature: string, m
 }
 
 /** A random retry key. `getRandomValues` (not `randomUUID`) also works on plain-http LAN origins. */
-export function mintRequestId(fill: (bytes: Uint8Array<ArrayBuffer>) => void = (bytes) => { crypto.getRandomValues(bytes); }): string {
+export function mintRequestId(fill: (bytes: Uint8Array<ArrayBuffer>) => void = (bytes) => { crypto.getRandomValues(bytes); }, prefix = "ws-add"): string {
   const bytes = new Uint8Array(16);
   fill(bytes);
-  return `ws-add-${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+  return `${prefix}-${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
 /**

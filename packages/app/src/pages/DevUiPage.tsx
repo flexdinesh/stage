@@ -43,6 +43,7 @@ import {
   Kbd,
   Marker,
   Menu,
+  MenuGroup,
   MenuItem,
   MenuSeparator,
   Meta,
@@ -198,6 +199,7 @@ function OverlayDemos() {
   const menu = useMenu();
   const popover = usePopover();
   const [drawer, setDrawer] = useState(false);
+  const [hold, setHold] = useState("5 min");
   return (
     <div className="flex flex-wrap items-start gap-3">
       <Button {...menu.triggerProps}>Menu</Button>
@@ -213,6 +215,14 @@ function OverlayDemos() {
         <MenuItem onSelect={() => undefined} danger>
           Delete
         </MenuItem>
+        <MenuSeparator />
+        <MenuGroup label="Steerer hold">
+          {["Off", "2 min", "5 min"].map((label) => (
+            <MenuItem key={label} checked={hold === label} onSelect={() => setHold(label)}>
+              {label}
+            </MenuItem>
+          ))}
+        </MenuGroup>
       </Menu>
       <div {...popover.wrapProps} className="relative">
         <Button {...popover.triggerProps}>Popover</Button>

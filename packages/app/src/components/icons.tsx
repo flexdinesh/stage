@@ -25,6 +25,7 @@ import {
   RefreshCwIcon,
   RepeatIcon,
   SearchIcon,
+  ShipWheelIcon,
   SlidersHorizontalIcon,
   SunIcon,
   UsersIcon,
@@ -99,5 +100,7 @@ export const IconClock = sharp(ClockIcon, 12);
 export const IconRepeat = sharp(RepeatIcon, 12);
 /** Task tree: a need over its dependents. */
 export const IconTree = sharp(NetworkIcon);
+/** Tree steering: the steerer task that watches a tree and acts on its members. */
+export const IconSteer = sharp(ShipWheelIcon, 12);
 /** Pin a project: always filled, so a 14px pin reads as one solid shape, not a knot of tiny curves. */
 export const IconPin = sharp(PinIcon, 12, true);

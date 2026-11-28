@@ -9,6 +9,7 @@ import { isNoteCategory, journalEntryId, journalEntryPath, journalOwnerKey, MAX_
 import { journalEntryMarkdown } from "../lib/refs.ts";
 import { SourceSessionLink } from "./StageLinks.tsx";
 import { ActorCause, ActorLabel } from "./ActorLabel.tsx";
+import { journalEventLabel, journalEventText } from "../lib/steering.ts";
 import { SnippetTextarea } from "./SnippetPicker.tsx";
 import {
   Alert,
@@ -146,6 +147,8 @@ export function JournalRow({ entry, anchored = false }: { entry: JournalEntry; a
   const [expanded, setExpanded] = useState(false);
   const full = useJournalEntry(entry.id, expanded && entry.truncated);
   const shown = expanded ? full.data ?? entry : entry;
+  // Steering events read in words ("ended: tree finished"); notes and other events as written.
+  const body = entry.kind === "event" ? journalEventText(entry.eventType, shown.text) : shown.text;
   const root = useRef<HTMLElement>(null);
   useEffect(() => {
     if (anchored) root.current?.scrollIntoView({ block: "start" });
@@ -155,15 +158,15 @@ export function JournalRow({ entry, anchored = false }: { entry: JournalEntry; a
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-meta text-muted">
         <TextLink to={journalEntryPath(entry)} variant="rest" aria-label={`Link to journal entry ${entry.id}`}>#{entry.id}</TextLink>
         <RelTime at={entry.createdAt} />
-        {entry.kind === "event" ? <span>{entry.eventType.replaceAll("_", " ")}</span> : <Chip>{entry.category || "uncategorized"}</Chip>}
+        {entry.kind === "event" ? <span>{journalEventLabel(entry.eventType)}</span> : <Chip>{entry.category || "uncategorized"}</Chip>}
         <ActorLabel work={entry} />
         {entry.taskId === null ? <span>tree {entry.kind}</span> : <TextLink to={`/tasks/${entry.taskId}`} variant="rest">task #{entry.taskId}</TextLink>}
         {entry.attempt === null ? null : <span>attempt {entry.attempt}</span>}
         {markdown === null ? null : <CopyButton text={markdown} label="Copy link" accessibleLabel={`Copy link to note #${entry.id}`} variant="ghost" title={markdown} className="ml-auto" />}
       </div>
       <div className="min-w-0 break-words">
-        <Suspense fallback={<p className="text-small whitespace-pre-wrap">{shown.text}</p>}>
-          <Markdown text={shown.text} refs />
+        <Suspense fallback={<p className="text-small whitespace-pre-wrap">{body}</p>}>
+          <Markdown text={body} refs />
         </Suspense>
       </div>
       {entry.truncated ? (

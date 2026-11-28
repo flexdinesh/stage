@@ -12,13 +12,15 @@ import { AddExistingTaskDrawer } from "../components/trees/AddExistingTaskDrawer
 import { AdoptSessionDrawer, useTrackSessionBlock } from "../components/trees/AdoptSessionDrawer.tsx";
 import { BlockedReason, useStartReadyTasks } from "../components/LaunchGate.tsx";
 import { TreeActivity } from "../components/trees/TreeActivity.tsx";
+import { SteeringStrip } from "../components/trees/SteeringStrip.tsx";
 import { JournalPanel } from "../components/Journal.tsx";
 import { TreeNodePanel } from "../components/trees/TreeNodePanel.tsx";
 import { TreeGraph } from "../components/trees/TreeGraph.tsx";
 import { TreeView, TreeViewSkeleton } from "../components/trees/TreeView.tsx";
-import { Alert, Button, Chip, ConfirmInline, EmptyState, ErrorText, Hint, Input, Menu, MenuItem, MenuSeparator, Muted, PageHeader, Panel, PickerButton, Segmented, SkeletonBar, buttonClass, cx, useMenu } from "../components/ui.tsx";
+import { Alert, Button, Chip, ConfirmInline, EmptyState, ErrorText, Hint, Input, Menu, MenuGroup, MenuItem, MenuSeparator, Muted, PageHeader, Panel, PickerButton, Segmented, SkeletonBar, buttonClass, cx, useMenu } from "../components/ui.tsx";
 import { useIdParam } from "../lib/params.ts";
 import { dateTime, relativeTime, shortDate } from "../lib/format.ts";
+import { holdOptions } from "../lib/steering.ts";
 import { closeBlocker, closedLabel, countMembers, pickedTask, treeClosed, treeMeta, treeProjectLabel, treeCompleted } from "../lib/trees.ts";
 import { CopyLinkPair, type LinkSubject } from "../components/StageLinks.tsx";
 import { NotFoundPage } from "./NotFoundPage.tsx";
@@ -95,10 +97,10 @@ type TreeAction = "rename" | "existing" | "session" | "done" | "archive" | "diss
 
 /**
  * Overflow menu (popover): Rename, Add existing task, Add session, then Mark done, Archive tree, Dissolve tree and
- * Delete tree (only when no member started). Done and archive are disabled with the reason while a member is in
- * progress; a closed tree drops the structural items and the status it already has.
+ * Delete tree (only when no member started), then the Steerer hold choices. Done and archive are disabled with the
+ * reason while a member is in progress; a closed tree drops the structural items and the status it already has.
  */
-function TreeMenu({ tree, onPick }: { tree: TreeDetail; onPick: (item: TreeAction) => void }) {
+function TreeMenu({ tree, onPick, onHold }: { tree: TreeDetail; onPick: (item: TreeAction) => void; onHold: (seconds: number) => void }) {
   const menu = useMenu();
   const closed = treeClosed(tree);
   const blocker = closeBlocker(tree.tasks);
@@ -131,6 +133,15 @@ function TreeMenu({ tree, onPick }: { tree: TreeDetail; onPick: (item: TreeActio
             Delete tree
           </MenuItem>
         ) : null}
+        <MenuSeparator />
+        {/* How long a member's needs input waits for the steerer before it reaches you. */}
+        <MenuGroup label="Steerer hold">
+          {holdOptions(tree.steeringHoldSeconds).map((o) => (
+            <MenuItem key={o.seconds} checked={o.checked} onSelect={() => o.seconds !== tree.steeringHoldSeconds && onHold(o.seconds)}>
+              {o.label}
+            </MenuItem>
+          ))}
+        </MenuGroup>
       </Menu>
     </>
   );
@@ -210,6 +221,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
   const { start, count: launchableCount, readyCount, reason: startBlock } = useStartReadyTasks(tree.tasks);
   const mode = useMutation({ mutationFn: (startMode: StartMode) => api.updateTree(tree.id, { startMode }), onSettled: invalidate });
   const status = useMutation({ mutationFn: (next: TreeStatus) => api.updateTree(tree.id, { status: next }), onSettled: invalidate });
+  const hold = useMutation({ mutationFn: (seconds: number) => api.updateTree(tree.id, { steeringHoldSeconds: seconds }), onSettled: invalidate });
   const leave = async () => {
     await navigate("/trees");
     await invalidate();
@@ -274,7 +286,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
           closed ? (
             <>
               <CopyLinkPair subject={linkSubject} />
-              <TreeMenu tree={tree} onPick={onMenu} />
+              <TreeMenu tree={tree} onPick={onMenu} onHold={(seconds) => hold.mutate(seconds)} />
               <Button busy={status.isPending} onClick={() => status.mutate("open")}>
                 {tree.status === "archived" ? "Unarchive" : "Reopen"}
               </Button>
@@ -283,7 +295,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
             <>
               <CopyLinkPair subject={linkSubject} />
               <Segmented label="Tree start mode" options={MODE_OPTIONS} value={tree.startMode} onChange={(m) => m !== tree.startMode && mode.mutate(m)} />
-              <TreeMenu tree={tree} onPick={onMenu} />
+              <TreeMenu tree={tree} onPick={onMenu} onHold={(seconds) => hold.mutate(seconds)} />
               <Button onClick={addTask} title={selected === null ? "New parallel root. Select a task to add after it." : `New task that runs after #${selected.id}`}>
                 <IconPlus size={14} />
                 {selected === null ? "Add task" : `New task after #${selected.id}`}
@@ -311,6 +323,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
       )}
 
       <div className="flex flex-col gap-3.5">
+        <SteeringStrip tree={tree} />
         {confirming === "dissolve" ? (
           <ConfirmInline danger confirmLabel="Dissolve" busy={dissolve.isPending} onConfirm={() => dissolve.mutate()} onCancel={() => setConfirming(null)}>
             Dissolve this tree? Its {tree.tasks.length} tasks stay in stage; their needs and tree membership go. The tree is archived and its history stays here.
@@ -321,7 +334,7 @@ function TreeBody({ tree }: { tree: TreeDetail }) {
             be undone.
           </ConfirmInline>
         ) : null}
-        <ErrorText error={mode.error ?? start.error ?? status.error ?? dissolve.error ?? remove.error} />
+        <ErrorText error={mode.error ?? start.error ?? status.error ?? hold.error ?? dissolve.error ?? remove.error} />
         {startFailures.length === 0 ? null : (
           <Alert tone="bad">
             {startFailures.map((f) => (

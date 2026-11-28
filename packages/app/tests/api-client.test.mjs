@@ -220,3 +220,22 @@ test("a remote machine that cannot answer surfaces 503 with its code", async () 
   const { api } = fakeApi(async () => Response.json({ error: "This machine is offline", code: "machine_offline" }, { status: 503 }));
   await assert.rejects(api.forMachine(3).harnessStatus("t3"), (e) => e instanceof ApiError && e.status === 503 && e.code === "machine_offline");
 });
+
+test("tree steering requests: set, end, feed page and hold", async () => {
+  const seen = [];
+  const { api } = fakeApi(async (path, init) => {
+    seen.push({ path, method: init.method, body: init.body === undefined ? undefined : JSON.parse(init.body) });
+    return Response.json({});
+  });
+  const body = { prompt: "Drive it", connectionId: 1, workspaceId: "ws1", replace: true, requestId: "steer-1" };
+  await api.setTreeSteerer(3, body);
+  await api.endTreeSteering(3);
+  await api.steeringEvents(3, 41);
+  await api.updateTree(3, { steeringHoldSeconds: 600 });
+  assert.deepEqual(seen, [
+    { path: "/trees/3/steerer", method: "POST", body },
+    { path: "/trees/3/steerer", method: "DELETE", body: undefined },
+    { path: "/trees/3/steering/events?after=41&limit=50", method: "GET", body: undefined },
+    { path: "/trees/3", method: "PATCH", body: { steeringHoldSeconds: 600 } },
+  ]);
+});
