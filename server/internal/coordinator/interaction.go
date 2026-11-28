@@ -117,6 +117,18 @@ const FollowUpSent = "Follow-up sent from Stage"
 // can't take it now) is 409 session_busy. expected (expectedStateRevision)
 // guards it: first answer wins (answer).
 func (s *Service) Send(ctx context.Context, id int64, m execution.Message, expected *int64) (db.Task, error) {
+	return s.send(ctx, id, m, expected, nil)
+}
+
+// SendRecorded is Send, unguarded, for a sender that records the send
+// itself: after the harness took m, record runs (instead of the
+// FollowUpSent event) with a context that outlives the caller's; its error
+// is returned. Steering delivery records its digest this way (ADR 0013).
+func (s *Service) SendRecorded(ctx context.Context, id int64, m execution.Message, record func(context.Context) error) (db.Task, error) {
+	return s.send(ctx, id, m, nil, record)
+}
+
+func (s *Service) send(ctx context.Context, id int64, m execution.Message, expected *int64, recorder func(context.Context) error) (db.Task, error) {
 	if strings.TrimSpace(m.Text) == "" {
 		return db.Task{}, db.Invalid("message text is required")
 	}
@@ -132,6 +144,9 @@ func (s *Service) Send(ctx context.Context, id int64, m execution.Message, expec
 		}
 		record, cancel := recordContext(ctx, db.Cause{Kind: "session_message", TaskID: id, Session: db.CallerRef(ctx)})
 		defer cancel()
+		if recorder != nil {
+			return recorder(record)
+		}
 		if expected != nil {
 			return s.store.RecordTaskAnswer(record, id, *t.Session, "", FollowUpSent, expected)
 		}

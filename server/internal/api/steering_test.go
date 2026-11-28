@@ -105,7 +105,8 @@ func TestTreeSteering(t *testing.T) {
 		st.LaunchAttempt != 1 || len(first.Warnings) != 0 {
 		t.Fatalf("steerer %+v warnings %v", st, first.Warnings)
 	}
-	if s := first.Tree.Steerer; s == nil || s.TaskID != st.ID || s.Title != st.Title || s.Since == "" || s.DeliveredThrough != 0 {
+	// The launch brief covers steering_started: delivered at bind.
+	if s := first.Tree.Steerer; s == nil || s.TaskID != st.ID || s.Title != st.Title || s.Since == "" || s.DeliveredThrough == 0 || s.Pending != 0 {
 		t.Fatalf("tree steerer %+v", first.Tree.Steerer)
 	}
 	var replay steererResponse
@@ -144,7 +145,7 @@ func TestTreeSteering(t *testing.T) {
 	}
 	var tree steeringTree
 	e.must("GET", fmt.Sprintf("/api/trees/%d", tr.ID), nil, 200, &tree)
-	if tree.Steerer == nil || tree.Steerer.Pending != 2 {
+	if tree.Steerer == nil || tree.Steerer.Pending != 1 {
 		t.Fatalf("pending %+v", tree.Steerer)
 	}
 	var paged steeringPage

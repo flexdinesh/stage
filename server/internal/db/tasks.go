@@ -339,6 +339,14 @@ func (s *Store) ArchiveTask(ctx context.Context, id int64, archived bool) (Task,
 		if err := noActiveTask(tx.Trees().ActiveTask(ctx, id)); err != nil {
 			return err
 		}
+		// An archived steerer stops steering (ADR 0013).
+		if steerer, err := tx.Steering().ActiveByTask(ctx, id); err == nil {
+			if err := endSteerer(ctx, tx, steerer, store.SteeringTaskRemoved); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, ErrNotFound) {
+			return err
+		}
 		return tx.Tasks().SetArchived(ctx, id, true)
 	})
 	if err != nil {

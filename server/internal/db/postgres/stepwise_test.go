@@ -68,6 +68,7 @@ var stepwiseMigrations = map[int64][]migrationStep{
 	52: {{name: "one active steerer per tree and per task", seed: seedV0040SharedAccess, check: checkV0052TreeSteering}},
 	53: {{name: "one steering brief per task attempt", seed: seedV0040SharedAccess, check: checkV0053SteeringLaunchContext}},
 	54: {{name: "one held notification per task; tree hold defaults to 300", seed: seedV0040SharedAccess, check: checkV0054NotificationHolds}},
+	55: {{name: "existing binding has no finish or completion", seed: seedV0055Steerer, check: checkV0055SteeringFinish}},
 }
 
 func checkV0054NotificationHolds(t *testing.T, pool *sql.DB) {
@@ -142,6 +143,30 @@ func checkV0052TreeSteering(t *testing.T, pool *sql.DB) {
 	exec(`INSERT INTO tree_steerers(tree_id,task_id,request_id,request_digest) VALUES(9,6,'r2','d')`)
 	exec(`INSERT INTO steering_events(tree_id,steerer_id,kind,task_id) VALUES(9,(SELECT id FROM tree_steerers WHERE request_id='r1'),'steering_started',6)`)
 	wantPGRows(t, pool, `SELECT kind || '|' || payload::text || '|' || COALESCE(caused_by_task_id::text,'NULL') FROM steering_events`, "steering_started|{}|NULL")
+}
+
+func seedV0055Steerer(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	seedV0040SharedAccess(t, pool)
+	for _, q := range []string{
+		`INSERT INTO task_trees(id,title) VALUES(9,'Steered')`,
+		`INSERT INTO tree_steerers(id,tree_id,task_id,request_id,request_digest) VALUES(1,9,6,'r1','d')`,
+	} {
+		if _, err := pool.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+}
+
+func checkV0055SteeringFinish(t *testing.T, pool *sql.DB) {
+	t.Helper()
+	wantPGRows(t, pool, `SELECT COALESCE(finish_event_id::text,'NULL') || '|' || COALESCE(final_state_revision::text,'NULL') || '|' || COALESCE(completion,'NULL') FROM tree_steerers`, "NULL|NULL|NULL")
+	if _, err := pool.Exec(`UPDATE tree_steerers SET completion='maybe' WHERE id=1`); err == nil {
+		t.Fatal("accepted an unknown completion")
+	}
+	if _, err := pool.Exec(`UPDATE tree_steerers SET finish_event_id=3,final_state_revision=4,completion='completed' WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func seedV0049ProjectEvents(t *testing.T, pool *sql.DB) {

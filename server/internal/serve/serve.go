@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agenttools"
@@ -39,6 +40,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/release"
 	"github.com/flexdinesh/stage/server/internal/remote"
 	"github.com/flexdinesh/stage/server/internal/schedule"
+	"github.com/flexdinesh/stage/server/internal/steering"
 	"github.com/flexdinesh/stage/server/internal/webui"
 	"github.com/flexdinesh/stage/server/internal/workerchan"
 	"github.com/flexdinesh/stage/server/internal/workevent"
@@ -171,6 +173,14 @@ func Run(ctx context.Context, o Options) error {
 		return err
 	}
 	database := db.NewStore(pool)
+	// Committed steering events kick the delivery dispatcher (bound below,
+	// once it exists). Set before the store is used.
+	var steeringKick atomic.Pointer[func()]
+	database.OnSteeringEvent(func() {
+		if kick := steeringKick.Load(); kick != nil {
+			(*kick)()
+		}
+	})
 	sharedRequested := cfg.MultiUser != nil && *cfg.MultiUser
 	intent := cfg.MultiUser
 	if sharedRequested {
@@ -294,6 +304,14 @@ func Run(ctx context.Context, o Options) error {
 		sc.Since = scheduleSince
 		return sc
 	})
+	// Steering delivery: digests to each tree's steerer, and tree finish.
+	steerer := steering.New(store, eng.Coordinator, logger)
+	// A steering event (a binding ending too) may also settle holds.
+	kickSteering := func() {
+		steerer.Kick()
+		holds.Kick()
+	}
+	steeringKick.Store(&kickSteering)
 	kickTrees := func() {
 		releases.Each(func(r *release.Runner) { r.Kick() })
 		holds.Kick()
@@ -312,6 +330,7 @@ func Run(ctx context.Context, o Options) error {
 	// Hooks only queue work; set before RecoverLaunching emits transitions.
 	eng.Coordinator.OnTransition = func(ctx context.Context, c workevent.TaskChange) {
 		releases.Each(func(r *release.Runner) { r.OnTransition(ctx, c) })
+		steerer.OnTransition(ctx, c)
 		eng.Observe.Kick()
 		notifier.OnTransition(ctx, c)
 		holds.Kick()
@@ -319,6 +338,7 @@ func Run(ctx context.Context, o Options) error {
 	}
 	eng.Coordinator.OnObservedTransition = func(ctx context.Context, c workevent.TaskChange) {
 		releases.Each(func(r *release.Runner) { r.OnTransition(ctx, c) })
+		steerer.OnTransition(ctx, c)
 		eng.Observe.Kick()
 		holds.Kick()
 		inbox.Signal()
@@ -437,6 +457,7 @@ func Run(ctx context.Context, o Options) error {
 		wg.Go(func() { eng.Run(systemCtx) })
 		wg.Go(func() { releases.Run(systemCtx) })
 		wg.Go(func() { schedules.Run(systemCtx) })
+		wg.Go(func() { steerer.Run(systemCtx) })
 		wg.Go(func() { moved.Run(systemCtx) })
 		wg.Go(func() { sweepStagedAttachments(systemCtx, store, logger) })
 	})

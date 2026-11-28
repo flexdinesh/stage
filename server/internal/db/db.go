@@ -120,3 +120,51 @@ func DecodeStrict(raw []byte, v any) error {
 	}
 	return nil
 }
+
+// OnSteeringEvent calls fn after each committed Write that enqueued a
+// steering event (the delivery dispatcher's kick). fn must not block. Call
+// once, before the Store is used concurrently.
+func (s *Store) OnSteeringEvent(fn func()) {
+	s.e = steeringEngine{Engine: s.e, hook: fn}
+}
+
+// steeringEngine reports committed Writes that inserted steering events.
+type steeringEngine struct {
+	store.Engine
+	hook func()
+}
+
+func (e steeringEngine) Write(ctx context.Context, fn func(store.Tx) error) error {
+	var inserted atomic.Bool
+	err := e.Engine.Write(ctx, func(tx store.Tx) error {
+		// Write may rerun fn (Postgres retry): count only the committed run.
+		inserted.Store(false)
+		return fn(steeringTx{Tx: tx, inserted: &inserted})
+	})
+	if err == nil && inserted.Load() {
+		e.hook()
+	}
+	return err
+}
+
+type steeringTx struct {
+	store.Tx
+	inserted *atomic.Bool
+}
+
+func (t steeringTx) Steering() store.Steering {
+	return steeringRepo{Steering: t.Tx.Steering(), inserted: t.inserted}
+}
+
+type steeringRepo struct {
+	store.Steering
+	inserted *atomic.Bool
+}
+
+func (r steeringRepo) InsertEvent(ctx context.Context, ev store.NewSteeringEvent) (int64, error) {
+	id, err := r.Steering.InsertEvent(ctx, ev)
+	if err == nil {
+		r.inserted.Store(true)
+	}
+	return id, err
+}
