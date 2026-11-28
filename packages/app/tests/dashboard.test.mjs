@@ -4,8 +4,11 @@ import {
   DEFAULT_FOLD,
   LINGER_MS,
   awaitingReview,
-  ATTENTION_GROUPS,
+  DASHBOARD_GROUPS,
   GROUP_KEYS,
+  dashboardGroups,
+  dashboardLoad,
+  needsYouCount,
   completedSince,
   endLinger,
   filterByTree,
@@ -48,8 +51,8 @@ test("a task completed here lingers in Awaiting review, not Completed", () => {
   assert.deepEqual(groupsOf(t), ["completed"]);
 });
 
-test("the Dashboard lists only what asks for the user", () => {
-  assert.deepEqual(ATTENTION_GROUPS, ["needs", "done", "ready", "failed"]);
+test("the Dashboard lists what asks for the user, then running, then ready", () => {
+  assert.deepEqual(DASHBOARD_GROUPS, ["needs", "done", "failed", "running", "ready"]);
   assert.equal(parseGroupKey("running"), "running");
   assert.equal(parseGroupKey("trees"), null);
   assert.equal(parseGroupKey(null), null);
@@ -149,4 +152,59 @@ test("dashboard problems are the status button's yellow and red items, in its or
   const items = [item("x", "bad"), item("y", "need"), item("z", "ok"), item("w", "idle")];
   assert.deepEqual(dashboardProblems(items).map((p) => p.key), ["x", "y"]);
   assert.deepEqual(dashboardProblems([item("z", "ok")]), []);
+});
+
+const counts = (extra = {}) => ({
+  total: 0, backlog: 0, blocked: 0, ready: 0, launching: 0, running: 0, needsInput: 0, done: 0, completed: 0, failed: 0, interrupted: 0, cancelled: 0,
+  ...extra,
+});
+const tree = (id, c, extra = {}) => ({ id, status: "open", completedAt: null, counts: counts(c), ...extra });
+const shape = (groups) => groups.map((g) => [g.key, ids(g.trees), ids(g.tasks)]);
+
+test("dashboard groups: tree members list only through their tree, in Dashboard order", () => {
+  const tasks = [
+    task(1, "running"),
+    task(2, "backlog", { readiness: "ready", startAt: null }),
+    task(3, "needs_input"),
+    task(4, "running", { treeId: 10 }),
+    task(5, "backlog", { readiness: "ready", startAt: null, treeId: 11 }),
+    task(6, "failed"),
+    task(7, "done"),
+  ];
+  const trees = [tree(10, { total: 2, running: 1, backlog: 1 }), tree(11, { total: 1, backlog: 1, ready: 1 })];
+  assert.deepEqual(shape(dashboardGroups(tasks, trees, SINCE, new Set())), [
+    ["needs", [], [3]],
+    ["done", [], [7]],
+    ["failed", [], [6]],
+    ["running", [10], [1]],
+    ["ready", [11], [2]],
+  ]);
+});
+
+test("dashboard groups: a tree lists once, under its most pressing step as on the Trees view", () => {
+  const mixed = tree(1, { total: 3, running: 1, backlog: 1, ready: 1, done: 1 });
+  const asking = tree(2, { total: 2, needsInput: 1, failed: 1 });
+  const review = tree(3, { total: 2, done: 1, running: 1 });
+  assert.deepEqual(shape(dashboardGroups([], [mixed, asking, review], SINCE, new Set())), [
+    ["needs", [2], []],
+    ["done", [3], []],
+    ["ready", [1], []],
+  ]);
+});
+
+test("dashboard groups: waiting, completed and closed trees stay off, with their members", () => {
+  const waiting = tree(1, { total: 2, backlog: 2, blocked: 2 });
+  const completed = tree(2, { total: 1, completed: 1 }, { completedAt: "2026-11-20T00:00:00Z" });
+  const closed = tree(3, { total: 1, done: 1 }, { status: "done" });
+  const members = [task(4, "backlog", { treeId: 1 }), task(5, "done", { treeId: 3 })];
+  assert.deepEqual(dashboardGroups(members, [waiting, completed, closed], SINCE, new Set()), []);
+});
+
+test("dashboard counts: a tree counts once; Running is not owed; the load has no backlog", () => {
+  const tasks = [task(1, "running"), task(2, "needs_input"), task(3, "done"), task(4, "backlog", { startAt: null })];
+  const trees = [tree(10, { total: 2, running: 2 }), tree(11, { total: 3, backlog: 3, ready: 2 })];
+  const groups = dashboardGroups(tasks, trees, SINCE, new Set());
+  assert.equal(needsYouCount(groups), 3, "needs input, review and one ready tree");
+  assert.deepEqual(dashboardLoad(groups), { need: 1, waiting: 2, run: 2, open: 5 });
+  assert.deepEqual(dashboardLoad([]), { need: 0, waiting: 0, run: 0, open: 0 });
 });

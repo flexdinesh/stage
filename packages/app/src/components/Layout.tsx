@@ -31,7 +31,7 @@ import { NotificationToasts, NotificationsBell, NotificationsDrawer, usePushRefr
 import { PullToReload } from "./PullToReload.tsx";
 import { AdoptSessionDrawer } from "./trees/AdoptSessionDrawer.tsx";
 import { ScopeProvider, useScope } from "./Scope.tsx";
-import { LoadCount, ProjectNav, SideLink, useScopeLoad } from "./Sidebar.tsx";
+import { LoadCount, ProjectNav, SideLink, useDashboardLoad } from "./Sidebar.tsx";
 import { StatusButton, useStatusAlert } from "./StatusRow.tsx";
 import { Drawer, IconButton, Kbd, PickerButton, cx, toneClass, type IconComponent } from "./ui.tsx";
 
@@ -161,7 +161,7 @@ function Shell() {
 
   const onMorePage = matchPath("/more", location.pathname) !== null;
   const inMoreSection = moreDestinations(admin).some(({ to }) => matchPath({ path: to, end: false }, location.pathname) !== null);
-  const scopeLoad = useScopeLoad();
+  const dashboardLoad = useDashboardLoad();
   const scope = useScope();
   const [scopeSheet, setScopeSheet] = useState(false);
   const canGoBack = useCanGoBack();
@@ -196,7 +196,7 @@ function Shell() {
           <IconButton variant="primary" onClick={() => newTask()} title="New task (N)" label="New task" icon={IconPlus} />
         </div>
         <nav aria-label="Main" className="flex shrink-0 flex-col px-2 pt-3">
-          <SideLink to="/" icon={<IconDashboard />} label="Dashboard" count={<LoadCount load={scopeLoad} />} />
+          <SideLink to="/" icon={<IconDashboard />} label="Dashboard" count={<LoadCount load={dashboardLoad} />} />
           <SideLink to="/tasks" icon={<IconTasks />} label="Tasks" />
           <SideLink to="/trees" icon={<IconTree />} label="Trees" />
           <SideLink to="/schedules" icon={<IconSchedules />} label="Schedules" />
