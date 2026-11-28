@@ -439,7 +439,7 @@ On the Dashboard and Tasks (every state group) the project gets its own column w
 Closing work: the Dashboard and the Tasks Open view never list closed work (archived tasks, done or archived trees and their members); Tasks Closed and All do. Project detail's Tasks panel header carries a small `Open | Closed | All` segmented control (Closed: done or archived) beside the state select. Task detail's action row ends with Archive (secondary; standalone tasks only, disabled with "Stop the task first" while active) or Unarchive when archived, then Delete (danger, far right) only while the task has never started; an archived task adds a plain `archived` header chip. The palette lists closed tasks and trees too, each with a plain chip (`archived`, `tree done`, `done`).
 
 ### Last word
-A session's latest assistant reply, a read-only glance (the harness stays the place to talk).
+A read-only view of the session's latest assistant reply. When task #533 ships, the panel moves to the Session tab.
 - **Row preview:** needs-input and done rows only (task rows and external session rows). One line of Geist 13px Slate prose with an ellipsis, full preview in `title`, no marker or label. Laptop: under the meta line in the title column. Phone: its own full-width line between the title block and the actions, so it is not squeezed beside the state chip.
 - **Panel:** "Last word" Panel right under Prompt in the main column on task detail. Header meta is the reply's relative time (mono, exact time on hover), plus "· earlier run" when the reply is not from the session's latest run; Copy in the header. The body renders sanitized markdown (`.prose-reply`): Geist 14.5px at 1.55 leading, 75ch measure, headings at body or title size (never competing with the page H1), square Slate list markers, inline code and code blocks in mono on the Bench Gray panel with hairline borders (code blocks scroll sideways, prose wraps anywhere), hairline tables and rules, and a 1px Strong Hairline quote rule. Raw HTML shows as literal text. A truncated excerpt ends with a hairline-ruled mono footer, "Excerpt. Full reply in {harness}", linking to the session. Hidden until a reply has been read.
 
@@ -449,7 +449,7 @@ First task-detail panel, above the final reply. Preserve mono text, Copy, six-li
 
 ### Transcript
 
-Conversations open in their harness. Task detail contains prompt, final reply and journal, without a conversation tab or composer.
+Full conversations open in their harness. When task #533 ships, task detail gains URL-addressable **Task** and **{Harness} session** tabs under the header on phone and laptop. Task is the default at `/tasks/:id` and holds the prompt, images, handoffs, acceptance, State, Tree, journal, timeline, Config and task actions. The Session tab at `/tasks/:id/session` holds the session header and actions, recovery, requests, composer, Last word, harness sections, usage, launch metadata and facts. Where the harness declares `activity`, show bounded Recent activity with **Full transcript in {harness}** using the existing destination. Activity polls every 5 seconds while the view is visible and the session is running or needs input. [Session surface](docs/adr/0014-session-surface.md)
 
 ### Alert
 Tinted callout: tone border at 50%, tone fill at 9% over surface, a 7px square marker, 13px text, actions right. `need` for waiting-on-you, `bad` for errors.
@@ -532,11 +532,11 @@ Task run span remains in metadata. Detailed harness runs are opened in the harne
 
 ### Sessions
 
-Explicit Track session drawer from Stage and Project; Add session from a tree. Paste a T3 link or ID, Preview session, inspect title/project/state, then confirm. Optional title and initial note for a new owner. Show actionable eligibility and lookup errors in place; keep input during retries. No session list.
+Explicit Track session drawer from Stage and Project; Add session from a tree. Paste a T3 link or ID, Preview session, inspect title/project/state, then confirm. Optional title and initial note for a new owner. Show actionable eligibility and lookup errors in place; keep input during retries. When task #533 ships, the Session header offers a task-scoped attempt switcher, newest first. An attempt opens at `/tasks/:id/session/:attempt`. Only the current session can receive actions. Earlier attempts show read-only snapshots with their last observation, reply, usage, facts, links and activity by session reference.
 
 ### Image dropzone
 
-Backlog task prompts accept image drops and Add image. Preserve thumbnails, upload/error states, the 8-image limit and read-only image links on launched tasks. No conversation composer.
+Backlog task prompts accept image drops and Add image. Preserve thumbnails, upload/error states, the 8-image limit and read-only image links on launched tasks.
 
 ### Notifications bell
 A secondary 32px button (40px on phone) in the sidebar bottom row (after the theme toggle) on laptop, and in the phone top bar (before search) with the bell icon. Always square: the unread count rides a corner badge (see Chips), plain, or need-toned when an unread needs-input item is still waiting. Zero unread shows the bell alone.
@@ -545,15 +545,19 @@ A secondary 32px button (40px on phone) in the sidebar bottom row (after the the
 
 Keep a compact yellow-edged needs-input alert with Open in {harness} and Stop. A harness that cannot answer from Stage handles questions and permission approvals in its own client. Notifications retain live waiting state and offer Open in {harness} (or Copy resume command).
 
+When task #533 ships, the alert sits above both tabs. On the Task tab it offers an **Answer** arrow link to `/tasks/:id/session#requests`. Needs-input links from task rows and notifications open `/tasks/:id/session`.
+
 ### Requests (answer in Stage)
 
-`packages/app/src/components/Requests.tsx`. When a task's harness offers operation `respond` (Claude Code), what its session waits on is answered in Stage; the harness stays authoritative, so its Open in / Copy resume command action stays beside it as secondary.
+`packages/app/src/components/Requests.tsx`. When a task's harness offers `respond`, Stage can answer the requests it exposes. The harness stays authoritative and its Open in / Copy resume command action is secondary. When task #533 ships, Requests moves to the Session tab.
 - **Task detail:** the needs-input Alert reads "<harness> is waiting for your answer." with the session action secondary, and a "Requests" Panel (`#requests`, flush, mono `N pending` meta) follows it. Each request is a ruled block: title (body, medium), detail (13px Slate), the preview (command, path, input) in a sharp Bench Gray mono box that wraps, long ones folded to 8 lines with a mono "Show all N lines" disclosure. Approvals: one button per option in the harness's order, the first primary (Allow), the rest secondary (each Always allow names the rule and where it is written; long labels wrap and the button grows); the text option (Deny) opens an inline "Reason for <harness> (optional)" field with Deny (primary) and Cancel. Phone stacks the buttons full width. Questions: one fieldset per question, the header as an inline mono Slate label before the prompt (never above it), square radios or checkboxes (`ChoiceRow`, description under the label, "pick any" meta on multi-select), Other with its input indented to the labels, one primary Send disabled until every question is answered. Once answered the block keeps its preview and shows a mono Slate status line, "Answered · waiting for <harness>" or, when the harness was answered first (404), "Already answered in <harness> or expired"; errors use the bad Alert. Answers are guarded by the task's state revision (first answer wins): one that lost (409 `already_answered`) keeps its controls and draft and prints the same mono Slate status line under them, "Already answered, by the steerer or in the harness.", while the task refetches.
 - **Rows:** a needs-input task row or inbox row with exactly one pending approval prints a one-line mono Ink summary under its title ("Run a command · touch a && echo b", truncated, full text in `title`) and takes small Allow (primary) and Deny (ghost, no reason) in its actions; a question or several requests show a small primary "Answer" ("Answer 2") link to `/tasks/:id#requests`. The session action drops to secondary. Toasts and silent waiting sessions are unchanged.
 
 ### Follow-up (message the session)
 
-`packages/app/src/components/FollowUp.tsx`. When a task's harness offers operation `send` (Claude Code), task detail carries one composer Panel; the harness stays authoritative and its Open in / Copy resume command stays beside it.
+`packages/app/src/components/FollowUp.tsx`. When a task's harness offers `send`, task detail carries one composer Panel. The harness stays authoritative and its Open in / Copy resume command stays beside it.
+
+When task #533 ships, the Session tab uses one textarea and keeps its draft across tab switches. Available actions are **Steer** and **Queue** during a running turn and **Send** once the turn ends, each gated by its declared operation. When no action applies, show the declared reason and Open in {harness} or Copy resume. The placement and state rules below describe the existing composer until that rollout.
 - **Placement:** a turn that ended asking you (needs input, no requests) leads: the Alert reads "<harness> is waiting for your reply." with the session action secondary (also in the phone bar), and a "Reply" Panel follows it where Requests sit. A done session gets a "Follow up" Panel right under Last word. Open requests hide it (Requests answer those).
 - **Body:** a plain mono Textarea (3 rows, resizes vertically) labelled by the panel title for screen readers, then one line: a mono Slate hint ("Ctrl Enter sends." on desktop, then "Continues the same <harness> session.") and Send right (primary only when it leads, else secondary; full width on phones). Ctrl/Cmd+Enter sends; Send is disabled while blank. Over 32 KiB the hint turns into a red `InlineError`.
 - **States:** while the session works (running, launching) the draft stays editable, Send is disabled and the hint reads "<harness> is working. Send once it finishes."; a sent message clears the field and the meta reads "sent 2m ago". A refusal (409 `session_busy`, with why) shows the bad Alert under it and keeps the draft. A Reply is guarded by the task's state revision: when someone answered first (409 `already_answered`) a mono Slate status line reads "Already answered, by the steerer or in the harness." instead of the Alert, the draft stays and the task refetches. The page holds the draft, so it survives the panel moving between placements. No new color.

@@ -223,7 +223,8 @@ Usage:
   stage task reopen ID --revision N [--request-id KEY]
   stage task requests ID              what the task's session waits on
   stage task respond ID RID [--option O] [--text T] [--answers JSON] [--expect-revision N]
-  stage task send ID --text TEXT [--expect-revision N]   message the task's session
+  stage task send ID --text TEXT [--steer | --queue] [--expect-revision N]
+  stage task activity ID [--limit N] [--json]             read recent session activity
                                       --expect-revision: first answer wins (409 already_answered)
   stage task escalate ID --reason TEXT   as the tree's steerer, notify the user about a member's wait now
   stage task opening-prompt ID [--full]

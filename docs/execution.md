@@ -424,8 +424,8 @@ declared capabilities.
 
 Use a typed operation when Stage branches on availability.
 `execution.Op` covers `launch`, `stop`, `adopt`, `reply`, `opening`,
-`attention`, `sessionSearch`, `images`, `respond`, `send`, `sessionRename`
-and `workspaceAdd`.
+`attention`, `sessionSearch`, `images`, `respond`, `send`, `steer`, `queue`,
+`activity`, `sessionRename`, `workspaceAdd` and `directoryBrowse`.
 Every adapter declares each operation and a reason when unavailable.
 For example, `images` gates image fields and image delivery in the API
 and MCP. The remote proxy passes the declarations through.
@@ -553,8 +553,10 @@ Browse… when its connection declares the operation
 
 ### Interaction
 
-The `Interactive` trait exposes requests, responses and messages behind
-`respond` and `send`. An approval takes an option and may accept text
+[ADR 0014](adr/0014-session-surface.md) defines the session surface.
+The `Interactive` trait exposes pending requests and answers behind
+`respond` and delivers messages behind `send`, `steer` and `queue`.
+An approval takes an option and may accept text
 for a designated option. A question group takes answers keyed by question
 ID, using option labels or custom text when allowed. An input takes free
 text. A preview can describe the command, path, URL or input the request
@@ -572,11 +574,27 @@ it can't list declares `unlistedRequests` on its descriptor with where to
 answer them; the app then shows that instead of a Reply composer when a
 needs-input session lists none. [Interaction API](api.md#session-interaction-api-v6)
 
-Send has one contract on every harness: a message is delivered when the
-session's current turn ends, or refused with `Busy` (409 `session_busy`)
-or, when the harness will never take it, `Refused` (409
-`session_refused`). Stage never interrupts or steers a turn mid-way
-([ADR 0013](adr/0013-tree-steering.md#send-semantics)).
+`Interactive.Send` receives a `Message.Delivery`. `send` (also empty)
+starts a new turn after the previous one ends. T3 and OpenCode currently
+also accept a follow-up into their native queues while running. `steer`
+injects into a running turn. `queue` admits a message during a running
+turn for the harness to deliver as the next turn. The coordinator checks
+the corresponding operation. Adapters return `Invalid` for an unsupported
+delivery and `Busy` with guidance when the turn state does not fit
+(409 `session_busy`). A permanent refusal is 409 `session_refused`.
+A successful delivery records its mode and attribution in a timeline
+event. Stage keeps the message text in the dispatch only. Workers relay
+`send` on `adapter.send` and `steer` and `queue` on `adapter.deliver`.
+The legacy send channel accepts only the send mode.
+
+`ActivityReader` reads the current session's bounded recent activity
+behind `activity`, with no Stage-side persistence. The adapter returns the
+last N items in chronological order, the current plan, changed files,
+model and optional harness details. The coordinator validates kinds and
+statuses and enforces the item, title, text and details limits.
+Workers relay the query through `adapter.activity`, bounding the result
+before encoding it. Older workers without the channel kinds report their
+update guidance in the connection operations.
 
 First answer wins ([ADR 0013](adr/0013-tree-steering.md#first-answer-wins)):
 `tasks.state_revision` counts real state transitions, and a send or

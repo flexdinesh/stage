@@ -1,14 +1,19 @@
 package cli_test
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 )
 
 // task preview, then task complete with its revision and evidence version;
@@ -89,5 +94,52 @@ func TestTaskSendExpectRevision(t *testing.T) {
 	}
 	if len(h.fake.Sent) != 1 {
 		t.Fatalf("sent: %+v", h.fake.Sent)
+	}
+}
+
+func TestTaskSessionSurfaceCommands(t *testing.T) {
+	h := newHarness(t)
+	p := h.project("/w/cli-delivery")
+	c := client.New(h.url)
+	a, err := c.CreateTask(t.Context(), client.CreateTask{ProjectID: p.ID, ConnectionID: dbtest.T3Connection, WorkspaceID: h.workspaceID(p), Title: "Delivery", Prompt: "x", Start: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := fmt.Sprint(a.ID)
+	for _, mode := range []struct{ flag, reason string }{{"--steer", "Steer in T3"}, {"--queue", "Queue in T3"}} {
+		if code, _, stderr := h.run("", "task", "send", id, "--text", "hello", mode.flag); code != 1 || !strings.Contains(stderr, mode.reason) {
+			t.Fatalf("task send %s: %d %s", mode.flag, code, stderr)
+		}
+	}
+	if code, _, stderr := h.run("", "task", "send", id, "--text", "hello", "--steer", "--queue"); code != 2 || !strings.Contains(stderr, "mutually exclusive") {
+		t.Fatalf("conflicting flags: %d %s", code, stderr)
+	}
+	if len(h.fake.Sent) != 0 {
+		t.Fatalf("unavailable delivery reached the harness: %+v", h.fake.Sent)
+	}
+
+	now := time.Date(2026, 11, 29, 4, 30, 0, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/tasks/1/activity" || r.URL.Query().Get("limit") != "5" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+		}
+		_ = json.NewEncoder(w).Encode(client.SessionActivity{Activity: execution.Activity{
+			Items: []execution.ActivityItem{{ID: "one", At: now, Kind: "command", Title: "Run tests", Preview: "go test"}},
+			Plan:  []execution.PlanStep{{Text: "Check result", Status: "done"}},
+			Files: []execution.FileChange{{Path: "work.go", Additions: 2, Deletions: 1, Status: "modified"}},
+		}})
+	}))
+	defer srv.Close()
+	h.url = srv.URL
+	code, stdout, stderr := h.run("", "task", "activity", "1", "--limit", "5")
+	for _, want := range []string{now.Format(time.RFC3339), "command", "Run tests", "go test", "Check result", "work.go", "+2 -1"} {
+		if code != 0 || !strings.Contains(stdout, want) {
+			t.Fatalf("activity missing %q: %d %s %s", want, code, stdout, stderr)
+		}
+	}
+	code, stdout, stderr = h.run("", "task", "activity", "1", "--limit", "5", "--json")
+	out := decode[client.SessionActivity](t, stdout)
+	if code != 0 || len(out.Activity.Items) != 1 || out.Activity.Items[0].ID != "one" {
+		t.Fatalf("activity JSON: %d %s %s", code, stdout, stderr)
 	}
 }

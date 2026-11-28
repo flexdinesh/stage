@@ -238,6 +238,7 @@ func NewRouter(deps Deps) http.Handler {
 	agent("POST /api/tasks/{id}/start", s.startTask)
 	agent("POST /api/tasks/{id}/stop", s.stopTask)
 	agent("GET /api/tasks/{id}/requests", s.taskRequests)
+	agent("GET /api/tasks/{id}/activity", s.taskActivity)
 	agent("POST /api/tasks/{id}/requests/{rid}", s.respondRequest)
 	agent("POST /api/tasks/{id}/messages", s.sendMessage)
 	agent("POST /api/tasks/{id}/escalate", s.escalateTask)

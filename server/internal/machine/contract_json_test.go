@@ -64,6 +64,9 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		ID: "folder", Label: "Folder", Help: "Add a folder.", Confirm: "Trust this folder.", Availability: avail,
 		Input: []execution.Field{{ID: "path", Label: "Path", Kind: execution.FieldPath, Required: true}},
 	}
+	item := execution.ActivityItem{ID: "i", At: at, Kind: "command", Title: "Run tests", Text: "passed", Status: "done", Preview: "go test"}
+	step := execution.PlanStep{Text: "Verify", Status: "in_progress"}
+	file := execution.FileChange{Path: "work.go", Additions: 2, Deletions: 1, Status: "modified"}
 	samples := map[string]any{
 		// Adapter contract (execution.Adapter and its optional interfaces).
 		"SessionRef":   ref,
@@ -103,8 +106,16 @@ func TestSeamTypesRoundTripJSON(t *testing.T) {
 		"Reply":       *observation.Reply,
 		"Request": execution.Request{ID: "q", Kind: "question", Title: "Pick", Detail: "one", Preview: "go test", Options: []execution.Choice{choice}, TextOption: "c",
 			Questions: []execution.Question{{ID: "0", Header: "H", Prompt: "Which?", Options: []execution.QuestionOption{{Label: "A", Description: "a"}}, Multi: true, Custom: true}}, CreatedAt: at},
-		"Response": execution.Response{Option: "c", Text: "because", Answers: map[string][]string{"0": {"A"}}},
-		"Message":  execution.Message{Text: "hi", RequestID: "steering-1-7"},
+		"Response":      execution.Response{Option: "c", Text: "because", Answers: map[string][]string{"0": {"A"}}},
+		"Message":       execution.Message{Text: "hi", Delivery: execution.DeliverySteer, RequestID: "steering-1-7"},
+		"ActivityQuery": execution.ActivityQuery{Limit: 30},
+		"Activity": execution.Activity{
+			Items: []execution.ActivityItem{item}, Plan: []execution.PlanStep{step}, Files: []execution.FileChange{file},
+			Model: "brain-7", Truncated: true, Details: json.RawMessage(`{"native":true}`), At: later,
+		},
+		"ActivityItem": item,
+		"PlanStep":     step,
+		"FileChange":   file,
 		// Connector setup (harness.Connector).
 		"Summary": harness.Summary{ConnectionID: 7, Configured: true, Connected: true, LastError: "e"},
 		"Status": harness.Status{

@@ -1,7 +1,10 @@
 package agenttools_test
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -10,6 +13,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/db/dbtest"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -95,5 +99,39 @@ func TestWorkToolsActOnOtherTasksOnly(t *testing.T) {
 	mustCall(t, envCaller, "reopen_task", map[string]any{"taskId": a.ID, "revision": result.Revision, "requestId": "agent-reopen"}, &reopened)
 	if reopened.Revision != result.Revision+1 || reopened.AcceptanceID != nil {
 		t.Fatalf("reopen_task %+v", reopened)
+	}
+}
+
+func TestSessionSurfaceTools(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "POST /api/tasks/7/messages":
+			var in execution.Message
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Text != "hello" || in.Delivery != execution.DeliveryQueue {
+				t.Errorf("message request %+v: %v", in, err)
+			}
+			_ = json.NewEncoder(w).Encode(client.Task{})
+		case "GET /api/tasks/7/activity":
+			if r.URL.Query().Get("limit") != "2" {
+				t.Errorf("activity query %s", r.URL)
+			}
+			_ = json.NewEncoder(w).Encode(client.SessionActivity{Activity: execution.Activity{
+				Items: []execution.ActivityItem{{ID: "last", Title: "Working", Kind: "event", Status: "running"}},
+			}})
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	cs := connect(t, &agenttools.Ops{Client: client.New(srv.URL)})
+	if msg := call(t, cs, "send_message", map[string]any{"taskId": 7, "text": "hello", "delivery": "restart"}, nil); !strings.Contains(msg, "enum") {
+		t.Fatalf("unexpected MCP validation error %q", msg)
+	}
+	mustCall(t, cs, "send_message", map[string]any{"taskId": 7, "text": "hello", "delivery": "queue"}, nil)
+	var out client.SessionActivity
+	mustCall(t, cs, "get_session_activity", map[string]any{"taskId": 7, "limit": 2}, &out)
+	if len(out.Activity.Items) != 1 || out.Activity.Items[0].ID != "last" {
+		t.Fatalf("unexpected activity %+v", out)
 	}
 }

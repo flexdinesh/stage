@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	"github.com/flexdinesh/stage/server/internal/db"
 	"github.com/flexdinesh/stage/server/internal/execution"
@@ -72,6 +73,21 @@ func (c *Client) Requests(ctx context.Context, id int64) ([]execution.Request, e
 	return out.Requests, err
 }
 
+// SessionActivity is the recent activity in a task's session.
+type SessionActivity struct {
+	Activity execution.Activity `json:"activity"`
+}
+
+func (c *Client) Activity(ctx context.Context, id int64, q execution.ActivityQuery) (SessionActivity, error) {
+	params := url.Values{}
+	if q.Limit != 0 {
+		params.Set("limit", strconv.Itoa(q.Limit))
+	}
+	var out SessionActivity
+	err := c.do(ctx, http.MethodGet, withQuery(taskPath(id, "activity"), params), nil, &out)
+	return out, err
+}
+
 // Respond answers a pending request of a task's session. expected
 // (expectedStateRevision, nil: unguarded) makes it a guarded answer: 409
 // already_answered when the task moved on or was answered first.
@@ -89,9 +105,10 @@ func (c *Client) Respond(ctx context.Context, id int64, requestID string, in exe
 func (c *Client) SendMessage(ctx context.Context, id int64, in execution.Message, expected *int64, caller *db.SessionRef) (Task, error) {
 	var out Task
 	body := struct {
-		execution.Message
-		ExpectedStateRevision *int64 `json:"expectedStateRevision,omitempty"`
-	}{in, expected}
+		Text                  string             `json:"text"`
+		Delivery              execution.Delivery `json:"delivery,omitempty"`
+		ExpectedStateRevision *int64             `json:"expectedStateRevision,omitempty"`
+	}{in.Text, in.Delivery, expected}
 	err := c.doCaller(ctx, http.MethodPost, taskPath(id, "messages"), body, caller, &out)
 	return out, err
 }

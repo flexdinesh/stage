@@ -54,7 +54,8 @@ import type {
   PushSubscriptionBody,
   SyncResult,
   RequestResponse,
-  SendMessageRequest,
+  Activity,
+  Delivery,
   SessionRequest,
   Task,
   TaskDetail,
@@ -292,14 +293,17 @@ export function createApi(transport: Transport) {
       apiFetch<ActionResult>(`/tasks/${id}/actions/${encodeURIComponent(actionId)}`, actionPost(input, confirmed)),
     /** What the task's session waits on (409 `operation_unavailable` when its harness can't answer from Stage). */
     taskRequests: (id: number) => apiFetch<{requests: SessionRequest[]}>(`/tasks/${id}/requests`),
+    getActivity: (id: number, q: {limit?: number} = {}) =>
+      apiFetch<{activity: Activity}>(`/tasks/${id}/activity${toQuery(q)}`),
     /**
      * Answers one request (400 the answer doesn't fit, 404 no longer pending, 403 `self_action_forbidden` from the task's own session). With
      * `expectedStateRevision` (the task's `stateRevision`) the first answer wins: 409 `already_answered` when it moved on or was answered first.
      */
     respondRequest: (id: number, requestId: string, body: RequestResponse, expectedStateRevision?: number) =>
       apiFetch<Task>(`/tasks/${id}/requests/${encodeURIComponent(requestId)}`, post(expectedStateRevision === undefined ? body : { ...body, expectedStateRevision })),
-    /** Sends the session a follow-up (409 `session_busy` when it can't take one now, 409 `already_answered` when a guarded reply lost, 403 `self_action_forbidden` from the task's own session). */
-    sendMessage: (id: number, body: SendMessageRequest) => apiFetch<Task>(`/tasks/${id}/messages`, post(body)),
+    /** Delivers a session message (409 `session_busy` when it can't take it now, 409 `already_answered` when a guarded reply lost, 403 `self_action_forbidden` from the task's own session). */
+    sendMessage: (id: number, text: string, delivery?: Delivery, expectedStateRevision?: number) =>
+      apiFetch<Task>(`/tasks/${id}/messages`, post({text, delivery, expectedStateRevision})),
     duplicateTask: (id: number, draft?: DuplicateTaskRequest) => apiFetch<Task>(`/tasks/${id}/duplicate`, post(draft)),
     /** Replaces a backlog task's needs ([] clears them); a task outside a tree joins the needs' tree. */
     setNeeds: (id: number, needs: number[]) => apiFetch<Task>(`/tasks/${id}/needs`, { method: "PUT", body: { needs } }),

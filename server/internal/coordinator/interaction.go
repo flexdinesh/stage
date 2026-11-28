@@ -15,6 +15,20 @@ import (
 // interactive is the task's session and its adapter's Interactive when the
 // harness offers op; otherwise an operation_unavailable conflict naming why.
 func (s *Service) interactive(ctx context.Context, id int64, op execution.Op) (db.Task, execution.Interactive, error) {
+	t, a, err := s.sessionOperation(ctx, id, op)
+	if err != nil {
+		return t, nil, err
+	}
+	in, ok := execution.As[execution.Interactive](a)
+	if !ok {
+		return t, nil, unavailable(op, "this connection does not provide session interaction")
+	}
+	return t, in, nil
+}
+
+// sessionOperation resolves the task's current session and checks its
+// connection's declaration. The caller checks the corresponding trait.
+func (s *Service) sessionOperation(ctx context.Context, id int64, op execution.Op) (db.Task, execution.Catalog, error) {
 	t, err := s.store.GetTask(ctx, id)
 	if err != nil {
 		return t, nil, err
@@ -33,11 +47,7 @@ func (s *Service) interactive(ctx context.Context, id int64, op execution.Op) (d
 	if avail := features.Operations[op]; !avail.Available {
 		return t, nil, unavailable(op, avail.Reason)
 	}
-	in, ok := execution.As[execution.Interactive](a)
-	if !ok {
-		return t, nil, unavailable(op, "this connection does not provide session interaction")
-	}
-	return t, in, nil
+	return t, a, nil
 }
 
 // CanAnswer reports whether connection id offers respond or send, so a
@@ -77,6 +87,25 @@ func (s *Service) Requests(ctx context.Context, id int64) ([]execution.Request, 
 	return rs, nil
 }
 
+// Activity reads recent activity for the task's current session (OpActivity).
+func (s *Service) Activity(ctx context.Context, id int64, q execution.ActivityQuery) (execution.Activity, error) {
+	t, a, err := s.sessionOperation(ctx, id, execution.OpActivity)
+	if err != nil {
+		return execution.Activity{}, err
+	}
+	reader, ok := execution.As[execution.ActivityReader](a)
+	if !ok {
+		return execution.Activity{}, unavailable(execution.OpActivity, "this connection does not provide session activity")
+	}
+	q = q.Bounded()
+	out, err := reader.Activity(ctx, *t.Session, q)
+	if err != nil {
+		return execution.Activity{}, harnessErr(err)
+	}
+	out, err = out.Bounded(q)
+	return out, harnessErr(err)
+}
+
 // Respond answers one pending request, then observes the session once.
 // expected (expectedStateRevision) guards it: first answer wins (answer).
 func (s *Service) Respond(ctx context.Context, id int64, requestID string, r execution.Response, expected *int64) (db.Task, error) {
@@ -109,8 +138,12 @@ func (s *Service) Respond(ctx context.Context, id int64, requestID string, r exe
 // command-line argument.
 const MaxMessage = 32 << 10
 
-// FollowUpSent is the task event a sent message records.
-const FollowUpSent = "Follow-up sent from Stage"
+// Delivery events record the action without the message text.
+const (
+	FollowUpSent  = "Follow-up sent from Stage"
+	SteerSent     = "Steer sent from Stage"
+	MessageQueued = "Message queued from Stage"
+)
 
 // Send sends the task's session a message, records it on the task's
 // timeline, then observes the session once. *execution.Busy (the session
@@ -135,11 +168,26 @@ func (s *Service) send(ctx context.Context, id int64, m execution.Message, expec
 	if len(m.Text) > MaxMessage {
 		return db.Task{}, db.Invalid("message text is longer than %d KiB", MaxMessage>>10)
 	}
+	op, err := m.Delivery.Operation()
+	if err != nil {
+		return db.Task{}, db.Invalid("%s", err)
+	}
+	detail := FollowUpSent
+	switch op {
+	case execution.OpSteer:
+		detail = SteerSent
+	case execution.OpQueue:
+		detail = MessageQueued
+	}
 	if m.RequestID == "" {
 		m.RequestID = "stage-send:" + rand.Text()
 	}
-	t, err := s.answer(ctx, id, execution.OpSend, expected, func(t db.Task, in execution.Interactive) error {
+	t, err := s.answer(ctx, id, op, expected, func(t db.Task, in execution.Interactive) error {
 		if err := in.Send(ctx, *t.Session, m); err != nil {
+			var invalid *execution.Invalid
+			if errors.As(err, &invalid) {
+				return db.Invalid("%s", invalid.Reason)
+			}
 			return harnessErr(err)
 		}
 		record, cancel := recordContext(ctx, db.Cause{Kind: "session_message", TaskID: id, Session: db.CallerRef(ctx)})
@@ -148,10 +196,10 @@ func (s *Service) send(ctx context.Context, id int64, m execution.Message, expec
 			return recorder(record)
 		}
 		if expected != nil {
-			return s.store.RecordTaskAnswer(record, id, *t.Session, "", FollowUpSent, expected)
+			return s.store.RecordTaskAnswer(record, id, *t.Session, "", detail, expected)
 		}
-		if err := s.store.AddTaskEvent(record, id, FollowUpSent); err != nil {
-			s.log.Warn("record follow-up", "task", id, "err", err)
+		if err := s.store.AddTaskEvent(record, id, detail); err != nil {
+			s.log.Warn("record session message", "task", id, "err", err)
 		}
 		return nil
 	})

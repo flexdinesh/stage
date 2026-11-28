@@ -108,11 +108,27 @@ the role on the connection's machine.
 
 Use [`execution.As[T]`](../server/internal/execution/optional.go) for
 `LinkResolver`, `SessionSearcher`, `SessionNamer`, `WorkspaceFeatures`, `WorkspaceAdder`,
-`Correlator`, `EventSource`, `Interactive` and `Actor`. The adapter implements the Go interface.
+`Correlator`, `EventSource`, `Interactive`, `ActivityReader` and `Actor`. The adapter implements the Go interface.
 A partial adapter such as a worker proxy must also advertise the trait in
 its ready snapshot. The trait says whether the interface is callable.
 Check the corresponding operation, policy or action availability for the
 requested scope. Polling reconciles missed `EventSource` events.
+
+### Session interaction and activity
+
+Follow [ADR 0014](adr/0014-session-surface.md) and the
+[interaction contract](execution.md#interaction). Declare a harness-specific
+reason for each unavailable operation.
+
+| Operation | Adapter contract | Worker kind |
+| --- | --- | --- |
+| `steer` | `Interactive.Send` with `DeliverySteer` injects into the running turn. Return `Busy` with guidance if the turn ended. | `adapter.deliver` |
+| `queue` | `Interactive.Send` with `DeliveryQueue` admits a message into the harness's native queue during a running turn. The harness delivers it as the next turn. | `adapter.deliver` |
+| `activity` | `ActivityReader.Activity` returns recent items oldest first, plus the current plan and changed files. Use the requested limit and set `Truncated` when older items exist. | `adapter.activity` |
+
+Return `Invalid` if a caller supplies an unsupported delivery. Keep the
+session data in the harness and expose harness-specific activity details
+through its own UI slot.
 
 ### Workspace and session selection
 
@@ -234,7 +250,7 @@ degrades through declared availability.
 | --- | --- | --- |
 | Display fact | Show a harness detail such as an endpoint or extra usage information. | `execution.Fact` carries a label, value and tone in status, an observation or an action result. |
 | Scoped action | Relay a harness-specific operation such as labelling a session. | Declare the target, inputs, confirmation, caller authorization and availability. Connection setup uses the connector. Session and project actions use `execution.Actor` and capability declarations. The owner validates opaque input. |
-| Typed operation | Let Stage decide whether it can launch, stop, adopt, read a reply or opening, list attention, search for sessions, launch with images, respond, send, add a workspace or browse folders. | Declare each [`execution.Op`](../server/internal/execution/ops.go) with availability and a reason when unavailable. Use `WorkspaceFeatures` for a workspace-specific declaration. |
+| Typed operation | Let Stage decide whether it can launch, stop, adopt, read a reply or opening, list attention, search for sessions, launch with images, respond, deliver messages, read activity, add a workspace or browse folders. | Declare each [`execution.Op`](../server/internal/execution/ops.go) with availability and a reason when unavailable. Use `WorkspaceFeatures` for a workspace-specific declaration. |
 | Launch option | Pass a choice, boolean or text value at launch, such as a harness worktree option. | Declare the field in capabilities and validate and translate it from `execution.Config`. |
 | Descriptor policy | Apply a Stage invariant such as launch recovery, attribution, identity or completion from a closure signal. | Declare it in the descriptor. Stage interprets the policy for every kind that uses it. A harness whose `respond` lists only some request kinds declares `unlistedRequests` with where to answer the rest (T3: permission requests; OpenCode: forms with conditions, hidden or external fields; Codex: permission requests, MCP elicitations and secret questions). |
 

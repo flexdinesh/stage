@@ -218,6 +218,9 @@ func operations() map[execution.Op]execution.Availability {
 	return map[execution.Op]execution.Availability{
 		execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
 		execution.OpSend:            {Reason: sendUnavailable},
+		execution.OpSteer:           {Reason: "Steer in OpenCode."},
+		execution.OpQueue:           {Reason: "Queue in OpenCode."},
+		execution.OpActivity:        {Reason: "Recent activity is in OpenCode."},
 		execution.OpSessionSearch:   {Reason: sessionSearchUnavailable},
 		execution.OpImages:          {Reason: "Image attachment delivery has not been verified for this adapter."},
 		execution.OpRespond:         {Reason: respondUnavailable},

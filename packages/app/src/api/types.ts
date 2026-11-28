@@ -540,6 +540,9 @@ export type OperationId =
   | "images"
   | "respond"
   | "send"
+  | "steer"
+  | "queue"
+  | "activity"
   | "sessionRename"
   | "workspaceAdd"
   | "directoryBrowse";
@@ -1075,11 +1078,46 @@ export interface RequestResponse {
   answers?: Record<string, string[]>;
 }
 
-/** A follow-up message into a task's session (POST /tasks/:id/messages); nonblank, at most 32 KiB. */
+export type Delivery = "send" | "steer" | "queue";
+
+/** A message into a task's session (POST /tasks/:id/messages); nonblank, at most 32 KiB. */
 export interface SendMessageRequest {
   text: string;
+  delivery?: Delivery;
   /** Guards a reply: the task's `stateRevision` while it needs input (409 `already_answered` when it moved on or was answered first). */
   expectedStateRevision?: number;
+}
+
+export interface ActivityItem {
+  id: string;
+  at: string;
+  kind: "message_user" | "message_agent" | "reasoning" | "tool" | "command" | "file_change" | "plan" | "event";
+  title: string;
+  text: string;
+  status: "running" | "done" | "failed" | "";
+  preview: string;
+}
+
+export interface PlanStep {
+  text: string;
+  status: "pending" | "in_progress" | "done";
+}
+
+export interface FileChange {
+  path: string;
+  additions: number;
+  deletions: number;
+  status: "added" | "modified" | "deleted" | "";
+}
+
+export interface Activity {
+  items: ActivityItem[];
+  plan: PlanStep[];
+  files: FileChange[];
+  model: string;
+  truncated: boolean;
+  details?: unknown;
+  at: string;
 }
 
 export interface AdoptSessionRequest {

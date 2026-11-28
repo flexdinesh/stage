@@ -88,7 +88,8 @@ type Response struct {
 
 // Message is a user message sent into a session.
 type Message struct {
-	Text string `json:"text"`
+	Text     string   `json:"text"`
+	Delivery Delivery `json:"delivery,omitempty"`
 	// RequestID identifies this send so a retry delivers it once, where the
 	// harness deduplicates (T3 clientRequestId). The coordinator sets a fresh
 	// one per API call; a caller that retries (steering delivery) passes its
@@ -98,7 +99,8 @@ type Message struct {
 
 // Interactive answers a session's pending requests and sends it messages.
 // ErrNotFound: the request is no longer pending. *Invalid: the answer does
-// not fit the request (nothing was sent).
+// not fit the request or the adapter cannot use the requested delivery.
+// *Busy: the session's turn state does not fit the delivery.
 type Interactive interface {
 	Requests(context.Context, SessionRef) ([]Request, error)
 	Respond(ctx context.Context, ref SessionRef, requestID string, r Response) error
@@ -131,6 +133,7 @@ var optionalTraits = []optionalTrait{
 	registerTrait[Correlator]("correlator"),
 	registerTrait[EventSource]("eventSource"),
 	registerTrait[Interactive]("interactive"),
+	registerTrait[ActivityReader]("activityReader"),
 	registerTrait[Actor]("actor"),
 	registerTrait[WorkspaceAdder]("workspaceAdder"),
 	registerTrait[DirectoryBrowser]("directoryBrowser"),

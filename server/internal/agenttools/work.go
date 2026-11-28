@@ -26,7 +26,8 @@ func addWorkTools(s *mcp.Server, o *Ops, ro *mcp.ToolAnnotations) {
 	add(s, o, "get_opening_prompt", "Read an adopted task's opening prompt (full=true: untruncated).", ro, o.GetOpeningPrompt)
 	add(s, o, "list_requests", "List what a task's session waits on: approvals, questions and input requests, with their options.", ro, o.ListRequests)
 	add(s, o, "respond_request", "Answer a pending request of a task's session with option, text or answers (by question id)."+selfRule, nil, o.RespondRequest)
-	add(s, o, "send_message", "Send a task's running session a follow-up message."+selfRule, nil, o.SendMessage)
+	add(s, o, "send_message", "Deliver a message to a task's session. Use send (default) to start a new turn after the previous one ends, steer to inject into the running turn, or queue to let the harness deliver it as the next turn. Availability is declared per connection operation."+selfRule, nil, o.SendMessage)
+	add(s, o, "get_session_activity", "Read a task's bounded recent session activity, plan and changed files, including your own task. Requires the connection's activity operation.", ro, o.GetSessionActivity)
 }
 
 func (o *Ops) GetCompletionPreview(ctx context.Context, a TaskIDArgs) (db.CompletionPreview, error) {
@@ -123,8 +124,9 @@ func (o *Ops) RespondRequest(ctx context.Context, a RespondRequestArgs) (client.
 // SendMessageArgs is send_message (execution.Message).
 type SendMessageArgs struct {
 	CallerArgs
-	TaskID int64  `json:"taskId" jsonschema:"task whose session receives it (not your own)"`
-	Text   string `json:"text" jsonschema:"message text (up to 32 KiB)"`
+	TaskID   int64              `json:"taskId" jsonschema:"task whose session receives it (not your own)"`
+	Text     string             `json:"text" jsonschema:"message text (up to 32 KiB)"`
+	Delivery execution.Delivery `json:"delivery,omitempty" jsonschema:"message delivery (default send)"`
 	// ExpectedStateRevision guards the message (first answer wins).
 	ExpectedStateRevision *int64 `json:"expectedStateRevision,omitempty" jsonschema:"the task's stateRevision you are answering (it needs input); Stage refuses with already_answered when the task moved on or was answered first"`
 }
@@ -134,5 +136,15 @@ func (o *Ops) SendMessage(ctx context.Context, a SendMessageArgs) (client.Task, 
 	if err != nil {
 		return client.Task{}, err
 	}
-	return o.Client.SendMessage(ctx, a.TaskID, execution.Message{Text: a.Text}, a.ExpectedStateRevision, c.Session)
+	return o.Client.SendMessage(ctx, a.TaskID, execution.Message{Text: a.Text, Delivery: a.Delivery}, a.ExpectedStateRevision, c.Session)
+}
+
+// SessionActivityArgs is get_session_activity.
+type SessionActivityArgs struct {
+	TaskID int64 `json:"taskId" jsonschema:"task whose session to read"`
+	Limit  int   `json:"limit,omitempty" jsonschema:"number of recent items (default 30, capped at 100)"`
+}
+
+func (o *Ops) GetSessionActivity(ctx context.Context, a SessionActivityArgs) (client.SessionActivity, error) {
+	return o.Client.Activity(ctx, a.TaskID, execution.ActivityQuery{Limit: a.Limit})
 }

@@ -50,10 +50,19 @@ func (hostedAdapter) Health(context.Context) execution.Health {
 	return execution.Health{Availability: execution.Availability{Available: true}, Identity: "kit-home"}
 }
 func (hostedAdapter) Features(context.Context) (execution.Capabilities, error) {
-	return execution.Capabilities{
-		Operations: map[execution.Op]execution.Availability{execution.OpLaunch: {Available: true}},
+	caps := execution.Capabilities{
+		Operations: make(map[execution.Op]execution.Availability, len(execution.Ops)),
 		Models:     []execution.Model{{Choice: execution.Choice{ID: "m", Availability: execution.Availability{Available: true}}}},
-	}, nil
+	}
+	for _, op := range execution.Ops {
+		caps.Operations[op] = execution.Availability{Reason: "Hosted kit does not offer " + string(op) + " from Stage."}
+	}
+	caps.Operations[execution.OpLaunch] = execution.Availability{Available: true}
+	caps.Operations[execution.OpStop] = execution.Availability{Reason: "This connection does not support stopping tasks."}
+	caps.Operations[execution.OpSteer] = execution.Availability{Reason: "Steer in Hosted kit."}
+	caps.Operations[execution.OpQueue] = execution.Availability{Reason: "Queue in Hosted kit."}
+	caps.Operations[execution.OpActivity] = execution.Availability{Reason: "Recent activity is in Hosted kit."}
+	return caps, caps.DeclaresOperations()
 }
 func (hostedAdapter) Workspaces(context.Context) ([]execution.WorkspaceInfo, error) {
 	return []execution.WorkspaceInfo{{ID: "repo", Title: "repo", WorkspaceRoot: hostedWorkspace}}, nil

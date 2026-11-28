@@ -623,7 +623,7 @@ export function useSendMessage(taskId: number) {
   const api = useApi();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: SendMessageRequest) => api.sendMessage(taskId, body),
+    mutationFn: (body: SendMessageRequest) => api.sendMessage(taskId, body.text, body.delivery, body.expectedStateRevision),
     onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: keys.notifications }), invalidateWork(qc)]),
   });
 }

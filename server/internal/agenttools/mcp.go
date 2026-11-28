@@ -11,6 +11,7 @@ import (
 	"github.com/flexdinesh/stage/server/internal/agentctx"
 	"github.com/flexdinesh/stage/server/internal/client"
 	"github.com/flexdinesh/stage/server/internal/db"
+	"github.com/flexdinesh/stage/server/internal/execution"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -26,7 +27,8 @@ const guide = `Stage owns projects, tasks, trees, accepted results and journals.
 - Create work with create_task. Supply a self-contained prompt. The default is backlog. Choose connectionId and workspaceId together from list_projects, which includes unbound workspaces. Stage assigns a project when omitted. The same pair in list_models shows workspace-specific executionConfig choices. CLI equivalents use --connection and --workspace-id. Select that pair again to repair an unavailable destination. To plan unresolved backlog, provide the connection and Stage project context and omit workspaceId.
 - In Stage, trees are the only way to express dependencies. Set needs to task IDs, use create_tree to group tasks, or afterMe to depend on your own session's task. adopt_session explicitly tracks a top-level session. Existing owners can be reused offline. Trees default to auto start and tasks inherit the tree mode: omit startMode unless the user asks for manual. Auto is safe for planned work: roots never start on their own, and other members launch only once their needs are completed in Stage (a task added after its needs are completed launches at once; that is expected). Do not pick manual to avoid launches; ask the user if unsure. Only completion in Stage releases dependencies. start_tree starts ready members.
 - A dependent launch receives Stage's stored accepted reply and references unless handoff is disabled. Stage does not start a dependent from its predecessor's branch: the handoff carries the branch the harness reported. A worktree, its base ref or branch are launch options in executionConfig where the harness declares them (list_models).
-- Append findings and outcomes with append_note. Provide taskId for a task note, or treeId and the current sourceTaskId for a tree conclusion. Reuse requestId only for identical retries. Report your outcome; never complete your own task (Stage refuses it). Leave acceptance to the user unless asked: to complete another task, call get_completion_preview, then complete_task with its revision and evidenceVersion. list_requests, respond_request and send_message act on other tasks' sessions, never your own.
+- Append findings and outcomes with append_note. Provide taskId for a task note, or treeId and the current sourceTaskId for a tree conclusion. Reuse requestId only for identical retries. Report your outcome; never complete your own task (Stage refuses it). Leave acceptance to the user unless asked: to complete another task, call get_completion_preview, then complete_task with its revision and evidenceVersion.
+- Read pending requests with list_requests and bounded recent activity with get_session_activity, including on your own task. Use respond_request and send_message on other tasks' sessions. Message delivery (send, steer or queue) and activity depend on the connection's declared operations.
 - For a shared server, use the agent address in the launch instructions or the configured Stage MCP integration. Keep passwords and credentials out of prompts, notes and callerSession.
 - Use list_tasks with originSession to find work you created. Use read_ref with a Stage task, tree, schedule, project or journal entry link, a harness session link or a scoped session; get_project and get_project_group read a project or group by id. get_task returns stored results and available links. Use the native harness for the conversation.
 - create_schedule queues recurring work. Use get_task, get_tree, list_tasks or wait_task for progress. The CLI exposes the same workflows through {cli} task, tree, schedule, sessions adopt and show. Run {cli} help for flags.`
@@ -179,14 +181,17 @@ func retiredInputResult(field string) *mcp.CallToolResult {
 	return result
 }
 
-// add registers op as a tool with an inferred input schema. Output has no
-// schema (Out = any): results are the REST shapes as JSON.
+// add registers op as a tool with an inferred input schema. Results use
+// the REST shapes as JSON.
 func add[In, Out any](s *mcp.Server, o *Ops, name, desc string, ann *mcp.ToolAnnotations, op func(context.Context, In) (Out, error)) {
 	// PATCH distinguishes an omitted selector from an explicit null.
 	input, err := jsonschema.For[In](&jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
 		reflect.TypeFor[db.Optional[string]]():      {Types: []string{"string", "null"}},
 		reflect.TypeFor[db.Optional[int64]]():       {Types: []string{"integer", "null"}},
 		reflect.TypeFor[db.Optional[ConfigInput]](): nullableConfigSchema,
+		reflect.TypeFor[execution.Delivery](): {Type: "string", Enum: []any{
+			string(execution.DeliverySend), string(execution.DeliverySteer), string(execution.DeliveryQueue),
+		}},
 	}})
 	if err != nil {
 		panic(fmt.Sprintf("MCP tool %s input schema: %v", name, err))

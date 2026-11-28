@@ -201,6 +201,9 @@ func labelValue(q Question, v string) (string, bool) {
 // won't send to (archived, or its worktree can't be restored) is
 // *execution.Refused.
 func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m execution.Message) error {
+	if err := m.Delivery.RequireSend(); err != nil {
+		return err
+	}
 	if ref.ConnectionID != a.ConnectionID {
 		return execution.ErrUnavailable
 	}

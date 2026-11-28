@@ -80,6 +80,9 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 		out.Operations[op] = yes
 	}
 	out.Operations[execution.OpWorkspaceAdd] = yes
+	out.Operations[execution.OpSteer] = execution.Availability{Reason: "Steer in T3: open the thread there."}
+	out.Operations[execution.OpQueue] = execution.Availability{Reason: "Queue in T3: open the thread there."}
+	out.Operations[execution.OpActivity] = execution.Availability{Reason: "Recent activity is in T3."}
 	out.Operations[execution.OpDirectoryBrowse] = execution.Availability{Reason: "T3 does not expose folder browsing to Stage; type the path."}
 	out.WorkspaceSources = workspaceSources()
 	for _, mode := range []string{"approval-required", "auto-accept-edits", "auto", "full-access"} {
