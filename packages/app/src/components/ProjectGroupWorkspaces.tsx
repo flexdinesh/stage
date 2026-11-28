@@ -4,6 +4,7 @@ import { keys, useDestinations, useInvalidateProjects, useProject } from "../api
 import type { GroupWorkspace, ProjectGroup } from "../api/types.ts";
 import { canRunProjectActions, groupWorkspaceBlocked } from "../lib/projectGroups.ts";
 import { useApi } from "../platform/context.tsx";
+import { AddWorkspaceDrawer } from "./AddWorkspace.tsx";
 import { DeclaredActions } from "./DeclaredActions.tsx";
 import { GroupMembershipDrawer, type MembershipAction } from "./GroupMembershipDrawer.tsx";
 import { GroupWorkspaceState, groupWorkspaceLabel, groupWorkspaceLocation } from "./GroupWorkspaceDisplay.tsx";
@@ -24,8 +25,9 @@ export function ProjectGroupWorkspaces({ group, connections }: {
   const [title, setTitle] = useState(group.title);
   const [action, setAction] = useState<MembershipAction | null>(null);
   const closeMembership = useCallback(() => setAction(null), []);
-  const [moved, setMoved] = useState<Pick<ProjectGroup, "id" | "title"> | null>(null);
-  const feedback = useRef<HTMLParagraphElement>(null);
+  const [adding, setAdding] = useState(false);
+  const [feedback, setFeedback] = useState<{ moved: Pick<ProjectGroup, "id" | "title"> } | "added" | null>(null);
+  const feedbackLine = useRef<HTMLParagraphElement>(null);
   const menu = useMenu();
   const menuTrigger = useRef<HTMLButtonElement>(null);
   const archived = group.archivedAt !== null;
@@ -44,11 +46,12 @@ export function ProjectGroupWorkspaces({ group, connections }: {
     setTitle(group.title);
     setEditing(edit);
   };
-  useEffect(() => { if (moved !== null) feedback.current?.focus(); }, [moved]);
+  useEffect(() => { if (feedback !== null) feedbackLine.current?.focus(); }, [feedback]);
 
   return (
     <>
       <Panel flush title="Workspaces" meta={group.members.length} actions={<>
+        <Button small onClick={() => { setFeedback(null); setAdding(true); }}>Add workspace</Button>
         <Button ref={menuTrigger} small {...menu.triggerProps}>Project actions</Button>
         <Menu menu={menu} label="Project actions" align="right" className="w-48">
           <MenuItem onSelect={() => showEdit("title")}>Edit title</MenuItem>
@@ -75,8 +78,8 @@ export function ProjectGroupWorkspaces({ group, connections }: {
             </ConfirmInline>
           )}
         </div>}
-        {moved === null ? null : <p ref={feedback} tabIndex={-1} role="status" className="border-b border-line px-3 py-2 text-small wrap-anywhere">
-          Workspace moved to <TextLink to={`/projects/${moved.id}`}>{moved.title}</TextLink>.
+        {feedback === null ? null : <p ref={feedbackLine} tabIndex={-1} role="status" className="border-b border-line px-3 py-2 text-small wrap-anywhere">
+          {feedback === "added" ? "Workspace added." : <>Workspace moved to <TextLink to={`/projects/${feedback.moved.id}`}>{feedback.moved.title}</TextLink>.</>}
         </p>}
         {group.members.length === 0 ? <EmptyState inset>No workspaces in this project. Recorded work stays here.</EmptyState> : (
           <RowList>
@@ -102,9 +105,9 @@ export function ProjectGroupWorkspaces({ group, connections }: {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button small aria-label={`Move workspace ${path} on ${site} to another project`}
-                      onClick={() => { setMoved(null); setAction({ workspace, separate: false }); }}>Move to project</Button>
+                      onClick={() => { setFeedback(null); setAction({ workspace, separate: false }); }}>Move to project</Button>
                     {group.members.length < 2 ? null : <Button small variant="ghost" aria-label={`Separate workspace ${path} on ${site}`}
-                      onClick={() => { setMoved(null); setAction({ workspace, separate: true }); }}>Separate</Button>}
+                      onClick={() => { setFeedback(null); setAction({ workspace, separate: true }); }}>Separate</Button>}
                   </div>
                 </Row>
               );
@@ -114,7 +117,9 @@ export function ProjectGroupWorkspaces({ group, connections }: {
         <RecordedWorkspaces projectId={group.id} connections={connections} />
       </Panel>
       {action === null ? null : <GroupMembershipDrawer action={action} group={group} connections={connections}
-        onClose={closeMembership} onApplied={(target) => { setMoved(target); closeMembership(); }} />}
+        onClose={closeMembership} onApplied={(target) => { setFeedback({ moved: target }); closeMembership(); }} />}
+      {adding ? <AddWorkspaceDrawer projectId={group.id} onClose={() => setAdding(false)}
+        onAdded={() => { setAdding(false); setFeedback("added"); }} /> : null}
     </>
   );
 }

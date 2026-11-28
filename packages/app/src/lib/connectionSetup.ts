@@ -33,6 +33,11 @@ export function settingsBody(fields: SetupField[], current: FieldStates, values:
   return body;
 }
 
+/** How a text-like field's input renders: its type, and monospace for a `path` (the harness checks it). */
+export function fieldInput(field: Pick<SetupField, "kind">): { type: "text" | "url" | "password"; mono: boolean } {
+  return { type: field.kind === "secret" ? "password" : field.kind === "url" ? "url" : "text", mono: field.kind === "path" };
+}
+
 /** Action input body: entered values and checked flags. */
 export function actionBody(fields: SetupField[], values: SetupValues): Record<string, unknown> {
   const body: Record<string, unknown> = {};

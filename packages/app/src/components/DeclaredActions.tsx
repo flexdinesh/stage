@@ -1,37 +1,41 @@
 import { useMutation } from "@tanstack/react-query";
 import { useId, useRef, useState, type FormEvent } from "react";
 import type { ActionResult, HarnessAction, HarnessStatus, SetupField } from "../api/types.ts";
-import { actionBody, clearSecrets, initialValues, type SetupValues } from "../lib/connectionSetup.ts";
+import { actionBody, clearSecrets, fieldInput, initialValues, type SetupValues } from "../lib/connectionSetup.ts";
 import { HarnessFacts } from "./HarnessPresentation.tsx";
 import { Button, Checkbox, Combobox, ConfirmInline, ErrorText, ExternalLink, Field, Hint, Input, cx } from "./ui.tsx";
 
 const NO_FIELDS: SetupField[] = [];
 
-export function SetupInputs({ fields, status, values, disabled = false, onChange }: {
+export function SetupInputs({ fields, status, values, disabled = false, nativeRequired = true, onChange }: {
   fields: readonly SetupField[];
   status?: HarnessStatus;
   values: SetupValues;
   disabled?: boolean;
+  /** False inside another form (the task form's inline add): required stays aria-only, so it never blocks that form. */
+  nativeRequired?: boolean;
   onChange: (id: string, value: string | boolean) => void;
 }) {
   return fields.map((field) => (
-    <SetupInput key={field.id} field={field} value={values[field.id]} disabled={disabled}
+    <SetupInput key={field.id} field={field} value={values[field.id]} disabled={disabled} nativeRequired={nativeRequired}
       savedSecret={status?.fields.some((current) => current.id === field.id && current.set) === true}
       onChange={(value) => onChange(field.id, value)} />
   ));
 }
 
-function SetupInput({ field, value, savedSecret, disabled, onChange }: {
+function SetupInput({ field, value, savedSecret, disabled, nativeRequired, onChange }: {
   field: SetupField;
   value: string | boolean | undefined;
   savedSecret: boolean;
   disabled: boolean;
+  nativeRequired: boolean;
   onChange: (value: string | boolean) => void;
 }) {
   const hintId = useId();
   const description = field.help ? hintId : undefined;
   const text = typeof value === "string" ? value : "";
   const hint = field.help ? <span id={hintId}>{field.help}</span> : undefined;
+  const input = fieldInput(field);
   if (field.kind === "bool") {
     return (
       <div className="flex flex-col gap-1">
@@ -54,9 +58,10 @@ function SetupInput({ field, value, savedSecret, disabled, onChange }: {
             ...(field.choices ?? []).map((choice) => ({ value: choice.id, label: choice.label })),
           ]} />
       ) : (
-        <Input id={id} disabled={disabled} required={field.required && !savedSecret} aria-describedby={description}
-          className={field.kind === "path" ? "font-mono text-input-mono" : undefined}
-          type={field.kind === "secret" ? "password" : field.kind === "url" ? "url" : "text"}
+        <Input id={id} disabled={disabled} required={nativeRequired && field.required && !savedSecret}
+          aria-required={!nativeRequired && field.required && !savedSecret ? true : undefined} aria-describedby={description}
+          className={input.mono ? "font-mono text-input-mono" : undefined}
+          type={input.type}
           value={text} placeholder={field.kind === "secret" && savedSecret ? "Saved" : undefined}
           autoComplete={field.kind === "secret" ? "new-password" : "off"} spellCheck={false}
           onChange={(e) => onChange(e.target.value)} />
