@@ -33,6 +33,9 @@ var Descriptor = harness.Descriptor{
 	StateReasons:  []string{execution.ReasonOwnerExited},
 	SessionHint:   "A thread ID, or a pasted codex resume command.",
 	DiscoveryHint: "Trust the workspace folder in Codex on this machine, then refresh discovery.",
+	// Permission requests, MCP elicitations and secret questions
+	// (Interactive.Requests).
+	UnlistedRequests: "Answer it in a terminal with the resume command.",
 	Closures: []harness.Closure{{
 		Signal: execution.ClosedArchived, Provenance: "harness_archived",
 		Setting:   "Complete tasks when archived in Codex",

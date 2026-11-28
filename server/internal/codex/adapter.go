@@ -139,8 +139,6 @@ var reasoningEffortLabels = map[string]string{
 
 var available = execution.Availability{Available: true}
 
-const answerInCodex = "Answer in Codex: copy the resume command and run it in a terminal."
-
 // ActionArchive archives a tracked thread in Codex (thread/archive). It is
 // user-triggered; the closure reaches Stage through observation.
 const ActionArchive = "archive"
@@ -163,8 +161,8 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 			execution.OpLaunch: available, execution.OpStop: available, execution.OpAdopt: available, execution.OpReply: available, execution.OpOpening: available, execution.OpAttention: available,
 			execution.OpSessionSearch:   available,
 			execution.OpImages:          available,
-			execution.OpRespond:         {Reason: answerInCodex},
-			execution.OpSend:            {Reason: answerInCodex},
+			execution.OpRespond:         available,
+			execution.OpSend:            available,
 			execution.OpSessionRename:   available,
 			execution.OpWorkspaceAdd:    available,
 			execution.OpDirectoryBrowse: available,

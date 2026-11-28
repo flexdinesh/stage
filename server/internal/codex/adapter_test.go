@@ -454,7 +454,7 @@ func TestFeaturesFromModelCatalog(t *testing.T) {
 	if labels := c.Models[0].Options[0].ValueLabels; labels["low"] != "Low" || labels["high"] != "High" {
 		t.Fatalf("reasoning effort labels %+v", labels)
 	}
-	if !c.Operations[execution.OpImages].Available || c.Operations[execution.OpRespond].Available || len(c.Options) != 0 || len(c.Permissions) != 3 {
+	if !c.Operations[execution.OpImages].Available || !c.Operations[execution.OpRespond].Available || !c.Operations[execution.OpSend].Available || len(c.Options) != 0 || len(c.Permissions) != 3 {
 		t.Fatalf("%+v", c)
 	}
 	if err := c.ValidateConfig(execution.Config{}); err != nil {

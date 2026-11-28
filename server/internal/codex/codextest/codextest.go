@@ -46,6 +46,22 @@ type Thread struct {
 	Approval  string
 	Sandbox   string
 	persisted bool
+	// requests are the thread's pending server requests (Request).
+	requests []*serverRequest
+	reqSeq   int
+}
+
+type serverRequest struct {
+	ID     int
+	Method string
+	Params map[string]any
+}
+
+// Answer is a client's reply to a server request.
+type Answer struct {
+	Thread, Method string
+	ID             int
+	Result         json.RawMessage
 }
 
 // Server is the fake daemon.
@@ -80,11 +96,15 @@ type Server struct {
 	// account/rateLimits/read (nil: Codex's auth error).
 	mcpServers []map[string]any
 	rateLimits map[string]any
+	answers    []Answer
 }
 
 type wsClient struct {
 	ws *websocket.Conn
 	mu sync.Mutex
+	// subs are the threads the client subscribed to (thread/start,
+	// thread/resume; thread/unsubscribe ends one). Guarded by Server.mu.
+	subs map[string]bool
 }
 
 func (c *wsClient) write(v any) {
@@ -357,7 +377,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws.SetReadLimit(64 << 20)
-	c := &wsClient{ws: ws}
+	c := &wsClient{ws: ws, subs: map[string]bool{}}
 	s.mu.Lock()
 	s.clients[c] = true
 	s.mu.Unlock()
@@ -383,6 +403,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		if len(m.ID) == 0 {
 			continue // notifications (initialized)
 		}
+		if m.Method == "" {
+			s.answered(c, m.ID, b)
+			continue
+		}
 		if m.Method != "initialize" && !initialized {
 			c.write(map[string]any{"id": m.ID, "error": map[string]any{"code": -32600, "message": "Not initialized"}})
 			continue
@@ -405,6 +429,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			c.write(map[string]any{"id": m.ID, "error": rpcErr})
 		} else {
 			c.write(map[string]any{"id": m.ID, "result": result})
+		}
+		if rpcErr == nil {
+			s.subscribe(c, m.Method, m.Params, result)
 		}
 		if m.Method == "turn/start" && rpcErr == nil {
 			var p struct{ ThreadID string }
@@ -506,6 +533,18 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		}
 		th.Name = str("name")
 		return map[string]any{}, nil
+	case "thread/resume":
+		th, e := thread()
+		if e != nil {
+			return nil, e
+		}
+		if th.Archived {
+			return nil, invalid("session %s is archived. Run `codex unarchive %s` to unarchive it first.", th.ID, th.ID)
+		}
+		if th.Status == "notLoaded" {
+			th.Status, th.Flags = "idle", nil
+		}
+		return map[string]any{"thread": wireThread(th, false), "model": th.Model, "cwd": th.Cwd}, nil
 	case "turn/start":
 		th, e := thread()
 		if e != nil {
@@ -513,6 +552,9 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		}
 		if th.Archived {
 			return nil, invalid("session %s is archived", th.ID)
+		}
+		if th.Status == "notLoaded" {
+			return nil, invalid("thread not found: %s", th.ID)
 		}
 		var input []struct {
 			Type, Text, URL string
@@ -640,6 +682,131 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 	}
 	return nil, invalid("Invalid request: unknown variant `%s`, expected one of `initialize`", method)
 }
+
+// subscribe tracks the client's thread subscriptions after a successful
+// call; a resume replays the thread's pending requests to the client after
+// the reply, as Codex does.
+func (s *Server) subscribe(c *wsClient, method string, params json.RawMessage, result any) {
+	var p struct{ ThreadID string }
+	_ = json.Unmarshal(params, &p)
+	var replay []*serverRequest
+	s.mu.Lock()
+	switch method {
+	case "thread/start":
+		if r, ok := result.(map[string]any); ok {
+			if th, ok := r["thread"].(map[string]any); ok {
+				if id, ok := th["id"].(string); ok {
+					c.subs[id] = true
+				}
+			}
+		}
+	case "thread/resume":
+		c.subs[p.ThreadID] = true
+		if th := s.threads[p.ThreadID]; th != nil {
+			replay = slices.Clone(th.requests)
+		}
+	case "thread/unsubscribe":
+		delete(c.subs, p.ThreadID)
+	}
+	s.mu.Unlock()
+	for _, r := range replay {
+		c.write(map[string]any{"id": r.ID, "method": r.Method, "params": r.Params})
+	}
+}
+
+// subscribers are the clients subscribed to thread id.
+func (s *Server) subscribers(id string) []*wsClient {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var cs []*wsClient
+	for c := range s.clients {
+		if c.subs[id] {
+			cs = append(cs, c)
+		}
+	}
+	return cs
+}
+
+// Request makes the thread's running turn wait on a server request
+// (method and params; threadId is set): its subscribers receive it now, a
+// client resuming the thread later gets it replayed. The thread waits on
+// approval, or on user input for item/tool/requestUserInput. Returns the
+// request id (per thread, from 0).
+func (s *Server) Request(id, method string, params map[string]any) int {
+	s.mu.Lock()
+	th := s.threads[id]
+	p := map[string]any{"threadId": id}
+	for k, v := range params {
+		p[k] = v
+	}
+	r := &serverRequest{ID: th.reqSeq, Method: method, Params: p}
+	th.reqSeq++
+	th.requests = append(th.requests, r)
+	flag := "waitingOnApproval"
+	if method == "item/tool/requestUserInput" {
+		flag = "waitingOnUserInput"
+	}
+	th.Status = "active"
+	if !slices.Contains(th.Flags, flag) {
+		th.Flags = append(slices.Clone(th.Flags), flag)
+	}
+	s.mu.Unlock()
+	for _, c := range s.subscribers(id) {
+		c.write(map[string]any{"id": r.ID, "method": r.Method, "params": r.Params})
+	}
+	s.broadcastStatus(id)
+	return r.ID
+}
+
+// answered resolves the server request a client's reply names: the first
+// reply wins, subscribers hear serverRequest/resolved, and the thread
+// stops waiting once none is left.
+func (s *Server) answered(c *wsClient, rawID json.RawMessage, b []byte) {
+	var id int
+	var m struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if json.Unmarshal(rawID, &id) != nil || json.Unmarshal(b, &m) != nil {
+		return
+	}
+	s.mu.Lock()
+	var thread string
+	for tid := range c.subs {
+		th := s.threads[tid]
+		if th == nil {
+			continue
+		}
+		i := slices.IndexFunc(th.requests, func(r *serverRequest) bool { return r.ID == id })
+		if i < 0 {
+			continue
+		}
+		s.answers = append(s.answers, Answer{Thread: tid, Method: th.requests[i].Method, ID: id, Result: m.Result})
+		th.requests = slices.Delete(th.requests, i, i+1)
+		if len(th.requests) == 0 && th.Status == "active" {
+			th.Flags = []string{}
+		}
+		thread = tid
+		break
+	}
+	s.mu.Unlock()
+	if thread == "" {
+		return
+	}
+	for _, sc := range s.subscribers(thread) {
+		sc.write(map[string]any{"method": "serverRequest/resolved", "params": map[string]any{"threadId": thread, "requestId": id}})
+	}
+	s.broadcastStatus(thread)
+}
+
+// Answers are the replies clients gave to server requests, in order.
+func (s *Server) Answers() []Answer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.answers)
+}
+
+// Subscribed reports how many clients hold the thread's subscription.
+func (s *Server) Subscribed(id string) int { return len(s.subscribers(id)) }
 
 func wireThread(th *Thread, turns bool) map[string]any {
 	m := map[string]any{

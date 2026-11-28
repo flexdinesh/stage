@@ -9,6 +9,9 @@
   decision 10 (Codex is offered on workers whose machine profile allows
   local harnesses, like Claude Code; ADR 0007 decision 14). Decision 2
   stands, on workers too.
+- **Amended** 2026-11-28 by #545 ([ADR 0013](0013-tree-steering.md)):
+  decision 7. Stage answers listed requests and sends messages, verified
+  by live gates g8, g9 and g10 against codex-cli 0.172.0.
 - **Sources:** live gates against `codex` 0.171.0 (app-server 0.171.0) on
   Linux x86_64 with a ChatGPT login, 2026-11-25, in scratch directories.
   Probe threads were deleted afterwards. Sanitized protocol fixtures:
@@ -67,6 +70,15 @@ daemon, so a thread Stage starts is the user's thread too.
    command and run it in a terminal." Every Codex task's links carry
    `cd <dir> && codex resume <id>` (shell-quoted); the task list offers
    "Copy resume command".
+   *Superseded by #545 ([ADR 0013](0013-tree-steering.md)): respond and
+   send are available. Each call opens its own connection, resumes the
+   thread (which replays its pending server requests with the ids every
+   client sees; gate g9, g10), acts and unsubscribes. Command and
+   file-change approvals and `requestUserInput` questions are listed;
+   permission requests, MCP elicitations and secret questions stay in
+   Codex (`unlistedRequests`), with the resume command. Send starts a turn
+   (`turn/start` with `clientUserMessageId`) only on an idle thread, after
+   `thread/resume` (gate g8); a running turn is Busy and never steered.*
 8. **Inventory.** Workspaces are the projects `config/read` reports
    trusted (`projects{path:{trust_level}}`); a Git checkout is importable.
    Stage never writes Codex's config: trust a project in Codex.
