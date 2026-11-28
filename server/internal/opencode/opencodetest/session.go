@@ -6,12 +6,14 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Session is the wire snapshot of one test session. SetSession copies it.
 type Session struct {
 	Info                               map[string]any
 	Permissions, Forms, Messages, Diff []map[string]any // messages are newest first
+	Inbox                              []map[string]any
 	Running                            bool
 }
 
@@ -71,13 +73,7 @@ func (s *Server) serveSession(w http.ResponseWriter, r *http.Request) {
 		case "diff":
 			write(nonNil(v.Diff))
 		case "inbox":
-			inbox := []map[string]any{}
-			for _, call := range s.interactions {
-				if call.Path == "/api/session/"+id+"/prompt" && call.Body["delivery"] != nil {
-					inbox = append(inbox, admission(id, call.Body))
-				}
-			}
-			write(inbox)
+			write(nonNil(v.Inbox))
 		case "message":
 			messages := []map[string]any{}
 			for _, m := range v.Messages {
@@ -111,6 +107,16 @@ func (s *Server) serveSession(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if inboxID, ok := strings.CutPrefix(rest, "inbox/"); ok {
+		if s.noQueueManagement {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodPatch || r.Method == http.MethodDelete {
+			s.changeInbox(w, r, id, inboxID, v)
+			return
+		}
+	}
 	if r.Method != http.MethodPost {
 		http.NotFound(w, r)
 		return
@@ -122,7 +128,17 @@ func (s *Server) serveSession(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case rest == "prompt":
-		write(admission(id, body))
+		entry := admission(id, body)
+		if body["delivery"] != nil {
+			i := slices.IndexFunc(v.Inbox, func(item map[string]any) bool { return item["id"] == body["id"] })
+			if i >= 0 {
+				entry = v.Inbox[i]
+			} else {
+				v.Inbox = append(v.Inbox, entry)
+				s.sessions[id] = v
+			}
+		}
+		write(entry)
 	case strings.HasSuffix(rest, "/reply"):
 		kind, tail, _ := strings.Cut(rest, "/")
 		requestID, _, _ := strings.Cut(tail, "/")
@@ -145,6 +161,32 @@ func (s *Server) serveSession(w http.ResponseWriter, r *http.Request) {
 	s.interactions = append(s.interactions, Interaction{Path: r.URL.Path, Body: body})
 }
 
+// changeInbox models OpenCode's 204 for an absent DELETE target and 409 for
+// an absent PATCH target.
+func (s *Server) changeInbox(w http.ResponseWriter, r *http.Request, sessionID, inboxID string, v Session) {
+	i := slices.IndexFunc(v.Inbox, func(item map[string]any) bool { return item["id"] == inboxID })
+	if r.Method == http.MethodDelete {
+		if i >= 0 {
+			v.Inbox = slices.Delete(v.Inbox, i, i+1)
+			s.sessions[sessionID] = v
+			s.interactions = append(s.interactions, Interaction{Path: r.URL.Path})
+		}
+	} else {
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body) != 1 || (body["delivery"] != "steer" && body["delivery"] != "queue") {
+			http.Error(w, `{"_tag":"InvalidRequestError"}`, http.StatusBadRequest)
+			return
+		}
+		if i < 0 {
+			http.Error(w, `{"_tag":"ConflictError"}`, http.StatusConflict)
+			return
+		}
+		v.Inbox[i]["delivery"] = body["delivery"]
+		s.interactions = append(s.interactions, Interaction{Path: r.URL.Path, Body: map[string]any{"delivery": body["delivery"]}})
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func nonNil(rows []map[string]any) []map[string]any {
 	if rows == nil {
 		return []map[string]any{}
@@ -154,5 +196,6 @@ func nonNil(rows []map[string]any) []map[string]any {
 
 func admission(session string, body map[string]any) map[string]any {
 	return map[string]any{"id": body["id"], "sessionID": session, "type": "user", "delivery": body["delivery"],
+		"time":    map[string]int64{"created": time.Now().UnixMilli()},
 		"payload": map[string]any{"text": body["text"], "metadata": body["metadata"]}}
 }

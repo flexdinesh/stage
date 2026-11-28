@@ -336,8 +336,9 @@ and links to recorded attempts. Only the current session can receive requests
 or messages. Its composer selects the declared `steer` and `queue` operations
 while a turn runs and `send` after it ends. The Recent activity panel reads
 bounded harness activity and polls while the current turn runs or waits for
-input with the tab visible. Past attempts use the recorded observation and read
-activity by that attempt's reference.
+input with the tab visible. The native queue under the composer follows
+the same cadence when `queueManage` is available. Past attempts use the
+recorded observation and read activity by that attempt's reference.
 
 ### Polling, streams and attention
 
@@ -440,7 +441,7 @@ declared capabilities.
 Use a typed operation when Stage branches on availability.
 `execution.Op` covers `launch`, `stop`, `adopt`, `reply`, `opening`,
 `attention`, `sessionSearch`, `images`, `respond`, `send`, `steer`, `queue`,
-`activity`, `sessionRename`, `workspaceAdd` and `directoryBrowse`.
+`queueManage`, `activity`, `sessionRename`, `workspaceAdd` and `directoryBrowse`.
 Every adapter declares each operation and a reason when unavailable.
 For example, `images` gates image fields and image delivery in the API
 and MCP. The remote proxy passes the declarations through.
@@ -600,6 +601,15 @@ A successful delivery records its mode and attribution in a timeline
 event. Stage keeps the message text in the dispatch only. Workers relay
 `send` on `adapter.send` and `steer` and `queue` on `adapter.deliver`.
 The legacy send channel accepts only the send mode.
+
+`QueueManager` uses `queueManage` to list the current session's native
+queue, cancel a pending message or promote one to a steer. The harness
+keeps the messages and their order. Stage returns previews capped at 2000
+runes and the harness's creation time and source when known. A message
+that has left the queue returns `ErrNotFound` (404). Writes refuse the
+caller's own task and record successful actions without message text.
+Workers relay these calls through `adapter.queue` and cap previews before
+encoding the response. Older workers report update guidance for the operation.
 
 `ActivityReader` reads bounded recent activity for the current session or
 a recorded attempt behind that session connection's `activity` operation.
@@ -852,10 +862,15 @@ workspace row. The Stage group keeps its title.
 
 ### T3 interaction
 
-T3 implements `Interactive` and `ActivityReader` over its MCP. Stage
+T3 implements `Interactive`, `ActivityReader` and `QueueManager` over its MCP. Stage
 declares the operations from `tools/list`: `t3_pending_request` for
 `respond`, `t3_thread_send` and `t3_thread_read` for delivery, and
-`t3_thread_read` for `activity`. A missing tool gives an Update T3 reason.
+`t3_thread_read` for `activity`, and `t3_queue` plus `t3_thread_read` for
+`queueManage`. A missing tool gives an Update T3 reason.
+
+- **Native queue.** `t3_queue` lists pending runs in send order and
+  handles `cancel` and `promote_to_steer`. Promotion targets the active
+  run reported by `t3_thread_read`. Its list omits timestamps and source.
 
 - **Requests.** `t3_pending_request` lists a thread's pending user-input
   requests; each is read and becomes one `question` request. Questions keep
@@ -1099,7 +1114,8 @@ OpenCode declares the V2 session operations per workspace.
 reply bodies. `steer` and `queue` require their respective prompt delivery
 values. `send` requires the prompt delivery contract and uses its default
 on an idle session. `activity` requires `session.diff` alongside the
-session and message reads. Missing optional operations show an update
+session and message reads. `queueManage` requires inbox listing,
+deletion and an update schema that accepts `delivery: steer`. Missing optional operations show an update
 reason. The connection and its other operations stay available.
 
 - **Requests.** `GET /api/session/{id}/permission` then
@@ -1153,10 +1169,13 @@ reason. The connection and its other operations stay available.
   header shows agent, model and variant, and the shared Usage panel shows
   the reported totals. Stage reads the view on demand.
 
-Workers use the existing `adapter.requests`, `adapter.respond`, `adapter.send`,
-`adapter.deliver` and `adapter.activity` channels. Queue management and
-using inbox and usage events for refresh are follow-ups. Polling reconciles
-activity and usage.
+OpenCode's native inbox supports listing, deleting and changing a message
+to `steer` to wake session execution. Stage checks the inbox before
+cancelling because OpenCode acknowledges a DELETE for an absent item.
+A message consumed between that check and DELETE can still produce a
+success response. Workers use `adapter.requests`,
+`adapter.respond`, `adapter.send`, `adapter.deliver`, `adapter.activity`
+and `adapter.queue`. Polling refreshes activity, usage and the queue.
 
 ### OpenCode push
 

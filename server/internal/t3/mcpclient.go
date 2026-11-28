@@ -655,6 +655,8 @@ func retrySafe(tool string, args map[string]any) bool {
 		return ok && id != ""
 	case "t3_pending_request":
 		return args["action"] == "list" || args["action"] == "read"
+	case queueTool:
+		return args["action"] == "list"
 	}
 	return false
 }

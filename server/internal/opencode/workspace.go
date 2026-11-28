@@ -197,6 +197,9 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 			ops[op] = available
 		}
 	}
+	if contract.queueManage {
+		ops[execution.OpQueueManage] = available
+	}
 	if contract.activity {
 		ops[execution.OpActivity] = available
 	}
@@ -225,6 +228,7 @@ func operations() map[execution.Op]execution.Availability {
 		execution.OpSend:            {Reason: sendUnavailable},
 		execution.OpSteer:           {Reason: steerUnavailable},
 		execution.OpQueue:           {Reason: queueUnavailable},
+		execution.OpQueueManage:     {Reason: queueManageUnavailable},
 		execution.OpActivity:        {Reason: activityUnavailable},
 		execution.OpSessionSearch:   {Reason: sessionSearchUnavailable},
 		execution.OpImages:          {Reason: "Image attachment delivery has not been verified for this adapter."},

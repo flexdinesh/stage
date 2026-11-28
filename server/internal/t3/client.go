@@ -81,6 +81,11 @@ type Client interface {
 	// clientRequestID (a retry with it is safe). ErrNotFound if the thread
 	// is unknown.
 	SendMessage(ctx context.Context, threadID, message string, mode SendMode, clientRequestID string) error
+	// ListQueued pages t3_queue list in send order. Writes address a queued
+	// run by ID and return ErrNotFound once it leaves the queue.
+	ListQueued(ctx context.Context, threadID string) ([]QueuedRun, error)
+	CancelQueued(ctx context.Context, threadID, queuedRunID string) error
+	PromoteQueued(ctx context.Context, threadID, queuedRunID, targetRunID string) error
 	// ListPendingQuestions calls t3_pending_request list: the thread's
 	// pending user-input request ids (approvals are not listed).
 	ListPendingQuestions(ctx context.Context, threadID string) ([]string, error)

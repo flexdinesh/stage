@@ -225,6 +225,7 @@ Usage:
   stage task respond ID RID [--option O] [--text T] [--answers JSON] [--expect-revision N]
   stage task send ID --text TEXT [--steer | --queue] [--expect-revision N]
   stage task activity ID [--attempt N] [--limit N] [--json]  read recent session activity
+  stage task queue ID [--cancel QID | --steer QID]   list or manage native queued messages
                                       --expect-revision: first answer wins (409 already_answered)
   stage task escalate ID --reason TEXT   as the tree's steerer, notify the user about a member's wait now
   stage task opening-prompt ID [--full]

@@ -160,6 +160,23 @@ test("session delivery and activity use the task routes and preserve guarded fol
   ]);
 });
 
+test("the native queue routes escape the message ID and send no mutation body", async () => {
+  const seen = [];
+  const messages = [{ id: "A/B +?", text: "Continue", delivery: "queue", createdAt: "2026-11-29T02:00:00Z", source: "stage" }];
+  const { api } = fakeApi(async (path, init) => {
+    seen.push({ path, method: init.method, body: init.body });
+    return init.method === "GET" ? Response.json({ messages }) : new Response(null, { status: 204 });
+  });
+  assert.deepEqual(await api.taskQueue(17, new AbortController().signal), { messages });
+  assert.equal(await api.cancelQueuedMessage(17, messages[0].id), undefined);
+  assert.equal(await api.steerQueuedMessage(17, messages[0].id), undefined);
+  assert.deepEqual(seen, [
+    { path: "/tasks/17/queue", method: "GET", body: undefined },
+    { path: "/tasks/17/queue/A%2FB%20%2B%3F", method: "DELETE", body: undefined },
+    { path: "/tasks/17/queue/A%2FB%20%2B%3F/steer", method: "POST", body: undefined },
+  ]);
+});
+
 test("setAutoComplete PUTs the flag to the connection and returns it", async () => {
   let seen;
   const connection = { id: 2, configured: true, harness: "opencode", autoComplete: true };

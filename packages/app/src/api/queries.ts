@@ -5,7 +5,8 @@ import { ApiError, type ArchivedFilter, type HarnessApi } from "./client.ts";
 import { useHarnessApi, useHarnessScope, useScopedKey } from "./harnessScope.tsx";
 import { harnessLookup, type Harnesses } from "../lib/harnesses.ts";
 import { POLL, pollFirstPage } from "../lib/polling.ts";
-import type { ExecutionConfig, Harness, RequestResponse, SendMessageRequest, SessionRequest, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OperationId, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, TaskListQuery, TreeListQuery } from "./types.ts";
+import { taskQueueKey, type QueueSession } from "../lib/sessionQueue.ts";
+import type { ExecutionConfig, Harness, QueuedMessage, RequestResponse, SendMessageRequest, SessionRequest, HarnessConnection, HarnessDescriptor, HarnessStatus, Machine, OperationId, JournalOwner, JournalQuery, ScheduleListQuery, SchedulePreviewRequest, TaskListQuery, TreeListQuery } from "./types.ts";
 
 export const keys = {
   /** A harness's generic status (`[...harnessStatus, kind]`); a harness with its own status reader keeps its own key (src/harnesses/). */
@@ -315,6 +316,54 @@ export function useTaskActivity(taskId: number, attempt: number | undefined, liv
     refetchInterval: live ? POLL.live : false,
     refetchOnWindowFocus: live,
     refetchOnReconnect: live,
+  });
+}
+
+/** Read the native queue only while its current session view is mounted. */
+export function useTaskQueue(taskId: number, session: QueueSession, live: boolean) {
+  const api = useApi();
+  return useQuery({
+    queryKey: taskQueueKey(taskId, session),
+    queryFn: async ({ signal }) => {
+      try {
+        return (await api.taskQueue(taskId, signal)).messages;
+      } catch (error) {
+        if (isNotFound(error)) return [];
+        throw error;
+      }
+    },
+    retry: false,
+    refetchInterval: live ? POLL.live : false,
+    refetchOnWindowFocus: live,
+    refetchOnReconnect: live,
+  });
+}
+
+export function useChangeTaskQueue(taskId: number, session: QueueSession) {
+  const api = useApi();
+  const qc = useQueryClient();
+  const queryKey = taskQueueKey(taskId, session);
+  return useMutation({
+    mutationFn: async ({ id, action }: { id: string; action: "cancel" | "steer" }) => {
+      try {
+        if (action === "cancel") await api.cancelQueuedMessage(taskId, id);
+        else await api.steerQueuedMessage(taskId, id);
+        return { remove: action === "cancel" };
+      } catch (error) {
+        if (isNotFound(error)) return { remove: true };
+        throw error;
+      }
+    },
+    onSuccess: async ({ remove }, { id }) => {
+      // A read started before the write may still contain the old row.
+      await qc.cancelQueries({ queryKey, exact: true });
+      if (remove) {
+        qc.setQueryData<QueuedMessage[]>(
+          queryKey, (messages) => messages?.filter((message) => message.id !== id),
+        );
+      }
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey, exact: true }),
   });
 }
 
@@ -650,7 +699,16 @@ export function useSendMessage(taskId: number) {
   const api = useApi();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: SendMessageRequest) => api.sendMessage(taskId, body.text, body.delivery, body.expectedStateRevision),
-    onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: keys.notifications }), invalidateWork(qc)]),
+    mutationFn: ({ body }: { session: QueueSession; body: SendMessageRequest }) =>
+      api.sendMessage(taskId, body.text, body.delivery, body.expectedStateRevision),
+    onSettled: async (_data, _error, { session, body }) => {
+      const queue = { queryKey: taskQueueKey(taskId, session), exact: true };
+      if (body.delivery === "queue") await qc.cancelQueries(queue);
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: keys.notifications }),
+        invalidateWork(qc),
+        ...(body.delivery === "queue" ? [qc.invalidateQueries(queue)] : []),
+      ]);
+    },
   });
 }

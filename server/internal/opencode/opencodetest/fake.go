@@ -37,9 +37,11 @@ type Server struct {
 	// noInteraction drops the permission and form replies and the prompt's
 	// delivery from the contract (an older service).
 	noInteraction bool
-	noDiff        bool
-	sessions      map[string]Session
-	interactions  []Interaction
+	// noQueueManagement preserves inbox reads for older services.
+	noQueueManagement bool
+	noDiff            bool
+	sessions          map[string]Session
+	interactions      []Interaction
 	// archived: known session IDs and whether each is archived.
 	archived map[string]bool
 	// projects: GET /api/project, in insertion order (AddProject).
@@ -124,6 +126,13 @@ func (s *Server) WithoutInteraction() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.noInteraction = true
+}
+
+// WithoutQueueManagement removes the inbox mutation routes.
+func (s *Server) WithoutQueueManagement() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noQueueManagement = true
 }
 
 // WithoutDiff removes the optional activity route from the advertised contract.
@@ -271,7 +280,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"version": version, "hostname": "fake", "pid": 42})
 	case r.URL.Path == "/openapi.json":
 		s.mu.Lock()
-		contract := spec(!s.noUpdate, !s.noProjectUpdate, !s.noInteraction, !s.noDiff)
+		contract := spec(!s.noUpdate, !s.noProjectUpdate, !s.noInteraction, !s.noDiff, !s.noQueueManagement)
 		s.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(contract)
 	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/session/") && strings.Count(r.URL.Path, "/") == 3:
@@ -388,8 +397,9 @@ func (s *Server) patchProject(w http.ResponseWriter, r *http.Request, id string)
 // spec is the contract the adapter's health check requires, with
 // session.update unless update is false, project.update unless
 // projectUpdate is false, and the permission and form replies and the
-// prompt's delivery unless interaction is false.
-func spec(update, projectUpdate, interaction, diff bool) map[string]any {
+// prompt's delivery unless interaction is false. Queue management adds the
+// native inbox update and cancel operations.
+func spec(update, projectUpdate, interaction, diff, queueManagement bool) map[string]any {
 	bodies := map[string][]string{
 		"/api/worktree":                   {"projectID", "from", "name"},
 		"/api/session":                    {"id", "location", "metadata"},
@@ -433,6 +443,17 @@ func spec(update, projectUpdate, interaction, diff bool) map[string]any {
 			operation["requestBody"] = map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"properties": props}}}}
 		}
 		paths[op.path][op.method] = operation
+	}
+	if queueManagement {
+		paths["/api/session/{sessionID}/inbox/{inboxID}"] = map[string]any{
+			"delete": map[string]any{"operationId": "session.inbox.cancel"},
+			"patch": map[string]any{
+				"operationId": "session.inbox.update",
+				"requestBody": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
+					"properties": map[string]any{"delivery": map[string]any{"$ref": "#/components/schemas/Session.Inbox.Delivery"}},
+				}}}},
+			},
+		}
 	}
 	if diff {
 		paths["/api/session/{sessionID}/diff"] = map[string]any{"get": map[string]any{"operationId": "session.diff"}}

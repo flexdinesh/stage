@@ -130,6 +130,7 @@ reason for each unavailable operation.
 | --- | --- | --- |
 | `steer` | `Interactive.Send` with `DeliverySteer` injects into the running turn. Return `Busy` with guidance if the turn ended. | `adapter.deliver` |
 | `queue` | `Interactive.Send` with `DeliveryQueue` admits a message into the harness's native queue during a running turn. The harness delivers it as the next turn. | `adapter.deliver` |
+| `queueManage` | `QueueManager` lists pending messages in native order, cancels a message or promotes it to a steer. Return `ErrNotFound` for a gone item. Supply source and creation time when known. | `adapter.queue` |
 | `activity` | `ActivityReader.Activity` reads a scoped session ref, including past attempts, and returns recent items oldest first with the plan and changed files. Use the requested limit and set `Truncated` when older items exist. | `adapter.activity` |
 
 Return `Invalid` if a caller supplies an unsupported delivery. Keep the
@@ -268,7 +269,7 @@ degrades through declared availability.
 | --- | --- | --- |
 | Display fact | Show a harness detail such as an endpoint or extra usage information. | `execution.Fact` carries a label, value and tone in status, an observation or an action result. |
 | Scoped action | Relay a harness-specific operation such as labelling a session. | Declare the target, inputs, confirmation, caller authorization and availability. Connection setup uses the connector. Session and project actions use `execution.Actor` and capability declarations. The owner validates opaque input. |
-| Typed operation | Let Stage decide whether it can launch, stop, adopt, read a reply or opening, list attention, search for sessions, launch with images, respond, deliver messages, read activity, add a workspace or browse folders. | Declare each [`execution.Op`](../server/internal/execution/ops.go) with availability and a reason when unavailable. Use `WorkspaceFeatures` for a workspace-specific declaration. |
+| Typed operation | Let Stage decide whether it can launch, stop, adopt, read a reply or opening, list attention, search for sessions, launch with images, respond, deliver messages, manage the native queue, read activity, add a workspace or browse folders. | Declare each [`execution.Op`](../server/internal/execution/ops.go) with availability and a reason when unavailable. Use `WorkspaceFeatures` for a workspace-specific declaration. |
 | Launch option | Pass a choice, boolean or text value at launch, such as a harness worktree option. | Declare the field in capabilities and validate and translate it from `execution.Config`. |
 | Descriptor policy | Apply a Stage invariant such as launch recovery, attribution, identity or completion from a closure signal. | Declare it in the descriptor. Stage interprets the policy for every kind that uses it. A harness whose `respond` lists only some request kinds declares `unlistedRequests` with where to answer the rest (T3: permission requests; OpenCode: forms with conditions, hidden or external fields; Codex: permission requests, MCP elicitations and secret questions). |
 

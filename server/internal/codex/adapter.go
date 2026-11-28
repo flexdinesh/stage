@@ -181,6 +181,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 			execution.OpSteer:           a.client.interactionAvailability(ctx, link, "Update Codex to steer from Stage.", "turn/steer", "thread/turns/list"),
 			execution.OpQueue:           {Reason: queueUnavailable},
 			execution.OpActivity:        a.client.interactionAvailability(ctx, link, "Update Codex to read recent activity in Stage.", "thread/items/list"),
+			execution.OpQueueManage:     {Reason: "Codex queues messages only in its own client."},
 			execution.OpSessionRename:   available,
 			execution.OpWorkspaceAdd:    available,
 			execution.OpDirectoryBrowse: available,

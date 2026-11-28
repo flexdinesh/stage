@@ -54,6 +54,7 @@ var (
 	_ execution.EventSource       = (*Adapter)(nil)
 	_ execution.Interactive       = (*Adapter)(nil)
 	_ execution.ActivityReader    = (*Adapter)(nil)
+	_ execution.QueueManager      = (*Adapter)(nil)
 	_ execution.Actor             = (*Adapter)(nil)
 	_ execution.SessionSearcher   = (*Adapter)(nil)
 	_ execution.SessionNamer      = (*Adapter)(nil)
@@ -134,6 +135,7 @@ var operationKinds = map[execution.Op][]string{
 	execution.OpOpening: {KindOpening}, execution.OpAttention: {KindAttention},
 	execution.OpRespond: {KindRequests, KindRespond}, execution.OpSend: {KindSend},
 	execution.OpSteer: {KindDeliver}, execution.OpQueue: {KindDeliver}, execution.OpActivity: {KindActivity},
+	execution.OpQueueManage:     {KindQueue},
 	execution.OpSessionRename:   {KindSessionRename},
 	execution.OpWorkspaceAdd:    {KindWorkspaceAdd, KindWorkspaces},
 	execution.OpDirectoryBrowse: {KindDirectoryBrowse},
@@ -156,7 +158,7 @@ func (a *Adapter) limitOperations(c *execution.Capabilities) {
 		}
 	}
 	// Older workers omit the session surface operations entirely.
-	for _, op := range []execution.Op{execution.OpSteer, execution.OpQueue, execution.OpActivity} {
+	for _, op := range []execution.Op{execution.OpSteer, execution.OpQueue, execution.OpActivity, execution.OpQueueManage} {
 		if _, declared := c.Operations[op]; !declared && !slices.Contains(snapshot.ChannelKinds, operationKinds[op][0]) {
 			if c.Operations == nil {
 				c.Operations = make(map[execution.Op]execution.Availability)
@@ -344,4 +346,18 @@ func (a *Adapter) Activity(ctx context.Context, ref execution.SessionRef, q exec
 	var out execution.Activity
 	err := callTrait[execution.ActivityReader](ctx, a, KindActivity, ActivityRequest{Session: ref, Query: q}, &out)
 	return out, err
+}
+
+func (a *Adapter) Queued(ctx context.Context, ref execution.SessionRef) ([]execution.QueuedMessage, error) {
+	var out []execution.QueuedMessage
+	err := callTrait[execution.QueueManager](ctx, a, KindQueue, QueueRequest{Session: ref, Action: "list"}, &out)
+	return out, err
+}
+
+func (a *Adapter) CancelQueued(ctx context.Context, ref execution.SessionRef, id string) error {
+	return callTrait[execution.QueueManager](ctx, a, KindQueue, QueueRequest{Session: ref, Action: "cancel", ID: id}, nil)
+}
+
+func (a *Adapter) PromoteQueued(ctx context.Context, ref execution.SessionRef, id string) error {
+	return callTrait[execution.QueueManager](ctx, a, KindQueue, QueueRequest{Session: ref, Action: "steer", ID: id}, nil)
 }

@@ -1,6 +1,7 @@
 import { createContext, useContext, useRef, useState, type ReactNode } from "react";
 import { useSendMessage } from "../../api/queries.ts";
 import type { Delivery, SendMessageRequest } from "../../api/types.ts";
+import type { QueueSession } from "../../lib/sessionQueue.ts";
 
 interface Receipt {
   delivery: Delivery;
@@ -10,7 +11,7 @@ interface Receipt {
 interface Draft {
   text: string;
   setText: (text: string) => void;
-  send: (attempt: number, request: SendMessageRequest & { delivery: Delivery }) => void;
+  send: (session: QueueSession, request: SendMessageRequest & { delivery: Delivery }) => void;
   pending: Delivery | undefined;
   result: { attempt: number; receipt?: Receipt; error?: unknown } | null;
 }
@@ -24,17 +25,17 @@ export function SessionDraftProvider({ taskId, children }: { taskId: number; chi
   const version = useRef(0);
   const sending = useRef(false);
   const message = useSendMessage(taskId);
-  const send: Draft["send"] = (attempt, request) => {
+  const send: Draft["send"] = (session, request) => {
     if (sending.current) return;
     sending.current = true;
     const submitted = version.current;
     setResult(null);
-    void message.mutateAsync(request).then(
+    void message.mutateAsync({ session, body: request }).then(
       () => {
         if (submitted === version.current) setText("");
-        setResult({ attempt, receipt: { delivery: request.delivery, at: new Date().toISOString() } });
+        setResult({ attempt: session.launchAttempt, receipt: { delivery: request.delivery, at: new Date().toISOString() } });
       },
-      (error: unknown) => setResult({ attempt, error }),
+      (error: unknown) => setResult({ attempt: session.launchAttempt, error }),
     ).finally(() => { sending.current = false; });
   };
   const edit = (value: string) => {
@@ -42,7 +43,7 @@ export function SessionDraftProvider({ taskId, children }: { taskId: number; chi
     setText(value);
   };
   return (
-    <SessionDraft.Provider value={{ text, setText: edit, send, pending: message.isPending ? message.variables.delivery : undefined, result }}>
+    <SessionDraft.Provider value={{ text, setText: edit, send, pending: message.isPending ? message.variables.body.delivery : undefined, result }}>
       {children}
     </SessionDraft.Provider>
   );

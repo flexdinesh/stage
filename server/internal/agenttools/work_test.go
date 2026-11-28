@@ -57,6 +57,8 @@ func TestWorkToolsActOnOtherTasksOnly(t *testing.T) {
 			{"reopen_task", "reopen its own task", map[string]any{"taskId": worker.ID, "revision": own.Revision, "requestId": "self"}},
 			{"respond_request", "answer its own session's request", map[string]any{"taskId": worker.ID, "requestId": "q1", "option": "allow"}},
 			{"send_message", "message its own session", map[string]any{"taskId": worker.ID, "text": "hello"}},
+			{"queued_messages", "change its own session's queue", map[string]any{"taskId": worker.ID, "action": "cancel", "id": "queued-run"}},
+			{"queued_messages", "change its own session's queue", map[string]any{"taskId": worker.ID, "action": "steer", "id": "queued-run"}},
 		} {
 			if msg := call(t, cs, c.tool, c.args, nil); !strings.Contains(msg, c.want) {
 				t.Fatalf("%s: %s on own task: %q", name, c.tool, msg)
@@ -146,5 +148,58 @@ func TestSessionSurfaceTools(t *testing.T) {
 	mustCall(t, cs, "get_session_activity", map[string]any{"taskId": 7, "attempt": 0, "limit": 2}, &out)
 	if len(out.Activity.Items) != 1 || out.Activity.Items[0].ID != "last" {
 		t.Fatalf("unexpected activity %+v", out)
+	}
+}
+
+func TestQueuedMessagesTool(t *testing.T) {
+	caller := &db.SessionRef{ConnectionID: 9, ExternalSessionID: "caller"}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.EscapedPath() {
+		case "GET /api/tasks/7/queue":
+			_ = json.NewEncoder(w).Encode(client.SessionQueue{Messages: []execution.QueuedMessage{
+				{ID: "queue/1", Text: "preview", Delivery: execution.DeliveryQueue},
+			}})
+		case "GET /api/tasks/8/queue":
+			_ = json.NewEncoder(w).Encode(client.SessionQueue{Messages: []execution.QueuedMessage{}})
+		case "DELETE /api/tasks/7/queue/queue%2F1", "POST /api/tasks/7/queue/queue%2F1/steer":
+			if r.Header.Get(agentctx.CallerHeader) != "9:caller" {
+				t.Error("write did not carry caller session")
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	cs := connect(t, &agenttools.Ops{Client: client.New(srv.URL), Caller: agentctx.Caller{Session: caller}})
+	for _, args := range []struct {
+		in   map[string]any
+		want string
+	}{
+		{map[string]any{"taskId": 7, "action": "edit", "id": "queue/1"}, "enum"},
+		{map[string]any{"taskId": 7, "action": "list", "id": "queue/1"}, "id can only be used"},
+		{map[string]any{"taskId": 7, "action": "steer"}, "id is required"},
+	} {
+		if msg := call(t, cs, "queued_messages", args.in, nil); !strings.Contains(msg, args.want) {
+			t.Fatalf("unexpected MCP validation error %q, want %q", msg, args.want)
+		}
+	}
+	var list client.SessionQueue
+	mustCall(t, cs, "queued_messages", map[string]any{"taskId": 7, "action": "list"}, &list)
+	if len(list.Messages) != 1 || list.Messages[0].ID != "queue/1" || list.Messages[0].Text != "preview" {
+		t.Fatalf("queue %+v", list)
+	}
+	var empty client.SessionQueue
+	mustCall(t, cs, "queued_messages", map[string]any{"taskId": 8, "action": "list"}, &empty)
+	if empty.Messages == nil || len(empty.Messages) != 0 {
+		t.Fatalf("empty queue %+v", empty)
+	}
+	for _, action := range []string{"cancel", "steer"} {
+		var result agenttools.QueuedMessagesOut
+		mustCall(t, cs, "queued_messages", map[string]any{"taskId": 7, "action": action, "id": "queue/1"}, &result)
+		if !result.OK {
+			t.Fatalf("%s result %+v", action, result)
+		}
 	}
 }

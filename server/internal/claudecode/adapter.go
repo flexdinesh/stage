@@ -249,6 +249,7 @@ func (a *Adapter) Features(context.Context) (execution.Capabilities, error) {
 			execution.OpSteer:           a.deliveryAvailability(),
 			execution.OpQueue:           a.deliveryAvailability(),
 			execution.OpActivity:        available,
+			execution.OpQueueManage:     {Reason: "Claude Code has no message queue Stage can read."},
 			execution.OpSessionRename:   {Reason: "Claude Code has no rename interface."},
 			execution.OpWorkspaceAdd:    a.trustAvailability(),
 			execution.OpDirectoryBrowse: {Reason: "Type the path."},

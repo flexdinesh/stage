@@ -110,6 +110,9 @@ shared session view and can add its own sections.
   **Queue**. After the turn ends it offers **Send**. Otherwise it shows
   the declared reason and Open in {harness} or Copy resume. The draft
   persists across tab switches.
+- When `queueManage` is available, a non-empty native queue appears under
+  the current composer. Pending messages can be cancelled or steered.
+  The view refreshes on the activity cadence and after a queue action.
 
 ### D8. Boundary tests
 
@@ -134,10 +137,10 @@ shared session view and can add its own sections.
 
 | Harness | `respond` | `send` | `steer` | `queue` | `activity` | `queueManage` |
 | --- | --- | --- | --- | --- | --- | --- |
-| OpenCode (shipped in 04) | Permissions (once/always/reject) and forms | Idle prompt | Prompt with `steer` | Prompt with `queue` | `/message`, `/diff`, `Session.Info` | `/inbox` (task 09) |
-| T3 (shipped in 05) | Questions via `t3_pending_request`. Permission approvals use **Open in T3**. | `t3_thread_send` with `queue` after the turn ends | `t3_thread_send` with `steer` | `t3_thread_send` with `queue` while a turn runs | `t3_thread_read` activity | `t3_queue` (task 09) |
-| Codex (shipped in 06 and 07) | Command, file-change and permissions approvals on tracked active threads through `thread/resume` and a held subscription (0.172+) | `turn/start` after a finished turn | `turn/steer` with `expectedTurnId` | Unavailable (experimental) | `thread/items/list` with thread metadata | Unavailable |
-| Claude Code | `PermissionRequest` hooks | Send between turns | `PostToolUse` / `PostToolBatch` context, with `Stop` fallback | `Stop` block | Owning-machine transcript | Unavailable |
+| OpenCode (shipped in 04) | Permissions (once/always/reject) and forms | Idle prompt | Prompt with `steer` | Prompt with `queue` | `/message`, `/diff`, `Session.Info` | Native `/inbox` list, delete and delivery update (shipped in 09) |
+| T3 (shipped in 05) | Questions via `t3_pending_request`. Permission approvals use **Open in T3**. | `t3_thread_send` with `queue` after the turn ends | `t3_thread_send` with `steer` | `t3_thread_send` with `queue` while a turn runs | `t3_thread_read` activity | `t3_queue` list, cancel and promote (shipped in 09) |
+| Codex (shipped in 06 and 07) | Command, file-change and permissions approvals on tracked active threads through `thread/resume` and a held subscription (0.172+) | `turn/start` after a finished turn | `turn/steer` with `expectedTurnId` | Unavailable (experimental) | `thread/items/list` with thread metadata | Codex queues messages only in its own client. |
+| Claude Code | `PermissionRequest` hooks | Send between turns | `PostToolUse` / `PostToolBatch` context, with `Stop` fallback | `Stop` block | Owning-machine transcript | Claude Code has no message queue Stage can read. |
 
 Claude Code steer and queue apply only to sessions launched with the new
 hooks. Pending delivery is memory-only in the hook receiver, lost on Stage

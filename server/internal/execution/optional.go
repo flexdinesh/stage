@@ -141,6 +141,7 @@ var optionalTraits = []optionalTrait{
 	registerTrait[EventSource]("eventSource"),
 	registerTrait[Interactive]("interactive"),
 	registerTrait[ActivityReader]("activityReader"),
+	registerTrait[QueueManager]("queueManager"),
 	registerTrait[Actor]("actor"),
 	registerTrait[WorkspaceAdder]("workspaceAdder"),
 	registerTrait[DirectoryBrowser]("directoryBrowser"),

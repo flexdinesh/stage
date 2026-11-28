@@ -715,6 +715,9 @@ func TestClosedSessionRetriesOnlyIdempotentTools(t *testing.T) {
 		{"t3_thread_send", nil, false},
 		{"t3_thread_send", map[string]any{"clientRequestId": "stage-send:1"}, true},
 		{"t3_thread_interrupt", nil, false},
+		{queueTool, map[string]any{"action": "list"}, true},
+		{queueTool, map[string]any{"action": "cancel"}, false},
+		{queueTool, map[string]any{"action": "promote_to_steer"}, false},
 		{"t3_project_clone", nil, false},
 		{"t3_project_create", nil, false},
 	} {

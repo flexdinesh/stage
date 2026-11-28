@@ -91,6 +91,25 @@ func (c *Client) Activity(ctx context.Context, id int64, attempt *int, q executi
 	return out, err
 }
 
+// SessionQueue is the live native queue of a task's current session.
+type SessionQueue struct {
+	Messages []execution.QueuedMessage `json:"messages"`
+}
+
+func (c *Client) QueuedMessages(ctx context.Context, id int64) (SessionQueue, error) {
+	var out SessionQueue
+	err := c.do(ctx, http.MethodGet, taskPath(id, "queue"), nil, &out)
+	return out, err
+}
+
+func (c *Client) CancelQueued(ctx context.Context, id int64, queueID string, caller *db.SessionRef) error {
+	return c.doCaller(ctx, http.MethodDelete, taskPath(id, "queue/"+url.PathEscape(queueID)), nil, caller, nil)
+}
+
+func (c *Client) PromoteQueued(ctx context.Context, id int64, queueID string, caller *db.SessionRef) error {
+	return c.doCaller(ctx, http.MethodPost, taskPath(id, "queue/"+url.PathEscape(queueID)+"/steer"), nil, caller, nil)
+}
+
 // Respond answers a pending request of a task's session. expected
 // (expectedStateRevision, nil: unguarded) makes it a guarded answer: 409
 // already_answered when the task moved on or was answered first.

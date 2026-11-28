@@ -182,18 +182,21 @@ func TestContractSessionSurface(t *testing.T) {
 
 func TestContractSessionSurfaceWithOlderWorker(t *testing.T) {
 	ctx := t.Context()
-	f := &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}, surface: true, state: "done"}
+	f := &hostedQueue{hostedHarness: &hostedHarness{fakeBase: fakeBase{workspace: "volume://v2"}, surface: true, state: "done"}}
 	store, svc, task := v2Setup(t, placements[1], "hosted", f)
 	if _, err := svc.Coordinator.StartTask(ctx, task.ID); err != nil {
 		t.Fatal(err)
 	}
 	rig := newContractWorker(t, store, map[int64]execution.Adapter{3: f})
 	rig.StopWorker()
-	rig.SetMissingRequestKinds(remote.KindDeliver, remote.KindActivity)
+	rig.SetMissingRequestKinds(remote.KindDeliver, remote.KindActivity, remote.KindQueue)
 	rig.StartWorker()
 	older := engine.NewForMachines(store, v2Harnesses, rig.Set(), nil)
 	if _, ok := execution.As[execution.ActivityReader](rig.Adapter(3)); ok {
 		t.Fatal("activity trait offered without its worker handler")
+	}
+	if _, ok := execution.As[execution.QueueManager](rig.Adapter(3)); ok {
+		t.Fatal("queue manager trait offered without its worker handler")
 	}
 	// Test both an older worker's omitted declarations and a worker that
 	// reports availability but lacks the matching channel kinds.
@@ -218,6 +221,9 @@ func TestContractSessionSurfaceWithOlderWorker(t *testing.T) {
 		delete(features.Operations, op)
 	}
 	delete(features.Operations, execution.OpActivity)
+	_, err = older.Coordinator.Queued(ctx, task.ID)
+	checkUnavailable(execution.OpQueueManage, err)
+	delete(features.Operations, execution.OpQueueManage)
 	body, err := json.Marshal(features)
 	if err != nil {
 		t.Fatal(err)
@@ -225,6 +231,8 @@ func TestContractSessionSurfaceWithOlderWorker(t *testing.T) {
 	rig.ReplaceResult(remote.KindFeatures, body)
 	_, err = older.Coordinator.Activity(ctx, task.ID, nil, execution.ActivityQuery{})
 	checkUnavailable(execution.OpActivity, err)
+	_, err = older.Coordinator.Queued(ctx, task.ID)
+	checkUnavailable(execution.OpQueueManage, err)
 	if _, err := older.Coordinator.Send(ctx, task.ID, execution.Message{Text: "legacy send"}, nil); err != nil {
 		t.Fatalf("legacy send unavailable: %v", err)
 	}
