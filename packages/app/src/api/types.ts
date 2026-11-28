@@ -541,7 +541,8 @@ export type OperationId =
   | "respond"
   | "send"
   | "sessionRename"
-  | "workspaceAdd";
+  | "workspaceAdd"
+  | "directoryBrowse";
 export interface Capabilities {
   permissions?: HarnessChoice[];
   /** Harness-wide options, beside the selected model's own (ids never collide). */
@@ -564,6 +565,13 @@ export interface WorkspaceSource {
   /** The harness's confirmation text: send `confirmed: true` only after the person agreed. */
   confirm?: string;
   availability: { available: boolean; reason?: string };
+}
+/** GET /api/connections/:id/directories: one folder's child folders on the harness's host (at most 500; `parent` "" at the root). */
+export interface DirectoryListing {
+  path: string;
+  parent: string;
+  entries: { name: string; path: string }[];
+  truncated: boolean;
 }
 /** POST /api/connections/:id/workspaces. Retry an uncertain outcome (504 `outcome_uncertain`) with the same requestId. */
 export interface AddWorkspaceRequest {

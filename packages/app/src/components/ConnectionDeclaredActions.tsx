@@ -34,5 +34,6 @@ export function ConnectionDeclaredActions({ descriptor, status, actions, onRepla
     await refresh();
     return { message: result.message ?? "", ...(result.link ? { link: result.link } : {}) };
   };
-  return <DeclaredActions actions={actions ?? availableSetupActions(descriptor.setup.actions, status.actions)} run={run} />;
+  return <DeclaredActions actions={actions ?? availableSetupActions(descriptor.setup.actions, status.actions)} run={run}
+    connectionId={status.configured && status.connectionId > 0 ? status.connectionId : undefined} />;
 }

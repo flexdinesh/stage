@@ -8,8 +8,10 @@ import {
   ChevronRightIcon,
   ChevronUpIcon,
   ClockIcon,
+  CornerLeftUpIcon,
   EllipsisIcon,
   FileCodeIcon,
+  FolderIcon,
   ImageIcon,
   InboxIcon,
   LinkIcon,
@@ -77,6 +79,9 @@ export const IconStep = sharp(ChevronRightIcon, 12);
 export const IconArrowRight = sharp(ArrowRightIcon);
 export const IconChevronDown = sharp(ChevronDownIcon);
 export const IconChevronUp = sharp(ChevronUpIcon);
+/** Folder browser: a folder row, and Up to the parent folder. */
+export const IconFolder = sharp(FolderIcon, 14);
+export const IconFolderUp = sharp(CornerLeftUpIcon);
 /** Theme: monitor (system), sun (light), moon (dark). */
 export const IconThemeSystem = sharp(MonitorIcon);
 export const IconSun = sharp(SunIcon);

@@ -157,7 +157,7 @@ function ProjectHarnessActions({ projectId, workspace, initiallyOpen }: { projec
       <div><Button small variant="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>Harness actions</Button></div>
       {open ? <QueryState isPending={query.isPending} error={query.error} hasData={query.data !== undefined}
         empty={actions.length === 0} emptyText="This workspace has no declared project actions.">
-        <DeclaredActions actions={actions} run={async (id, input, confirmed) => {
+        <DeclaredActions actions={actions} connectionId={scope.connectionId} run={async (id, input, confirmed) => {
           const result = await api.runProjectAction(projectId, scope, id, input, confirmed);
           await refresh();
           return result;

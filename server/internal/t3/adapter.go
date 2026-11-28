@@ -79,6 +79,7 @@ func (a *Adapter) Features(ctx context.Context) (execution.Capabilities, error) 
 		out.Operations[op] = yes
 	}
 	out.Operations[execution.OpWorkspaceAdd] = yes
+	out.Operations[execution.OpDirectoryBrowse] = execution.Availability{Reason: "T3 does not expose folder browsing to Stage; type the path."}
 	out.WorkspaceSources = workspaceSources()
 	for _, mode := range []string{"approval-required", "auto-accept-edits", "auto", "full-access"} {
 		out.Permissions = append(out.Permissions, execution.Choice{ID: mode, Label: mode, Availability: yes})

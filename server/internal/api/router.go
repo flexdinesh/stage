@@ -204,6 +204,7 @@ func NewRouter(deps Deps) http.Handler {
 	h("GET /api/connections/{connectionId}/projects", removedRoute("GET /api/connections/{connectionId}/workspaces"))
 	h("GET /api/connections/{connectionId}/workspaces", s.workspaces)
 	agent("POST /api/connections/{connectionId}/workspaces", s.addWorkspace)
+	h("GET /api/connections/{connectionId}/directories", s.browseDirectories)
 	h("POST /api/connections/{connectionId}/resolve", removedRoute("POST /api/sync and GET /api/connections/{connectionId}/workspaces"))
 	h("POST /api/connections/{connectionId}/workspaces/decline", removedRoute("POST /api/project-groups/membership"))
 	h("POST /api/connections/{connectionId}/workspaces/undecline", removedRoute("POST /api/project-groups/membership"))

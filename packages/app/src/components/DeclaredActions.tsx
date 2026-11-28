@@ -3,35 +3,45 @@ import { useId, useRef, useState, type FormEvent } from "react";
 import type { ActionResult, HarnessAction, HarnessStatus, SetupField } from "../api/types.ts";
 import { actionBody, clearSecrets, fieldInput, initialValues, type SetupValues } from "../lib/connectionSetup.ts";
 import { HarnessFacts } from "./HarnessPresentation.tsx";
+import { PathBrowser, useCanBrowse } from "./PathBrowser.tsx";
 import { Button, Checkbox, Combobox, ConfirmInline, ErrorText, ExternalLink, Field, Hint, Input, cx } from "./ui.tsx";
 
 const NO_FIELDS: SetupField[] = [];
 
-export function SetupInputs({ fields, status, values, disabled = false, nativeRequired = true, onChange }: {
+export function SetupInputs({ fields, status, values, disabled = false, nativeRequired = true, connectionId, onChange }: {
   fields: readonly SetupField[];
   status?: HarnessStatus;
   values: SetupValues;
   disabled?: boolean;
   /** False inside another form (the task form's inline add): required stays aria-only, so it never blocks that form. */
   nativeRequired?: boolean;
+  /** The connection whose host a `path` field names: Browse… shows when it declares `directoryBrowse`. */
+  connectionId?: number | undefined;
   onChange: (id: string, value: string | boolean) => void;
 }) {
   return fields.map((field) => (
     <SetupInput key={field.id} field={field} value={values[field.id]} disabled={disabled} nativeRequired={nativeRequired}
+      connectionId={connectionId}
       savedSecret={status?.fields.some((current) => current.id === field.id && current.set) === true}
       onChange={(value) => onChange(field.id, value)} />
   ));
 }
 
-function SetupInput({ field, value, savedSecret, disabled, nativeRequired, onChange }: {
+function SetupInput({ field, value, savedSecret, disabled, nativeRequired, connectionId, onChange }: {
   field: SetupField;
   value: string | boolean | undefined;
   savedSecret: boolean;
   disabled: boolean;
   nativeRequired: boolean;
+  connectionId: number | undefined;
   onChange: (value: string | boolean) => void;
 }) {
   const hintId = useId();
+  const browserId = useId();
+  const browsable = useCanBrowse(field.kind === "path" ? connectionId : undefined);
+  const [browsing, setBrowsing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const browseRef = useRef<HTMLButtonElement>(null);
   const description = field.help ? hintId : undefined;
   const text = typeof value === "string" ? value : "";
   const hint = field.help ? <span id={hintId}>{field.help}</span> : undefined;
@@ -58,13 +68,28 @@ function SetupInput({ field, value, savedSecret, disabled, nativeRequired, onCha
             ...(field.choices ?? []).map((choice) => ({ value: choice.id, label: choice.label })),
           ]} />
       ) : (
-        <Input id={id} disabled={disabled} required={nativeRequired && field.required && !savedSecret}
-          aria-required={!nativeRequired && field.required && !savedSecret ? true : undefined} aria-describedby={description}
-          className={input.mono ? "font-mono text-input-mono" : undefined}
-          type={input.type}
-          value={text} placeholder={field.kind === "secret" && savedSecret ? "Saved" : undefined}
-          autoComplete={field.kind === "secret" ? "new-password" : "off"} spellCheck={false}
-          onChange={(e) => onChange(e.target.value)} />
+        <>
+          <div className="flex min-w-0 gap-2">
+            <Input ref={inputRef} id={id} disabled={disabled} required={nativeRequired && field.required && !savedSecret}
+              aria-required={!nativeRequired && field.required && !savedSecret ? true : undefined} aria-describedby={description}
+              className={input.mono ? "font-mono text-input-mono" : undefined}
+              type={input.type}
+              value={text} placeholder={field.kind === "secret" && savedSecret ? "Saved" : undefined}
+              autoComplete={field.kind === "secret" ? "new-password" : "off"} spellCheck={false}
+              onChange={(e) => onChange(e.target.value)} />
+            {browsable && connectionId !== undefined ? (
+              <Button ref={browseRef} className="shrink-0" disabled={disabled} aria-expanded={browsing} aria-controls={browsing ? browserId : undefined}
+                onClick={() => setBrowsing((open) => !open)}>
+                Browse…
+              </Button>
+            ) : null}
+          </div>
+          {browsing && browsable && connectionId !== undefined && !disabled ? (
+            <PathBrowser id={browserId} connectionId={connectionId} value={text}
+              onPick={(path) => { onChange(path); setBrowsing(false); inputRef.current?.focus(); }}
+              onClose={() => { setBrowsing(false); browseRef.current?.focus(); }} />
+          ) : null}
+        </>
       )}
     </Field>
   );
@@ -73,17 +98,23 @@ function SetupInput({ field, value, savedSecret, disabled, nativeRequired, onCha
 type RunAction = (id: string, input: Record<string, unknown>, confirmed: boolean) => Promise<ActionResult>;
 
 /** Shared connection, session and project action forms. The caller supplies the scoped dispatch. */
-export function DeclaredActions({ actions, run, className }: { actions: readonly HarnessAction[]; run: RunAction; className?: string }) {
+export function DeclaredActions({ actions, run, connectionId, className }: {
+  actions: readonly HarnessAction[];
+  run: RunAction;
+  /** The connection the actions run on, when known: its `path` inputs offer Browse… (see SetupInputs). */
+  connectionId?: number | undefined;
+  className?: string;
+}) {
   const visible = actions.filter((action) => action.callers.includes("user"));
   if (visible.length === 0) return null;
   return (
     <div className={cx("flex min-w-0 flex-col divide-y divide-line", className)}>
-      {visible.map((action) => <DeclaredActionForm key={action.id} action={action} run={run} />)}
+      {visible.map((action) => <DeclaredActionForm key={action.id} action={action} run={run} connectionId={connectionId} />)}
     </div>
   );
 }
 
-function DeclaredActionForm({ action, run }: { action: HarnessAction; run: RunAction }) {
+function DeclaredActionForm({ action, run, connectionId }: { action: HarnessAction; run: RunAction; connectionId: number | undefined }) {
   const fields = action.input ?? NO_FIELDS;
   const [values, setValues] = useState<SetupValues>(() => initialValues(fields, []));
   const [confirm, setConfirm] = useState(false);
@@ -123,7 +154,7 @@ function DeclaredActionForm({ action, run }: { action: HarnessAction; run: RunAc
   const result = mutation.data;
   return (
     <form onSubmit={submit} className="flex min-w-0 flex-col gap-2 py-2 first:pt-0 last:pb-0">
-      {reason === undefined ? <SetupInputs fields={fields} values={values} disabled={mutation.isPending || confirm}
+      {reason === undefined ? <SetupInputs fields={fields} values={values} disabled={mutation.isPending || confirm} connectionId={connectionId}
         onChange={(id, value) => setValues((current) => ({ ...current, [id]: value }))} /> : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button ref={trigger} small type="submit" variant={action.primary ? "primary" : "secondary"}

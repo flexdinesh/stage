@@ -176,6 +176,14 @@ func (a *Adapter) request(ctx context.Context, method, path string, input, out i
 			strings.HasPrefix(path, "/api/location?") && body.Tag == "LocationNotFoundError" {
 			return errLocationNotFound
 		}
+		if resp.StatusCode == http.StatusNotFound && method == http.MethodGet && strings.HasPrefix(path, "/api/fs/list?") {
+			switch body.Tag {
+			case "FileNotFoundError":
+				return errDirectoryNotFound
+			case "LocationNotFoundError":
+				return errLocationNotFound
+			}
+		}
 		return responseError{code: resp.StatusCode, message: body.Message}
 	}
 	if out == nil {
@@ -233,6 +241,8 @@ type serverContract struct {
 	// projectRename: PATCH /api/project/{projectID} (project.update) takes
 	// a name (the project rename action).
 	projectRename bool
+	// fsList: GET /api/fs/list (fs.list) lists a folder (DirectoryBrowser).
+	fsList bool
 	// respond: session.permission.reply takes a decision and
 	// session.form.reply an answer (Interactive.Respond).
 	respond bool
@@ -310,6 +320,7 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 	contract.archive = sessionUpdateTakes(update, spec.Components.Schemas, "archived")
 	contract.projectRename = operationTakes(spec.Paths["/api/project/{projectID}"]["patch"], spec.Components.Schemas, "project.update", "name")
 	contract.location = spec.Paths["/api/location"]["get"].OperationID == "location.get"
+	contract.fsList = spec.Paths["/api/fs/list"]["get"].OperationID == "fs.list"
 	contract.respond = inspectReplies(spec.Paths, spec.Components.Schemas)
 	contract.events = inspectEvents(spec.Paths["/api/event"]["get"])
 	a.verified = contract

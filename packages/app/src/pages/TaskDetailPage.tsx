@@ -345,7 +345,7 @@ function TaskBody({ task }: { task: TaskDetail }) {
                 </BlockedReason>
               ) : null}
               <SessionToolbarActions key={`buttons:${task.launchAttempt}:${task.externalSessionId}`} actions={sessionActions.buttons} run={run} />
-              <DeclaredActions key={`forms:${task.launchAttempt}:${task.externalSessionId}`} actions={sessionActions.forms} run={run} className="max-md:basis-full" />
+              <DeclaredActions key={`forms:${task.launchAttempt}:${task.externalSessionId}`} actions={sessionActions.forms} run={run} connectionId={task.connectionId} className="max-md:basis-full" />
             </div>
           ) : null}
           {task.adopted ? null : (

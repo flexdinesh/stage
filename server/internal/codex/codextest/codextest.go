@@ -487,6 +487,8 @@ func (s *Server) handle(method string, raw json.RawMessage) (any, *rpcError) {
 		return s.configBatchWrite(raw)
 	case "fs/getMetadata":
 		return fsMetadata(str("path"))
+	case "fs/readDirectory":
+		return fsReadDirectory(str("path"))
 	case "thread/start":
 		s.seq++
 		s.now++

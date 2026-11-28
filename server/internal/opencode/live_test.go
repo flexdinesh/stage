@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -232,5 +233,49 @@ func TestLiveOpenCodeSessionSearch(t *testing.T) {
 	q.Cursor = "not-a-valid-cursor"
 	if _, err := f.a.SearchSessions(ctx, q); !errors.Is(err, execution.ErrSessionSearchCursor) {
 		t.Fatalf("invalid native cursor: %v", err)
+	}
+}
+
+// Browsing lists folders on the isolated host and saves no project.
+func TestLiveOpenCodeBrowse(t *testing.T) {
+	f := newFixture(t)
+	ctx := t.Context()
+	other := t.TempDir()
+	for _, sub := range []string{"app", ".hidden", "app/src"} {
+		if err := os.Mkdir(other+"/"+sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(other+"/notes.txt", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.a.projects(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := f.a.Features(ctx)
+	if err != nil || !c.Operations[execution.OpDirectoryBrowse].Available {
+		t.Fatalf("declaration %+v %v", c.Operations[execution.OpDirectoryBrowse], err)
+	}
+	start, err := f.a.Browse(ctx, execution.BrowseRequest{})
+	if err != nil || start.Path != path.Dir(f.dir) {
+		t.Fatalf("default start %+v %v, want %s", start, err, path.Dir(f.dir))
+	}
+	got, err := f.a.Browse(ctx, execution.BrowseRequest{Path: other})
+	if err != nil || len(got.Entries) != 1 || got.Entries[0] != (execution.DirEntry{Name: "app", Path: other + "/app"}) {
+		t.Fatalf("listing %+v %v", got, err)
+	}
+	if got, err = f.a.Browse(ctx, execution.BrowseRequest{Path: other, ShowHidden: true}); err != nil || len(got.Entries) != 2 {
+		t.Fatalf("hidden %+v %v", got, err)
+	}
+	var invalid *execution.Invalid
+	for _, p := range []string{other + "/missing", other + "/notes.txt"} {
+		if _, err := f.a.Browse(ctx, execution.BrowseRequest{Path: p}); !errors.As(err, &invalid) {
+			t.Fatalf("%s: %v", p, err)
+		}
+	}
+	after, err := f.a.projects(ctx)
+	if err != nil || len(after) != len(before) {
+		t.Fatalf("browsing saved a project: %d -> %d %v", len(before), len(after), err)
 	}
 }

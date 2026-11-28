@@ -25,10 +25,13 @@ const (
 	OpSend          Op = "send"          // send a message to the session (Interactive)
 	OpSessionRename Op = "sessionRename" // rename a Stage-launched session after its task's title (SessionNamer)
 	OpWorkspaceAdd  Op = "workspaceAdd"  // add a workspace through a declared source (WorkspaceAdder)
+	// OpDirectoryBrowse lists folders on the harness's host for a path
+	// field (DirectoryBrowser). People only: agents type paths.
+	OpDirectoryBrowse Op = "directoryBrowse"
 )
 
 // Ops are every operation, in a fixed order.
-var Ops = []Op{OpLaunch, OpStop, OpAdopt, OpReply, OpOpening, OpAttention, OpSessionSearch, OpImages, OpRespond, OpSend, OpSessionRename, OpWorkspaceAdd}
+var Ops = []Op{OpLaunch, OpStop, OpAdopt, OpReply, OpOpening, OpAttention, OpSessionSearch, OpImages, OpRespond, OpSend, OpSessionRename, OpWorkspaceAdd, OpDirectoryBrowse}
 
 // DeclaresOperations reports an operation c leaves out, or one unavailable
 // without a reason. Every adapter declares them all (its contract tests).

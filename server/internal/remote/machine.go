@@ -188,7 +188,8 @@ func (m *Machine) Connectors() map[string]harness.Connector {
 func (m *Machine) Ops() machine.Ops { return ops{m} }
 
 // implements uses the current ready snapshot. Actions, session search,
-// session rename and workspace add also need their worker handler.
+// session rename, workspace add and folder browsing also need their worker
+// handler.
 func (m *Machine) implements(connection int64, trait string) bool {
 	snapshot, _ := m.hub.Advertisement(m.id)
 	if snapshot == nil {
@@ -197,7 +198,8 @@ func (m *Machine) implements(connection int64, trait string) bool {
 	if trait == execution.TraitOf[execution.Actor]() && !slices.Contains(snapshot.ChannelKinds, KindAct) ||
 		trait == execution.TraitOf[execution.SessionSearcher]() && !slices.Contains(snapshot.ChannelKinds, KindSessionSearch) ||
 		trait == execution.TraitOf[execution.SessionNamer]() && !slices.Contains(snapshot.ChannelKinds, KindSessionRename) ||
-		trait == execution.TraitOf[execution.WorkspaceAdder]() && !slices.Contains(snapshot.ChannelKinds, KindWorkspaceAdd) {
+		trait == execution.TraitOf[execution.WorkspaceAdder]() && !slices.Contains(snapshot.ChannelKinds, KindWorkspaceAdd) ||
+		trait == execution.TraitOf[execution.DirectoryBrowser]() && !slices.Contains(snapshot.ChannelKinds, KindDirectoryBrowse) {
 		return false
 	}
 	for _, c := range snapshot.Connections {

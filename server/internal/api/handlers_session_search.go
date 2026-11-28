@@ -66,6 +66,18 @@ func (s *server) openSearchCursor(token string, scope sessionSearchScope, now ti
 	return string(c.Next), nil
 }
 
+// humanSurface admits only a person on the Stage app; otherwise it answers
+// 403 principal_forbidden with msg. The personal router also admits agent
+// gateway requests to many human routes, and MCP marks its tool calls.
+func humanSurface(w http.ResponseWriter, r *http.Request, msg string) bool {
+	actor, _ := principal.From(r.Context())
+	if !actor.IsHuman() && (actor.Kind != principal.Personal || r.Header.Get(principal.ToolTransportHeader) == "mcp") {
+		accessError(w, http.StatusForbidden, "principal_forbidden", msg)
+		return false
+	}
+	return true
+}
+
 type sessionSearchResult struct {
 	Session       execution.SessionRef   `json:"session"`
 	Title         string                 `json:"title,omitempty"`
@@ -78,10 +90,7 @@ type sessionSearchResult struct {
 func (s *server) searchSessions(w http.ResponseWriter, r *http.Request) error {
 	w.Header().Set("Cache-Control", "private, no-store")
 	actor, _ := principal.From(r.Context())
-	// The personal router also admits agent gateway requests to many
-	// human routes. A roster can only be searched on the human surface.
-	if !actor.IsHuman() && (actor.Kind != principal.Personal || r.Header.Get(principal.ToolTransportHeader) == "mcp") {
-		accessError(w, http.StatusForbidden, "principal_forbidden", "Search sessions from the Stage app.")
+	if !humanSurface(w, r, "Search sessions from the Stage app.") {
 		return nil
 	}
 	id, err := s.connectionPath(r)

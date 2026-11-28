@@ -195,6 +195,35 @@ Write labels short enough to read in joined buttons.
 [Workspace add API](api.md#add-a-workspace) ·
 [Execution contract](execution.md#workspace-add)
 
+### Browsing folders for path fields
+
+A `path` field takes a typed absolute path. If your harness can list
+folders on its host, declare `OpDirectoryBrowse` and implement
+`execution.DirectoryBrowser` with its own read-only API. Then every `path`
+input on that connection (workspace sources and connection, project and
+session action forms) offers Browse…: an inline browser with the current
+folder and Up, folder rows, Show hidden and Use this folder. Harness setup
+fields, which have no connection yet, stay typed.
+
+- Return folders only, through `execution.Listing`. It hides dot-folders,
+  sorts the rest and stops at 500.
+- An empty `Path` is your default start: somewhere a person recognizes,
+  such as the host user's home (Codex) or the parent of a listed project
+  (OpenCode).
+- Return `*execution.Invalid` with the harness's words for a missing,
+  unreadable or non-folder path. Return `*execution.BrowseUnavailable` with
+  a reason when you cannot browse right now.
+- Never persist anything while listing. OpenCode names an existing project
+  as its location because a request without one saves the service's
+  working directory as a project.
+
+Without a listing API, declare the operation unavailable with a reason that
+tells the person to type the path (T3, Claude Code). Only people browse;
+agents type paths. Workers relay the call as `adapter.directoryBrowse`
+behind the `directoryBrowser` trait.
+[Browse folders API](api.md#browse-folders) ·
+[Execution contract](execution.md#folder-browsing)
+
 ## Choose an extension
 
 Use [ADR 0008 P4](adr/0008-harness-foundation.md#p4) to decide which contract
@@ -205,7 +234,7 @@ degrades through declared availability.
 | --- | --- | --- |
 | Display fact | Show a harness detail such as an endpoint or extra usage information. | `execution.Fact` carries a label, value and tone in status, an observation or an action result. |
 | Scoped action | Relay a harness-specific operation such as labelling a session. | Declare the target, inputs, confirmation, caller authorization and availability. Connection setup uses the connector. Session and project actions use `execution.Actor` and capability declarations. The owner validates opaque input. |
-| Typed operation | Let Stage decide whether it can launch, stop, adopt, read a reply or opening, list attention, search for sessions, launch with images, respond or send. | Declare each [`execution.Op`](../server/internal/execution/ops.go) with availability and a reason when unavailable. Use `WorkspaceFeatures` for a workspace-specific declaration. |
+| Typed operation | Let Stage decide whether it can launch, stop, adopt, read a reply or opening, list attention, search for sessions, launch with images, respond, send, add a workspace or browse folders. | Declare each [`execution.Op`](../server/internal/execution/ops.go) with availability and a reason when unavailable. Use `WorkspaceFeatures` for a workspace-specific declaration. |
 | Launch option | Pass a choice, boolean or text value at launch, such as a harness worktree option. | Declare the field in capabilities and validate and translate it from `execution.Config`. |
 | Descriptor policy | Apply a Stage invariant such as launch recovery, attribution, identity or completion from a closure signal. | Declare it in the descriptor. Stage interprets the policy for every kind that uses it. A harness whose `respond` lists only some request kinds declares `unlistedRequests` with where to answer the rest (T3: permission requests; OpenCode: forms with conditions, hidden or external fields). |
 
