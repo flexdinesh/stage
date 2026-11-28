@@ -1075,13 +1075,13 @@ only to work Stage can launch.
 
 ### OpenCode interaction
 
-OpenCode implements `Interactive` over its V2 session endpoints
-(`server/internal/opencode/interaction.go`). `send` is available when
-OpenAPI's `session.prompt` body has a `delivery` field. `respond` is
-available when OpenAPI advertises `session.permission.reply` with a
-`decision` body and `session.form.reply` with an `answer` body. Otherwise
-each is unavailable with a reason naming the missing OpenCode capability;
-the connection stays healthy.
+OpenCode declares the V2 session operations per workspace.
+`respond` requires the OpenAPI permission `decision` and form `answer`
+reply bodies. `steer` and `queue` require their respective prompt delivery
+values. `send` requires the prompt delivery contract and uses its default
+on an idle session. `activity` requires `session.diff` alongside the
+session and message reads. Missing optional operations show an update
+reason. The connection and its other operations stay available.
 
 - **Requests.** `GET /api/session/{id}/permission` then
   `GET /api/session/{id}/form`, in OpenCode's order. A request whose
@@ -1089,13 +1089,13 @@ the connection stays healthy.
   missing session is `ErrNotFound`. OpenCode reports no request time, so
   `createdAt` is zero.
   - A permission is an `approval` with OpenCode's options: `once` "Allow
-    once", `always` "Allow always" (only when the request has non-empty
-    `save` patterns, the rules OpenCode would save) and `reject` "Deny"
-    (`textOption`, sent as the message; OpenCode treats it as correction
-    feedback and rejects the run's sibling asks). Its title is OpenCode's description of the action
+    once", `always` "Always allow" with the `save` patterns when supplied,
+    and `reject` "Deny". OpenCode saves rules when it supplies patterns.
+    The Deny text is sent as correction feedback and OpenCode rejects the
+    run's sibling asks. Its title is OpenCode's description of the action
     ("Run shell commands"), or "Permission required: <action>" for an
     action OpenCode does not describe. Its detail is the request's message.
-    Its preview is the tool input as `key: value` lines, then the resources.
+    Its preview is the resource list.
   - A form is a `question` request when Stage can show every field: a
     string (its options, custom text where allowed, free text without
     options), a multiselect, a boolean (Yes or No) or a number. Each field
@@ -1106,32 +1106,38 @@ the connection stays healthy.
     descriptor's `unlistedRequests` says to answer it in OpenCode.
 - **Respond.** The request ID prefix picks the endpoint, and Stage re-reads
   the session's list first: a request no longer listed is `ErrNotFound`. A
-  permission takes one of its options (`always` only when offered), with
+  permission takes one of its options, with
   text only on Deny
   (`POST .../permission/{id}/reply {decision, message?}`). A form takes
   answers by field key: option labels become option values, Yes or No a
   boolean, a number its value; fields left out stay unanswered and OpenCode
   checks required ones (`POST .../form/{id}/reply {answer}`). An answer
   that does not fit is `*Invalid` (400) before anything is sent. OpenCode
-  answering 404, or 409 for a settled form, is `ErrNotFound` (404); its 400
-  is `*Invalid` with OpenCode's message.
-- **Send.** `POST /api/session/{id}/prompt {id, text, metadata:
-  {stageMessage}, delivery: "queue"}`: an idle session starts a run, and a
-  running one takes the message when its current turn ends. Stage never
-  uses `steer`, which joins a running turn ([ADR 0013](adr/0013-tree-steering.md#send-semantics)).
-  The message ID is `msg_` plus 32 hex characters derived (SHA-256) from
-  the session and `Message.RequestID` (the coordinator sets one per call;
-  a retrying caller such as steering delivery passes its own), so a retry
-  is admitted once: OpenCode reconciles a repeated ID with the same
-  delivery. Without a request ID it is random. `stageMessage` is the
-  request ID, else the message ID. OpenCode's own composer is hidden while a request is
-  pending, so a session waiting on a permission or form takes no message
-  (`*Busy`, 409 `session_busy`: answer it first, or answer a form Stage
-  can't show in OpenCode). The admission must be a user item of the
-  session with the sent ID. A missing session is `ErrNotFound`.
+  answering 404 or 410, or 409 for a settled form, is `ErrNotFound` (404).
+  A rejected answer (400 or 422) is `*Invalid` with OpenCode's message.
+- **Send, Steer and Queue.** `POST /api/session/{id}/prompt` sends text.
+  Stage checks active turns and pending permissions and forms before the
+  prompt. Send omits `delivery` and starts a new turn while idle. Steer
+  passes `delivery: "steer"` to join a running turn. Queue passes
+  `delivery: "queue"` for the native next turn. A mismatched mode or pending
+  request returns `*Busy` (409 `session_busy`). The OpenCode endpoint has
+  no expected-turn field, so the session can change after the check.
+  Stage derives the ID from the session and request ID for native
+  deduplication. It checks the original ID in the inbox or messages if
+  a retry arrives after the state changed.
+- **Activity.** Stage reads recent `/message` pages (up to three pages of
+  100 messages) and shows at most the requested number of supported items.
+  Reasoning displays a title. Tool inputs supply previews, and the latest
+  completed todo tool call in the window supplies the plan. `/diff` supplies the
+  latest turn's file counts, grouped by path. `Session.Info` supplies the
+  model, agent, variant and cumulative cost and token counts. The OpenCode
+  header shows agent, model and variant, and the shared Usage panel shows
+  the reported totals. Stage reads the view on demand.
 
-Workers reach the same methods through `adapter.requests`,
-`adapter.respond` and `adapter.send` and the `interactive` trait.
+Workers use the existing `adapter.requests`, `adapter.respond`, `adapter.send`,
+`adapter.deliver` and `adapter.activity` channels. Queue management and
+using inbox and usage events for refresh are follow-ups. Polling reconciles
+activity and usage.
 
 ### OpenCode push
 

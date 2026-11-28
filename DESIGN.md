@@ -538,7 +538,7 @@ Task run span remains in metadata. Detailed harness runs are opened in the harne
 
 ### Sessions
 
-Explicit Track session drawer from Stage and Project; Add session from a tree. Paste a T3 link or ID, Preview session, inspect title/project/state, then confirm. Optional title and initial note for a new owner. Show actionable eligibility and lookup errors in place; keep input during retries. The Session header’s attempt switcher lists recorded attempts newest first and marks the current one. Past attempts have their own route at `/tasks/:id/session/:attempt` and show a read-only banner, their last observed state, reply, usage, facts, links and activity where available. A pending launch can leave every recorded attempt read-only. Past session references open the recorded attempt.
+Explicit Track session drawer from Stage and Project; Add session from a tree. Paste a T3 link or ID, Preview session, inspect title/project/state, then confirm. Optional title and initial note for a new owner. Show actionable eligibility and lookup errors in place; keep input during retries. The Session header’s attempt switcher lists recorded attempts newest first and marks the current one. Past attempts have their own route at `/tasks/:id/session/:attempt` and show a read-only banner, their last observed state, reply, usage, facts, links and activity where available. A pending launch can leave every recorded attempt read-only. Past session references open the recorded attempt. The OpenCode header adds a wrapping mono line for the reported agent and model, with the variant beside the model. The shared Activity and Usage panels carry the rest.
 
 ### Image dropzone
 

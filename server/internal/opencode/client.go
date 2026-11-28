@@ -137,6 +137,18 @@ func missing(e error) bool {
 	return errors.As(e, &status) && status.code == 404
 }
 
+func (e responseError) gone() bool {
+	return e.code == http.StatusNotFound || e.code == http.StatusGone
+}
+
+func sessionReadErr(err error) error {
+	var status responseError
+	if errors.As(err, &status) && status.gone() {
+		return execution.ErrNotFound
+	}
+	return err
+}
+
 func (a *Adapter) request(ctx context.Context, method, path string, input, out interface{}) error {
 	var body io.Reader
 	if input != nil {
@@ -246,9 +258,10 @@ type serverContract struct {
 	// respond: session.permission.reply takes a decision and
 	// session.form.reply an answer (Interactive.Respond).
 	respond bool
-	// send: session.prompt takes a delivery, so Send can queue a message
-	// for the end of the current turn (Interactive.Send).
-	send bool
+	// Prompt delivery modes explicitly advertised by session.prompt.
+	delivery map[string]bool
+	// activity: session.diff augments the required message and session reads.
+	activity bool
 	// events: the event types Stage subscribes to on GET /api/event
 	// (event.subscribe); nil: no stream, polling only (EventSource).
 	events []string
@@ -325,10 +338,40 @@ func (a *Adapter) checkContract(ctx context.Context) (serverContract, error) {
 	contract.location = spec.Paths["/api/location"]["get"].OperationID == "location.get"
 	contract.fsList = spec.Paths["/api/fs/list"]["get"].OperationID == "fs.list"
 	contract.respond = inspectReplies(spec.Paths, spec.Components.Schemas)
-	contract.send = requestTakes(spec.Paths["/api/session/{sessionID}/prompt"]["post"], "session.prompt", "delivery", spec.Components.Schemas)
+	contract.delivery = inspectDelivery(spec.Paths["/api/session/{sessionID}/prompt"]["post"], spec.Components.Schemas)
+	contract.activity = spec.Paths["/api/session/{sessionID}/diff"]["get"].OperationID == "session.diff"
 	contract.events = inspectEvents(spec.Paths["/api/event"]["get"])
 	a.verified = contract
 	return contract, nil
+}
+
+func inspectDelivery(op operation, schemas map[string]json.RawMessage) map[string]bool {
+	shape, _ := requestShape(op, schemas) // the required prompt shape was already verified
+	modes := map[string]bool{}
+	seen := map[string]bool{}
+	var inspect func(json.RawMessage)
+	inspect = func(raw json.RawMessage) {
+		var schema struct {
+			Ref          string `json:"$ref"`
+			Enum         []string
+			AnyOf, OneOf []json.RawMessage
+		}
+		if json.Unmarshal(raw, &schema) != nil {
+			return
+		}
+		for _, mode := range schema.Enum {
+			modes[mode] = true
+		}
+		if schema.Ref != "" && !seen[schema.Ref] {
+			seen[schema.Ref] = true
+			inspect(schemas[strings.TrimPrefix(schema.Ref, "#/components/schemas/")])
+		}
+		for _, sub := range append(schema.AnyOf, schema.OneOf...) {
+			inspect(sub)
+		}
+	}
+	inspect(shape.Properties["delivery"])
+	return modes
 }
 
 // requestShape is op's JSON request schema, with a component $ref resolved.

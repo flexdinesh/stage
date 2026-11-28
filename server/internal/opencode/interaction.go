@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
@@ -19,21 +20,16 @@ import (
 
 // Answering a session's pending permissions and forms and sending it
 // messages from Stage (execution.Interactive), over OpenCode's V2 session
-// endpoints. Messages are queued (delivery "queue"): OpenCode delivers them
-// when the current turn ends, never mid-turn (ADR 0013). A form whose
-// fields Stage's question model can't carry (conditions, hidden or external
-// fields) is left out of Requests and answered in OpenCode
-// (Descriptor.UnlistedRequests).
+// endpoints. A form with fields Stage cannot present is answered in OpenCode.
 
 var _ execution.Interactive = (*Adapter)(nil)
 
-const respondUnavailable = "This OpenCode version cannot answer permissions and forms from Stage (session.permission.reply with a decision, session.form.reply with an answer)."
-
-const sendUnavailable = "This OpenCode version cannot queue a message for the end of a turn (session.prompt with a delivery)."
-
-// deliveryQueue is session.prompt's delivery that waits for the current
-// turn to end (OpenCode's default, steer, joins a running turn).
-const deliveryQueue = "queue"
+const (
+	respondUnavailable = "Update OpenCode to answer permissions and forms in Stage."
+	sendUnavailable    = "Update OpenCode to send messages in Stage."
+	steerUnavailable   = "Update OpenCode to steer in Stage."
+	queueUnavailable   = "Update OpenCode to queue messages in Stage."
+)
 
 // Permission decisions (Permission.Reply), in OpenCode's order: proceed first.
 const (
@@ -53,6 +49,8 @@ const (
 	busyPermission = "OpenCode is waiting on a permission request. Answer it first."
 	busyQuestions  = "OpenCode is waiting for answers to its questions. Answer them first."
 	busyForm       = "OpenCode is waiting on a form Stage can't show. Answer it in OpenCode, then send."
+	busyRunning    = "OpenCode is working. Steer or queue instead."
+	busyIdle       = "The turn ended; send instead."
 )
 
 // Form field types (Form.Field).
@@ -88,14 +86,12 @@ func requestTakes(op operation, id, field string, components map[string]json.Raw
 
 // permissionRequest is a Permission.Request.
 type permissionRequest struct {
-	ID        string          `json:"id"`
-	SessionID string          `json:"sessionID"`
-	Action    string          `json:"action"`
-	Resources []string        `json:"resources"`
-	Message   string          `json:"message"`
-	Metadata  json.RawMessage `json:"metadata"`
-	// Save: the rules "always" saves; none means always is not offered.
-	Save []string `json:"save"`
+	ID        string   `json:"id"`
+	SessionID string   `json:"sessionID"`
+	Action    string   `json:"action"`
+	Resources []string `json:"resources"`
+	Message   string   `json:"message"`
+	Save      []string `json:"save"`
 }
 
 // formInfo is a Form.Info.
@@ -128,10 +124,8 @@ type formOption struct {
 
 func (a *Adapter) permissions(ctx context.Context, id string) ([]permissionRequest, error) {
 	var list envelope[[]permissionRequest]
-	if err := a.get(ctx, "/api/session/"+url.PathEscape(id)+"/permission", &list); missing(err) {
-		return nil, execution.ErrNotFound
-	} else if err != nil {
-		return nil, err
+	if err := a.get(ctx, "/api/session/"+url.PathEscape(id)+"/permission", &list); err != nil {
+		return nil, sessionReadErr(err)
 	}
 	if list.Data == nil {
 		return nil, errors.New("incomplete OpenCode permission list")
@@ -146,10 +140,8 @@ func (a *Adapter) permissions(ctx context.Context, id string) ([]permissionReque
 
 func (a *Adapter) forms(ctx context.Context, id string) ([]formInfo, error) {
 	var list envelope[[]formInfo]
-	if err := a.get(ctx, "/api/session/"+url.PathEscape(id)+"/form", &list); missing(err) {
-		return nil, execution.ErrNotFound
-	} else if err != nil {
-		return nil, err
+	if err := a.get(ctx, "/api/session/"+url.PathEscape(id)+"/form", &list); err != nil {
+		return nil, sessionReadErr(err)
 	}
 	if list.Data == nil {
 		return nil, errors.New("incomplete OpenCode form list")
@@ -212,48 +204,26 @@ func permissionToRequest(p permissionRequest) execution.Request {
 	if !ok {
 		title = "Permission required: " + p.Action
 	}
-	lines := toolInput(p.Metadata)
-	lines = append(lines, p.Resources...)
-	options := []execution.Choice{choice(decisionOnce, "Allow once")}
-	if p.savesRules() {
-		options = append(options, choice(decisionAlways, "Allow always"))
+	always := "Always allow"
+	if scope := p.saveScope(); scope != "" {
+		always += " " + scope
 	}
 	return execution.Request{
 		ID: p.ID, Kind: execution.RequestApproval, Title: title, Detail: p.Message,
-		Preview: strings.Join(lines, "\n"), TextOption: decisionReject,
-		Options: append(options, choice(decisionReject, "Deny")),
+		Preview: strings.Join(p.Resources, "\n"), TextOption: decisionReject,
+		Options: []execution.Choice{choice(decisionOnce, "Allow once"), choice(decisionAlways, always), choice(decisionReject, "Deny")},
 	}
 }
 
-// savesRules reports whether "always" would save a rule: OpenCode saves
-// nothing for a request without save patterns, so always is not offered.
-func (p permissionRequest) savesRules() bool {
-	return slices.ContainsFunc(p.Save, func(s string) bool { return strings.TrimSpace(s) != "" })
-}
-
-// toolInput is metadata.input as "key: value" lines, keys sorted; none
-// when the request carries no input object.
-func toolInput(metadata json.RawMessage) []string {
-	var m struct {
-		Input map[string]json.RawMessage `json:"input"`
-	}
-	if len(metadata) == 0 || json.Unmarshal(metadata, &m) != nil {
-		return nil
-	}
-	keys := make([]string, 0, len(m.Input))
-	for k := range m.Input {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	lines := make([]string, 0, len(keys))
-	for _, k := range keys {
-		var s string
-		if json.Unmarshal(m.Input[k], &s) != nil {
-			s = string(m.Input[k])
+// OpenCode saves no rule when there are no save patterns.
+func (p permissionRequest) saveScope() string {
+	patterns := make([]string, 0, len(p.Save))
+	for _, pattern := range p.Save {
+		if pattern = strings.TrimSpace(pattern); pattern != "" {
+			patterns = append(patterns, pattern)
 		}
-		lines = append(lines, k+": "+s)
 	}
-	return lines
+	return strings.Join(patterns, ", ")
 }
 
 // formKind is metadata.kind ("question" for the agent's question tool).
@@ -283,11 +253,13 @@ func formToRequest(f formInfo) (execution.Request, bool) {
 	} else if strings.TrimSpace(req.Title) == "" {
 		req.Title = "OpenCode form"
 	}
+	seen := make(map[string]bool, len(f.Fields))
 	for _, field := range f.Fields {
 		q, ok := fieldQuestion(field)
-		if !ok {
+		if !ok || seen[q.ID] {
 			return execution.Request{}, false
 		}
+		seen[q.ID] = true
 		req.Questions = append(req.Questions, q)
 	}
 	return req, true
@@ -373,10 +345,8 @@ func (a *Adapter) respondPermission(ctx context.Context, session, id string, r e
 	switch {
 	case len(r.Answers) > 0:
 		return &execution.Invalid{Reason: "Answer an OpenCode permission request with an option, not answers."}
-	case r.Option == decisionAlways && !perms[i].savesRules():
-		return &execution.Invalid{Reason: "OpenCode offers no Allow always for this request. Choose Allow once or Deny."}
 	case r.Option != decisionOnce && r.Option != decisionAlways && r.Option != decisionReject:
-		return &execution.Invalid{Reason: "Choose Allow once, Allow always or Deny."}
+		return &execution.Invalid{Reason: "Choose Allow once, Always allow or Deny."}
 	case strings.TrimSpace(r.Text) != "" && r.Option != decisionReject:
 		return &execution.Invalid{Reason: "Only Deny takes a message."}
 	}
@@ -399,8 +369,8 @@ func (a *Adapter) respondForm(ctx context.Context, session, id string, r executi
 	if _, ok := formToRequest(forms[i]); !ok {
 		return &execution.Invalid{Reason: "Answer this form in OpenCode."}
 	}
-	if len(r.Answers) == 0 {
-		return &execution.Invalid{Reason: "Answer OpenCode's questions with answers (an option or text alone does not fit)."}
+	if len(r.Answers) == 0 || r.Option != "" || r.Text != "" {
+		return &execution.Invalid{Reason: "Answer the OpenCode form by field."}
 	}
 	answer, err := formAnswer(forms[i].Fields, r.Answers)
 	if err != nil {
@@ -491,25 +461,39 @@ func replyErr(err error) error {
 		return err
 	}
 	switch status.code {
-	case 404, 409:
+	case http.StatusNotFound, http.StatusGone, http.StatusConflict:
 		return execution.ErrNotFound
-	case 400:
-		reason := strings.TrimSpace(status.message)
-		if reason == "" {
-			reason = "OpenCode refused the answer."
-		}
-		return &execution.Invalid{Reason: reason}
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return status.invalid("OpenCode refused the answer.")
 	}
 	return err
 }
 
-// Send queues a message in the session (delivery "queue"): an idle session
-// starts a run, a running one takes it when its turn ends. A session
-// waiting on a permission or form takes no message (*execution.Busy), as
-// OpenCode's own composer does. The message ID derives from m.RequestID
-// when set, so a retry is admitted once.
+func (e responseError) invalid(fallback string) error {
+	if reason := strings.TrimSpace(e.message); reason != "" {
+		return &execution.Invalid{Reason: reason}
+	}
+	return &execution.Invalid{Reason: fallback}
+}
+
+func (c serverContract) canDeliver(op execution.Op) bool {
+	switch op {
+	case execution.OpSend:
+		return c.delivery[string(execution.DeliverySteer)] || c.delivery[string(execution.DeliveryQueue)]
+	case execution.OpSteer:
+		return c.delivery[string(execution.DeliverySteer)]
+	case execution.OpQueue:
+		return c.delivery[string(execution.DeliveryQueue)]
+	default:
+		return false
+	}
+}
+
+// Send admits a message into OpenCode's native session. The session's live
+// state determines which delivery modes can be used.
 func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m execution.Message) error {
-	if err := m.Delivery.RequireSend(); err != nil {
+	op, err := m.Delivery.Operation()
+	if err != nil {
 		return err
 	}
 	if !a.valid(ref) {
@@ -519,49 +503,111 @@ func (a *Adapter) Send(ctx context.Context, ref execution.SessionRef, m executio
 	if err != nil {
 		return err
 	}
-	if !contract.send {
-		return errors.New(sendUnavailable)
+	if !contract.canDeliver(op) {
+		return errors.New(operations()[op].Reason)
 	}
 	id := ref.ExternalSessionID
-	perms, err := a.permissions(ctx, id)
-	if err != nil {
-		return err
-	}
-	if len(perms) > 0 {
-		return &execution.Busy{Reason: busyPermission}
-	}
-	forms, err := a.forms(ctx, id)
-	if err != nil {
-		return err
-	}
-	if len(forms) > 0 {
-		for _, f := range forms {
-			if _, ok := formToRequest(f); !ok {
-				return &execution.Busy{Reason: busyForm}
-			}
-		}
-		return &execution.Busy{Reason: busyQuestions}
-	}
 	msg, err := messageID(id, m.RequestID)
 	if err != nil {
 		return err
+	}
+	reason, err := a.deliveryBlock(ctx, id, op)
+	if err != nil {
+		return err
+	}
+	if reason != "" {
+		if m.RequestID != "" {
+			ok, err := a.hasPrompt(ctx, id, msg, m.RequestID)
+			if ok || err != nil {
+				return err
+			}
+		}
+		return &execution.Busy{Reason: reason}
 	}
 	marker := m.RequestID
 	if marker == "" {
 		marker = msg
 	}
-	body := map[string]any{"id": msg, "text": m.Text, "metadata": map[string]string{"stageMessage": marker}, "delivery": deliveryQueue}
+	body := map[string]any{"id": msg, "text": m.Text, "metadata": map[string]string{"stageMessage": marker}}
+	if op != execution.OpSend {
+		body["delivery"] = m.Delivery
+	}
 	var result envelope[admitted]
-	if err := a.request(ctx, "POST", "/api/session/"+url.PathEscape(id)+"/prompt", body, &result); missing(err) {
-		return execution.ErrNotFound
-	} else if err != nil {
-		return err
+	if err := a.request(ctx, http.MethodPost, "/api/session/"+url.PathEscape(id)+"/prompt", body, &result); err != nil {
+		var status responseError
+		if errors.As(err, &status) {
+			switch status.code {
+			case http.StatusBadRequest, http.StatusUnprocessableEntity:
+				return status.invalid("OpenCode refused the message.")
+			case http.StatusConflict:
+				if reason, checkErr := a.deliveryBlock(ctx, id, op); checkErr == nil && reason != "" {
+					return &execution.Busy{Reason: reason}
+				}
+			}
+		}
+		return sessionReadErr(err)
 	}
 	// A plugin may rewrite the text, so only the admission's identity is checked.
 	if v := result.Data; v.Type != "user" || v.ID != msg || v.SessionID != id {
 		return errors.New("OpenCode returned a mismatched message admission")
 	}
 	return nil
+}
+
+func (a *Adapter) deliveryBlock(ctx context.Context, id string, op execution.Op) (string, error) {
+	perms, err := a.permissions(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if len(perms) > 0 {
+		return busyPermission, nil
+	}
+	forms, err := a.forms(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if len(forms) > 0 {
+		for _, f := range forms {
+			if _, ok := formToRequest(f); !ok {
+				return busyForm, nil
+			}
+		}
+		return busyQuestions, nil
+	}
+	active, err := a.active(ctx)
+	if err != nil {
+		return "", err
+	}
+	_, running := active[id]
+	switch {
+	case running && op == execution.OpSend:
+		return busyRunning, nil
+	case !running && op != execution.OpSend:
+		return busyIdle, nil
+	}
+	return "", nil
+}
+
+// A retry may arrive after the session has changed state. Look for the
+// original admission in the inbox and in the delivered messages.
+func (a *Adapter) hasPrompt(ctx context.Context, session, id, marker string) (bool, error) {
+	prefix := "/api/session/" + url.PathEscape(session)
+	var inbox envelope[[]admitted]
+	if err := a.get(ctx, prefix+"/inbox", &inbox); err != nil {
+		return false, sessionReadErr(err)
+	}
+	for _, v := range inbox.Data {
+		if v.Type == "user" && v.ID == id && v.SessionID == session && v.Payload.Metadata["stageMessage"] == marker {
+			return true, nil
+		}
+	}
+	var m envelope[message]
+	if err := a.get(ctx, prefix+"/message/"+id, &m); missing(err) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return m.Data.Type == "user" && m.Data.ID == id && m.Data.Metadata["stageMessage"] == marker, nil
 }
 
 // messageID is the prompt's message ID: derived from the session and
