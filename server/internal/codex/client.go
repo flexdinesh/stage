@@ -75,28 +75,55 @@ func (cl *Client) connect(ctx context.Context) (*conn, error) {
 		}
 	}
 	cl.info = info
-	c, err := dial(ctx, info.SocketPath, cl.dispatch)
+	c, res, err := cl.open(ctx, info.SocketPath, cl.dispatch, nil)
 	if err != nil {
-		return nil, &DaemonDownError{Reason: "Stage could not reach the Codex daemon: " + err.Error()}
+		return nil, err
 	}
+	cl.c, cl.init = c, res
+	return c, nil
+}
+
+// open dials the daemon's socket and initializes a connection.
+func (cl *Client) open(ctx context.Context, path string, notify func(notification), request func(serverRequest)) (*conn, initializeResponse, error) {
 	var res initializeResponse
+	c, err := dial(ctx, path, notify, request)
+	if err != nil {
+		return nil, res, &DaemonDownError{Reason: "Stage could not reach the Codex daemon: " + err.Error()}
+	}
 	params := initializeParams{
 		ClientInfo:   clientInfo{Name: ClientName, Title: "Stage", Version: cl.version},
 		Capabilities: map[string]any{"optOutNotificationMethods": quiet},
 	}
 	if err := c.call(ctx, "initialize", params, &res); err != nil {
 		c.close()
-		return nil, err
+		return nil, res, err
 	}
 	if res.CodexHome == "" {
 		c.close()
-		return nil, errors.New("codex initialize: missing codexHome")
+		return nil, res, errors.New("codex initialize: missing codexHome")
 	}
 	if err := c.send(ctx, "initialized", nil); err != nil {
 		c.close()
-		return nil, err
+		return nil, res, err
 	}
-	cl.c, cl.init = c, res
+	return c, res, nil
+}
+
+// session opens a connection of its own beside the shared one (which it
+// connects first, starting the daemon when needed), for work that
+// subscribes to a thread and answers its server requests. The caller
+// closes it. Failures are execution.ErrUnavailable.
+func (cl *Client) session(ctx context.Context, notify func(notification), request func(serverRequest)) (*conn, error) {
+	if _, err := cl.connect(ctx); err != nil {
+		return nil, fmt.Errorf("%w: %w", execution.ErrUnavailable, err)
+	}
+	cl.mu.Lock()
+	path := cl.info.SocketPath
+	cl.mu.Unlock()
+	c, _, err := cl.open(ctx, path, notify, request)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", execution.ErrUnavailable, err)
+	}
 	return c, nil
 }
 

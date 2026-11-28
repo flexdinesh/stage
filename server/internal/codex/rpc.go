@@ -62,12 +62,22 @@ type reply struct {
 	err    *RPCError
 }
 
+// serverRequest is a request the daemon sends the client (an approval or
+// a question); the client answers it with respond and its ID.
+type serverRequest struct {
+	ID     json.RawMessage
+	Method string
+	Params json.RawMessage
+}
+
 // conn is one JSON-RPC session over a WebSocket on the daemon's unix
 // socket. Messages are JSON text frames without a jsonrpc member. Server
-// requests (approvals) are never answered: the user answers them in Codex.
+// requests go to request; without one they are left unanswered (another
+// client, or the user in Codex, answers them).
 type conn struct {
-	ws     *websocket.Conn
-	notify func(notification)
+	ws      *websocket.Conn
+	notify  func(notification)
+	request func(serverRequest)
 
 	mu      sync.Mutex
 	next    int64
@@ -76,8 +86,10 @@ type conn struct {
 	err     error
 }
 
-// dial opens a WebSocket on the unix socket at path.
-func dial(ctx context.Context, path string, notify func(notification)) (*conn, error) {
+// dial opens a WebSocket on the unix socket at path. notify and request
+// (either may be nil) receive notifications and server requests, in order,
+// on the read loop.
+func dial(ctx context.Context, path string, notify func(notification), request func(serverRequest)) (*conn, error) {
 	hc := &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			var d net.Dialer
@@ -89,7 +101,7 @@ func dial(ctx context.Context, path string, notify func(notification)) (*conn, e
 		return nil, err
 	}
 	ws.SetReadLimit(readLimit)
-	c := &conn{ws: ws, notify: notify, pending: map[string]chan reply{}, done: make(chan struct{})}
+	c := &conn{ws: ws, notify: notify, request: request, pending: map[string]chan reply{}, done: make(chan struct{})}
 	go c.read()
 	return c, nil
 }
@@ -119,8 +131,11 @@ func (c *conn) read() {
 			if c.notify != nil {
 				c.notify(notification{Method: m.Method, Params: m.Params})
 			}
+		case m.Method != "":
+			if c.request != nil {
+				c.request(serverRequest{ID: m.ID, Method: m.Method, Params: m.Params})
+			}
 		}
-		// A server request (method and id) waits for the user in Codex.
 	}
 }
 
@@ -227,6 +242,18 @@ func (c *conn) send(ctx context.Context, method string, params any) error {
 		return err
 	}
 	return c.ws.Write(ctx, websocket.MessageText, b)
+}
+
+// respond answers the server request id with result.
+func (c *conn) respond(ctx context.Context, id json.RawMessage, result any) error {
+	b, err := json.Marshal(map[string]any{"id": id, "result": result})
+	if err != nil {
+		return err
+	}
+	if err := c.ws.Write(ctx, websocket.MessageText, b); err != nil {
+		return fmt.Errorf("%w: %v", errClosed, err)
+	}
+	return nil
 }
 
 func (c *conn) forget(id int64) {

@@ -565,7 +565,9 @@ send and respond, never from the task's own session
 its hook receiver. T3 supplies both for its questions and messages
 ([T3 interaction](#t3-interaction)). OpenCode supplies both for its
 permissions, the forms Stage can show and messages
-([OpenCode interaction](#opencode-interaction)). A harness that can wait on requests
+([OpenCode interaction](#opencode-interaction)). Codex supplies both for
+command and file-change approvals, its `requestUserInput` questions and
+messages to an idle thread ([Codex adapter](#codex-adapter)). A harness that can wait on requests
 it can't list declares `unlistedRequests` on its descriptor with where to
 answer them; the app then shows that instead of a Reply composer when a
 needs-input session lists none. [Interaction API](api.md#session-interaction-api-v6)
@@ -1499,9 +1501,51 @@ server's `harness_settings` row for that machine
   archive and turn completion for every thread. Stage reads each thread and
   passes the observation to the local runner. `Attention` lists loaded
   threads waiting on input.
-- **Interaction.** Respond and send are unavailable: the user answers in
-  Codex. Links carry `command` (`cd <dir> && codex resume <id>`), which the
-  task list offers as Copy resume command.
+- **Interaction** (`execution.Interactive`, `interaction.go`; live gates
+  g8, g9, g10 against codex-cli 0.172.0). Each call opens its own
+  app-server connection, runs `thread/resume {threadId, excludeTurns}`,
+  acts, then `thread/unsubscribe`s and disconnects; the daemon keeps
+  running the turn. Resume replays the thread's pending server requests to
+  the resuming client right after its reply, with the same request ids
+  (per-thread counters) every client sees; `serverRequest/resolved` clears
+  one. Stage waits for the first replayed request, then 250 ms of quiet,
+  at most 3 s, and only resumes a thread whose status waits
+  (`waitingOnApproval`, `waitingOnUserInput`).
+  - **Requests.** `item/commandExecution/requestApproval` and
+    `item/fileChange/requestApproval` are approvals keyed by `approvalId`
+    (else `itemId`), with the plain decisions of `availableDecisions` in
+    Codex's order (all four for a file change, which names none):
+    `accept`, `acceptForSession`, `decline` (the turn continues without
+    it) and `cancel` (the turn stops). Decisions carrying an exec policy or
+    network amendment stay in Codex. A command shows its command and
+    reason; a file change shows its reason and, since Codex shares the
+    edits only with the session that made them, says to read the diff with
+    the resume command. `item/tool/requestUserInput` is a question request
+    keyed by `itemId` ("Codex asks"); `isOther` or no options allows custom
+    text. Permission requests (`item/permissions/requestApproval`), MCP
+    elicitations and questions with a secret answer are not listed: the
+    descriptor's `unlistedRequests` says to answer them with the resume
+    command.
+  - **Respond.** An approval takes one of its options and no text
+    (`{decision}`); a question request takes an answer for every question,
+    option labels or one custom text, several only when multi-select
+    (`{answers: {id: {answers}}}`). An answer that does not fit is
+    `*Invalid` before anything is sent; a request no longer pending (or an
+    unlisted kind) is `ErrNotFound`.
+  - **Send.** `thread/read`: a thread with a turn running is `*Busy`
+    ("Codex is working…", or waiting on an approval or question); Stage
+    never steers a turn (`turn/steer` is unused). Otherwise resume (which
+    loads a thread the daemon unloaded: `turn/start` on one answers
+    -32600), check the status again, then `turn/start` with
+    `clientUserMessageId` = the message's request ID (a random `stage-` id
+    without one). A message whose request ID the newest turn's user message
+    already carries was delivered and is not sent again (the coordinator
+    sets a fresh request ID per API call). An archived thread is
+    `*Refused` (409 `session_refused`) and a `turn/start` Codex refuses
+    (-32600) is `*Busy`, each with Codex's message.
+
+  Links carry `command` (`cd <dir> && codex resume <id>`), which task rows,
+  notifications and task detail offer as Copy resume command.
 - **Adoption.** `ResolveLink` takes a thread id or a `codex resume` command
   and refuses ephemeral and subagent threads. An observation's `origin` is
   the thread's originator, raw; the coordinator refuses a thread another
@@ -1513,4 +1557,9 @@ server's `harness_settings` row for that machine
 The fake daemon (`codex/codextest`) speaks the same subset over a temp
 socket; `internal/engine/contract_codex_test.go` runs the execution
 contract on it in both placements, and `codex/testdata` holds sanitized
-fixtures from the live gates.
+fixtures from the live gates. The fake also resumes threads (replaying
+their pending server requests), takes client replies to server requests
+and broadcasts `serverRequest/resolved` to subscribers. The send and
+respond gates rerun with `STAGE_CODEX_GATES=1 go test -tags codexlive
+-run TestLiveGate ./internal/codex/` (real model turns on the signed-in
+account in temp directories; threads are deleted afterwards).
